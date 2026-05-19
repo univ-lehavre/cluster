@@ -1,7 +1,7 @@
 {
   "name": "cluster",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Kubernetes cluster manifests, playbooks and runbooks",
   "author": {
     "name": "Pierre-Olivier Chasset",
