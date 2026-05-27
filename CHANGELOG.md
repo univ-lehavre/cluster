@@ -10,8 +10,8 @@ Les entrées sont générées automatiquement à partir des messages de commit
 :
 
 ```bash
-npm run release:dry   # aperçu
-npm run release       # bump + tag + commit
+pnpm release:dry   # aperçu
+pnpm release       # bump + tag + commit
 ```
 
 ## 1.0.0 (2026-05-19)

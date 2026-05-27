@@ -43,7 +43,7 @@ Après création d'un utilisateur (voir [`user.yaml`](user.yaml) ou
 store :
 
 ```bash
-USER=rook-ceph-object-user-datalake-petrus
+USER=rook-ceph-object-user-datalake-admin
 kubectl -n rook-ceph get secret "${USER}" -o jsonpath='{.data.AccessKey}' | base64 --decode
 echo
 kubectl -n rook-ceph get secret "${USER}" -o jsonpath='{.data.SecretKey}' | base64 --decode

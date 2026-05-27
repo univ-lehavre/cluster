@@ -8,14 +8,15 @@
     "email": "pierre-olivier.chasset@univ-lehavre.fr"
   },
   "license": "MIT",
+  "packageManager": "pnpm@11.3.0",
   "scripts": {
     "format": "prettier --write \"**/*.{yaml,yml,md,json}\"",
     "format:check": "prettier --check \"**/*.{yaml,yml,md,json}\"",
     "lint:yaml": "yamllint .",
     "lint:shell": "find . -name '*.sh' -not -path './node_modules/*' -not -path './.git/*' -print0 | xargs -0 shellcheck",
-    "lint:k8s": "find . -name '*.yaml' -not -path './bootstrap/*' -not -path './apps/jupyter/config.yaml' -not -path './node_modules/*' -not -path './.git/*' -print0 | xargs -0 kubeconform -strict -ignore-missing-schemas -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'",
+    "lint:k8s": "find . -name '*.yaml' -not -path './bootstrap/*' -not -path './node_modules/*' -not -path './.git/*' -print0 | xargs -0 kubeconform -strict -ignore-missing-schemas -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'",
     "lint:ansible": "ansible-lint bootstrap/",
-    "lint": "npm run format:check && npm run lint:yaml && npm run lint:shell",
+    "lint": "pnpm format:check && pnpm lint:yaml && pnpm lint:shell",
     "release": "commit-and-tag-version",
     "release:dry": "commit-and-tag-version --dry-run",
     "prepare": "lefthook install"
