@@ -14,7 +14,7 @@
     "format:check": "prettier --check \"**/*.{yaml,yml,md,json}\"",
     "lint:yaml": "yamllint .",
     "lint:shell": "find . -name '*.sh' -not -path './node_modules/*' -not -path './.git/*' -print0 | xargs -0 shellcheck",
-    "lint:k8s": "find . -name '*.yaml' -not -path './bootstrap/*' -not -path './node_modules/*' -not -path './.git/*' -print0 | xargs -0 kubeconform -strict -ignore-missing-schemas -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'",
+    "lint:k8s": "find . -name '*.yaml' -not -path './bootstrap/*' -not -path './node_modules/*' -not -path './.git/*' -not -name 'pnpm-lock.yaml' -not -name 'pnpm-workspace.yaml' -not -name '.yamllint.yaml' -not -path './storage/ceph/crds.yaml' -not -path './storage/ceph/common.yaml' -not -path './storage/ceph/operator.yaml' -not -path './storage/ceph/cluster.yaml' -not -path './storage/ceph/dashboard.yaml' -not -path './storage/ceph/toolbox.yaml' -print0 | xargs -0 kubeconform -strict -ignore-missing-schemas -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'",
     "lint:ansible": "ansible-lint bootstrap/",
     "lint": "pnpm format:check && pnpm lint:yaml && pnpm lint:shell",
     "release": "commit-and-tag-version",
