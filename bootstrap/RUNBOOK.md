@@ -133,6 +133,41 @@ sudo systemctl enable --now tmp.mount
 > (pas de control plane) → réaffecter ses 10 Go à `var`, ou conserver la même
 > recette pour l’uniformité (la LV reste alors simplement inutilisée).
 
+### Configuration réseau
+
+Chaque nœud reçoit une **IP statique** sur le port 10 GbE actif `ens10f0np0`
+(réseau `10.67.2.0/22`). Le plus simple est le défaut Debian (ifupdown), le
+fichier `/etc/network/interfaces` (sans extension) :
+
+| Nœud     | IP            |
+| -------- | ------------- |
+| dirqual1 | 10.67.2.11/22 |
+| dirqual2 | 10.67.2.12/22 |
+| dirqual3 | 10.67.2.13/22 |
+| dirqual4 | 10.67.2.14/22 |
+
+Exemple pour `dirqual1` :
+
+```text
+auto ens10f0np0
+iface ens10f0np0 inet static
+    address 10.67.2.11/22
+    gateway 10.67.0.1          # à adapter : passerelle réelle du /22
+    dns-nameservers 10.67.0.1  # à adapter : résolveur(s) DNS
+```
+
+Appliquer avec `sudo systemctl restart networking` (ou au redémarrage).
+
+Cette configuration peut être saisie directement à l'étape « Configurer le
+réseau » de l'installateur en choisissant **Configuration manuelle** ; y
+renseigner aussi le **nom de machine** (`dirqual1`…`dirqual4`) et laisser le
+**domaine** vide. Vérifier la passerelle et le DNS réels du `/22` (non
+documentés dans le dépôt).
+
+> Alternatives selon le gestionnaire réseau : `systemd-networkd`
+> (`/etc/systemd/network/*.network`) ou NetworkManager
+> (`/etc/NetworkManager/system-connections/*.nmconnection`).
+
 ### Accès SSH par clef asymétrique
 
 Une fois le système d’exploitation installé, il est recommandé de configurer
