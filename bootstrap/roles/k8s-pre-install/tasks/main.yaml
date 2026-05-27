@@ -51,12 +51,14 @@
       ansible.builtin.command: cat /sys/class/dmi/id/product_uuid
       register: uuid
       changed_when: false
+      # Some hosts (VMs, arm64) expose no DMI; skip them rather than fail.
+      failed_when: false
 
-    - name: Build the UUID list
+    - name: Build the UUID list (ignoring hosts without a DMI UUID)
       ansible.builtin.set_fact:
         uuids: >-
           {{ ansible_play_hosts | map('extract', hostvars, 'uuid')
-             | map(attribute='stdout') | list }}
+             | map(attribute='stdout') | select('!=', '') | list }}
 
     - name: UUIDs are unique
       run_once: true

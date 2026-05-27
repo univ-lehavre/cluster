@@ -60,16 +60,18 @@
         state: present
         update_cache: true
 
+    # The Debian package ships a minimal config.toml without a SystemdCgroup
+    # line, so generate the full default and force the systemd cgroup driver.
     - name: Generate the default containerd configuration
-      ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
-      args:
-        creates: /etc/containerd/config.toml
+      ansible.builtin.command: containerd config default
+      register: containerd_default
+      changed_when: false
 
-    - name: Use the systemd cgroup driver
-      ansible.builtin.replace:
-        path: /etc/containerd/config.toml
-        regexp: 'SystemdCgroup = false'
-        replace: 'SystemdCgroup = true'
+    - name: Write containerd config with the systemd cgroup driver
+      ansible.builtin.copy:
+        content: "{{ containerd_default.stdout | regex_replace('SystemdCgroup = false', 'SystemdCgroup = true') }}"
+        dest: /etc/containerd/config.toml
+        mode: '0644'
       notify: Restart containerd
 
     - name: Ensure containerd is enabled and running
