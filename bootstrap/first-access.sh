@@ -51,8 +51,15 @@ for h in "${hosts[@]}"; do
     ssh-copy-id -i "$SSH_PUBKEY" "$USER_REMOTE@$h"
 
     # (2) sudo NOPASSWD + durcissement sshd via drop-ins.
-    #     Dernier passage où sudo demande un mot de passe.
-    ssh -tt "$USER_REMOTE@$h" "sudo bash -s" <<'REMOTE'
+    #
+    # On dépose d'abord le script sur le nœud via un ssh sans TTY (le heredoc
+    # part dans `cat > /tmp/…`), puis on l'exécute en root via un ssh -t qui
+    # n'a PAS de stdin piped — sudo peut ainsi prompter proprement, une seule
+    # fois. (Le piège : `ssh -tt … <<heredoc` envoie le heredoc dans le TTY
+    # distant et il est consommé par le prompt sudo, qui essaie chaque ligne
+    # du script comme mot de passe.)
+    ssh "$USER_REMOTE@$h" 'cat > /tmp/cluster-first-access.sh' <<'REMOTE'
+#!/bin/bash
 set -euo pipefail
 
 install -m 0440 /dev/stdin /etc/sudoers.d/90-debian-nopasswd <<'SUDOERS'
@@ -73,6 +80,9 @@ systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
 
 echo "  → sudo NOPASSWD + sshd durci"
 REMOTE
+
+    ssh -t "$USER_REMOTE@$h" \
+        'sudo bash /tmp/cluster-first-access.sh && rm -f /tmp/cluster-first-access.sh'
 
     # (3) Optionnel : changement du mot de passe debian (passwordless via sudo).
     if [ -n "${NEW_DEBIAN_PASSWORD:-}" ]; then
