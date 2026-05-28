@@ -256,6 +256,9 @@ ADR à rédiger (issus des décisions de ce plan) :
 - `0011-registry-http-sans-auth.md` — registry interne en HTTP sans
   authentification, fonde sa sécurité sur Tailscale + réseau pod confiance ; cf.
   Workstream H.
+- `0012-rstudio-disable-auth.md` — RStudio avec `DISABLE_AUTH=true` : shell +
+  filesystem accessibles sans login, décision assumée pour un cluster
+  mono-tenant ; cf. Workstream H7.
 
 ### Discussion fondatrice : pourquoi 4 nœuds ?
 
@@ -473,6 +476,21 @@ regroupées ici pour intégration dans la Phase 5.
 - Ajouter `kustomization.yaml` par composant (`platform/container-registry/` et
   `platform/k8s-dashboard/`) pour permettre `kubectl apply -k <dir>` en un seul
   appel. Non bloquant.
+
+### H7. RStudio (`apps/rstudio/`) — décision d'authentification — 📝
+
+- [`apps/rstudio/deployment.yaml`](apps/rstudio/deployment.yaml) pose
+  `DISABLE_AUTH=true` : tout pair Tailscale qui résout `rstudio:80` ouvre une
+  session shell + filesystem (PVC 1 Ti) sans login.
+- **Décision assumée** pour le cluster mono-tenant actuel — formalisée dans
+  [`docs/decisions/0012-rstudio-disable-auth.md`](docs/decisions/0012-rstudio-disable-auth.md)
+  et expliquée dans le README RStudio.
+- Garde-fous opérationnels : Service en `ClusterIP` uniquement (pas d'Ingress
+  public), ACL Tailscale stricte pour `tag:rstudio-user`, sauvegarde régulière
+  de la PVC.
+- À **revoir avant** tout élargissement du périmètre (multi-utilisateurs,
+  ouverture externe) — bascule sur auth `PASSWORD` via Secret, ou outil
+  multi-utilisateurs (JupyterHub, Posit Workbench).
 
 ---
 

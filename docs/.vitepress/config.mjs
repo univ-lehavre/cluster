@@ -107,6 +107,10 @@ export default defineConfig({
             text: '0011 — Registry HTTP sans auth',
             link: '/docs/decisions/0011-registry-http-sans-auth',
           },
+          {
+            text: '0012 — RStudio sans auth',
+            link: '/docs/decisions/0012-rstudio-disable-auth',
+          },
         ],
       },
     ],
