@@ -420,3 +420,61 @@ Voir [`storage/ceph/RUNBOOK.md`](../storage/ceph/RUNBOOK.md).
 ```bash
 ansible-playbook -i ./hosts.yaml ./upgrade.yaml
 ```
+
+### Sauvegarde etcd (SPOF assumé)
+
+Le cluster fonctionne avec **1 seul control plane** (`dirqual1`) — décision
+assumée (cf. PLAN « Workstream A12 / décision actée »). C'est un **SPOF** : la
+perte du nœud control plane → cluster inutilisable jusqu'à restauration.
+Mitigations :
+
+1. **`--control-plane-endpoint cluster-api:6443` posé dès `kubeadm init`** (rôle
+   `k8s-initialization`) : l'API est référencée par un nom DNS stable, donc un
+   futur ajout de control planes n'imposera pas de réinstaller les workers.
+2. **Sauvegarde etcd horaire** via le rôle [`etcd-backup`](roles/etcd-backup/) :
+
+   ```bash
+   ansible-playbook -i ./hosts.yaml ./etcd-backup.yaml
+   ```
+
+   Pose un script `/usr/local/sbin/etcd-snapshot.sh` + un timer systemd
+   `etcd-snapshot.timer` qui exécute `etcdctl snapshot save` chaque heure et
+   garde les **24 derniers snapshots** dans `/var/lib/etcd-backups/`. Vérifier :
+
+   ```bash
+   systemctl status etcd-snapshot.timer
+   systemctl list-timers etcd-snapshot.timer
+   ls -la /var/lib/etcd-backups/
+   ```
+
+#### Restauration etcd (procédure)
+
+Sur le control plane à restaurer (ou un nouveau nœud qui va prendre sa place),
+avec un snapshot copié dans `/tmp/etcd-snapshot.db` :
+
+```bash
+# 1. Arrêter le kubelet et tous les conteneurs (sinon etcd ne se laisse
+#    pas remplacer "sous lui").
+sudo systemctl stop kubelet
+sudo crictl ps -q | xargs -r sudo crictl stop
+sudo crictl ps -q | xargs -r sudo crictl rm
+
+# 2. Restaurer le snapshot vers un nouveau data-dir.
+sudo rm -rf /var/lib/etcd-restore
+sudo ETCDCTL_API=3 etcdctl snapshot restore /tmp/etcd-snapshot.db \
+  --name "$(hostname)" \
+  --initial-cluster "$(hostname)=https://$(hostname -I | awk '{print $1}'):2380" \
+  --initial-advertise-peer-urls "https://$(hostname -I | awk '{print $1}'):2380" \
+  --data-dir /var/lib/etcd-restore
+
+# 3. Remplacer l'ancien data-dir (sauvegarde de sécurité incluse).
+sudo mv /var/lib/etcd /var/lib/etcd.before-restore-$(date +%s)
+sudo mv /var/lib/etcd-restore /var/lib/etcd
+
+# 4. Redémarrer kubelet → l'API + etcd remontent sur le snapshot.
+sudo systemctl start kubelet
+kubectl get nodes      # attendre que les nœuds redeviennent Ready
+```
+
+> Tester cette procédure **sur le banc multi-nœuds** avant d'en avoir besoin en
+> prod (cf. `test/multi-node/`).

@@ -1,0 +1,68 @@
+---
+# Pose un script `etcd-snapshot.sh` + un systemd timer qui exécute
+# `etcdctl snapshot save` toutes les heures et garde les 24 dernières
+# snapshots. À appliquer uniquement sur les nœuds control-plane.
+#
+# Restauration documentée dans `bootstrap/RUNBOOK.md` (section SPOF /
+# sauvegarde etcd).
+
+- name: Créer le répertoire des snapshots etcd
+  ansible.builtin.file:
+    path: /var/lib/etcd-backups
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Déposer le script de snapshot
+  ansible.builtin.template:
+    src: etcd-snapshot.sh.j2
+    dest: /usr/local/sbin/etcd-snapshot.sh
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Déposer l'unité systemd (oneshot)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/etcd-snapshot.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Snapshot etcd via etcdctl
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/etcd-snapshot.sh
+
+- name: Déposer le timer systemd
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/etcd-snapshot.timer
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Snapshot etcd toutes les heures
+
+      [Timer]
+      OnCalendar=hourly
+      Persistent=true
+      RandomizedDelaySec=300
+      Unit=etcd-snapshot.service
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Recharger systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Activer et démarrer le timer
+  ansible.builtin.systemd:
+    name: etcd-snapshot.timer
+    enabled: true
+    state: started
