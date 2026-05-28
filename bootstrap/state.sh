@@ -21,7 +21,7 @@
 set -euo pipefail
 
 USER_REMOTE=${USER_REMOTE:-debian}
-read -ra SSH_OPTS_ARR <<<"${SSH_OPTS:-}"
+SSH_OPTS=${SSH_OPTS:-}
 
 hosts=("$@")
 if [ ${#hosts[@]} -eq 0 ]; then
@@ -40,13 +40,15 @@ next_step=""
 
 ssh_q() {
     # ssh_q HOST CMD — best effort, stderr muet, retourne stdout.
-    ssh "${SSH_OPTS_ARR[@]}" -o ConnectTimeout=5 -o BatchMode=yes \
+    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
+    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
         "${USER_REMOTE}@$1" "$2" 2>/dev/null
 }
 
 ssh_ok() {
     # ssh_ok HOST CMD — exit 0 si la commande distante renvoie 0.
-    ssh "${SSH_OPTS_ARR[@]}" -o ConnectTimeout=5 -o BatchMode=yes \
+    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
+    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
         "${USER_REMOTE}@$1" "$2" >/dev/null 2>&1
 }
 
