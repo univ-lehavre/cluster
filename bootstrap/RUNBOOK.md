@@ -217,11 +217,19 @@ documentés dans le dépôt).
 ## Premier accès SSH
 
 Le script [`first-access.sh`](first-access.sh) automatise le **strict minimum**
-nécessaire pour qu'Ansible puisse ensuite piloter les nœuds sans mot de passe :
-dépôt de la clé publique de l'opérateur (`ssh-copy-id`) et règle `sudo NOPASSWD`
-pour `debian`. Tout le reste du durcissement est délégué au dépôt
-[`server-security`](https://github.com/univ-lehavre/server-security) (cf.
-section suivante).
+nécessaire pour qu'Ansible puisse ensuite piloter les nœuds sans mot de passe,
+**et** ferme immédiatement la fenêtre d'authentification par mot de passe :
+
+- dépôt de la clé publique de l'opérateur (`ssh-copy-id`) ;
+- règle `sudo NOPASSWD` pour `debian` ;
+- **durcissement `sshd`** via drop-in `/etc/ssh/sshd_config.d/00-hardening.conf`
+  (`PasswordAuthentication no`, `PermitRootLogin no`, `AllowUsers debian`,
+  `MaxAuthTries 3`, `ClientAlive*`).
+
+Le reste du hardening (mises à jour automatiques, UFW, fail2ban, auditd,
+postfix, expiration de mot de passe) est délégué à
+[`server-security`](https://github.com/univ-lehavre/server-security) — cf.
+section suivante.
 
 Pré-requis : disposer d'une clé SSH locale.
 
@@ -247,10 +255,13 @@ La 1re passe demande **deux fois** le mot de passe par hôte (`ssh-copy-id` puis
 ## Durcissement de l'OS (server-security)
 
 Le dépôt [`server-security`](https://github.com/univ-lehavre/server-security)
-porte les rôles Ansible de durcissement complet : `sshd` (clés seulement, root
-off, etc.), `unattended-upgrades`, **UFW**, `fail2ban`, `auditd`, `postfix`
-(redirection des mails système), gestion du compte admin (expiration mot de
-passe). Source unique de vérité pour la sécurité de base.
+porte les rôles Ansible de durcissement complet : `unattended-upgrades`,
+**UFW**, `fail2ban`, `auditd`, `postfix` (redirection des mails système),
+gestion du compte admin (expiration mot de passe). Le `sshd` est déjà durci par
+`first-access.sh` (drop-in) avant ce passage ; si le rôle `network/sshd` de
+`server-security` retouche `sshd`, ses changements doivent rester **cohérents**
+avec le drop-in (ordre alphanumérique des `*.conf` ; ce dernier gagne en cas de
+conflit de directive).
 
 ```bash
 git clone https://github.com/univ-lehavre/server-security.git
