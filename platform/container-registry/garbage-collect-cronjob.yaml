@@ -1,0 +1,79 @@
+# Garbage collection mensuel du registry.
+#
+# `registry garbage-collect` supprime les blobs orphelins (référencés par
+# aucun manifest) ; sans GC périodique, les blobs s'accumulent malgré les
+# `docker rmi` / suppressions API → le PVC se remplit.
+#
+# Pré-requis (posé par deployment.yaml) :
+#   REGISTRY_STORAGE_DELETE_ENABLED=true → permet à l'API de supprimer
+#   les manifests ; sans ça, la GC n'a rien à collecter.
+#
+# Le CronJob monte le même PVC que le Deployment principal et lance
+# `registry garbage-collect /etc/distribution/config.yml` avec `--delete-untagged`.
+# Suspended par défaut : à activer (`kubectl -n registry patch cronjob registry-gc
+# --type=merge -p '{"spec":{"suspend":false}}'`) une fois validé sur le banc.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: registry-gc
+  namespace: registry
+spec:
+  # Le 1er du mois à 03h17 (heure UTC du cluster, peu de trafic).
+  schedule: '17 3 1 * *'
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          # Le PVC est RWO : pour pouvoir le monter quand le Deployment
+          # registry tourne, le job doit atterrir sur le même nœud.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: registry
+                  topologyKey: kubernetes.io/hostname
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: gc
+              image: registry:3.1.1
+              command:
+                - registry
+                - garbage-collect
+                - --delete-untagged
+                - /etc/distribution/config.yml
+              volumeMounts:
+                - name: registry-storage
+                  mountPath: /var/lib/registry
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  memory: '256Mi'
+                  cpu: '100m'
+                limits:
+                  memory: '512Mi'
+                  cpu: '500m'
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+          volumes:
+            - name: registry-storage
+              persistentVolumeClaim:
+                claimName: registry-pvc
+            - name: tmp
+              emptyDir: {}

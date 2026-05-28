@@ -13,14 +13,44 @@ spec:
       labels:
         app: registry
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: registry
-          image: registry:2
+          # distribution v3 (CNCF) — successeur de docker/distribution v2.
+          # API HTTP Registry V2 inchangée, supporte OCI 1.1.
+          image: registry:3.1.1
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
+              name: http
+          env:
+            # Active la suppression de blobs (pré-requis pour le garbage-collect
+            # mensuel ; cf. garbage-collect-cronjob.yaml).
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: 'true'
           volumeMounts:
             - name: registry-storage
               mountPath: /var/lib/registry
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 30
           resources:
             requests:
               memory: '512Mi'
@@ -28,7 +58,15 @@ spec:
             limits:
               memory: '1Gi'
               cpu: '500m'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
       volumes:
         - name: registry-storage
           persistentVolumeClaim:
             claimName: registry-pvc
+        # /tmp doit rester writable même avec readOnlyRootFilesystem.
+        - name: tmp
+          emptyDir: {}

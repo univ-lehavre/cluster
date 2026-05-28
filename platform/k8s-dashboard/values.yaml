@@ -1,0 +1,43 @@
+# Valeurs Helm pour le chart kubernetes-dashboard.
+#
+# Le chart officiel ≥ 7.x est multi-container (API + Web + Metrics-Scraper +
+# Auth + Kong). Pinner chaque image individuellement est lourd : on fige donc
+# la version du chart (cf. manage.sh) qui fige indirectement les images sous-
+# jacentes. Ce fichier ne touche qu'aux paramètres d'exploitation.
+#
+# Référence : https://github.com/kubernetes/dashboard/tree/master/charts/kubernetes-dashboard
+
+# Le chart 7.x active déjà le metrics-scraper par défaut.
+
+# Ressources raisonnables pour un cluster mono-admin de recherche.
+# Les valeurs par défaut du chart sont en dessous, mais sans `requests`
+# (scheduling moins prévisible) ; on borne ici.
+api:
+  containers:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        cpu: 250m
+        memory: 400Mi
+
+web:
+  containers:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        cpu: 250m
+        memory: 400Mi
+
+metricsScraper:
+  containers:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 200Mi
+      limits:
+        cpu: 250m
+        memory: 400Mi
