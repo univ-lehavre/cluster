@@ -9,4 +9,4 @@ spec:
   resources:
     requests:
       storage: 1Ti
-  storageClassName: rook-ceph-block-ec
+  storageClassName: rook-ceph-block-replicated

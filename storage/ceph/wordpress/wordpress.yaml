@@ -19,9 +19,7 @@ metadata:
   labels:
     app: wordpress
 spec:
-  #storageClassName: rook-ceph-block-replicated
-  #storageClassName: rook-ceph-block
-  storageClassName: rook-ceph-block-ec
+  storageClassName: rook-ceph-block-replicated
   accessModes:
     - ReadWriteOnce
   resources:
