@@ -8,20 +8,13 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   srcDir: '..',
   title: 'Cluster',
-  description:
-    'Cluster Kubernetes hyperconvergé — Debian 13, Cilium, Rook-Ceph',
+  description: 'Cluster Kubernetes hyperconvergé — Debian 13, Cilium, Rook-Ceph',
   lang: 'fr-FR',
   cleanUrls: true,
   lastUpdated: true,
   ignoreDeadLinks: true,
 
-  srcExclude: [
-    'node_modules/**',
-    '.git/**',
-    '.github/**',
-    'CHANGELOG.md',
-    'docs/.vitepress/**',
-  ],
+  srcExclude: ['node_modules/**', '.git/**', '.github/**', 'CHANGELOG.md', 'docs/.vitepress/**'],
 
   // Map every README.md to its directory's index.md so URLs like /test/,
   // /bootstrap/, /storage/ceph/ resolve cleanly.
@@ -52,6 +45,10 @@ export default defineConfig({
           { text: "Vue d'ensemble", link: '/bootstrap/' },
           { text: 'Runbook installation', link: '/bootstrap/RUNBOOK' },
         ],
+      },
+      {
+        text: 'Durcissement OS',
+        items: [{ text: "Vue d'ensemble (server-security)", link: '/bootstrap/security/' }],
       },
       {
         text: 'Stockage Rook-Ceph',
@@ -88,8 +85,7 @@ export default defineConfig({
     returnToTopLabel: 'Retour en haut',
     lastUpdated: { text: 'Dernière mise à jour' },
     editLink: {
-      pattern:
-        'https://github.com/pochasset/cluster/edit/main/:path',
+      pattern: 'https://github.com/pochasset/cluster/edit/main/:path',
       text: 'Modifier cette page sur GitHub',
     },
   },

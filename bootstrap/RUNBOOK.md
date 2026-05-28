@@ -252,23 +252,25 @@ NEW_DEBIAN_PASSWORD='choisir-un-mot-de-passe-robuste' \
 La 1re passe demande **deux fois** le mot de passe par hôte (`ssh-copy-id` puis
 `sudo`). Les runs suivants sont silencieux et idempotents.
 
-## Durcissement de l'OS (server-security)
+## Durcissement de l'OS (`bootstrap/security/`)
 
-Le dépôt [`server-security`](https://github.com/univ-lehavre/server-security)
-porte les rôles Ansible de durcissement complet : `unattended-upgrades`,
+Les rôles Ansible de durcissement complet sont fusionnés dans ce dépôt via
+`git subtree` sous [`bootstrap/security/`](security/) : `unattended-upgrades`,
 **UFW**, `fail2ban`, `auditd`, `postfix` (redirection des mails système),
-gestion du compte admin (expiration mot de passe). Le `sshd` est déjà durci par
-`first-access.sh` (drop-in) avant ce passage ; si le rôle `network/sshd` de
-`server-security` retouche `sshd`, ses changements doivent rester **cohérents**
-avec le drop-in (ordre alphanumérique des `*.conf` ; ce dernier gagne en cas de
-conflit de directive).
+gestion du compte admin (expiration mot de passe). Origine :
+`univ-lehavre/server-security` (DOI
+[`10.5281/zenodo.16983614`](https://doi.org/10.5281/zenodo.16983614)).
+
+Le `sshd` est déjà durci par `first-access.sh` (drop-in) avant ce passage ; si
+le rôle `network/sshd` retouche `sshd`, ses changements doivent rester
+**cohérents** avec le drop-in (ordre alphanumérique des `*.conf` ; ce dernier
+gagne en cas de conflit de directive).
 
 ```bash
-git clone https://github.com/univ-lehavre/server-security.git
-cd server-security
-cp .env.example .env && $EDITOR .env       # MAIL_ROOT_REDIRECT, HOST_USER, …
+cd bootstrap/security
+cp .env-example .env && $EDITOR .env       # MAIL_ROOT_REDIRECT, HOST_USER, …
 set -a; source .env; set +a
-ansible-playbook secure.yml
+ansible-playbook -i ../hosts.yaml secure.yml
 ```
 
 > ⚠️ **UFW × Kubernetes** : le rôle `network/ufw.yml` durcit le pare-feu. Pour
