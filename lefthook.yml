@@ -62,6 +62,7 @@ pre-push:
           -not -path './storage/ceph/cluster.yaml' \
           -not -path './storage/ceph/dashboard.yaml' \
           -not -path './storage/ceph/toolbox.yaml' \
+          -not -path './platform/k8s-dashboard/values.yaml' \
           -print0 | xargs -0 kubeconform \
             -strict -ignore-missing-schemas \
             -schema-location default \
