@@ -35,9 +35,9 @@ kubectl -n rstudio get pods,pvc,svc                  # tout Ready, PVC Bound
 
 ## Accès
 
-- **Via Tailscale** (recommandé) : ouvrir `http://rstudio` depuis un pair
-  Tailscale ayant le bon tag.
-- **Localement (debug)** :
+- **Via Tailscale** _(si le Tailscale operator est déployé)_ : ouvrir
+  `http://rstudio` depuis un pair Tailscale ayant le bon tag.
+- **Sans Tailscale (fallback)** :
   `kubectl -n rstudio port-forward svc/rstudio-service 8787:80` puis ouvrir
   `http://localhost:8787`.
 

@@ -28,10 +28,12 @@ l'accès à RStudio repose **entièrement sur le contrôle d'accès au Service**
 
 - Service `rstudio-service` de type `ClusterIP` (pas de NodePort, pas de
   LoadBalancer Internet).
-- Accès distant via les annotations Tailscale du Service
-  (`tailscale.com/ expose: 'true'`, `tailscale.com/hostname: rstudio`) —
-  accessibles aux pairs Tailscale ayant `tag:cluster-user` (ACL gérée
-  hors-cluster).
+- Accès distant **optionnel** via les annotations Tailscale du Service
+  (`tailscale.com/expose: 'true'`, `tailscale.com/hostname: rstudio`) : si le
+  Tailscale operator est déployé, les pairs ayant `tag:rstudio-user` joignent
+  `http://rstudio`. **Sans Tailscale**, l'accès se fait par
+  `kubectl port-forward svc/rstudio-service 8787:80` depuis un poste autorisé à
+  parler à l'API K8s.
 - Accès intra-cluster : tout pod du namespace `rstudio` (vide à part RStudio) et
   tout pod du cluster (pas de NetworkPolicy → cohérent avec le modèle
   mono-tenant) peut joindre `rstudio-service.rstudio:80`.
@@ -68,8 +70,9 @@ Accepted (2026-05-28).
 **Garde-fous opérationnels.**
 
 - Ne **pas** exposer le Service via Ingress public ni LoadBalancer Internet.
-- ACL Tailscale : restreindre `tag:rstudio-user` aux seuls comptes autorisés
-  (revue régulière à inscrire dans l'opérationnel).
+- Si Tailscale est utilisé : restreindre `tag:rstudio-user` aux seuls comptes
+  autorisés (revue régulière à inscrire dans l'opérationnel). Sinon : ne pas
+  distribuer le kubeconfig à des utilisateurs non habilités à port-forward.
 - Sauvegarde régulière de la PVC RStudio (pas dans ce dépôt — à documenter
   ailleurs).
 

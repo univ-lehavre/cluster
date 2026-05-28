@@ -99,13 +99,20 @@ le détail des claims et l'extraction des credentials.
 
 Aucun chiffrement Ceph n'est activé : `network.connections.encryption.enabled`
 reste à `false` dans `cluster.yaml`, et le datalake RGW expose `port: 80` sans
-TLS. La décision tient parce que **tout accès externe transite obligatoirement
-par le VPN Tailscale** (chiffrement bout-en-bout côté réseau) et que les flux
-internes au cluster restent confinés au réseau privé `10.67.2.0/22`. À revisiter
-le jour où ces hypothèses changent (exposition publique, données classifiées,
+TLS. La décision tient parce que les flux internes au cluster restent confinés
+au réseau privé `10.67.2.0/22`, et que **l'accès externe est limité par le
+contrôle d'accès au Service** (réseau cluster, port-forward sur API K8s, ou
+tunnel Tailscale si l'operator est déployé — voir ci-dessous). À revisiter le
+jour où ces hypothèses changent (exposition publique, données classifiées,
 etc.).
 
-## Tailscale operator
+## Tailscale operator (optionnel)
+
+L'installation du Tailscale operator est **facultative**. Sans lui, les
+annotations `tailscale.com/expose` et `tailscale.com/hostname` posées sur
+certains Services (registry, RStudio) sont simplement ignorées, et l'accès
+distant se fait par `kubectl port-forward`. Avec lui, ces Services deviennent
+joignables depuis le tailnet.
 
 ```bash
 helm repo add tailscale https://pkgs.tailscale.com/helmcharts

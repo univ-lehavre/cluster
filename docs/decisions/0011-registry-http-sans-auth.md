@@ -14,18 +14,28 @@ Le périmètre d'accès est :
 
 - intra-cluster : pulls par `kubelet` depuis le réseau pods Cilium
   (`10.244.0.0/16`) ;
-- accès distant : opérateur unique via tunnel Tailscale (chiffré bout-en-bout
-  côté réseau).
+- accès distant (**optionnel**) : opérateur unique via tunnel Tailscale (chiffré
+  bout-en-bout côté réseau) **si** le Tailscale operator est déployé. Sans
+  Tailscale, le registry n'est exposé que sur le réseau cluster — l'accès se
+  fait par `kubectl port-forward` ou par un nœud du cluster.
 
 ## Décision
 
 **HTTP en clair, pas d'authentification**. Le Service expose le registry sur le
 port 80, et aucun module `REGISTRY_AUTH` n'est activé.
 
+La sécurité de l'accès est **déléguée au contrôle d'accès au Service** :
+
+- intra-cluster, les pods qui peuvent résoudre `registry.registry:80` sont de
+  confiance par hypothèse (mono-tenant) ;
+- pour l'accès distant, si Tailscale est déployé, son tunnel chiffre le
+  transport et son ACL limite les pairs autorisés ; sinon, l'accès passe par
+  `kubectl port-forward` ou par un saut SSH sur un nœud.
+
 C'est cohérent avec
 [`0003-pas-de-chiffrement-ceph-tailscale.md`](0003-pas-de-chiffrement-ceph-tailscale.md)
-: la sécurité du transport est déléguée à Tailscale ; les flux intra-cluster
-restent confinés au réseau de pods de confiance.
+: aucun composant ne s'appuie en dur sur Tailscale ; c'est un moyen d'accès
+distant possible, pas le pivot de la sécurité.
 
 ## Statut
 
@@ -44,9 +54,10 @@ Accepted (2026-05-28).
 
 **Coûts assumés.**
 
-- **Tout pair Tailscale autorisé peut pusher** des images arbitraires dans le
-  registry, y compris écraser des tags existants. Mitigation : l'ACL Tailscale
-  est gérée hors-cluster ; ne donner accès au tag de cluster qu'aux opérateurs.
+- **Tout client autorisé à atteindre le Service peut pusher** des images
+  arbitraires, y compris écraser des tags existants. Si Tailscale est déployé,
+  l'ACL gérée hors-cluster restreint le périmètre ; sans Tailscale, l'accès est
+  limité aux pods du cluster + aux opérateurs via port-forward.
 - **Tout pod du cluster peut tirer** depuis le registry (pas de
   `imagePullSecret` requis). Acceptable pour un cluster mono-tenant ;
   inacceptable si on introduit du multi-tenancy.
