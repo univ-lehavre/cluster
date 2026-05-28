@@ -1,0 +1,7 @@
+- name: Configuration des utilisateurs
+  become: true
+  block:
+    - name: Configuration de l’utilisateur principal
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        password_expire_min: "{{ settings_password_expiration }}"

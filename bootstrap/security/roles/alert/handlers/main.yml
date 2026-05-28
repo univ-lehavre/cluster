@@ -1,0 +1,5 @@
+- name: Regénérer les alias mail si le fichier a changé
+  become: true
+  ansible.builtin.command: newaliases
+  listen: newaliases
+  changed_when: false

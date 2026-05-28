@@ -1,0 +1,6 @@
+- name: Recharger la configuration de fail2ban
+  become: true
+  ansible.builtin.service:
+    name: fail2ban
+    state: reloaded
+  listen: Reload fail2ban

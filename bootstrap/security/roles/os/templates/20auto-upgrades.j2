@@ -1,0 +1,15 @@
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Verbose "1";
+APT::Periodic::Remove-Unused-Dependencies "1";
+APT::Periodic::Autoremove "1";
+Unattended-Upgrade::Mail "root";
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename},label=Debian-Security";
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+Unattended-Upgrade::MailOnlyOnError "true";
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:{{ '%02d' | format(os_unattended_reboot_minute | int) }}";

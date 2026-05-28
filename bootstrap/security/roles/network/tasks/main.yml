@@ -1,0 +1,8 @@
+- name: Limitation des accès avec un pare-feu
+  ansible.builtin.import_tasks: ufw.yml
+
+- name: Organisation de l’accès à distance via SSH
+  ansible.builtin.import_tasks: sshd.yml
+
+- name: Autorisation d’un accès distant par clef publique
+  ansible.builtin.import_tasks: ssh.yml

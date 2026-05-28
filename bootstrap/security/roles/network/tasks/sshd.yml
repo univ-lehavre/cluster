@@ -1,0 +1,130 @@
+- name: Installation et activation du serveur SSH
+  become: true
+  tags:
+    - install
+  block:
+    - name: Installation du paquet OpenSSH
+      ansible.builtin.apt:
+        name: openssh-server
+        state: present
+
+    - name: Activation et démarrage du service SSH
+      ansible.builtin.systemd:
+        name: sshd
+        state: started
+        enabled: true
+
+- name: |
+    Configuration du serveur SSH
+    avec, en cas d’échec du rechargement du serveur SSH,
+    restauration de la configuration précédente
+  become: true
+  tags:
+    - configuration
+  block:
+    - name: Sauvegarder la configuration SSH actuelle
+      ansible.builtin.copy:
+        src: /etc/ssh/sshd_config
+        dest: /etc/ssh/sshd_config.bak
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+    - name: Désactiver le login root
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin no"
+        state: present
+      notify: Restart SSH
+
+    - name: Forcer l’authentification par clé
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication no"
+        state: present
+      notify: Restart SSH
+
+    - name: Désactiver ChallengeResponseAuthentication
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?ChallengeResponseAuthentication"
+        line: "ChallengeResponseAuthentication no"
+        state: present
+      notify: Restart SSH
+
+    - name: Limiter le nombre de tentatives
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?MaxAuthTries"
+        line: "MaxAuthTries 3"
+        state: present
+      notify: Restart SSH
+
+    - name: Réduire le délai d’attente
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?LoginGraceTime"
+        line: "LoginGraceTime 30s"
+        state: present
+      notify: Restart SSH
+
+    - name: Activer le logging détaillé
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?LogLevel"
+        line: "LogLevel VERBOSE"
+        state: present
+      notify: Restart SSH
+
+    - name: Restreindre les utilisateurs autorisés
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?AllowUsers"
+        line: "AllowUsers {{ settings_host_user }}"
+        state: present
+      notify: Restart SSH
+
+    - name: Activer l’authentification par clé publique
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PubkeyAuthentication"
+        line: "PubkeyAuthentication yes"
+        state: present
+      notify: Restart SSH
+
+    - name: Définir l'intervalle de vie client SSH
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?ClientAliveInterval"
+        line: "ClientAliveInterval 300"
+        state: present
+      notify: Restart SSH
+
+    - name: Définir le nombre maximal de keepalive sans réponse
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?ClientAliveCountMax"
+        line: "ClientAliveCountMax 3"
+        state: present
+      notify: Restart SSH
+  rescue:
+    - name: Rollback de la configuration SSH en cas d’échec
+      ansible.builtin.copy:
+        src: /etc/ssh/sshd_config.bak
+        dest: /etc/ssh/sshd_config
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      notify: Restart SSH
+  always:
+    - name: Récupération de la configuration SSH
+      ansible.builtin.command: grep -E '^(PermitRootLogin|PasswordAuthentication|ChallengeResponseAuthentication|MaxAuthTries|LoginGraceTime|LogLevel|AllowUsers|PubkeyAuthentication|ClientAliveInterval|ClientAliveCountMax)' /etc/ssh/sshd_config # noqa yaml[line-length]
+      register: network_config_check
+      changed_when: false
+
+    - name: Afficher la configuration SSH
+      ansible.builtin.debug:
+        var: network_config_check.stdout_lines

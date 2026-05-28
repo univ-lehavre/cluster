@@ -1,0 +1,14 @@
+- name: Redémarrer le service SSH
+  become: true
+  ansible.builtin.service:
+    name: ssh
+    state: restarted
+  listen: Restart SSH
+
+- name: Redémarrer le service UFW
+  become: true
+  ansible.builtin.service:
+    name: ufw
+    state: restarted
+    force: true
+  listen: Restart UFW

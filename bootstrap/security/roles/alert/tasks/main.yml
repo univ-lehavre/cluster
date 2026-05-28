@@ -1,0 +1,21 @@
+- name: Rediriger les mails root vers une adresse personnalisée
+  become: true
+  block:
+    - name: Installer postfix (pour fournir /etc/aliases)
+      ansible.builtin.apt:
+        name: postfix
+        state: present
+
+    - name: Activer le service postfix
+      ansible.builtin.service:
+        name: postfix
+        state: started
+        enabled: true
+
+    - name: Définir l'alias root dans /etc/aliases
+      ansible.builtin.lineinfile:
+        path: /etc/aliases
+        regexp: "^root:"
+        line: "root: {{ settings_mail_root_redirect }}"
+        state: present
+      notify: newaliases

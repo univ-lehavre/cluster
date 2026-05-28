@@ -1,0 +1,22 @@
+- name: Configuration et activation d'auditd
+  become: true
+  block:
+    - name: Installer le paquet auditd
+      ansible.builtin.package:
+        name: auditd
+        state: present
+
+    - name: Activation du service auditd
+      ansible.builtin.service:
+        name: auditd
+        state: started
+        enabled: true
+
+    - name: Déployer les règles auditd
+      ansible.builtin.copy:
+        src: audit.rules
+        dest: /etc/audit/rules.d/audit.rules
+        owner: root
+        group: root
+        mode: "0640"
+      notify: Restart auditd

@@ -1,0 +1,48 @@
+- name: Installation et activation du pare-feu UFW
+  become: true
+  tags:
+    - install
+  block:
+    - name: Installation du paquet
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+
+    - name: Activation et démarrage du service
+      ansible.builtin.systemd:
+        name: ufw
+        state: started
+        enabled: true
+
+- name: Configuration du pare-feu UFW
+  become: true
+  tags:
+    - configuration
+  block:
+    - name: Définir la politique entrante par défaut (deny)
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+      notify: Restart UFW
+
+    - name: Définir la politique sortante par défaut (allow)
+      community.general.ufw:
+        direction: outgoing
+        policy: allow
+      notify: Restart UFW
+
+    - name: Autoriser OpenSSH depuis Internet
+      community.general.ufw:
+        rule: limit
+        name: OpenSSH
+      notify: Restart UFW
+
+    - name: Activer le logging UFW
+      community.general.ufw:
+        logging: "on"
+      notify: Restart UFW
+
+    - name: Activer et appliquer UFW
+      community.general.ufw:
+        state: enabled
+      notify: Restart UFW

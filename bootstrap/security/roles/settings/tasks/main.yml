@@ -1,0 +1,39 @@
+- name: Importer les variables d'environnement dans des variables Ansible
+  tags:
+    - import
+  block:
+    - name: "Affecter les variables d'environnement à des variables Ansible"
+      ansible.builtin.set_fact:
+        settings_mail_root_redirect: "{{ lookup('ansible.builtin.env', 'MAIL_ROOT_REDIRECT') }}"
+        settings_host_user: "{{ lookup('ansible.builtin.env', 'HOST_USER') }}"
+        settings_password_expiration: "{{ lookup('ansible.builtin.env', 'PASSWORD_EXPIRATION') }}"
+        settings_ssh_key: "{{ lookup('ansible.builtin.env', 'PUBLIC_SSH_KEY') }}"
+
+- name: Vérification de l’import des variables d’environnement
+  tags:
+    - checks
+  block:
+    - name: Vérifier que les variables sont définies et ont une chaîne de caractères non vide
+      ansible.builtin.assert:
+        that:
+          - settings_mail_root_redirect is defined
+          - settings_mail_root_redirect | length > 0
+          - settings_host_user is defined
+          - settings_host_user | length > 0
+          - settings_password_expiration is defined
+          - settings_password_expiration | length > 0
+          - settings_ssh_key is defined
+          - settings_ssh_key | length > 0
+        fail_msg: "Les variables d'environnement ne sont pas définies ou sont vides."
+  always:
+    - name: Créer une variable ansible
+      ansible.builtin.set_fact:
+        settings_debug:
+          settings_mail_root_redirect: "{{ settings_mail_root_redirect }}"
+          settings_host_user: "{{ settings_host_user }}"
+          settings_password_expiration: "{{ settings_password_expiration }}"
+          settings_ssh_key: "{{ settings_ssh_key }}"
+
+    - name: Afficher les variables importées
+      ansible.builtin.debug:
+        var: settings_debug
