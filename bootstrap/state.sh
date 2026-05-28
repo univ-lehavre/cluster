@@ -226,6 +226,114 @@ for h in "${reachable[@]}"; do
     fi
 done
 
+# ─── Couche 3b — Disques bruts prêts pour Ceph ─────────────────────────────
+# Pré-requis Rook (cf. storage/ceph/RUNBOOK.md) : les HDD SAS et le NVMe
+# block.db (`nvme1n1`) doivent être BRUTS (aucune table de partitions, aucun
+# FS, aucun reste d'OSD précédent) ; `/var/lib/rook` doit être absent.
+# Variables d'env :
+#   CEPH_MIN_HDD       nombre minimum de HDD bruts (défaut: 1, prod: 12)
+#   CEPH_BLOCK_DEVICE  nom du NVMe block.db (défaut: nvme1n1)
+CEPH_MIN_HDD=${CEPH_MIN_HDD:-1}
+CEPH_BLOCK_DEVICE=${CEPH_BLOCK_DEVICE:-nvme1n1}
+section "Disques bruts Ceph (≥ ${CEPH_MIN_HDD} HDD, /dev/${CEPH_BLOCK_DEVICE}, /var/lib/rook propre)"
+for h in "${reachable[@]}"; do
+    # On délègue tout l'examen au shell distant : c'est lui qui voit /sys.
+    disk_report=$(ssh_script "$h" <<REMOTE
+set -u
+
+# 1) HDD bruts (pas le disque OS) : sd* sans table de partitions ni FS.
+#    On considère "brut" si lsblk ne montre pas d'enfant (pas de partition)
+#    ET wipefs ne trouve aucune signature.
+hdd_total=0
+hdd_dirty=0
+hdd_clean=0
+for d in /sys/block/sd*; do
+    [ -e "\$d" ] || continue
+    name=\$(basename "\$d")
+    hdd_total=\$((hdd_total + 1))
+    parts=\$(ls "\$d" | grep -E "^\${name}[0-9]+\$" | wc -l | tr -d ' ')
+    sig=\$(wipefs -n "/dev/\$name" 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+    if [ "\$parts" -eq 0 ] && [ "\$sig" -eq 0 ]; then
+        hdd_clean=\$((hdd_clean + 1))
+    else
+        hdd_dirty=\$((hdd_dirty + 1))
+    fi
+done
+
+# 2) NVMe block.db : présent ? brut ?
+nvme_state=absent
+if [ -e "/sys/block/${CEPH_BLOCK_DEVICE}" ]; then
+    nparts=\$(ls /sys/block/${CEPH_BLOCK_DEVICE} | grep -E '^${CEPH_BLOCK_DEVICE}p?[0-9]+\$' | wc -l | tr -d ' ')
+    nsig=\$(wipefs -n /dev/${CEPH_BLOCK_DEVICE} 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+    if [ "\$nparts" -eq 0 ] && [ "\$nsig" -eq 0 ]; then
+        nvme_state=clean
+    else
+        nvme_state=dirty
+    fi
+fi
+
+# 3) /var/lib/rook propre ?
+if [ -d /var/lib/rook ] && [ -n "\$(ls -A /var/lib/rook 2>/dev/null)" ]; then
+    rook_state=dirty
+else
+    rook_state=clean
+fi
+
+echo "\${hdd_total} \${hdd_clean} \${hdd_dirty} \${nvme_state} \${rook_state}"
+REMOTE
+    )
+    read -r hdd_total hdd_clean hdd_dirty nvme_state rook_state <<<"$disk_report"
+    hdd_total=${hdd_total:-?}
+    hdd_clean=${hdd_clean:-0}
+    hdd_dirty=${hdd_dirty:-0}
+    nvme_state=${nvme_state:-?}
+    rook_state=${rook_state:-?}
+
+    # HDD bruts
+    if [ "$hdd_total" = "?" ] || [ -z "$hdd_total" ]; then
+        mark skip "$h : impossible d'inspecter les disques (sudo ? wipefs ?)"
+    elif [ "$hdd_clean" -ge "$CEPH_MIN_HDD" ] && [ "$hdd_dirty" -eq 0 ]; then
+        mark ok "$h : ${hdd_clean}/${hdd_total} HDD bruts (≥ ${CEPH_MIN_HDD} requis)"
+    elif [ "$hdd_dirty" -gt 0 ]; then
+        mark fail "$h : ${hdd_dirty} HDD avec partition/signature résiduelle" \
+                  "bash storage/ceph/cleanup.sh (ou wipefs -a /dev/sdX) sur $h"
+    else
+        mark fail "$h : ${hdd_clean}/${hdd_total} HDD bruts (< ${CEPH_MIN_HDD} requis)" \
+                  "vérifier l'inventaire matériel — pas assez de disques détectés"
+    fi
+
+    # NVMe block.db
+    case "$nvme_state" in
+        clean)
+            mark ok "$h : /dev/${CEPH_BLOCK_DEVICE} présent et brut (block.db)"
+            ;;
+        dirty)
+            mark fail "$h : /dev/${CEPH_BLOCK_DEVICE} présent mais a une signature/partition" \
+                      "blkdiscard /dev/${CEPH_BLOCK_DEVICE} (ou bash storage/ceph/cleanup.sh)"
+            ;;
+        absent)
+            mark skip "$h : /dev/${CEPH_BLOCK_DEVICE} absent — banc sans NVMe ? OK en dev"
+            ;;
+        *)
+            mark skip "$h : état NVMe indéterminé ($nvme_state)"
+            ;;
+    esac
+
+    # /var/lib/rook
+    case "$rook_state" in
+        clean)
+            mark ok "$h : /var/lib/rook absent ou vide"
+            ;;
+        dirty)
+            mark fail "$h : /var/lib/rook contient des résidus d'un précédent Rook" \
+                      "sudo rm -rf /var/lib/rook sur $h (pré-requis avant Phase 3)"
+            ;;
+        *)
+            mark skip "$h : état /var/lib/rook indéterminé"
+            ;;
+    esac
+done
+
 # ─── Couche 4 — CNI Cilium (cluster-level) ─────────────────────────────────
 section "CNI Cilium (kubectl)"
 if ! kubectl_ready; then
