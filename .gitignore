@@ -30,3 +30,6 @@ test/inventory.yaml
 # VitePress (generated output + cache)
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+
+# Ansible runtime cache
+.ansible/

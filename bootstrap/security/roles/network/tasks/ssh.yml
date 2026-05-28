@@ -3,16 +3,16 @@
   block:
     - name: Créer le dossier .ssh pour l’utilisateur "{{ settings_host_user }}"
       ansible.builtin.file:
-        path: "/home/{{ settings_host_user }}/.ssh"
+        path: '/home/{{ settings_host_user }}/.ssh'
         state: directory
-        owner: "{{ settings_host_user }}"
-        group: "{{ settings_host_user }}"
-        mode: "0700"
+        owner: '{{ settings_host_user }}'
+        group: '{{ settings_host_user }}'
+        mode: '0700'
 
     - name: Copier notre clé publique
       ansible.builtin.copy:
-        src: "{{ settings_ssh_key }}"
-        dest: "/home/{{ settings_host_user }}/.ssh/authorized_keys"
-        owner: "{{ settings_host_user }}"
-        group: "{{ settings_host_user }}"
-        mode: "0600"
+        src: '{{ settings_ssh_key }}'
+        dest: '/home/{{ settings_host_user }}/.ssh/authorized_keys'
+        owner: '{{ settings_host_user }}'
+        group: '{{ settings_host_user }}'
+        mode: '0600'

@@ -39,7 +39,7 @@
 
     - name: Activer le logging UFW
       community.general.ufw:
-        logging: "on"
+        logging: 'on'
       notify: Restart UFW
 
     - name: Activer et appliquer UFW

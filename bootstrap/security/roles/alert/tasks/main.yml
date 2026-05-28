@@ -15,7 +15,7 @@
     - name: Définir l'alias root dans /etc/aliases
       ansible.builtin.lineinfile:
         path: /etc/aliases
-        regexp: "^root:"
-        line: "root: {{ settings_mail_root_redirect }}"
+        regexp: '^root:'
+        line: 'root: {{ settings_mail_root_redirect }}'
         state: present
       notify: newaliases

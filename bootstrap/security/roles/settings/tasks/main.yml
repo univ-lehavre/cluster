@@ -29,10 +29,10 @@
     - name: Créer une variable ansible
       ansible.builtin.set_fact:
         settings_debug:
-          settings_mail_root_redirect: "{{ settings_mail_root_redirect }}"
-          settings_host_user: "{{ settings_host_user }}"
-          settings_password_expiration: "{{ settings_password_expiration }}"
-          settings_ssh_key: "{{ settings_ssh_key }}"
+          settings_mail_root_redirect: '{{ settings_mail_root_redirect }}'
+          settings_host_user: '{{ settings_host_user }}'
+          settings_password_expiration: '{{ settings_password_expiration }}'
+          settings_ssh_key: '{{ settings_ssh_key }}'
 
     - name: Afficher les variables importées
       ansible.builtin.debug:

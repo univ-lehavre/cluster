@@ -18,5 +18,5 @@
         dest: /etc/audit/rules.d/audit.rules
         owner: root
         group: root
-        mode: "0640"
+        mode: '0640'
       notify: Restart auditd

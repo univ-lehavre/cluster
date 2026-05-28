@@ -8,10 +8,10 @@
 
     - name: Générer une minute aléatoire pour le reboot automatique
       ansible.builtin.set_fact:
-        os_unattended_reboot_minute: "{{ 59 | random(seed=inventory_hostname) | int }}"
+        os_unattended_reboot_minute: '{{ 59 | random(seed=inventory_hostname) | int }}'
 
     - name: Déployer le fichier 20auto-upgrades avec minute aléatoire
       ansible.builtin.template:
         src: 20auto-upgrades.j2
         dest: /etc/apt/apt.conf.d/20auto-upgrades
-        mode: "0644"
+        mode: '0644'

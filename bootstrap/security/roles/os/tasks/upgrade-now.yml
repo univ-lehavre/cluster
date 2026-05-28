@@ -13,6 +13,6 @@
 
     - name: Redémarrer la machine si nécessaire
       ansible.builtin.reboot:
-        msg: "Redémarrage automatique après mise à jour"
+        msg: 'Redémarrage automatique après mise à jour'
         reboot_timeout: 600
       when: os_reboot_required.stat.exists

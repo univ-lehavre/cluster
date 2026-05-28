@@ -3,5 +3,5 @@
   block:
     - name: Configuration de l’utilisateur principal
       ansible.builtin.user:
-        name: "{{ ansible_user }}"
-        password_expire_min: "{{ settings_password_expiration }}"
+        name: '{{ ansible_user }}'
+        password_expire_min: '{{ settings_password_expiration }}'

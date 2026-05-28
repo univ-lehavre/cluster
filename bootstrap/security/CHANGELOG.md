@@ -8,7 +8,8 @@
 
 ### Minor Changes
 
-- 1542555: Les mises à jour automatiques s’effectuent maintenant uniquement sur celles critiques.
+- 1542555: Les mises à jour automatiques s’effectuent maintenant uniquement sur
+  celles critiques.
 
 ## 1.1.0
 
