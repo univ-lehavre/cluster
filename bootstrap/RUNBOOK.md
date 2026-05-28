@@ -249,6 +249,15 @@ NEW_DEBIAN_PASSWORD='choisir-un-mot-de-passe-robuste' \
 La 1re passe demande **deux fois** le mot de passe par hôte (`ssh-copy-id` puis
 `sudo`). Les runs suivants sont silencieux et idempotents.
 
+### Vérification : le mot de passe `debian` a-t-il été modifié depuis l'install ?
+
+`bootstrap/state.sh` couche 1 compare la date du dernier `passwd`
+(`chage -l debian`) à la date de création de `/etc/machine-id` (= premier boot
+post-install). Si l'écart est ≤ 1 jour, l'utilisateur n'a **jamais** changé le
+mot de passe d'installation → drift `fail` avec remédiation suggérée
+(`NEW_DEBIAN_PASSWORD=… bash bootstrap/first-access.sh <hôte>`). Sinon, `ok`
+avec le nombre de jours écoulés.
+
 ## Durcissement de l'OS (`bootstrap/security/`)
 
 Les rôles Ansible de durcissement complet sont fusionnés dans ce dépôt via

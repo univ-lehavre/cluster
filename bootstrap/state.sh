@@ -52,6 +52,15 @@ ssh_ok() {
         "${USER_REMOTE}@$1" "$2" >/dev/null 2>&1
 }
 
+ssh_script() {
+    # ssh_script HOST — lit un script bash depuis stdin et l'exécute via
+    # `sudo bash -s` sur HOST. Utile pour les vérifications multi-lignes
+    # qui touchent à /etc/shadow ou autres fichiers privilégiés.
+    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
+    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
+        "${USER_REMOTE}@$1" 'sudo bash -s' 2>/dev/null
+}
+
 kubectl_q() { kubectl "$@" 2>/dev/null; }
 
 kubectl_ready() {
@@ -121,6 +130,41 @@ for h in "${reachable[@]}"; do
         mark fail "$h : PasswordAuthentication toujours autorisé" \
                   "bash bootstrap/first-access.sh $h"
     fi
+
+    # Mot de passe debian modifié depuis l'install ? On compare la date de
+    # dernier `passwd` (chage) à celle de création de /etc/machine-id
+    # (= premier boot post-install). L'arithmétique se fait côté serveur
+    # (GNU date) pour rester compatible avec un poste de contrôle macOS.
+    pw_result=$(ssh_script "$h" <<'REMOTE'
+last=$(chage -l debian 2>/dev/null | awk -F: '/Last password change/{print $2}' | xargs)
+install=$(stat -c '%y' /etc/machine-id 2>/dev/null | cut -d' ' -f1)
+le=$(date -d "$last" +%s 2>/dev/null || echo 0)
+ie=$(date -d "$install" +%s 2>/dev/null || echo 0)
+if [ "$le" -eq 0 ] || [ "$ie" -eq 0 ]; then
+    echo "UNKNOWN 0"
+else
+    days=$(( (le - ie) / 86400 ))
+    if [ "$days" -le 1 ]; then
+        echo "NEVER $days"
+    else
+        echo "MOD $days"
+    fi
+fi
+REMOTE
+    )
+    read -r pw_status pw_days <<<"$pw_result"
+    case "$pw_status" in
+        MOD)
+            mark ok "$h : mot de passe debian modifié (~${pw_days} j après install)"
+            ;;
+        NEVER)
+            mark fail "$h : mot de passe debian JAMAIS modifié depuis l'install" \
+                      "ssh $h sudo passwd debian (ou NEW_DEBIAN_PASSWORD=... bash bootstrap/first-access.sh $h)"
+            ;;
+        *)
+            mark skip "$h : impossible de lire les dates passwd/install (sudo ? chage ? machine-id ?)"
+            ;;
+    esac
 done
 
 # ─── Couche 2 — Hardening OS (opt-in par couche) ───────────────────────────
