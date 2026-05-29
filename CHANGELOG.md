@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.1](https://github.com/univ-lehavre/cluster/compare/v2.1.0...v2.1.1) (2026-05-29)
+
+
+### Documentation
+
+* **test:** clarifie l'expansion du glob state.sh + exporte les surcharges cleanup banc ([13ae846](https://github.com/univ-lehavre/cluster/commit/13ae846bf312557f4cc702601decf1a9a1560a46))
+* **test:** clarifie state.sh + exporte les surcharges cleanup banc ([0ef70ef](https://github.com/univ-lehavre/cluster/commit/0ef70efb9ce065decae876f1571717e23ceb8f38))
+
 ## [2.1.0](https://github.com/univ-lehavre/cluster/compare/v2.0.1...v2.1.0) (2026-05-29)
 
 
