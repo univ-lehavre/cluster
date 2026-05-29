@@ -53,6 +53,27 @@ sur macOS. (Ce n'était pas le cas de l'ancienne plage `10.67.2.0/24` — cf. dr
 3 VMs × 5 GiB ≈ **15 GiB**. Sur un Mac 48 GiB, ça tient avec marge. À ajuster
 (`vb.memory`) si ton hôte est plus modeste.
 
+## Orchestrateur — `run-phases.sh`
+
+Pour dérouler les phases 1-6 avec les **surcharges banc déjà câblées**
+(`metadataDevice: vde`, `CEPH_HDD_GLOB`, kubeconfig réécrit sur l'IP privée) et
+un **gate** entre chaque phase :
+
+```bash
+test/multi-node/run-phases.sh up         # vagrant up + gate VMs/disques
+test/multi-node/run-phases.sh bootstrap  # phases 1-2 + gate 3 nœuds Ready
+test/multi-node/run-phases.sh ceph       # phase 3 + gate HEALTH_OK
+test/multi-node/run-phases.sh sc         # phase 4 + gate PVC Bound
+test/multi-node/run-phases.sh workloads  # phase 5 + gate (wordpress + datalake)
+test/multi-node/run-phases.sh etcd       # phase 6 + gate snapshot etcd
+test/multi-node/run-phases.sh all        # tout, arrêt au 1er gate rouge
+```
+
+Chaque phase est idempotente ; le script s'arrête si un critère de succès n'est
+pas atteint. Penser à `vagrant snapshot save <nom>` aux gates (le script
+rappelle le nom conseillé). Les sections ci-dessous détaillent chaque étape
+manuellement, pour le débogage.
+
 ## 1. Démarrer les VMs
 
 ```bash
@@ -60,10 +81,11 @@ cd test/multi-node
 vagrant up --provider=virtualbox
 ```
 
-Au 1ᵉʳ `up`, Vagrant crée pour chaque VM :
+Au 1ᵉʳ `up`, Vagrant crée pour chaque VM (contrôleur **VirtIO**, cf. drift 0a/0b
+dans [RESULTS.md](../RESULTS.md)) :
 
-- 3 HDD virtuels `*-hdd[1-3].vdi` (10 GiB chacun, sur SATA → `sdb/sdc/sdd`)
-- 1 NVMe virtuel `*-nvme.vdi` (5 GiB, sur contrôleur NVMe dédié → `nvme0n1`)
+- 3 HDD virtuels `*-hdd[1-3].vdi` (10 GiB chacun → `/dev/vdb`, `vdc`, `vdd`)
+- 1 « NVMe » block.db `*-nvme.vdi` (5 GiB, 4ᵉ disque VirtIO → `/dev/vde`)
 
 Les disques persistent à travers `vagrant halt/up`, mais sont supprimés par
 `vagrant destroy`.
@@ -72,18 +94,18 @@ Les disques persistent à travers `vagrant halt/up`, mais sont supprimés par
 >
 > - IPs : `192.168.67.X` (banc) vs `10.67.2.X` (prod) — pour éviter le conflit
 >   de routage (drift #6).
-> - Disques : `/dev/sde` (banc, contrôleur VirtIO) vs `/dev/nvme1n1` (prod,
->   contrôleur NVMe matériel).
+> - Disques : HDD `/dev/vd[b-d]` + block.db `/dev/vde` (banc, contrôleur VirtIO)
+>   vs HDD `/dev/sd*` + `/dev/nvme1n1` (prod, NVMe matériel).
 >
 > [`bootstrap/state.sh`](../../bootstrap/state.sh) accepte des variables d'env
 > pour s'adapter :
 >
 > ```bash
-> CEPH_BLOCK_DEVICE=sde CEPH_MIN_HDD=3 \
+> CEPH_HDD_GLOB='/sys/block/vd[b-z]' CEPH_BLOCK_DEVICE=vde CEPH_MIN_HDD=3 \
 >   bash bootstrap/state.sh 192.168.67.11 192.168.67.12 192.168.67.13
 > ```
 >
-> En prod, les défauts (`nvme1n1`, 12 HDD) sont les bons.
+> En prod, les défauts (`/sys/block/sd*`, `nvme1n1`, 12 HDD) sont les bons.
 
 ## 2. Inventaire Ansible
 
@@ -137,18 +159,21 @@ ssh debian@192.168.67.11 'bash -s' < ../../bootstrap/cni.sh
 
 ## 5. Rook-Ceph (Phase 3+)
 
+> Le plus simple est `run-phases.sh ceph`, qui câble tout ce qui suit. La
+> procédure manuelle ci-dessous est pour le débogage.
+
 Pré-vérification disques bruts (le pré-requis Phase 3) :
 
 ```bash
-CEPH_BLOCK_DEVICE=nvme0n1 CEPH_MIN_HDD=3 \
-  bash ../../bootstrap/state.sh dirqual1 dirqual2 dirqual3
+CEPH_HDD_GLOB='/sys/block/vd[b-z]' CEPH_BLOCK_DEVICE=vde CEPH_MIN_HDD=3 \
+  bash ../../bootstrap/state.sh 192.168.67.11 192.168.67.12 192.168.67.13
 ```
 
 La couche 3b doit afficher :
 
 ```text
 ✓ dirqual1 : 3/3 HDD bruts (≥ 3 requis)
-✓ dirqual1 : /dev/nvme0n1 présent et brut (block.db)
+✓ dirqual1 : /dev/vde présent et brut (block.db)
 ✓ dirqual1 : /var/lib/rook absent ou vide
 ```
 
@@ -159,13 +184,15 @@ cd ../../storage/ceph
 ssh debian@192.168.67.11 'sudo mkdir -p /var/lib/rook'   # créé par Rook, sinon
 kubectl apply -f crds.yaml -f common.yaml -f operator.yaml
 # attendre l'operator Ready
-kubectl apply -f cluster.yaml                          # ← surcharger metadataDevice sur nvme0n1
+# surcharger metadataDevice nvme1n1 -> vde AVANT d'appliquer :
+sed "s/metadataDevice: 'nvme1n1'/metadataDevice: 'vde'/" cluster.yaml \
+  | kubectl apply -f -
 ```
 
 > ⚠️ Le `metadataDevice: 'nvme1n1'` codé dans `cluster.yaml` est pour la prod.
-> Sur ce banc, soit on patche, soit on laisse Rook tomber sur l'auto-détection
-> NVMe (`metadataDevice: ""` + `useAllDevices: true`). À documenter dans une
-> variante de manifeste si on veut un cycle répétable.
+> Sur ce banc le block.db est `/dev/vde` (4ᵉ disque VirtIO) : surcharger comme
+> ci-dessus, ou laisser Rook auto-détecter (`metadataDevice: ""` +
+> `useAllDevices: true`). `run-phases.sh ceph` applique la surcharge `vde`.
 
 ## 6. Démolir
 
