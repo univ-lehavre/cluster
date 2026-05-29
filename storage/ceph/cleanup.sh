@@ -10,11 +10,16 @@
 #
 # Variables d'env :
 #   NVME_BLOCK_DEVICE  device NVMe block.db (défaut: /dev/nvme1n1 prod, à
-#                      surcharger en /dev/nvme0n1 sur le banc Vagrant).
+#                      surcharger en /dev/vde sur le banc Vagrant).
+#   DATA_DEVICE_GLOB   glob des disques data HDD (défaut: /dev/sd[a-z] prod).
+#                      Sur le banc Vagrant (contrôleur VirtIO, aucun /dev/sd*),
+#                      surcharger en '/dev/vd[b-z]' — JAMAIS /dev/vd[a-z] qui
+#                      inclurait /dev/vda, le disque système.
 #   SKIP_REBOOT        si non vide, ne reboote pas (utile en CI / dry-run).
 set -euo pipefail
 
 NVME_BLOCK_DEVICE=${NVME_BLOCK_DEVICE:-/dev/nvme1n1}
+DATA_DEVICE_GLOB=${DATA_DEVICE_GLOB:-/dev/sd[a-z]}
 
 sudo rm -fR /var/lib/rook
 
@@ -38,14 +43,17 @@ wipe_all() {
     sudo partprobe "${device}"
 }
 
-# `shopt -s nullglob` : sur un nœud sans /dev/sd* (NVMe-only ou banc
-# Vagrant avec uniquement vd*), le glob renvoie une liste vide au lieu
-# de la chaîne littérale `/dev/sd[a-z]` qui ferait planter wipe_all.
+# `shopt -s nullglob` : si le glob ne matche rien (ex. nœud NVMe-only),
+# il renvoie une liste vide au lieu de la chaîne littérale qui ferait
+# planter wipe_all. Le glob est configurable via DATA_DEVICE_GLOB pour
+# couvrir le banc Vagrant (vd*) sans toucher au disque OS.
 shopt -s nullglob
-for device in /dev/sd[a-z]; do
+# shellcheck disable=SC2206 # glob intentionnel, pas un split de valeur
+data_devices=(${DATA_DEVICE_GLOB})
+shopt -u nullglob
+for device in "${data_devices[@]}"; do
     wipe_all "${device}"
 done
-shopt -u nullglob
 
 wipe_all "${NVME_BLOCK_DEVICE}"
 

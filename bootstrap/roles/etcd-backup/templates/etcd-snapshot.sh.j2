@@ -3,50 +3,128 @@
 # Snapshot etcd horaire — rétention 24 (= 1 jour glissant).
 # Géré par le timer systemd `etcd-snapshot.timer` (rôle Ansible
 # `etcd-backup`). Restauration : cf. bootstrap/RUNBOOK.md.
+#
+# APPROCHE : `crictl exec` dans le conteneur etcd (static pod kubeadm).
+# Sur un nœud kubeadm, etcd tourne en STATIC POD et son image embarque le
+# binaire `etcdctl`. On l'appelle DANS le conteneur via `crictl exec`, ce qui
+# évite toute dépendance hôte : ni etcdctl installé sur l'hôte, ni
+# kubectl/KUBECONFIG (non garantis sous un timer systemd tournant en root,
+# et inutilisables si l'API K8s est justement en panne).
+#
+# Pont conteneur <-> hôte : le data-dir `/var/lib/etcd` et les certs
+# `/etc/kubernetes/pki/etcd` sont bind-montés dans le conteneur etcd aux MÊMES
+# chemins que sur l'hôte. On écrit donc le snapshot temporaire SOUS
+# /var/lib/etcd (le seul répertoire RW partagé conteneur<->hôte), puis on le
+# RECOPIE vers BACKUP_DIR.
+#
+# ATTENTION FS : sur ce cluster, /var/lib/etcd est un LV ext4 dédié (lv_etcd)
+# DIFFÉRENT du FS de /var/lib/etcd-backups (sur lv_var). `mv` entre les deux
+# n'est donc PAS atomique (copie+suppression). On rend la publication atomique
+# nous-mêmes : copie vers un fichier .partial DANS BACKUP_DIR, puis `mv`
+# atomique .partial -> nom final (même FS = rename atomique).
 set -euo pipefail
+umask 077
 
 BACKUP_DIR=/var/lib/etcd-backups
 KEEP=24
 STAMP=$(date +%Y%m%d-%H%M%S)
 DEST="${BACKUP_DIR}/etcd-${STAMP}.db"
+DEST_PARTIAL="${DEST}.partial"
 
-# etcdctl est embarqué dans l'image kube-apiserver / etcd ; on appelle
-# `etcdctl` via `kubectl -n kube-system exec` sur le pod etcd local. Cela
-# évite d'avoir à installer/maintenir un etcdctl séparé sur le hôte.
-ETCD_POD=$(crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock ps \
-    -o json 2>/dev/null \
-    | grep -oE '"name": "etcd"[^}]*' | head -1 || true)
+CRICTL=(crictl --runtime-endpoint unix:///run/containerd/containerd.sock)
 
-if [ -z "${ETCD_POD}" ]; then
-    # Fallback : utiliser kubectl si l'API est joignable
-    kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system \
-        exec "etcd-$(hostname)" -- etcdctl \
-        --endpoints=https://127.0.0.1:2379 \
-        --cacert=/etc/kubernetes/pki/etcd/ca.crt \
-        --cert=/etc/kubernetes/pki/etcd/server.crt \
-        --key=/etc/kubernetes/pki/etcd/server.key \
-        snapshot save "/var/lib/etcd/snapshot-${STAMP}.db"
-    # Récupérer le snapshot depuis le pod
-    kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system \
-        cp "etcd-$(hostname):/var/lib/etcd/snapshot-${STAMP}.db" "${DEST}"
-    kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system \
-        exec "etcd-$(hostname)" -- rm "/var/lib/etcd/snapshot-${STAMP}.db"
+# Chemins certs/endpoint : identiques côté hôte ET côté conteneur (bind-mounts).
+ETCD_ENDPOINT="https://127.0.0.1:2379"
+ETCD_CACERT="/etc/kubernetes/pki/etcd/ca.crt"
+ETCD_CERT="/etc/kubernetes/pki/etcd/server.crt"
+ETCD_KEY="/etc/kubernetes/pki/etcd/server.key"
+
+# Snapshot temporaire SOUS le data-dir bind-monté (seul pont RW conteneur<->hôte).
+# Préfixe `.snap-tmp-` + PID pour ne pas heurter member/snap/wal d'etcd ni un run
+# concurrent ; mêmes chemins des deux côtés (bind-mount).
+TMP_NAME=".snap-tmp-${STAMP}-$$.db"
+IN_CONTAINER_TMP="/var/lib/etcd/${TMP_NAME}"
+HOST_TMP="${IN_CONTAINER_TMP}"
+
+log() { printf '[%s] etcd-snapshot: %s\n' "$(date +%H:%M:%S)" "$*"; }
+die() {
+    printf 'ERROR: etcd-snapshot: %s\n' "$*" >&2
+    exit 1
+}
+
+# Nettoyage idempotent du temporaire (hôte) et du .partial, quel que soit le
+# code de sortie (succès, échec, set -e). Le tmp sous /var/lib/etcd ne doit
+# JAMAIS rester : c'est le LV de données d'etcd (10 GiB).
+cleanup() { rm -f "${HOST_TMP}" "${DEST_PARTIAL}" 2> /dev/null || true; }
+trap cleanup EXIT
+
+command -v crictl > /dev/null 2>&1 || die "crictl introuvable (containerd requis)."
+mkdir -p "${BACKUP_DIR}"
+chmod 0700 "${BACKUP_DIR}"
+
+# Sanity : certs présents côté hôte (== côté conteneur, même mount).
+for f in "${ETCD_CACERT}" "${ETCD_CERT}" "${ETCD_KEY}"; do
+    [ -r "$f" ] || die "certificat etcd absent/illisible : $f"
+done
+
+# --- Détecter l'ID du conteneur etcd Running ------------------------------
+ETCD_CID=$("${CRICTL[@]}" ps --state Running --name '^etcd$' -q 2> /dev/null | head -n1 || true)
+# Repli : vieux crictl sans ancrage regex.
+if [ -z "${ETCD_CID}" ]; then
+    ETCD_CID=$("${CRICTL[@]}" ps --state Running --name etcd -q 2> /dev/null | head -n1 || true)
+fi
+[ -n "${ETCD_CID}" ] || die "conteneur etcd 'Running' introuvable via crictl (control-plane sain ?)."
+log "conteneur etcd : ${ETCD_CID}"
+
+# --- Snapshot DANS le conteneur, vers le volume monté ---------------------
+log "snapshot save -> ${IN_CONTAINER_TMP} (dans le conteneur)"
+"${CRICTL[@]}" exec "${ETCD_CID}" \
+    env ETCDCTL_API=3 etcdctl \
+    --endpoints="${ETCD_ENDPOINT}" \
+    --cacert="${ETCD_CACERT}" \
+    --cert="${ETCD_CERT}" \
+    --key="${ETCD_KEY}" \
+    snapshot save "${IN_CONTAINER_TMP}" \
+    || die "etcdctl snapshot save a échoué."
+
+# Le fichier doit exister côté hôte (preuve du bind-mount partagé).
+[ -s "${HOST_TMP}" ] || die "snapshot absent/vide côté hôte (${HOST_TMP}) : mount /var/lib/etcd ?"
+
+# --- Vérification d'intégrité (toujours dans le conteneur, fichier encore
+#     sous /var/lib/etcd donc visible). Best-effort : WARN si l'outil manque,
+#     mais ÉCHEC si l'outil est présent et le snapshot est corrompu. ---------
+if "${CRICTL[@]}" exec "${ETCD_CID}" sh -c \
+    "command -v etcdutl >/dev/null 2>&1 || command -v etcdctl >/dev/null 2>&1" \
+    > /dev/null 2>&1; then
+    "${CRICTL[@]}" exec "${ETCD_CID}" sh -c \
+        "ETCDCTL_API=3 etcdutl snapshot status '${IN_CONTAINER_TMP}' \
+           2>/dev/null \
+         || ETCDCTL_API=3 etcdctl snapshot status '${IN_CONTAINER_TMP}'" \
+        > /dev/null 2>&1 \
+        || die "intégrité du snapshot INVALIDE (snapshot status a échoué)."
+    log "intégrité du snapshot vérifiée"
 else
-    # Méthode directe : ETCDCTL_API=3 etcdctl en parlant aux certs locaux.
-    # Présuppose que etcdctl est installé sur l'hôte (ce qu'on documente
-    # mais ne force pas — sinon on tombe sur le fallback ci-dessus).
-    ETCDCTL_API=3 etcdctl \
-        --endpoints=https://127.0.0.1:2379 \
-        --cacert=/etc/kubernetes/pki/etcd/ca.crt \
-        --cert=/etc/kubernetes/pki/etcd/server.crt \
-        --key=/etc/kubernetes/pki/etcd/server.key \
-        snapshot save "${DEST}"
+    log "WARN: ni etcdutl ni etcdctl status dans l'image, intégrité non vérifiée — on conserve."
 fi
 
-chmod 0600 "${DEST}"
-echo "Snapshot écrit : ${DEST}"
+# --- Publication atomique vers BACKUP_DIR (FS différent de /var/lib/etcd) --
+# /var/lib/etcd (lv_etcd) != /var/lib/etcd-backups (lv_var) : `mv` direct
+# serait une copie non atomique. On copie d'abord vers .partial DANS le FS
+# cible, on fixe les perms, puis `mv` .partial -> final = rename atomique.
+cp -f "${HOST_TMP}" "${DEST_PARTIAL}" || die "copie vers ${DEST_PARTIAL} échouée."
+chmod 0600 "${DEST_PARTIAL}"
+mv -f "${DEST_PARTIAL}" "${DEST}" || die "publication ${DEST} échouée."
+rm -f "${HOST_TMP}"
+log "snapshot écrit : ${DEST} ($(stat -c %s "${DEST}" 2> /dev/null || echo '?') octets)"
 
-# Rétention : garder les KEEP plus récents, supprimer le reste.
-ls -1t "${BACKUP_DIR}"/etcd-*.db 2>/dev/null \
-    | tail -n +$((KEEP + 1)) \
-    | xargs -r rm -f
+# --- Rétention : garder les KEEP plus récents (NUL-safe, GNU coreutils) ----
+# find -printf '%T@\t%p\0' | sort -zrn | tail -z -n +N | cut -z -f2- | xargs -0 -r rm -f
+# On exclut les .partial éventuels (pattern strict 'etcd-*.db').
+find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'etcd-*.db' ! -name '*.partial' \
+    -printf '%T@\t%p\0' \
+    | sort -zrn \
+    | tail -z -n +"$((KEEP + 1))" \
+    | cut -z -f2- \
+    | xargs -0 -r rm -f
+
+log "rétention appliquée (KEEP=${KEEP})"

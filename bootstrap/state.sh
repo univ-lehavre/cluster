@@ -280,22 +280,28 @@ done
 # FS, aucun reste d'OSD précédent) ; `/var/lib/rook` doit être absent.
 # Variables d'env :
 #   CEPH_MIN_HDD       nombre minimum de HDD bruts (défaut: 1, prod: 12)
-#   CEPH_BLOCK_DEVICE  nom du NVMe block.db (défaut: nvme1n1)
+#   CEPH_BLOCK_DEVICE  nom du NVMe block.db (défaut: nvme1n1, banc: vde)
+#   CEPH_HDD_GLOB      glob /sys/block des disques data HDD (défaut prod:
+#                      '/sys/block/sd*'). Sur le banc Vagrant (contrôleur
+#                      VirtIO, aucun sd*), surcharger en '/sys/block/vd[b-z]'
+#                      — JAMAIS vd[a-z] qui inclurait vda, le disque système.
 CEPH_MIN_HDD=${CEPH_MIN_HDD:-1}
 CEPH_BLOCK_DEVICE=${CEPH_BLOCK_DEVICE:-nvme1n1}
+CEPH_HDD_GLOB=${CEPH_HDD_GLOB:-/sys/block/sd*}
 section "Disques bruts Ceph (≥ ${CEPH_MIN_HDD} HDD, /dev/${CEPH_BLOCK_DEVICE}, /var/lib/rook propre)"
 for h in "${reachable[@]}"; do
     # On délègue tout l'examen au shell distant : c'est lui qui voit /sys.
     disk_report=$(ssh_script "$h" <<REMOTE
 set -u
 
-# 1) HDD bruts (pas le disque OS) : sd* sans table de partitions ni FS.
-#    On considère "brut" si lsblk ne montre pas d'enfant (pas de partition)
-#    ET wipefs ne trouve aucune signature.
+# 1) HDD bruts (pas le disque OS) : disques data sans partition ni FS.
+#    Le glob (${CEPH_HDD_GLOB}, interpolé localement) cible sd* en prod et
+#    vd[b-z] sur le banc VirtIO. On considère "brut" si aucune partition
+#    ET aucune signature wipefs.
 hdd_total=0
 hdd_dirty=0
 hdd_clean=0
-for d in /sys/block/sd*; do
+for d in ${CEPH_HDD_GLOB}; do
     [ -e "\$d" ] || continue
     name=\$(basename "\$d")
     hdd_total=\$((hdd_total + 1))

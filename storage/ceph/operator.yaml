@@ -32,7 +32,11 @@ data:
   ROOK_CEPH_ALLOW_LOOP_DEVICES: "false"
 
   # Enable CSI Operator
-  ROOK_USE_CSI_OPERATOR: "true"
+  # NB : laissé à "false" — Rook embarque alors lui-même le provisioner CSI
+  # (chemin historique éprouvé). Passer à "true" exige de déployer en plus
+  # ceph-csi-operator + ses CRDs `csi.ceph.io` (absentes de crds.yaml) et des
+  # Driver CRs ; sans ça le CephCluster casse sur « no matches for kind ».
+  ROOK_USE_CSI_OPERATOR: "false"
   # Enable the CSI driver.
   # To run the non-default version of the CSI driver, see the override-able image properties in operator.yaml
   ROOK_CSI_ENABLE_CEPHFS: "true"
