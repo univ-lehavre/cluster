@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.0.1](https://github.com/univ-lehavre/cluster/compare/v2.0.0...v2.0.1) (2026-05-29)
+
+
+### Documentation
+
+* **safeguards:** documente le pré-requis org pour release-please ([74f9719](https://github.com/univ-lehavre/cluster/commit/74f9719314cefebddf025d6b11fb86c57a891c2b))
+* **safeguards:** documente le pré-requis org pour release-please ([d510f48](https://github.com/univ-lehavre/cluster/commit/d510f48f620f0da6490042d91795772533ee69ca))
+
 ## [2.0.0](https://github.com/univ-lehavre/cluster/compare/v1.0.0...v2.0.0) (2026-05-29)
 
 
