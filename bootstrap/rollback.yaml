@@ -1,0 +1,15 @@
+# code: language=ansible
+#
+# Rollback DESTRUCTIF du bootstrap Kubernetes. À utiliser pour ré-essayer un
+# bootstrap depuis zéro sur le banc, ou pour préparer le terrain avant un
+# rebuild OS. Exige `-e confirm=yes`.
+#
+#   ansible-playbook -i hosts.yaml rollback.yaml -e confirm=yes --limit dirqual1
+#
+# Hors périmètre : first-access.sh (sshd drop-in), secure.yml (hardening
+# opt-in), disques Ceph (cf. storage/ceph/cleanup.sh), partitionnement.
+- name: Rollback bootstrap Kubernetes
+  hosts: cloud
+  become: true
+  roles:
+    - k8s-rollback

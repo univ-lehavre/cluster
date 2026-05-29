@@ -1,0 +1,37 @@
+# Banc de test local (VirtualBox) — canari mono-nœud.
+#
+# Valide les phases 1-2 du bootstrap (OS/runtime + kubeadm init + Cilium) sur
+# du vrai Debian 13 arm64, avant le rebuild des serveurs.
+#
+#   cd test/single-node && vagrant up
+#   (puis playbooks Ansible avec inventory.yaml — cf. README.md)
+#
+# Périmètre :
+#   - 1 VM, pas de disque additionnel → pas de Ceph
+#   - Pour tester Rook-Ceph (Phase 3+), utiliser `test/multi-node`
+#
+# Réserves : arm64 (≠ x86_64 cible), échelle réduite (fonctionnel, pas perf).
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/debian-13"
+  config.vm.box_architecture = "arm64"
+  config.vm.hostname = "dirqual1"
+  config.ssh.insert_key = false
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.cpus = 2
+    vb.memory = 6144
+  end
+
+  # Crée l'utilisateur `debian` (sudo sans mot de passe + même clé SSH) pour
+  # rejouer les rôles Ansible tels quels (ils ciblent l'utilisateur debian).
+  config.vm.provision "shell", inline: <<-SHELL
+    set -eu
+    id debian >/dev/null 2>&1 || useradd -m -s /bin/bash debian
+    install -d -m 700 -o debian -g debian /home/debian/.ssh
+    cp /home/vagrant/.ssh/authorized_keys /home/debian/.ssh/authorized_keys
+    chown debian:debian /home/debian/.ssh/authorized_keys
+    chmod 600 /home/debian/.ssh/authorized_keys
+    echo 'debian ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/debian
+    chmod 440 /etc/sudoers.d/debian
+  SHELL
+end

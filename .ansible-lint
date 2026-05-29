@@ -10,8 +10,24 @@ exclude_paths:
   - platform/
   - apps/
 
+# Convention de nommage : les rôles utilisent des tirets (`audit-log`,
+# `k8s-CRI-install`, etc.) cohérents avec le reste du dépôt
+# (`platform/container-registry/`, `storage/ceph/`, etc.). On désactive
+# la règle `role-name` qui imposerait des underscores et tout lowercase.
+skip_list:
+  - role-name
+
+# `audit-log` est invoqué via `import_role: name: audit-log` depuis le
+# rôle `k8s-rollback`. Comme ansible-lint est lancé depuis la racine,
+# il ne le trouve pas via `~/.ansible/roles` ou les chemins par défaut.
+# On le mock pour que la syntax-check passe (le rôle existe vraiment
+# dans bootstrap/roles/audit-log/).
+mock_roles:
+  - audit-log
+
 # Ansible playbooks live under bootstrap/ — these files are not Ansible content.
 kinds:
+  - inventory: 'bootstrap/hosts.yaml'
   - playbook: 'bootstrap/*.yaml'
   - tasks: 'bootstrap/roles/*/tasks/*.yaml'
   - handlers: 'bootstrap/roles/*/handlers/*.yaml'

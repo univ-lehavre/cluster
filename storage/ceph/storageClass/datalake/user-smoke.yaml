@@ -1,0 +1,22 @@
+# Utilisateur S3 dédié au smoke-test du datalake (cf. smoke-test.sh).
+# Sépare le test des utilisateurs métier (admin, datalake) pour pouvoir
+# le supprimer/recréer sans impact.
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStoreUser
+metadata:
+  name: smoke
+  namespace: rook-ceph
+spec:
+  store: datalake
+  displayName: 'Datalake smoke-test'
+---
+# Bucket dédié au smoke-test, créé via ObjectBucketClaim → le provisioner
+# Rook génère le bucket S3 + le Secret de credentials d'accès.
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: smoke
+  namespace: rook-ceph
+spec:
+  bucketName: smoke
+  storageClassName: rook-ceph-datalake

@@ -1,0 +1,31 @@
+---
+# Trace chaque exécution de playbook dans /var/log/cluster-bootstrap.log
+# sur le nœud cible : timestamp UTC, nom du playbook, identité de
+# l'opérateur côté poste de contrôle + nom du compte SSH côté serveur.
+#
+# Lu ensuite par bootstrap/state.sh couche 0 pour corréler "ce qui a
+# été appliqué" (registre Ansible) et "ce qui est observé" (état réel).
+#
+# Inclusion : chaque playbook ajoute en pre_tasks :
+#   - ansible.builtin.import_role:
+#       name: audit-log
+#     vars:
+#       audit_log_playbook: <nom du playbook>
+
+- name: Append cluster-bootstrap audit-log entry
+  become: true
+  ansible.builtin.shell: |
+    install -d -m 0750 -o root -g adm /var/log
+    touch /var/log/cluster-bootstrap.log
+    chgrp adm /var/log/cluster-bootstrap.log
+    chmod 0640 /var/log/cluster-bootstrap.log
+    printf '%s playbook=%s from=%s@%s ssh-as=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "{{ audit_log_playbook | default('unknown') }}" \
+      "{{ lookup('env', 'USER') | default('unknown') }}" \
+      "{{ lookup('pipe', 'hostname') }}" \
+      "{{ ansible_user_id }}" \
+      >> /var/log/cluster-bootstrap.log
+  changed_when: false
+  args:
+    executable: /bin/bash

@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # release-please dépose (ou met à jour) une PR « chore(release): vX.Y.Z »
+      # à chaque push sur main. Le merge de cette PR crée le tag git, la
+      # release GitHub, et met à jour CHANGELOG.md + package.json — aucune
+      # action manuelle requise après le merge.
+      #
+      # La version cible est dérivée des messages Conventional Commits depuis
+      # le dernier tag :
+      #   - `feat:`               → bump minor (1.0.0 → 1.1.0)
+      #   - `fix:` / `perf:`      → bump patch (1.0.0 → 1.0.1)
+      #   - `feat!:` ou `BREAKING CHANGE:` → bump major (1.0.0 → 2.0.0)
+      #   - Autres types (`chore:`, `docs:`, `ci:`, …) → pas de bump
+      - uses: googleapis/release-please-action@v4
+        with:
+          # Le `bootstrap-sha` initial est posé une fois pour signaler que
+          # release-please reprend l'historique à partir du tag v1.0.0
+          # (b28e0f2). Voir release-please-config.json + manifest.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

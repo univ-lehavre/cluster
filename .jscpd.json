@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/packages/jscpd/schemas/jscpd-config.schema.json",
+  "threshold": 5,
+  "minTokens": 70,
+  "format": ["markdown", "yaml", "shell", "json"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "docs/.vitepress/cache/**",
+    "docs/.vitepress/dist/**",
+    "test/.vagrant/**",
+    "test/inventory.yaml",
+    "pnpm-lock.yaml",
+    "CHANGELOG.md",
+    "storage/ceph/crds.yaml",
+    "storage/ceph/common.yaml",
+    "storage/ceph/operator.yaml",
+    "storage/ceph/cluster.yaml",
+    "storage/ceph/dashboard.yaml",
+    "storage/ceph/toolbox.yaml"
+  ],
+  "absolute": false,
+  "gitignore": true,
+  "reporters": ["console"]
+}

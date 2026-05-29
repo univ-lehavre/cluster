@@ -1,0 +1,16 @@
+---
+# Active la sauvegarde horaire d'etcd sur les nœuds control plane.
+# À jouer une fois Phase 2 terminée (`kubeadm init` effectif).
+# Cf. bootstrap/RUNBOOK.md — section SPOF / sauvegarde etcd.
+
+- name: Sauvegarde etcd (control-plane uniquement)
+  hosts: control
+  become: true
+  pre_tasks:
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: etcd-backup.yaml
+  roles:
+    - etcd-backup

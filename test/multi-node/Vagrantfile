@@ -1,0 +1,153 @@
+# Banc de test local (VirtualBox) — multi-nœuds avec disques pour Ceph.
+#
+# Valide les Phases 1-3 du PLAN (bootstrap + kubeadm join workers + Rook-Ceph)
+# sur du vrai Debian 13 arm64, avant le rebuild des serveurs.
+#
+#   cd test && vagrant up
+#   ../bootstrap puis: ansible-playbook -i inventory.yaml <playbook>  (cf. README.md)
+#
+# Topologie reproduisant la prod (à l'arch et à l'échelle près) :
+#   - 3 VMs Debian 13 (dirqual1 control + dirqual2/3 workers)
+#   - Réseau privé 10.67.2.0/24 (mêmes IPs que la prod : .11/.12/.13)
+#   - Par VM : 3 HDD virtuels 10 GiB (sdb/sdc/sdd) + 1 NVMe virtuel 5 GiB
+#     (simulent les 12 HDD SAS + 1 NVMe block.db de la prod, en miniature)
+#
+# Réserves : arm64 (≠ x86_64 cible), échelle réduite (fonctionnel, pas perf).
+# Pré-requis hôte : VBox doit autoriser le réseau host-only 10.67.2.0/24 —
+# ajouter dans /etc/vbox/networks.conf (cf. test/README.md).
+
+require 'fileutils'
+
+# ⚠️ Plage IP du banc : **NE PAS** utiliser la plage prod (10.67.2.0/22) sur
+# un poste qui peut router vers la prod (université, Tailscale, etc.). VBox
+# crée une interface host-only sur cette plage → toutes les routes locales
+# vers `10.67.2.x` partent vers les VMs banc, et on perd l'accès aux vrais
+# serveurs. On utilise donc **192.168.67.0/24** côté banc (plage host-only
+# autorisée par défaut par VirtualBox, sans config networks.conf).
+# La logique testée (multi-VM, kubeadm endpoint, kubelet --node-ip) est
+# identique ; seules les valeurs numériques diffèrent.
+DIRQUAL_HOSTS = [
+  { name: "dirqual1", ip: "192.168.67.11", role: "control" },
+  { name: "dirqual2", ip: "192.168.67.12", role: "worker"  },
+  { name: "dirqual3", ip: "192.168.67.13", role: "worker"  },
+].freeze
+
+# Disques additionnels stockés à côté du Vagrantfile, gitignorés.
+DISKS_DIR = File.join(File.dirname(__FILE__), ".vagrant", "ceph-disks")
+HDD_SIZE_MB = 10_240   # 10 GiB par HDD virtuel
+NVMe_SIZE_MB = 5_120   # 5 GiB pour le block.db NVMe
+HDD_COUNT = 3          # par VM (prod = 12, on réduit pour le banc)
+
+FileUtils.mkdir_p(DISKS_DIR)
+
+# Pre-flight : refuser le up si une interface VBox host-only existe déjà sur
+# la plage PROD (10.67.2.0/22). Évite la rechute du conflit historique où le
+# banc tournait sur la même plage que la prod et capturait toutes les routes
+# locales vers les vrais serveurs. (cf. test/RESULTS.md drift #6.)
+prod_ranges_to_block = ["10.67.2", "10.67.3", "10.67.4", "10.67.5"]
+hostonly_conflict = `VBoxManage list hostonlyifs 2>/dev/null`
+                     .scan(/IPAddress:\s+(\S+)/).flatten
+                     .any? { |ip| prod_ranges_to_block.any? { |p| ip.start_with?("#{p}.") } }
+if hostonly_conflict
+  abort <<~ERR
+    Une interface VBox host-only existe déjà sur la plage PROD
+    (10.67.2.0/22). Démarrer le banc capturerait les routes locales et
+    couperait l'accès aux vrais serveurs.
+
+    Lister :   VBoxManage list hostonlyifs | grep -E 'Name|IPAddress'
+    Supprimer : VBoxManage hostonlyif remove <vboxnetN>
+
+    (Voir test/RESULTS.md drift #6 pour le contexte.)
+  ERR
+end
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/debian-13"
+  config.vm.box_architecture = "arm64"
+  config.ssh.insert_key = false
+
+  # Provision commun à toutes les VMs : crée le compte `debian` (sudo
+  # NOPASSWD + même clé SSH que vagrant) pour rejouer les rôles Ansible
+  # tels quels, et pose une route persistante pour le CIDR services K8s
+  # (10.96.0.0/12) via eth1.
+  #
+  # Pourquoi cette route ? Sans elle, les workers ne peuvent pas joindre
+  # l'API service ClusterIP (10.96.0.1) : leur route par défaut va via
+  # eth0 (NAT Vagrant 10.0.2.x), donc le SYN sort avec source IP NAT et
+  # l'API ne peut pas y répondre. Cf. drift #7 dans test/RESULTS.md.
+  # En prod, ce problème n'existe pas car les nœuds n'ont qu'une seule
+  # interface réseau (eth0 = 10.67.2.X).
+  config.vm.provision "shell", inline: <<-SHELL
+    set -eu
+    id debian >/dev/null 2>&1 || useradd -m -s /bin/bash debian
+    install -d -m 700 -o debian -g debian /home/debian/.ssh
+    cp /home/vagrant/.ssh/authorized_keys /home/debian/.ssh/authorized_keys
+    chown debian:debian /home/debian/.ssh/authorized_keys
+    chmod 600 /home/debian/.ssh/authorized_keys
+    echo 'debian ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/debian
+    chmod 440 /etc/sudoers.d/debian
+
+    # Route persistante via systemd-networkd drop-in
+    install -d /etc/systemd/network/10-eth1.network.d
+    cat > /etc/systemd/network/10-eth1.network.d/k8s-services-route.conf <<'NET'
+[Route]
+Destination=10.96.0.0/12
+Scope=link
+NET
+    # Pose immédiatement sans attendre le reboot
+    ip route replace 10.96.0.0/12 dev eth1 || true
+  SHELL
+
+  DIRQUAL_HOSTS.each do |host|
+    config.vm.define host[:name] do |node|
+      node.vm.hostname = host[:name]
+      node.vm.network "private_network", ip: host[:ip]
+
+      node.vm.provider "virtualbox" do |vb|
+        vb.name = host[:name]
+        vb.cpus = 2
+        vb.memory = 5120  # 5 GiB / VM × 3 VMs = 15 GiB total
+
+        # ── HDD virtuels (vdb/vdc/vdd) ────────────────────────────
+        # La box bento/debian-13 arm64 utilise un contrôleur VirtIO
+        # (VirtioSCSI) — pas SATA. On y attache les disques additionnels
+        # sur les ports libres (port 0 = disque OS).
+        # Conséquence : sur le banc les disques apparaissent comme
+        # /dev/vd[bcd] (virtio-blk), pas /dev/sd[bcd] comme en prod.
+        # `bootstrap/state.sh` couche 3b lit `/sys/block/sd*` → sur le banc
+        # cette couche compte 0 HDD sd*. Surcharger CEPH_MIN_HDD=0 en
+        # banc, ou enrichir state.sh pour scanner aussi vd* (cf. TODO).
+        (1..HDD_COUNT).each do |i|
+          disk = File.join(DISKS_DIR, "#{host[:name]}-hdd#{i}.vdi")
+          unless File.exist?(disk)
+            vb.customize ["createhd", "--filename", disk,
+                          "--size", HDD_SIZE_MB, "--format", "VDI"]
+          end
+          vb.customize ["storageattach", :id,
+                        "--storagectl", "VirtIO Controller",
+                        "--port", i.to_s, "--device", "0",
+                        "--type", "hdd", "--medium", disk]
+        end
+
+        # ── « NVMe » block.db (en pratique : un 4e disque VirtIO) ────
+        # Sur arm64 + VBox 7.2, créer un contrôleur NVMe séparé via
+        # Vagrant `vb.customize` est fragile (l'ordre des commandes
+        # n'est pas garanti et un flag fichier ne tient pas la
+        # cohérence sur les rejeux). On accepte la perte de fidélité
+        # « NVMe distinct » et on attache le block.db au même
+        # contrôleur VirtIO sur le port HDD_COUNT+1. Le device sera
+        # /dev/vde sur la VM ; surcharger CEPH_BLOCK_DEVICE=vde dans
+        # state.sh quand on cible ce banc.
+        nvme = File.join(DISKS_DIR, "#{host[:name]}-nvme.vdi")
+        unless File.exist?(nvme)
+          vb.customize ["createhd", "--filename", nvme,
+                        "--size", NVMe_SIZE_MB, "--format", "VDI"]
+        end
+        vb.customize ["storageattach", :id,
+                      "--storagectl", "VirtIO Controller",
+                      "--port", (HDD_COUNT + 1).to_s, "--device", "0",
+                      "--type", "hdd", "--medium", nvme]
+      end
+    end
+  end
+end

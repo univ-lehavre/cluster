@@ -8,5 +8,7 @@
         name: kubectl
         state: present
 
-    - name: Mark packages to not upgrade
-      ansible.builtin.command: apt-mark hold kubectl
+    - name: Hold kubectl at its installed version
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: hold

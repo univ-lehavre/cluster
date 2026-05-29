@@ -12,18 +12,26 @@
           - gpg
         state: present
 
+    - name: Ensure the APT keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
     - name: Get kubernetes keyrings
-      ansible.builtin.shell:
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o
-        /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      ansible.builtin.shell: >-
+        set -o pipefail &&
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key
+        | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       args:
+        executable: /bin/bash
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     - name: Add kubernetes repository
       ansible.builtin.apt_repository:
-        repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /'
+        repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.34/deb/ /'
         state: present
-        update_cache: yes
+        update_cache: true
 
     - name: Install kubelet and kubeadm
       ansible.builtin.apt:
@@ -32,8 +40,31 @@
           - kubeadm
         state: present
 
-    - name: Mark packages to not upgrade
-      ansible.builtin.command: apt-mark hold kubelet kubeadm
+    - name: Hold kubelet and kubeadm at their installed version
+      ansible.builtin.dpkg_selections:
+        name: '{{ item }}'
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+
+    - name: Configure KUBELET_EXTRA_ARGS for --node-ip when needed
+      # `kubelet_node_ip` (optionnel) surcharge l'IP que kubelet annonce
+      # comme INTERNAL-IP du nœud. Utile sur le banc multi-node où chaque
+      # VM a deux interfaces (NAT eth0 + privée eth1) : sans ça, kubelet
+      # prend le NAT, et Cilium agent ne peut pas joindre l'API depuis
+      # les workers. En prod, on laisse vide → kubelet détecte l'IP de
+      # l'interface cluster (10.67.2.X).
+      ansible.builtin.copy:
+        dest: /etc/default/kubelet
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Géré par bootstrap/roles/k8s-install — ne pas éditer à la main.
+          KUBELET_EXTRA_ARGS="--node-ip={{ kubelet_node_ip }}"
+      when: kubelet_node_ip | default('') | length > 0
+      notify: Restart kubelet
 
     - name: Enable and start kubernetes service
       ansible.builtin.systemd_service:
@@ -42,5 +73,14 @@
         enabled: true
         state: started
 
-    # - name: Reboot
-    #   ansible.builtin.reboot:
+    - name: Map the control-plane endpoint to the primary control-plane node
+      # `control_plane_ip` (optionnel) surcharge l'IP utilisée pour
+      # joindre le control plane. Utile sur le banc multi-node où le
+      # réseau privé inter-VM (10.67.2.x) doit être préféré au NAT par
+      # défaut détecté par Ansible (10.0.2.x). En prod, on laisse la
+      # variable vide et on tombe sur `ansible_default_ipv4.address`.
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '\s{{ control_plane_endpoint }}$'
+        line: "{{ control_plane_ip | default(hostvars[groups['control'][0]].ansible_default_ipv4.address, true) }} {{ control_plane_endpoint }}"
+        state: present

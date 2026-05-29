@@ -1,31 +1,50 @@
 # code: language=ansible
+# Following https://kubernetes.io/docs/setup/production-environment/container-runtimes/
 - name: Install container runtime
   become: true
   become_method: ansible.builtin.sudo
   block:
-    - name: System kernel attributes
+    - name: Load required kernel modules at boot
+      ansible.builtin.copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/k8s.conf
+        mode: '0644'
+
+    - name: Load required kernel modules now
+      ansible.builtin.command: modprobe {{ item }} # noqa: command-instead-of-module
+      loop:
+        - overlay
+        - br_netfilter
+      changed_when: false
+
+    - name: Persist kernel parameters required by Kubernetes
       ansible.builtin.copy:
         content: |
           net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
         dest: /etc/sysctl.d/k8s.conf
-        mode: '644'
+        mode: '0644'
 
-    - name: Reload system kernel
+    - name: Apply kernel parameters
       ansible.builtin.command: sysctl --system
+      changed_when: false
 
-    - name: Gather facts on IPv4
-      ansible.builtin.command: sysctl net.ipv4.ip_forward
+    - name: Gather IPv4 forwarding value
+      ansible.builtin.command: sysctl --values net.ipv4.ip_forward
       register: output_ipv4_forward
       changed_when: false
 
-    - name: IPv4 forward is enabled
-      ansible.builtin.debug:
-        msg: '{{ output_ipv4_forward }}'
-      when: output_ipv4_forward == "net.ipv4.ip_forward = 1"
+    - name: IPv4 forwarding is enabled
+      ansible.builtin.assert:
+        that: output_ipv4_forward.stdout == '1'
+        fail_msg: IPv4 forwarding is not enabled on {{ ansible_hostname }}.
 
     - name: Install APT dependencies
       ansible.builtin.apt:
-        update_cache: yes
+        update_cache: true
         name:
           - ca-certificates
           - apt-transport-https
@@ -33,43 +52,54 @@
           - gpg
         state: present
 
-    - name: Get Docker keyrings
-      ansible.builtin.shell: sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-      args:
-        creates: /etc/apt/keyrings/docker.asc
+    # Debian 13 ships containerd 1.7.x (deprecated in Kubernetes 1.34, removed
+    # in 1.36), so install containerd.io 2.x from the Docker repository — which
+    # also avoids the user-namespace gap (default-enabled since Kubernetes 1.33).
+    - name: Ensure the APT keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
-    - name: Add Docker repository
+    - name: Download the Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Add the Docker repository
       ansible.builtin.apt_repository:
-        repo: "deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}
-          signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian {{
-          ansible_distribution_release }} stable"
+        repo: >-
+          deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}
+          signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/debian
+          {{ ansible_distribution_release }} stable
         state: present
-        update_cache: yes
+        update_cache: true
 
-    - name: Install CRI
+    - name: Install the container runtime (containerd.io)
       ansible.builtin.apt:
         name: containerd.io
         state: present
+        update_cache: true
 
-    - name: Build a default containerd config
+    # containerd.io ships a config.toml that disables the CRI plugin, so
+    # generate the full default and force the systemd cgroup driver.
+    - name: Generate the default containerd configuration
       ansible.builtin.command: containerd config default
-      register: containerd_config
+      register: containerd_default
       changed_when: false
 
-    - name: Copy default config into production
+    - name: Write containerd config with the systemd cgroup driver
       ansible.builtin.copy:
-        content: '{{ containerd_config.stdout }}'
+        content: "{{ containerd_default.stdout | regex_replace('SystemdCgroup = false', 'SystemdCgroup = true') }}"
         dest: /etc/containerd/config.toml
+        mode: '0644'
+      notify: Restart containerd
 
-    - name: Change containerd default config
-      ansible.builtin.replace:
-        path: /etc/containerd/config.toml
-        regexp: 'SystemdCgroup = false'
-        replace: 'SystemdCgroup = true'
-
-    - name: Enable containerd service
+    - name: Ensure containerd is enabled and running
       ansible.builtin.systemd_service:
         name: containerd
         daemon_reload: true
         enabled: true
-        state: restarted
+        state: started

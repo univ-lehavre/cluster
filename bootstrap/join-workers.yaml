@@ -1,8 +1,20 @@
 - name: Cluster initialization from one control-plane node
   hosts: control
+  pre_tasks:
+    - name: Audit-log — record playbook execution (pre-join)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: join-workers.yaml (pre-join)
   roles:
     - k8s-pre-join
 - name: Workers join the cluster
   hosts: workers
+  pre_tasks:
+    - name: Audit-log — record playbook execution (worker-join)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: join-workers.yaml (worker-join)
   roles:
     - k8s-join-cluster

@@ -1,21 +1,27 @@
 # code: language=ansible
 - name: Install kubernetes on control plane nodes
   block:
-    - name: Initialize the cluster
+    - name: Initialize the control plane
       become: true
       become_method: ansible.builtin.sudo
-      ansible.builtin.shell: kubeadm init >> cluster-setup.log
+      # `--apiserver-advertise-address` est posé automatiquement si la
+      # variable `control_plane_ip` est définie (typiquement sur le banc
+      # multi-node : annoncer l'IP du réseau privé inter-VM au lieu du
+      # NAT par défaut). En prod, on laisse la variable vide et kubeadm
+      # détecte l'IP de l'interface principale.
+      ansible.builtin.command: >-
+        kubeadm init
+        --control-plane-endpoint {{ control_plane_endpoint }}:{{ control_plane_port }}
+        --upload-certs
+        {{ '--apiserver-advertise-address=' ~ control_plane_ip if control_plane_ip | default('') | length > 0 else '' }}
       args:
-        chdir: /home/debian
-        creates: cluster-setup.log
+        creates: /etc/kubernetes/admin.conf
 
-    - name: Create .kube directory
-      become: true
-      become_user: debian
+    - name: Create the .kube directory for the debian user
       ansible.builtin.file:
-        path: ${HOME}/.kube
+        path: /home/debian/.kube
         state: directory
-        mode: 0755
+        mode: '0755'
 
     - name: Copy kubernetes configuration
       become: true
@@ -25,23 +31,21 @@
         remote_src: true
         dest: /home/debian/.kube/config
         owner: debian
+        mode: '0600'
 
-    # - name: Install CNI
-    #   ansible.builtin.shell:
-    #     kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml >>
-    #     cni-setup.log
-    #   args:
-    #     chdir: /home/debian
-    #     creates: cni-setup.log
-
-    - name: Control plane accepts pods
-      ansible.builtin.shell: kubectl taint nodes --all node-role.kubernetes.io/control-plane- >> taint-setup.log
+    - name: Control plane accepts pods (remove the control-plane taint)
+      ansible.builtin.shell: >-
+        kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+        >> taint-setup.log
       args:
         chdir: /home/debian
         creates: taint-setup.log
 
-    - name: Control plane isn’t a load balancer, because it accepts pods
-      ansible.builtin.shell: kubectl label nodes --all node.kubernetes.io/exclude-from-external-load-balancers- >> lb-setup.log
+    - name: Exclude the control plane from external load balancers
+      ansible.builtin.shell: >-
+        kubectl label nodes --all
+        node.kubernetes.io/exclude-from-external-load-balancers-
+        >> lb-setup.log
       args:
         chdir: /home/debian
         creates: lb-setup.log

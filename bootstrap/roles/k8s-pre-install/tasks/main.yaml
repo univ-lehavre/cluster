@@ -1,119 +1,105 @@
 # code: language=ansible
-# Following protocol https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
-- name: Machines have all the same stable operating system, suitable for k8s
+# Following https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
+- name: Machines run a supported, homogeneous operating system (Debian 13)
   ansible.builtin.assert:
-    that: ansible_distribution == 'Debian' and ansible_distribution_version ==
-      '12.11'
-    fail_msg: 'The distribution {{ ansible_distribution }} {{
-      ansible_distribution_version }} installed on {{ ansible_hostname }} isn’t
-      allowed.'
+    that:
+      - ansible_distribution == 'Debian'
+      - ansible_distribution_major_version == '13'
+    fail_msg: >-
+      The distribution {{ ansible_distribution }}
+      {{ ansible_distribution_version }} on {{ ansible_hostname }} is not
+      supported (Debian 13 / Trixie required).
 
-- name: Machine characteristics suit k8s
+- name: Machine characteristics suit Kubernetes
   block:
-    - name: Each machine has at least 2 Gb of RAM
+    - name: Each machine has enough RAM
       ansible.builtin.assert:
-        that: ansible_memory_mb.real.total >= 2048
-        fail_msg: '{{ ansible_hostname }} hasn’t enough RAM: only {{
-          ansible_memory_mb.real.total }} Mb detected.'
+        that: ansible_memory_mb.real.total >= 4096
+        fail_msg: >-
+          {{ ansible_hostname }} has insufficient RAM: only
+          {{ ansible_memory_mb.real.total }} MB (>= 4096 required; plan ~4-5 GB
+          of RAM per OSD on storage nodes).
 
-    - name: Each machine have at least 2 CPUs
+    - name: Each machine has at least 2 CPUs
       ansible.builtin.assert:
         that: ansible_processor_vcpus >= 2
-        fail_msg: '{{ ansible_hostname }} hasn’t enough CPU: only {{
-          ansible_processor_vcpus }} CPU detected.'
-
-- name: Full network connectivity between all machines in the cluster (public or
-    private network is fine) # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: Not implemented
-  when: true
-  ignore_errors: true
-  run_once: true
+        fail_msg: >-
+          {{ ansible_hostname }} has insufficient CPU: only
+          {{ ansible_processor_vcpus }} detected.
 
 - name: Machine hostnames are unique in the cluster
   block:
     - name: Gather hostnames
       ansible.builtin.set_fact:
-        all_hostnames: "{{ ansible_play_hosts_all | map('extract', hostvars,
-          'ansible_hostname') | list }}"
-
-    - name: Print hostnames
-      run_once: true
-      ansible.builtin.debug:
-        msg: '{{ all_hostnames }}'
+        all_hostnames: >-
+          {{ ansible_play_hosts_all
+             | map('extract', hostvars, 'ansible_hostname') | list }}
 
     - name: Hostnames are unique
       run_once: true
       ansible.builtin.assert:
         that: all_hostnames | length == all_hostnames | unique | length
-        fail_msg: 'At least 2 machines have the same hostname: {{ all_hostnames |
-          difference(all_hostnames | unique) }}'
+        fail_msg: >-
+          At least two machines share a hostname:
+          {{ all_hostnames | difference(all_hostnames | unique) }}
 
-- name: Machine MAC adresses are unique in the cluster # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: Not applicable
-  when: true
-  ignore_errors: true
-  run_once: true
-
-- name: Machine UUIDs are unique in the cluster
+- name: Machine product UUIDs are unique in the cluster
   block:
-    - name: Get UUID from each machine
+    - name: Get product UUID from each machine
       become: true
       become_method: ansible.builtin.sudo
       ansible.builtin.command: cat /sys/class/dmi/id/product_uuid
       register: uuid
       changed_when: false
+      # Some hosts (VMs, arm64) expose no DMI; skip them rather than fail.
+      failed_when: false
 
-    - name: Build UUID list
+    - name: Build the UUID list (ignoring hosts without a DMI UUID)
       ansible.builtin.set_fact:
-        uuids: "{{ ansible_play_hosts | map('extract', hostvars, 'uuid') |
-          map(attribute='stdout') | list }}"
-
-    - name: Print UUIDs
-      run_once: true
-      ansible.builtin.debug:
-        msg: '{{ uuids }}'
+        uuids: >-
+          {{ ansible_play_hosts | map('extract', hostvars, 'uuid')
+             | map(attribute='stdout') | select('!=', '') | list }}
 
     - name: UUIDs are unique
       run_once: true
       ansible.builtin.assert:
         that: uuids | length == uuids | unique | length
-        fail_msg: 'At least 2 machines have the same UUID: {{ uuids | difference(uuids |
-          unique) }}'
+        fail_msg: >-
+          At least two machines share a product UUID:
+          {{ uuids | difference(uuids | unique) }}
 
-- name: Certain ports are open # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: Not implemented
-  when: true
-  ignore_errors: true
-  run_once: true
+- name: Warn when the filesystem backing /var is small
+  vars:
+    var_mount: >-
+      {{ (ansible_mounts | selectattr('mount', 'equalto', '/var') | list)
+         | ternary(ansible_mounts | selectattr('mount', 'equalto', '/var')
+           | list, ansible_mounts | selectattr('mount', 'equalto', '/')
+           | list) }}
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: the filesystem backing /var on {{ ansible_hostname }} is only
+      {{ (var_mount[0].size_total / 1073741824) | round(1) }} GB; >= 100 GB is
+      recommended (containerd images, logs, etcd, /var/lib/rook).
+  when:
+    - var_mount | length > 0
+    - var_mount[0].size_total < 107374182400
 
-- name: Check network adaptaters # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: Not implemented
-  when: true
-  ignore_errors: true
-  run_once: true
-
-- name: Check required ports # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: Not implemented
-  when: true
-  ignore_errors: true
-  run_once: true
-
-- name: Swap is off
+- name: Swap is disabled (kubeadm refuses an active swap)
   become: true
   become_method: ansible.builtin.sudo
   block:
-    - name: Gather facts on SWAP
+    - name: Gather active swap devices
       ansible.builtin.command: swapon --show
       register: output_swapon
       changed_when: false
 
-    - name: SWAP is disabled
-      ansible.builtin.debug:
-        msg: '{{ output_swapon.stdout }}'
-      when: output_swapon.stdout == ""
-      notify: Disable swap
+    - name: Disable all swap immediately
+      ansible.builtin.command: swapoff -a
+      when: output_swapon.stdout | length > 0
+      changed_when: output_swapon.stdout | length > 0
+
+    - name: Comment swap entries in /etc/fstab so swap stays off after reboot
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#].*\sswap\s+sw\s+.*)$'
+        replace: '# \1'

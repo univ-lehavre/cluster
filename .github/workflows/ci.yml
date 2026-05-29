@@ -11,12 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run format:check
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
 
   yamllint:
     runs-on: ubuntu-latest
@@ -46,9 +47,19 @@ jobs:
         run: |
           find . -name '*.yaml' \
             -not -path './bootstrap/*' \
-            -not -path './apps/jupyter/config.yaml' \
             -not -path './node_modules/*' \
             -not -path './.git/*' \
+            -not -name 'pnpm-lock.yaml' \
+            -not -name 'pnpm-workspace.yaml' \
+            -not -name '.yamllint.yaml' \
+            -not -path './storage/ceph/crds.yaml' \
+            -not -path './storage/ceph/common.yaml' \
+            -not -path './storage/ceph/operator.yaml' \
+            -not -path './storage/ceph/cluster.yaml' \
+            -not -path './storage/ceph/dashboard.yaml' \
+            -not -path './storage/ceph/toolbox.yaml' \
+            -not -path './platform/k8s-dashboard/values.yaml' \
+            -not -path './test/*/inventory.yaml' \
             -print0 | xargs -0 kubeconform \
               -strict -ignore-missing-schemas \
               -schema-location default \
@@ -58,9 +69,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Ansible collections in user path
+        run: ansible-galaxy collection install --force -r bootstrap/requirements.yml -p ~/.ansible/collections
       - uses: ansible/ansible-lint@main
         with:
           working_directory: bootstrap/
+
+  jscpd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint:dup
 
   commitlint:
     runs-on: ubuntu-latest
@@ -69,10 +94,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
       - name: Validate PR commits
-        run: npx commitlint --from=${{ github.event.pull_request.base.sha }} --to=${{ github.event.pull_request.head.sha }} --verbose
+        run: pnpm exec commitlint --from=${{ github.event.pull_request.base.sha }} --to=${{ github.event.pull_request.head.sha }} --verbose

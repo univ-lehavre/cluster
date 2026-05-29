@@ -19,9 +19,7 @@ metadata:
   labels:
     app: wordpress
 spec:
-  #storageClassName: rook-ceph-block-replicated
-  #storageClassName: rook-ceph-block
-  storageClassName: rook-ceph-block-ec-3-1
+  storageClassName: rook-ceph-block-replicated
   accessModes:
     - ReadWriteOnce
   resources:
@@ -49,13 +47,16 @@ spec:
         tier: frontend
     spec:
       containers:
-        - image: wordpress:4.6.1-apache
+        - image: wordpress:7.0-php8.3-apache
           name: wordpress
           env:
             - name: WORDPRESS_DB_HOST
               value: wordpress-mysql
             - name: WORDPRESS_DB_PASSWORD
-              value: changeme
+              valueFrom:
+                secretKeyRef:
+                  name: wordpress-secret
+                  key: password
           ports:
             - containerPort: 80
               name: wordpress

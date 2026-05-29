@@ -1,8 +1,8 @@
 apiVersion: ceph.rook.io/v1
 kind: CephObjectStoreUser
 metadata:
-  name: petrus
+  name: admin
   namespace: rook-ceph
 spec:
   store: datalake
-  displayName: 'Pierre-Olivier Chasset'
+  displayName: 'Datalake admin'

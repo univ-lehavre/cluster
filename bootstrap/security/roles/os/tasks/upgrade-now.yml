@@ -1,0 +1,18 @@
+- name: Mise à jour du système d’exploitation
+  become: true
+  block:
+    - name: Mettre à jour le système
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+
+    - name: Vérifier si un redémarrage est nécessaire
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: os_reboot_required
+
+    - name: Redémarrer la machine si nécessaire
+      ansible.builtin.reboot:
+        msg: 'Redémarrage automatique après mise à jour'
+        reboot_timeout: 600
+      when: os_reboot_required.stat.exists

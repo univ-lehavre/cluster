@@ -1,0 +1,101 @@
+# Durcissement progressif (server-security) — fusionné dans cluster sous
+# bootstrap/security/.
+#
+# Politique : **toutes les couches de hardening sont OPT-IN**. Sans tag,
+# le playbook se borne à charger les variables (`settings`) et ne touche
+# à rien. L'utilisateur choisit explicitement la couche qu'il veut
+# activer ; voir IMPLICATIONS.md pour le détail.
+#
+# Menu (à lancer depuis `bootstrap/security/`) :
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags os         # mises à jour auto
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags alert      # mail root
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags audit      # auditd
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags detection  # fail2ban
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags sshd       # re-pose sshd (déjà fait par first-access.sh)
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags ssh-keys   # re-dépose les clés
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags ufw        # ⚠️ APRÈS bootstrap K8s
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags upgrade    # apt full-upgrade + reboot
+#
+# Pour tout activer en un coup (déconseillé sans avoir lu IMPLICATIONS.md) :
+#   ansible-playbook -i ../hosts.yaml secure.yml \
+#     --tags os,alert,audit,detection
+
+- name: Paramétrage du playbook
+  hosts: all
+  roles:
+    - role: settings
+      tags: always
+
+- name: Mise à niveau OS immédiate (opt-in)
+  hosts: all
+  become: true
+  serial: 1
+  tasks:
+    - name: Apt full-upgrade et reboot si nécessaire
+      ansible.builtin.import_role:
+        name: os
+        tasks_from: upgrade-now
+      tags:
+        - never
+        - upgrade
+
+- name: Durcissement (toutes couches en opt-in)
+  hosts: all
+  become: true
+  tasks:
+    - name: OS — comptes admin + unattended-upgrades
+      ansible.builtin.import_role:
+        name: os
+      tags:
+        - never
+        - os
+        - unattended-upgrades
+        - accounts
+
+    - name: Alert — postfix + redirection mail root
+      ansible.builtin.import_role:
+        name: alert
+      tags:
+        - never
+        - alert
+        - mail
+
+    - name: Audit — auditd + règles
+      ansible.builtin.import_role:
+        name: audit
+      tags:
+        - never
+        - audit
+        - auditd
+
+    - name: Detection — fail2ban
+      ansible.builtin.import_role:
+        name: detection
+      tags:
+        - never
+        - detection
+        - fail2ban
+
+    - name: Network — sshd (déjà posé par first-access.sh, opt-in)
+      ansible.builtin.import_role:
+        name: network
+        tasks_from: sshd
+      tags:
+        - never
+        - sshd
+
+    - name: Network — clés SSH (déjà déposées par first-access.sh, opt-in)
+      ansible.builtin.import_role:
+        name: network
+        tasks_from: ssh
+      tags:
+        - never
+        - ssh-keys
+
+    - name: Network — UFW (À ACTIVER APRÈS bootstrap K8s)
+      ansible.builtin.import_role:
+        name: network
+        tasks_from: ufw
+      tags:
+        - never
+        - ufw

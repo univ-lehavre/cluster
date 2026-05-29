@@ -1,5 +1,11 @@
 # code: language=ansible
 - name: Install Kubernetes
   hosts: cloud
+  pre_tasks:
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: cri.yaml
   roles:
     - k8s-CRI-install

@@ -1,0 +1,9 @@
+---
+# Collections Ansible utilisées par les playbooks et rôles de bootstrap/.
+# Installées automatiquement par l'action ansible/ansible-lint en CI, et
+# par `ansible-galaxy collection install -r requirements.yml` en local.
+collections:
+  - name: ansible.posix
+    version: '2.2.0'
+  - name: community.general
+    version: '12.6.1'

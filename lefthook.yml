@@ -10,7 +10,7 @@ commit-msg:
           exit 1
         fi
     commitlint:
-      run: npx --no-install commitlint --edit {1}
+      run: pnpm exec commitlint --edit {1}
 
 # Fast checks on staged files only
 pre-commit:
@@ -18,7 +18,7 @@ pre-commit:
   commands:
     prettier:
       glob: '*.{yaml,yml,md,json}'
-      run: npx prettier --check {staged_files}
+      run: pnpm exec prettier --check {staged_files}
     yamllint:
       glob: '*.{yaml,yml}'
       run: yamllint {staged_files}
@@ -30,8 +30,15 @@ pre-commit:
 pre-push:
   parallel: true
   commands:
+    no-direct-push-to-main:
+      run: |
+        branch="$(git rev-parse --abbrev-ref HEAD)"
+        if [ "${branch}" = "main" ]; then
+          echo "ERROR: push direct sur 'main' interdit — crée une branche et ouvre une PR." >&2
+          exit 1
+        fi
     prettier:
-      run: npx prettier --check "**/*.{yaml,yml,md,json}"
+      run: pnpm exec prettier --check "**/*.{yaml,yml,md,json}"
     yamllint:
       run: yamllint .
     shellcheck:
@@ -44,9 +51,19 @@ pre-push:
       run: |
         find . -name '*.yaml' \
           -not -path './bootstrap/*' \
-          -not -path './apps/jupyter/config.yaml' \
           -not -path './node_modules/*' \
           -not -path './.git/*' \
+          -not -name 'pnpm-lock.yaml' \
+          -not -name 'pnpm-workspace.yaml' \
+          -not -name '.yamllint.yaml' \
+          -not -path './storage/ceph/crds.yaml' \
+          -not -path './storage/ceph/common.yaml' \
+          -not -path './storage/ceph/operator.yaml' \
+          -not -path './storage/ceph/cluster.yaml' \
+          -not -path './storage/ceph/dashboard.yaml' \
+          -not -path './storage/ceph/toolbox.yaml' \
+          -not -path './platform/k8s-dashboard/values.yaml' \
+          -not -path './test/*/inventory.yaml' \
           -print0 | xargs -0 kubeconform \
             -strict -ignore-missing-schemas \
             -schema-location default \

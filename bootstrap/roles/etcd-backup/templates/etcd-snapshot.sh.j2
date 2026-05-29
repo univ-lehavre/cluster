@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# Snapshot etcd horaire — rétention 24 (= 1 jour glissant).
+# Géré par le timer systemd `etcd-snapshot.timer` (rôle Ansible
+# `etcd-backup`). Restauration : cf. bootstrap/RUNBOOK.md.
+set -euo pipefail
+
+BACKUP_DIR=/var/lib/etcd-backups
+KEEP=24
+STAMP=$(date +%Y%m%d-%H%M%S)
+DEST="${BACKUP_DIR}/etcd-${STAMP}.db"
+
+# etcdctl est embarqué dans l'image kube-apiserver / etcd ; on appelle
+# `etcdctl` via `kubectl -n kube-system exec` sur le pod etcd local. Cela
+# évite d'avoir à installer/maintenir un etcdctl séparé sur le hôte.
+ETCD_POD=$(crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock ps \
+    -o json 2>/dev/null \
+    | grep -oE '"name": "etcd"[^}]*' | head -1 || true)
+
+if [ -z "${ETCD_POD}" ]; then
+    # Fallback : utiliser kubectl si l'API est joignable
+    kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system \
+        exec "etcd-$(hostname)" -- etcdctl \
+        --endpoints=https://127.0.0.1:2379 \
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+        --cert=/etc/kubernetes/pki/etcd/server.crt \
+        --key=/etc/kubernetes/pki/etcd/server.key \
+        snapshot save "/var/lib/etcd/snapshot-${STAMP}.db"
+    # Récupérer le snapshot depuis le pod
+    kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system \
+        cp "etcd-$(hostname):/var/lib/etcd/snapshot-${STAMP}.db" "${DEST}"
+    kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system \
+        exec "etcd-$(hostname)" -- rm "/var/lib/etcd/snapshot-${STAMP}.db"
+else
+    # Méthode directe : ETCDCTL_API=3 etcdctl en parlant aux certs locaux.
+    # Présuppose que etcdctl est installé sur l'hôte (ce qu'on documente
+    # mais ne force pas — sinon on tombe sur le fallback ci-dessus).
+    ETCDCTL_API=3 etcdctl \
+        --endpoints=https://127.0.0.1:2379 \
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+        --cert=/etc/kubernetes/pki/etcd/server.crt \
+        --key=/etc/kubernetes/pki/etcd/server.key \
+        snapshot save "${DEST}"
+fi
+
+chmod 0600 "${DEST}"
+echo "Snapshot écrit : ${DEST}"
+
+# Rétention : garder les KEEP plus récents, supprimer le reste.
+ls -1t "${BACKUP_DIR}"/etcd-*.db 2>/dev/null \
+    | tail -n +$((KEEP + 1)) \
+    | xargs -r rm -f

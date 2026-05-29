@@ -22,3 +22,16 @@ secrets/
 # Temp
 tmp/
 *.tmp
+
+# Vagrant test bench (local state + machine-specific inventory + VDI disks)
+test/**/.vagrant/
+test/**/inventory.yaml
+test/**/*.vdi
+test/*.log
+
+# VitePress (generated output + cache)
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# Ansible runtime cache
+.ansible/

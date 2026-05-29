@@ -1,0 +1,6 @@
+# code: language=ansible
+# Stable control-plane endpoint. Resolved via /etc/hosts (see the k8s-install
+# role) to the primary control-plane node. Posing it at init time keeps the
+# door open for adding control planes later without reinstalling.
+control_plane_endpoint: cluster-api
+control_plane_port: 6443

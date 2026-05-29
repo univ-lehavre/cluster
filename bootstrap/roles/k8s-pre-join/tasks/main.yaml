@@ -4,8 +4,9 @@
   become_method: ansible.builtin.sudo
   block:
     - name: Get join command
-      ansible.builtin.shell: kubeadm token create --print-join-command
+      ansible.builtin.command: kubeadm token create --print-join-command
       register: join_command_raw
+      changed_when: false
 
     - name: Set join command
       ansible.builtin.set_fact:

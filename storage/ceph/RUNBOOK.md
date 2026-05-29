@@ -1,7 +1,7 @@
 # Runbook — Rook-Ceph
 
 Installation, opération et désinstallation d'un cluster Ceph distribué via
-l'opérateur Rook 1.16.
+l'opérateur Rook 1.19 (Ceph Tentacle 20.2.1).
 
 ## Installation de l'opérateur
 
@@ -63,14 +63,26 @@ kubectl -n rook-ceph delete deploy/rook-ceph-tools
 
 ## Classes de stockage
 
-> ⚠️ La première classe créée doit être la classe par défaut, sinon les volumes
-> persistants ne seront pas créés.
+`rook-ceph-block-replicated` est annotée
+`storageclass.kubernetes.io/is-default-class: "true"` — c'est la classe par
+défaut du cluster ; les PVC sans `storageClassName` y atterrissent.
 
 ### Bloc
 
 ```bash
-kubectl apply -f storageClass/block-replicated.yaml
+kubectl apply -f storageClass/block-replicated.yaml      # défaut (réplicat ×3)
+kubectl apply -f storageClass/block-ec-delete.yaml       # EC 2+1, reclaim Delete
+kubectl apply -f storageClass/block-ec-retain.yaml       # EC 2+1, reclaim Retain
 ```
+
+> ⚠️ **EC 2+1 sur 4 hôtes — piège `min_size`** : le `min_size` par défaut d'un
+> pool EC `k=2, m=1` est `k+1 = 3`. La perte d'**un** hôte fait passer le pool
+> sous `min_size` et **bloque les I/O** jusqu'au remplacement, sans perte de
+> données mais avec interruption. Ces classes restent utiles pour des données
+> tolérantes (datalake, archives). Pour le critique, utiliser la classe par
+> défaut `rook-ceph-block-replicated` (×3, tolère 1 perte sans blocage). Les
+> pools de **métadonnées** des classes EC sont désormais en `size: 3` +
+> `requireSafeReplicaSize: true` (Ceph déconseille fortement `size: 2`).
 
 ### Objet (datalake)
 
@@ -83,7 +95,30 @@ kubectl apply -f storageClass/datalake/object-bucket-claim-gdelt.yaml
 Voir [`storageClass/datalake/README.md`](storageClass/datalake/README.md) pour
 le détail des claims et l'extraction des credentials.
 
-## Tailscale operator
+> ⚠️ **Comportement destructif** : le `CephObjectStore` est configuré avec
+> `preservePoolsOnDelete: false` — supprimer l'objet **détruit les pools et
+> toutes les données S3**. Cohérent avec un datalake ré-ingestible. Si les
+> données doivent survivre à une suppression, basculer à
+> `preservePoolsOnDelete: true` avant.
+
+## Chiffrement (décision assumée)
+
+Aucun chiffrement Ceph n'est activé : `network.connections.encryption.enabled`
+reste à `false` dans `cluster.yaml`, et le datalake RGW expose `port: 80` sans
+TLS. La décision tient parce que les flux internes au cluster restent confinés
+au réseau privé `10.67.2.0/22`, et que **l'accès externe est limité par le
+contrôle d'accès au Service** (réseau cluster, port-forward sur API K8s, ou
+tunnel Tailscale si l'operator est déployé — voir ci-dessous). À revisiter le
+jour où ces hypothèses changent (exposition publique, données classifiées,
+etc.).
+
+## Tailscale operator (optionnel)
+
+L'installation du Tailscale operator est **facultative**. Sans lui, les
+annotations `tailscale.com/expose` et `tailscale.com/hostname` posées sur
+certains Services (registry, RStudio) sont simplement ignorées, et l'accès
+distant se fait par `kubectl port-forward`. Avec lui, ces Services deviennent
+joignables depuis le tailnet.
 
 ```bash
 helm repo add tailscale https://pkgs.tailscale.com/helmcharts

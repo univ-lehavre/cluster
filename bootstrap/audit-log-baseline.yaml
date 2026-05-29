@@ -1,0 +1,21 @@
+# code: language=ansible
+#
+# Initialise /var/log/cluster-bootstrap.log sur des nœuds existants —
+# typiquement des serveurs déjà installés/durcis manuellement avant
+# l'introduction du rôle `audit-log`. Pose une ligne « baseline » qui
+# matérialise « état initial reconnu après le fait » et débloque la
+# couche 0 de `bootstrap/state.sh` (qui sinon signale 'audit-log absent').
+#
+# Usage :
+#   ansible-playbook -i hosts.yaml audit-log-baseline.yaml
+#
+# Idempotent : peut être rejoué sans effet de bord (chaque run ajoute
+# juste une ligne supplémentaire).
+- name: Audit-log — pose une ligne baseline sur tous les nœuds
+  hosts: cloud
+  pre_tasks:
+    - name: Audit-log — record baseline entry
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: baseline (nœud reconnu rétroactivement)
