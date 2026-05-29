@@ -69,6 +69,44 @@ Posés par [Lefthook](https://lefthook.dev/) au premier `pnpm install` (config :
   Aucune version flottante en main, et chaque tag est lié à un set de commits
   explicitement validé par un opérateur.
 
+> ⚠️ **Pré-requis organisation (sinon release-please ne publie rien).**
+> release-please crée la PR de release, puis le tag + la GitHub Release, avec le
+> `GITHUB_TOKEN`. Cela exige que le réglage **Settings → Actions → General →
+> Workflow permissions → « Allow GitHub Actions to create and approve pull
+> requests »** soit activé. Sur `univ-lehavre`, ce réglage est verrouillé **au
+> niveau organisation** : il doit être activé par un admin org (l'API repo
+> renvoie sinon
+> `409 Write permissions for workflows are disabled by the organization`). Tant
+> qu'il est désactivé :
+>
+> - la PR de release n'est jamais créée (le job `release-please` échoue avec
+>   `GitHub Actions is not permitted to create or approve pull requests`) ;
+> - faute de tag publié, release-please considère la version précédente comme
+>   non publiée et **re-propose une version toujours plus haute à chaque push**
+>   (boucle observée le 2026-05-29 : `2.0.0` jamais taguée → `3.0.0`
+>   reproposée).
+>
+> **Rattrapage manuel** d'une release bloquée (le contenu de `main` est déjà bon
+> : `package.json`, `.release-please-manifest.json` et `CHANGELOG.md` portent la
+> bonne version) :
+>
+> ```bash
+> # 1. Publier le tag + la release sur le HEAD de main
+> gh release create vX.Y.Z --target "$(git rev-parse origin/main)" --title vX.Y.Z \
+>   --notes-file <(git show origin/main:CHANGELOG.md \
+>     | awk '/^## \[X\.Y\.Z\]/{f=1} /^## \[<version-précédente>\]/{f=0} f')
+> # 2. Supprimer la branche release-please parasite (via API : le hook pre-push
+> #    no-direct-push-to-main bloque un `git push --delete`)
+> gh api -X DELETE repos/univ-lehavre/cluster/git/refs/heads/release-please--branches--main--components--cluster
+> # 3. Vérifier qu'un run propre ne repropose plus rien
+> gh workflow run release.yml && gh run list --workflow release.yml -L 1
+> ```
+>
+> **Alternative durable** si l'org refuse le réglage : passer un PAT
+> fine-grained (`Contents: RW` + `Pull requests: RW`, scope = ce repo) en secret
+> `RELEASE_PLEASE_TOKEN` et l'injecter via `with: token:` dans `release.yml`
+> (penser à la rotation — un PAT expire).
+
 ## Bancs d'essai Vagrant
 
 [`test/`](test/) — deux topologies pour valider sur **vrai Debian 13** avant de
