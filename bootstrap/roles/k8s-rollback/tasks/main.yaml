@@ -98,12 +98,15 @@
 
 - name: Décharger les modules noyau (best-effort, sans erreur si absents)
   become: true
-  community.general.modprobe:
-    name: '{{ item }}'
-    state: absent
+  # `ansible.builtin.command` plutôt que `community.general.modprobe` pour
+  # éviter une dépendance collection en CI ansible-lint. -r = remove ;
+  # rmmod avec ignore failures (le module peut ne pas être chargé).
+  ansible.builtin.command:
+    cmd: 'modprobe -r {{ item }}'
   loop:
     - overlay
     - br_netfilter
+  changed_when: false
   failed_when: false
 
 - name: Appliquer un sysctl reset pour annuler les forwards/bridge-call
