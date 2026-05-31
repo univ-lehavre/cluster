@@ -14,6 +14,15 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.5](https://github.com/univ-lehavre/cluster/compare/v2.1.4...v2.1.5) (2026-05-31)
+
+
+### Bug Fixes
+
+* cni.sh idempotent + kubeconform ignore les .yaml gitignorés ([65cebab](https://github.com/univ-lehavre/cluster/commit/65cebab53d7ae563b5477a548ff9b75ad3b62569))
+* **cni:** rends cni.sh idempotent (download + cilium install/upgrade) ([f2797ba](https://github.com/univ-lehavre/cluster/commit/f2797ba385e08795c5efcd3325fd6b030f1edac7))
+* **lint:** kubeconform ignore les .yaml gitignorés (git ls-files) ([4a579a7](https://github.com/univ-lehavre/cluster/commit/4a579a7aa7ea2f4b44d34b7cecd7cb447150a40a))
+
 ## [2.1.4](https://github.com/univ-lehavre/cluster/compare/v2.1.3...v2.1.4) (2026-05-31)
 
 
