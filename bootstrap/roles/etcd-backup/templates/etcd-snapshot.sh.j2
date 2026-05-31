@@ -77,9 +77,14 @@ fi
 log "conteneur etcd : ${ETCD_CID}"
 
 # --- Snapshot DANS le conteneur, vers le volume monté ---------------------
+# etcdctl est invoqué DIRECTEMENT (ni `env …`, ni `sh -c …`) : l'image etcd
+# de kubeadm (registry.k8s.io/etcd) est distroless — elle n'embarque NI
+# `env` NI `sh`. `crictl exec … env …` échoue avec `exec: "env": executable
+# file not found` ; `sh -c` échouerait pareil. etcdctl ≥ 3.4 utilise l'API
+# v3 par défaut (ici 3.6), donc ETCDCTL_API=3 est inutile.
 log "snapshot save -> ${IN_CONTAINER_TMP} (dans le conteneur)"
 "${CRICTL[@]}" exec "${ETCD_CID}" \
-    env ETCDCTL_API=3 etcdctl \
+    etcdctl \
     --endpoints="${ETCD_ENDPOINT}" \
     --cacert="${ETCD_CACERT}" \
     --cert="${ETCD_CERT}" \
@@ -92,19 +97,22 @@ log "snapshot save -> ${IN_CONTAINER_TMP} (dans le conteneur)"
 
 # --- Vérification d'intégrité (toujours dans le conteneur, fichier encore
 #     sous /var/lib/etcd donc visible). Best-effort : WARN si l'outil manque,
-#     mais ÉCHEC si l'outil est présent et le snapshot est corrompu. ---------
-if "${CRICTL[@]}" exec "${ETCD_CID}" sh -c \
-    "command -v etcdutl >/dev/null 2>&1 || command -v etcdctl >/dev/null 2>&1" \
-    > /dev/null 2>&1; then
-    "${CRICTL[@]}" exec "${ETCD_CID}" sh -c \
-        "ETCDCTL_API=3 etcdutl snapshot status '${IN_CONTAINER_TMP}' \
-           2>/dev/null \
-         || ETCDCTL_API=3 etcdctl snapshot status '${IN_CONTAINER_TMP}'" \
+#     mais ÉCHEC si l'outil est présent et le snapshot est corrompu. ----------
+# Appels DIRECTS (image distroless, ni `sh` ni `env` — cf. snapshot ci-dessus).
+# `etcdutl` est l'outil moderne ; repli sur `etcdctl snapshot status` (déprécié
+# mais présent). On détecte la présence via le code retour de `… version`.
+if "${CRICTL[@]}" exec "${ETCD_CID}" etcdutl version > /dev/null 2>&1; then
+    "${CRICTL[@]}" exec "${ETCD_CID}" etcdutl snapshot status "${IN_CONTAINER_TMP}" \
         > /dev/null 2>&1 \
-        || die "intégrité du snapshot INVALIDE (snapshot status a échoué)."
-    log "intégrité du snapshot vérifiée"
+        || die "intégrité du snapshot INVALIDE (etcdutl snapshot status a échoué)."
+    log "intégrité du snapshot vérifiée (etcdutl)"
+elif "${CRICTL[@]}" exec "${ETCD_CID}" etcdctl version > /dev/null 2>&1; then
+    "${CRICTL[@]}" exec "${ETCD_CID}" etcdctl snapshot status "${IN_CONTAINER_TMP}" \
+        > /dev/null 2>&1 \
+        || die "intégrité du snapshot INVALIDE (etcdctl snapshot status a échoué)."
+    log "intégrité du snapshot vérifiée (etcdctl)"
 else
-    log "WARN: ni etcdutl ni etcdctl status dans l'image, intégrité non vérifiée — on conserve."
+    log "WARN: ni etcdutl ni etcdctl dans l'image, intégrité non vérifiée — on conserve."
 fi
 
 # --- Publication atomique vers BACKUP_DIR (FS différent de /var/lib/etcd) --

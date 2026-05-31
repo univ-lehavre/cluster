@@ -267,8 +267,12 @@ phase_etcd() {
     ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/etcd-backup.yaml"
     # GATE : run manuel du script → un .db produit
     dssh "${CP_IP}" 'sudo /usr/local/sbin/etcd-snapshot.sh'
-    # shellcheck disable=SC2016 # $(...) doit s'évaluer côté distant (SSH), pas localement
-    dssh "${CP_IP}" 'sudo test -s "$(ls -1t /var/lib/etcd-backups/etcd-*.db | head -1)"' \
+    # /var/lib/etcd-backups est root:root 0700 : le `$(ls …)` doit AUSSI tourner
+    # sous root, pas seulement le `test`. On enveloppe tout le pipeline dans
+    # `sudo sh -c` (sinon le ls s'exécute en `debian` → Permission denied → la
+    # substitution renvoie vide → faux négatif alors que le snapshot existe).
+    # shellcheck disable=SC2016 # le $(...) doit s'évaluer côté distant sous root, pas localement
+    dssh "${CP_IP}" 'sudo sh -c "test -s \"\$(ls -1t /var/lib/etcd-backups/etcd-*.db | head -1)\""' \
         || die "aucun snapshot etcd produit sur dirqual1"
     ok "Snapshot etcd produit"
     dssh "${CP_IP}" 'systemctl is-enabled etcd-snapshot.timer' \

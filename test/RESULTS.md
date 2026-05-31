@@ -300,10 +300,10 @@ réservation cumulée ne pose pas problème quand d'autres workloads cohabitent.
 
 ## Run #3 (2026-05-31) — relance banc intégral
 
-Relance de `run-phases.sh all` sur 3 VMs fraîches. **2 drifts détectés (#11,
-#12), tous deux banc-only.** Après correctifs, **Phases 0 à 5 franchies** (gate
-disques, 3 nœuds Ready, Ceph HEALTH_OK, StorageClasses + PVC Bound, WordPress
-Running, datalake S3 PUT/GET vérifié).
+Relance de `run-phases.sh all` sur 3 VMs fraîches. **5 drifts détectés
+(#11-#15)** ; **#13 et #14 impactent la prod** (backup etcd). Après correctifs,
+**Phases 0 à 6 franchies de bout en bout** — première fois qu'un `all` complet
+passe.
 
 - ✅ **Phase 0** : gate disques `^sdb` OK après #11.
 - ✅ **Phase 1-2** : bootstrap + Cilium, 3 nœuds Ready (drifts #4/#7 ne se
@@ -313,6 +313,9 @@ Running, datalake S3 PUT/GET vérifié).
 - ✅ **Phase 4** : 1 seule SC default, PVC test Bound.
 - ✅ **Phase 5** : WordPress + MySQL Running ; **smoke-test datalake S3 vert**
   (PUT/LIST/GET/DIFF) après #12. 5 OBC applicatifs créés.
+- ✅ **Phase 6** : snapshot etcd **19 MB, intégrité etcdutl vérifiée**, timer
+  activé — après #13, #14 et #15. C'est la première validation réelle du backup
+  etcd (l'audit notait justement « restauration etcd jamais testée »).
 
 ### 🔴 #11 — `run-phases.sh` câblé sur `/dev/vd*` alors que VirtioSCSI expose `/dev/sd*`
 
@@ -376,6 +379,52 @@ Running, datalake S3 PUT/GET vérifié).
 - **Statut prod** : non-applicable. En prod le RGW est exposé via Tailscale
   (`ENDPOINT=` explicite) et le démarrage x86_64 est plus rapide — mais
   l'attente RGW-Ready ajoutée est un durcissement utile partout.
+
+### 🔴 #13 — `crictl` jamais installé → backup etcd fantôme (impact PROD)
+
+- **Fichier** : [`k8s-install`](../bootstrap/roles/k8s-install/tasks/main.yaml).
+- **Symptôme** : gate Phase 6
+  `etcd-snapshot: crictl introuvable (containerd requis)`. Le timer
+  `etcd-snapshot.timer` est pourtant posé et activé.
+- **Cause** : le bootstrap installe `containerd.io` + `kubelet`/`kubeadm` mais
+  **jamais `cri-tools`** — donc pas de `crictl`. Or `etcd-snapshot.sh` repose
+  sur `crictl exec` dans le static pod etcd, et le RUNBOOK utilise `crictl` pour
+  la récupération. **Le timer tourne mais chaque snapshot échoue** : un backup
+  qui ne se produit jamais.
+- **Correctif** : ajouter `cri-tools` à l'install + au `hold` du rôle
+  `k8s-install` (même dépôt `pkgs.k8s.io/v1.34`, version `1.34.0-1.1` alignée).
+- **Statut prod** : **bloquant, se reproduit identique en prod** (mêmes rôles).
+
+### 🔴 #14 — `etcd-snapshot.sh` : `env`/`sh` absents de l'image etcd distroless (impact PROD)
+
+- **Fichier** :
+  [`etcd-snapshot.sh.j2`](../bootstrap/roles/etcd-backup/templates/etcd-snapshot.sh.j2).
+- **Symptôme** (révélé une fois #13 corrigé) :
+  `OCI runtime exec failed: exec: "env": executable file not found in $PATH`,
+  puis `etcdctl snapshot save a échoué`.
+- **Cause** : le script faisait `crictl exec … env ETCDCTL_API=3 etcdctl …`.
+  L'image etcd de kubeadm (`registry.k8s.io/etcd`) est **distroless** : ni `env`
+  ni `sh` (vérifié sur le nœud). Le bloc de vérif d'intégrité avait le même
+  défaut via `sh -c` (masqué car best-effort).
+- **Correctif** : invoquer `etcdctl`/`etcdutl` **directement** (etcdctl 3.6 →
+  API v3 par défaut, `ETCDCTL_API=3` inutile). Vérif d'intégrité réécrite en
+  appels directs (`etcdutl` puis repli `etcdctl`).
+- **Validation** : snapshot **19 MB**,
+  `intégrité du snapshot vérifiée (etcdutl)`.
+- **Statut prod** : **bloquant, se reproduit identique en prod.**
+
+### 🟢 #15 — Gate Phase 6 : `$(ls …)` hors du `sudo` → faux négatif (banc-only)
+
+- **Fichier** : [`run-phases.sh`](multi-node/run-phases.sh).
+- **Symptôme** :
+  `ls: cannot access '/var/lib/etcd-backups/etcd-*.db': Permission denied` →
+  `GATE ÉCHOUÉ: aucun snapshot etcd produit` alors que le snapshot venait d'être
+  écrit.
+- **Cause** : `sudo test -s "$(ls -1t /var/lib/etcd-backups/…)"` — le `sudo` ne
+  couvre que `test` ; la substitution `$(ls …)` tourne en `debian` sur un
+  dossier `root:root 0700` → vide → `test -s ""` échoue.
+- **Correctif** : envelopper tout le pipeline dans `sudo sh -c "…"`.
+- **Statut prod** : non-applicable (gate de test uniquement).
 
 ---
 
