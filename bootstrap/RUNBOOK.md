@@ -373,7 +373,7 @@ bash ./cni.sh
 cilium connectivity test
 ```
 
-#### Optionnel — `kubeProxyReplacement` (Workstream B3)
+#### Optionnel — `kubeProxyReplacement`
 
 Cilium peut remplacer `kube-proxy` (mode IPVS+eBPF), avec de meilleures perfs
 réseau et moins de composants à maintenir. **Non activé par défaut** dans
@@ -427,7 +427,7 @@ sudo tailscale up --ssh
 
 Voir [`storage/ceph/RUNBOOK.md`](../storage/ceph/RUNBOOK.md).
 
-## Audit-log et rollback (Workstream I)
+## Audit-log et rollback
 
 ### Audit-log : qui a fait quoi quand sur chaque nœud
 
@@ -531,9 +531,10 @@ ansible-playbook -i ./hosts.yaml ./upgrade.yaml
 ### Sauvegarde etcd (SPOF assumé)
 
 Le cluster fonctionne avec **1 seul control plane** (`dirqual1`) — décision
-assumée (cf. PLAN « Workstream A12 / décision actée »). C'est un **SPOF** : la
-perte du nœud control plane → cluster inutilisable jusqu'à restauration.
-Mitigations :
+assumée (cf.
+[ADR 0002](../docs/decisions/0002-control-plane-unique-avec-endpoint.md)). C'est
+un **SPOF** : la perte du nœud control plane → cluster inutilisable jusqu'à
+restauration. Mitigations :
 
 1. **`--control-plane-endpoint cluster-api:6443` posé dès `kubeadm init`** (rôle
    `k8s-initialization`) : l'API est référencée par un nom DNS stable, donc un

@@ -2,7 +2,7 @@
 #
 # Installe ou met à jour le Kubernetes Dashboard via Helm.
 # Version du chart figée (reproductibilité) — voir `CHART_VERSION` ci-dessous.
-# Pour bumper, vérifier d'abord la matrice de compatibilité (Workstream E).
+# Pour bumper, vérifier d'abord la matrice de compatibilité (ADR 0006).
 set -euo pipefail
 
 # Chart kubernetes-dashboard : la 7.x est l'architecture multi-container

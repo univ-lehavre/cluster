@@ -7,7 +7,8 @@ compatibilité croisées : Cilium ↔ K8s, Rook ↔ K8s, Ceph ↔ Rook, containe
 K8s, chart Helm dashboard ↔ K8s. Bump l'un sans vérifier les autres → drift
 silencieux jusqu'à un échec de provisionnement.
 
-Le PLAN (Workstream E) a vérifié ces compatibilités en mai 2026.
+Ces compatibilités croisées ont été vérifiées en mai 2026 (plafond commun imposé
+par Cilium 1.19 et Rook 1.19, tous deux testés jusqu'à K8s 1.34).
 
 ## Décision
 

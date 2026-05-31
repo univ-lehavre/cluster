@@ -38,7 +38,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Accueil', link: '/' },
-      { text: 'Plan', link: '/PLAN' },
+      { text: "Plan d'action", link: '/docs/audit/12-plan-action' },
       { text: 'Banc de test', link: '/test/' },
     ],
     sidebar: [
@@ -46,7 +46,6 @@ export default defineConfig({
         text: "Vue d'ensemble",
         items: [
           { text: 'Accueil', link: '/' },
-          { text: 'Plan de reconstruction', link: '/PLAN' },
           { text: 'Garde-fous', link: '/SAFEGUARDS' },
           { text: 'Contribuer', link: '/CONTRIBUTING' },
           { text: 'Inventaire matériel', link: '/platform/hardware' },

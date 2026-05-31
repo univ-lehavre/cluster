@@ -25,6 +25,17 @@ rook-discover-7psxb                   1/1     Running   0          53s
 
 ## Création du cluster
 
+> **Pré-requis critique (rebuild / réinstallation)** — avant
+> `kubectl create -f cluster.yaml`, vérifier que **les 4 nœuds** ont bien
+> `/var/lib/rook` **et leurs disques data effacés**. Un reliquat d'un cluster
+> précédent fait redémarrer les `ceph-mon` sur un ancien état (`fsid` divergent)
+> → ils refusent de démarrer et le `CephCluster` reste bloqué. Le wipe est
+> assuré par [`cleanup.sh`](cleanup.sh) (disques) et la réinstallation OS
+> (`/var/lib/rook`, hébergé sur `/var` reformaté — cf.
+> [`bootstrap/RUNBOOK.md` § Partitionnement](../../bootstrap/RUNBOOK.md)). Ne
+> pas créer le cluster avant d'avoir **≥ 3 hôtes prêts** (le quorum `mon` et le
+> réplicat ×3 l'exigent).
+
 ```bash
 kubectl create -f cluster.yaml
 ```

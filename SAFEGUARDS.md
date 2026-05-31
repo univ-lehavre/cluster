@@ -211,9 +211,12 @@ unique, hyperconvergence, EC 2+1 datalake) et les compromis sécurité (HTTP san
 auth, dashboard cluster-admin, RStudio sans login). Voir
 [index ADR](docs/decisions/README.md).
 
-## Plan + phasage gated — [`PLAN.md`](PLAN.md)
+## Phasage gated banc → prod
 
-Phasage de **7 phases** (banc → bootstrap → CNI → Rook → SC → workloads →
-exploitation → doc). Chaque phase a un critère de validation **sur le banc avant
-la prod**. Workstreams A-I couvrent bugs, durcissement, versions, banc, ADR,
-plateforme, audit-log+rollback.
+L'ordre de déploiement (canari `dirqual1` → workers → stockage cluster-wide) et
+les gates par étape sont décrits dans
+[`bootstrap/RUNBOOK.md` § Ordre de déploiement](bootstrap/RUNBOOK.md) ; **tout
+changement de cette nature doit passer par le banc ([`test/`](test/)) avant la
+prod**. Le _pourquoi_ de chaque choix structurant est tracé dans les
+[ADR](docs/decisions/). Le reste-à-faire priorisé vit dans
+[`docs/audit/12-plan-action.md`](docs/audit/12-plan-action.md).
