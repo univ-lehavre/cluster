@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.2](https://github.com/univ-lehavre/cluster/compare/v2.1.1...v2.1.2) (2026-05-31)
+
+
+### Documentation
+
+* retire PLAN.md et migre son contenu vivant vers RUNBOOK/ADR ([0096722](https://github.com/univ-lehavre/cluster/commit/0096722585a6d80f8e54f1fd9201088a4c9959dd))
+* retire PLAN.md, migre phasage canari + wipe Ceph vers RUNBOOK/ADR ([25d490a](https://github.com/univ-lehavre/cluster/commit/25d490a4a51fb3ab30557e7af08a858692096fd4))
+
 ## [2.1.1](https://github.com/univ-lehavre/cluster/compare/v2.1.0...v2.1.1) (2026-05-29)
 
 
