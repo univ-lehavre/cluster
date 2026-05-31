@@ -13,10 +13,19 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      # release-please dépose (ou met à jour) une PR « chore(release): vX.Y.Z »
-      # à chaque push sur main. Le merge de cette PR crée le tag git, la
-      # release GitHub, et met à jour CHANGELOG.md + package.json — aucune
-      # action manuelle requise après le merge.
+      # release-please dépose (ou met à jour) une PR « chore(main): release vX.Y.Z »
+      # à chaque push sur main. L'auto-merge ci-dessous la fusionne dès que les
+      # checks requis sont verts ; le tag git, la release GitHub et la mise à
+      # jour de CHANGELOG.md + package.json suivent automatiquement.
+      #
+      # IMPORTANT — token : l'organisation univ-lehavre verrouille le GITHUB_TOKEN
+      # par défaut en lecture seule (« Write permissions for workflows are
+      # disabled by the organization »), ce qui empêche release-please de pousser
+      # le tag/la release. On utilise donc un PAT fine-grained dédié
+      # (secret RELEASE_PLEASE_TOKEN, scope = ce repo : Contents RW + Pull
+      # requests RW). Ce token, contrairement au GITHUB_TOKEN, redéclenche aussi
+      # la CI sur la PR de release — sans quoi l'auto-merge resterait bloqué en
+      # attente de checks qui ne tournent jamais.
       #
       # La version cible est dérivée des messages Conventional Commits depuis
       # le dernier tag :
@@ -24,10 +33,25 @@ jobs:
       #   - `fix:` / `perf:`      → bump patch (1.0.0 → 1.0.1)
       #   - `feat!:` ou `BREAKING CHANGE:` → bump major (1.0.0 → 2.0.0)
       #   - Autres types (`chore:`, `docs:`, `ci:`, …) → pas de bump
-      - uses: googleapis/release-please-action@v4
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           # Le `bootstrap-sha` initial est posé une fois pour signaler que
           # release-please reprend l'historique à partir du tag v1.0.0
           # (b28e0f2). Voir release-please-config.json + manifest.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Active l'auto-merge (squash) sur la PR de release dès qu'elle existe.
+      # GitHub la fusionnera tout seul quand les 6 checks requis de la branch
+      # protection (prettier, yamllint, shellcheck, kubeconform, ansible-lint,
+      # commitlint) seront verts. Le step ne fait rien si aucune PR n'a été
+      # créée/mise à jour (releases sans bump, ex. commits `docs:` seuls non
+      # publiables).
+      - name: Enable auto-merge on the release PR
+        if: ${{ steps.release.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          PR_NUMBER: ${{ fromJSON(steps.release.outputs.pr).number }}
+        run: gh pr merge "$PR_NUMBER" --auto --squash --repo "$GITHUB_REPOSITORY"
