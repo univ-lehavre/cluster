@@ -46,12 +46,19 @@ jobs:
       # Active l'auto-merge (squash) sur la PR de release dès qu'elle existe.
       # GitHub la fusionnera tout seul quand les 6 checks requis de la branch
       # protection (prettier, yamllint, shellcheck, kubeconform, ansible-lint,
-      # commitlint) seront verts. Le step ne fait rien si aucune PR n'a été
-      # créée/mise à jour (releases sans bump, ex. commits `docs:` seuls non
-      # publiables).
+      # commitlint) seront verts.
+      #
+      # Garde sur `prs_created` (booléen, toujours valide) et NON sur
+      # `fromJSON(outputs.pr)` : sur un run sans PR créée, `outputs.pr` est une
+      # chaîne vide et `fromJSON('')` casse l'évaluation du template AVANT que le
+      # `if:` ne joue (erreur « The template is not valid … Error reading JToken »
+      # observée sur le run du 2026-05-31). On lit donc le numéro de PR dans le
+      # `run:` via `outputs.pr` passé en variable (vide = inoffensif là).
       - name: Enable auto-merge on the release PR
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PR_NUMBER: ${{ fromJSON(steps.release.outputs.pr).number }}
-        run: gh pr merge "$PR_NUMBER" --auto --squash --repo "$GITHUB_REPOSITORY"
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          PR_NUMBER=$(echo "$RELEASE_PR" | jq -r '.number')
+          gh pr merge "$PR_NUMBER" --auto --squash --repo "$GITHUB_REPOSITORY"
