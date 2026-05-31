@@ -14,6 +14,22 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.4](https://github.com/univ-lehavre/cluster/compare/v2.1.3...v2.1.4) (2026-05-31)
+
+
+### Bug Fixes
+
+* **datalake:** smoke-test attend le RGW Ready + port-forward automatique ([1b917a9](https://github.com/univ-lehavre/cluster/commit/1b917a97cdee81af057a9814cc139920b41a3a85))
+* **etcd-backup:** rends le backup etcd fonctionnel (crictl + distroless) ([af3bcf6](https://github.com/univ-lehavre/cluster/commit/af3bcf6887ec26949ef4eb0a99569817d72f8771))
+* **test+etcd:** banc multi-node intégral 0→6 + backup etcd réparé (5 drifts) ([7bb3d25](https://github.com/univ-lehavre/cluster/commit/7bb3d2566d27986ab7d97fef91b6eb283b28d9c9))
+* **test:** aligne le banc multi-node sur /dev/sd* (VirtioSCSI, pas vd*) ([fc3d1e2](https://github.com/univ-lehavre/cluster/commit/fc3d1e279bcde8f4db813298e53ca251827ef498))
+
+
+### Documentation
+
+* **test:** consigne le Run [#3](https://github.com/univ-lehavre/cluster/issues/3) et le drift [#12](https://github.com/univ-lehavre/cluster/issues/12) (smoke-test datalake) ([96e955f](https://github.com/univ-lehavre/cluster/commit/96e955f1641ca3629a440efaeb9327e1c2c465f9))
+* **test:** note que le Run [#3](https://github.com/univ-lehavre/cluster/issues/3) a validé les Phases 3-5 (table gap obsolète) ([dc9b1f5](https://github.com/univ-lehavre/cluster/commit/dc9b1f54d156de7c0d45803423c287c2912d4d43))
+
 ## [2.1.3](https://github.com/univ-lehavre/cluster/compare/v2.1.2...v2.1.3) (2026-05-31)
 
 
