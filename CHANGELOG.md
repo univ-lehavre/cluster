@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.3](https://github.com/univ-lehavre/cluster/compare/v2.1.2...v2.1.3) (2026-05-31)
+
+
+### Documentation
+
+* **safeguards:** documente la publication automatique des releases (PAT + auto-merge) ([2acf748](https://github.com/univ-lehavre/cluster/commit/2acf74863df5a4e2db9c5f3c5ce2bf7cee81fbf0))
+* **safeguards:** retire le paragraphe PAT redondant ([1d12e0c](https://github.com/univ-lehavre/cluster/commit/1d12e0c439c9e95e55a23b44674f45e636d5defb))
+
 ## [2.1.2](https://github.com/univ-lehavre/cluster/compare/v2.1.1...v2.1.2) (2026-05-31)
 
 
