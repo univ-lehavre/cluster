@@ -158,11 +158,25 @@ phase_ceph() {
         dssh "${ip}" 'sudo mkdir -p /var/lib/rook && sudo chmod 755 /var/lib/rook'
     done
 
-    # Manifeste cluster surchargé pour le banc (metadataDevice sde) — non committé
+    # Manifeste cluster surchargé pour le banc — non committé. Deux surcharges :
+    #  1. metadataDevice sde (block.db VirtioSCSI, cf. #11)
+    #  2. osd.requests.memory 2Gi → 512Mi : sur banc 5 GiB/VM, 2Gi ne laisse
+    #     scheduler qu'1 OSD/hôte → les autres restent Pending (drift #10) et,
+    #     avec tous les pools (block ×3 + EC + cephfs + RGW), le cluster sature
+    #     en PGs et le peering se fige. 512Mi laisse monter les ~3 OSD/hôte. La
+    #     valeur prod (2Gi, cluster.yaml) reste correcte — c'est une surcharge
+    #     banc, comme le conseille le scénario 08. L'awk ne touche QUE le bloc
+    #     osd: (memory: '2Gi' apparaît aussi sous mon:).
     local cluster_bench="${HERE}/.vagrant/cluster-bench.yaml"
     sed "s/metadataDevice: 'nvme1n1'/metadataDevice: 'sde'/" \
-        "${REPO}/storage/ceph/cluster.yaml" > "${cluster_bench}"
+        "${REPO}/storage/ceph/cluster.yaml" \
+        | awk '
+            /^[[:space:]]*osd:[[:space:]]*$/ { in_osd = 1 }
+            in_osd && /memory: .2Gi./ { sub(/2Gi/, "512Mi"); in_osd = 0 }
+            { print }
+          ' > "${cluster_bench}"
     grep -q "metadataDevice: 'sde'" "${cluster_bench}" || die "surcharge metadataDevice=sde non appliquée"
+    grep -q "memory: '512Mi'" "${cluster_bench}" || die "surcharge osd.requests.memory=512Mi non appliquée"
 
     log "  apply crds → common → operator"
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/crds.yaml"
