@@ -8,8 +8,8 @@
 # les phases sont idempotentes (rejouables).
 #
 # Surcharges BANC déjà câblées (vs prod) :
-#   - metadataDevice: vde   (banc VirtIO) au lieu de nvme1n1 (prod)
-#   - CEPH_HDD_GLOB=/sys/block/vd[b-z], CEPH_BLOCK_DEVICE=vde (state.sh)
+#   - metadataDevice: sde   (banc VirtioSCSI) au lieu de nvme1n1 (prod)
+#   - CEPH_HDD_GLOB=/sys/block/sd[b-z], CEPH_BLOCK_DEVICE=sde (state.sh)
 #   - kubeconfig récupéré depuis dirqual1 et réécrit sur l'IP privée du banc
 #
 # Usage :
@@ -35,15 +35,20 @@ NODES=(192.168.67.11 192.168.67.12 192.168.67.13)
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 SSH_KEY="${HOME}/.vagrant.d/insecure_private_keys/vagrant.key.ed25519"
 
-# Surcharges banc (devices VirtIO vd* au lieu de sd*/nvme1n1 prod).
+# Surcharges banc (devices sd* via VirtioSCSI ; block.db sde au lieu de
+# nvme1n1 prod). Le contrôleur de la box bento/debian-13 est de type
+# VirtioSCSI : il présente ses disques au noyau comme du SCSI (/dev/sd*),
+# PAS comme du virtio-blk (/dev/vd*). L'OS est sur sda, les 4 disques Ceph
+# sur sdb-sde — même schéma de nommage que la prod (HDD sd*), seul le
+# block.db diffère (sde ici vs nvme1n1 en prod). Cf. RESULTS.md drift 0b.
 # state.sh : détection des disques bruts (couche 3b).
-export CEPH_HDD_GLOB='/sys/block/vd[b-z]'   # HDD data (jamais vda = OS)
-export CEPH_BLOCK_DEVICE=vde                 # block.db (4e disque VirtIO)
+export CEPH_HDD_GLOB='/sys/block/sd[b-z]'   # HDD data (jamais sda = OS)
+export CEPH_BLOCK_DEVICE=sde                 # block.db (4e disque VirtioSCSI)
 export CEPH_MIN_HDD=3
 # cleanup.sh (si lancé à la main pour repartir à neuf) : mêmes devices.
-# /dev/vd[b-z] exclut vda (OS) ; /dev/vde = block.db.
-export DATA_DEVICE_GLOB='/dev/vd[b-z]'
-export NVME_BLOCK_DEVICE=/dev/vde
+# /dev/sd[b-z] exclut sda (OS) ; /dev/sde = block.db.
+export DATA_DEVICE_GLOB='/dev/sd[b-z]'
+export NVME_BLOCK_DEVICE=/dev/sde
 
 KUBECTL=(kubectl --kubeconfig "${KUBECONFIG_LOCAL}")
 
@@ -109,9 +114,10 @@ phase_up() {
         die "interface VBox host-only sur 10.67.x détectée — collision prod possible (cf. drift #6)"
     fi
     (cd "${HERE}" && vagrant up --provider=virtualbox)
-    # GATE : 3 VMs running + disques bruts vd[bcd]+vde sans partition
+    # GATE : 3 VMs running + disques bruts sd[bcd]+sde sans partition
+    # (VirtioSCSI → /dev/sd* ; sda = OS, sdb-sde = disques Ceph attachés)
     for ip in "${NODES[@]}"; do
-        dssh "${ip}" 'lsblk -dno NAME,TYPE | grep -q "^vdb"' || die "${ip} : disques data absents"
+        dssh "${ip}" 'lsblk -dno NAME,TYPE | grep -q "^sdb"' || die "${ip} : disques data absents"
     done
     ok "3 VMs up, disques data présents"
     log "⏱️  Pense à : (cd ${HERE} && vagrant snapshot save 01-fresh-vms)"
@@ -141,7 +147,7 @@ phase_bootstrap() {
 phase_ceph() {
     preflight
     [ -f "${KUBECONFIG_LOCAL}" ] || fetch_kubeconfig
-    log "Phase 3 — Rook-Ceph (banc : metadataDevice=vde)"
+    log "Phase 3 — Rook-Ceph (banc : metadataDevice=sde)"
 
     # Pré-gate : disques bruts (state.sh couche 3b, surcharges banc exportées)
     log "  Vérif disques bruts (state.sh)"
@@ -152,11 +158,11 @@ phase_ceph() {
         dssh "${ip}" 'sudo mkdir -p /var/lib/rook && sudo chmod 755 /var/lib/rook'
     done
 
-    # Manifeste cluster surchargé pour le banc (metadataDevice vde) — non committé
+    # Manifeste cluster surchargé pour le banc (metadataDevice sde) — non committé
     local cluster_bench="${HERE}/.vagrant/cluster-bench.yaml"
-    sed "s/metadataDevice: 'nvme1n1'/metadataDevice: 'vde'/" \
+    sed "s/metadataDevice: 'nvme1n1'/metadataDevice: 'sde'/" \
         "${REPO}/storage/ceph/cluster.yaml" > "${cluster_bench}"
-    grep -q "metadataDevice: 'vde'" "${cluster_bench}" || die "surcharge metadataDevice=vde non appliquée"
+    grep -q "metadataDevice: 'sde'" "${cluster_bench}" || die "surcharge metadataDevice=sde non appliquée"
 
     log "  apply crds → common → operator"
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/crds.yaml"

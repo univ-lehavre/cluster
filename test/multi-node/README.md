@@ -3,7 +3,9 @@
 3 VMs Debian 13 arm64 reproduisant la topologie de prod à l'échelle : 1 control
 plane (`dirqual1`) + 2 workers (`dirqual2-3`), réseau privé `192.168.67.0/24`,
 chaque VM dotée de **3 HDD virtuels + 1 NVMe virtuel** pour exercer Rook-Ceph
-(OSDs, block.db, quorum mon).
+(OSDs, block.db, quorum mon). Le contrôleur de la box est **VirtioSCSI**, donc
+les disques apparaissent en `/dev/sd*` (sda = OS, sdb-sde = disques Ceph) — même
+nommage que la prod, cf. [drift 0b](../RESULTS.md).
 
 > ⚠️ **Plage IP volontairement disjointe de la prod (10.67.2.0/22)** : le banc
 > utilise `192.168.67.0/24` pour éviter qu'une interface VBox host-only capture
@@ -56,7 +58,7 @@ sur macOS. (Ce n'était pas le cas de l'ancienne plage `10.67.2.0/24` — cf. dr
 ## Orchestrateur — `run-phases.sh`
 
 Pour dérouler les phases 1-6 avec les **surcharges banc déjà câblées**
-(`metadataDevice: vde`, `CEPH_HDD_GLOB`, kubeconfig réécrit sur l'IP privée) et
+(`metadataDevice: sde`, `CEPH_HDD_GLOB`, kubeconfig réécrit sur l'IP privée) et
 un **gate** entre chaque phase :
 
 ```bash
@@ -81,11 +83,11 @@ cd test/multi-node
 vagrant up --provider=virtualbox
 ```
 
-Au 1ᵉʳ `up`, Vagrant crée pour chaque VM (contrôleur **VirtIO**, cf. drift 0a/0b
-dans [RESULTS.md](../RESULTS.md)) :
+Au 1ᵉʳ `up`, Vagrant crée pour chaque VM (contrôleur **VirtioSCSI**, cf. drift
+0a/0b dans [RESULTS.md](../RESULTS.md)) :
 
-- 3 HDD virtuels `*-hdd[1-3].vdi` (10 GiB chacun → `/dev/vdb`, `vdc`, `vdd`)
-- 1 « NVMe » block.db `*-nvme.vdi` (5 GiB, 4ᵉ disque VirtIO → `/dev/vde`)
+- 3 HDD virtuels `*-hdd[1-3].vdi` (10 GiB chacun → `/dev/sdb`, `sdc`, `sdd`)
+- 1 « NVMe » block.db `*-nvme.vdi` (5 GiB, 4ᵉ disque VirtioSCSI → `/dev/sde`)
 
 Les disques persistent à travers `vagrant halt/up`, mais sont supprimés par
 `vagrant destroy`.
@@ -94,14 +96,15 @@ Les disques persistent à travers `vagrant halt/up`, mais sont supprimés par
 >
 > - IPs : `192.168.67.X` (banc) vs `10.67.2.X` (prod) — pour éviter le conflit
 >   de routage (drift #6).
-> - Disques : HDD `/dev/vd[b-d]` + block.db `/dev/vde` (banc, contrôleur VirtIO)
->   vs HDD `/dev/sd*` + `/dev/nvme1n1` (prod, NVMe matériel).
+> - Disques : HDD `/dev/sd[b-d]` + block.db `/dev/sde` (banc, VirtioSCSI) vs HDD
+>   `/dev/sd*` + `/dev/nvme1n1` (prod, NVMe matériel). Seul le block.db diffère
+>   ; le nommage HDD `sd*` est identique à la prod.
 >
 > [`bootstrap/state.sh`](../../bootstrap/state.sh) accepte des variables d'env
 > pour s'adapter :
 >
 > ```bash
-> CEPH_HDD_GLOB='/sys/block/vd[b-z]' CEPH_BLOCK_DEVICE=vde CEPH_MIN_HDD=3 \
+> CEPH_HDD_GLOB='/sys/block/sd[b-z]' CEPH_BLOCK_DEVICE=sde CEPH_MIN_HDD=3 \
 >   bash bootstrap/state.sh 192.168.67.11 192.168.67.12 192.168.67.13
 > ```
 >
@@ -165,7 +168,7 @@ ssh debian@192.168.67.11 'bash -s' < ../../bootstrap/cni.sh
 Pré-vérification disques bruts (le pré-requis Phase 3) :
 
 ```bash
-CEPH_HDD_GLOB='/sys/block/vd[b-z]' CEPH_BLOCK_DEVICE=vde CEPH_MIN_HDD=3 \
+CEPH_HDD_GLOB='/sys/block/sd[b-z]' CEPH_BLOCK_DEVICE=sde CEPH_MIN_HDD=3 \
   bash ../../bootstrap/state.sh 192.168.67.11 192.168.67.12 192.168.67.13
 ```
 
@@ -173,7 +176,7 @@ La couche 3b doit afficher :
 
 ```text
 ✓ dirqual1 : 3/3 HDD bruts (≥ 3 requis)
-✓ dirqual1 : /dev/vde présent et brut (block.db)
+✓ dirqual1 : /dev/sde présent et brut (block.db)
 ✓ dirqual1 : /var/lib/rook absent ou vide
 ```
 
@@ -184,15 +187,15 @@ cd ../../storage/ceph
 ssh debian@192.168.67.11 'sudo mkdir -p /var/lib/rook'   # créé par Rook, sinon
 kubectl apply -f crds.yaml -f common.yaml -f operator.yaml
 # attendre l'operator Ready
-# surcharger metadataDevice nvme1n1 -> vde AVANT d'appliquer :
-sed "s/metadataDevice: 'nvme1n1'/metadataDevice: 'vde'/" cluster.yaml \
+# surcharger metadataDevice nvme1n1 -> sde AVANT d'appliquer :
+sed "s/metadataDevice: 'nvme1n1'/metadataDevice: 'sde'/" cluster.yaml \
   | kubectl apply -f -
 ```
 
 > ⚠️ Le `metadataDevice: 'nvme1n1'` codé dans `cluster.yaml` est pour la prod.
-> Sur ce banc le block.db est `/dev/vde` (4ᵉ disque VirtIO) : surcharger comme
-> ci-dessus, ou laisser Rook auto-détecter (`metadataDevice: ""` +
-> `useAllDevices: true`). `run-phases.sh ceph` applique la surcharge `vde`.
+> Sur ce banc le block.db est `/dev/sde` (4ᵉ disque VirtioSCSI) : surcharger
+> comme ci-dessus, ou laisser Rook auto-détecter (`metadataDevice: ""` +
+> `useAllDevices: true`). `run-phases.sh ceph` applique la surcharge `sde`.
 
 ## 6. Démolir
 

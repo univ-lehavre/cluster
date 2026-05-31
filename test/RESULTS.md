@@ -6,11 +6,11 @@
 
 ## Topologie testée
 
-| VM       | IP NAT         | IP privée  | Rôle          | Disques                                     |
-| -------- | -------------- | ---------- | ------------- | ------------------------------------------- |
-| dirqual1 | 127.0.0.1:2222 | 10.67.2.11 | control plane | sda=OS 64G, sdb-sdd=HDD 10G ×3, sde=NVMe 5G |
-| dirqual2 | 127.0.0.1:2200 | 10.67.2.12 | worker        | (idem, ordre différent)                     |
-| dirqual3 | 127.0.0.1:2201 | 10.67.2.13 | worker        | (idem, ordre différent)                     |
+| VM       | IP NAT         | IP privée     | Rôle          | Disques                                     |
+| -------- | -------------- | ------------- | ------------- | ------------------------------------------- |
+| dirqual1 | 127.0.0.1:2222 | 192.168.67.11 | control plane | sda=OS 64G, sdb-sdd=HDD 10G ×3, sde=NVMe 5G |
+| dirqual2 | 127.0.0.1:2200 | 192.168.67.12 | worker        | (idem, ordre différent)                     |
+| dirqual3 | 127.0.0.1:2201 | 192.168.67.13 | worker        | (idem, ordre différent)                     |
 
 Box : `bento/debian-13` arm64 v202510.26.0, kernel `6.12.48+deb13-arm64`.
 
@@ -289,6 +289,45 @@ hôte). HEALTH_OK quand même car suffit pour réplicat ×3 + `failureDomain: ho
 **Statut prod** : OK (251 GiB/nœud). À vérifier via le scénario
 [`08-resource-limits-audit.sh`](scenarios/08-resource-limits-audit.sh) que la
 réservation cumulée ne pose pas problème quand d'autres workloads cohabitent.
+
+---
+
+## Run #3 (2026-05-31) — relance banc intégral, gate Phase 0 rouge
+
+Relance de `run-phases.sh all` sur 3 VMs fraîches. **Gate Phase 0 échoué
+immédiatement** : `192.168.67.11 : disques data absents`. **1 drift détecté
+(#11), banc-only** — une régression de nommage introduite après le Run #2.
+
+### 🔴 #11 — `run-phases.sh` câblé sur `/dev/vd*` alors que VirtioSCSI expose `/dev/sd*`
+
+- **Fichiers** : [`run-phases.sh`](multi-node/run-phases.sh) (gate Phase 0,
+  `CEPH_HDD_GLOB`, `CEPH_BLOCK_DEVICE`, surcharge `metadataDevice`,
+  `DATA_DEVICE_GLOB`, `NVME_BLOCK_DEVICE`),
+  [`Vagrantfile`](multi-node/Vagrantfile) (commentaires),
+  [README multi-node](multi-node/README.md).
+- **Symptôme** : le gate `lsblk … | grep "^vdb"` ne matche jamais ; les 3 VMs
+  bootent pourtant avec leurs disques. `lsblk` sur dirqual1 montre `sda` (OS) +
+  `sdb/sdc/sdd` (HDD) + `sde` (block.db) — **aucun `vd*`**.
+- **Cause** : le contrôleur de la box `bento/debian-13` est de type
+  **`VirtioSCSI`** (vérifié : `VBoxManage showvminfo dirqual1` →
+  `storagecontrollertype0="VirtioSCSI"`). VirtioSCSI présente ses disques au
+  noyau comme du **SCSI** → `/dev/sd*`. Seul `virtio-blk` produirait `/dev/vd*`.
+  L'hypothèse « VirtioSCSI ⇒ `vd*` » des drifts 0a/0b et de `run-phases.sh`
+  était fausse. Le Run #2 avait d'ailleurs déjà observé `sd*` (cf. table
+  topologie).
+- **À noter** : l'audit du 2026-05-29 ([02-tests.md](../docs/audit/02-tests.md))
+  avait le diagnostic **à l'envers** — il qualifiait les commentaires `sd*` de
+  vestige obsolète « contredit par le code VirtIO `vd*` ». C'est l'inverse : le
+  code `vd*` était la régression, les commentaires `sd*` (et le drift 0b ligne
+  76, « `/dev/sde` ») avaient raison.
+- **Correctif appliqué** : `run-phases.sh` repasse sur `sd*` partout (gate
+  `^sdb`, `CEPH_HDD_GLOB=/sys/block/sd[b-z]`, `CEPH_BLOCK_DEVICE=sde`,
+  `metadataDevice: 'sde'`, `DATA_DEVICE_GLOB=/dev/sd[b-z]`,
+  `NVME_BLOCK_DEVICE=/dev/sde`). `/sys/block/sd[b-z]` exclut naturellement `sda`
+  (OS) — même schéma de nommage HDD que la prod ; seul le block.db diffère
+  (`sde` banc vs `nvme1n1` prod). Commentaires Vagrantfile + README alignés.
+- **Statut prod** : non-applicable (régression purement banc). En prod les
+  défauts `/sys/block/sd*` + `nvme1n1` restent corrects.
 
 ---
 
