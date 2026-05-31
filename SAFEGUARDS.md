@@ -64,31 +64,34 @@ Posés par [Lefthook](https://lefthook.dev/) au premier `pnpm install` (config :
 - À chaque push sur `main` :
   [release-please](https://github.com/googleapis/release-please) ouvre (ou met à
   jour) une PR de release qui bumpe `package.json` et `CHANGELOG.md` d'après les
-  Conventional Commits. Le merge de cette PR pousse le tag `vX.Y.Z` et publie
-  une [GitHub Release](https://github.com/univ-lehavre/cluster/releases). →
-  Aucune version flottante en main, et chaque tag est lié à un set de commits
-  explicitement validé par un opérateur.
+  Conventional Commits. **L'auto-merge (squash) est activé sur cette PR dès sa
+  création** : GitHub la fusionne automatiquement quand les checks requis sont
+  verts, ce qui pousse le tag `vX.Y.Z` et publie une
+  [GitHub Release](https://github.com/univ-lehavre/cluster/releases). →
+  Publication **100 % automatique** ; aucune version flottante en main, chaque
+  tag lié à un set de commits validé par la CI.
 
-> ⚠️ **Pré-requis organisation (sinon release-please ne publie rien).**
-> release-please crée la PR de release, puis le tag + la GitHub Release, avec le
-> `GITHUB_TOKEN`. Cela exige que le réglage **Settings → Actions → General →
-> Workflow permissions → « Allow GitHub Actions to create and approve pull
-> requests »** soit activé. Sur `univ-lehavre`, ce réglage est verrouillé **au
-> niveau organisation** : il doit être activé par un admin org (l'API repo
-> renvoie sinon
-> `409 Write permissions for workflows are disabled by the organization`). Tant
-> qu'il est désactivé :
+> ✅ **Token : PAT fine-grained (`RELEASE_PLEASE_TOKEN`).** L'organisation
+> `univ-lehavre` verrouille le `GITHUB_TOKEN` par défaut en lecture seule
+> (`default_workflow_permissions` ne peut pas passer à `write` au niveau repo →
+> `409 Write permissions for workflows are disabled by the organization`). Avec
+> ce token bridé, release-please ouvrait la PR mais ne pouvait ni pousser le tag
+> ni publier la release. On utilise donc un **PAT fine-grained** (scope = ce
+> repo, `Contents: RW` + `Pull requests: RW`) déposé en secret
+> `RELEASE_PLEASE_TOKEN` et injecté via `with: token:` dans `release.yml`. Il
+> débloque tag + release **et** redéclenche la CI sur la PR de release — sans
+> quoi l'auto-merge resterait en attente de checks qui ne tournent jamais.
+> Réglage repo associé : `allow_auto_merge=true`.
 >
-> - la PR de release n'est jamais créée (le job `release-please` échoue avec
->   `GitHub Actions is not permitted to create or approve pull requests`) ;
-> - faute de tag publié, release-please considère la version précédente comme
->   non publiée et **re-propose une version toujours plus haute à chaque push**
->   (boucle observée le 2026-05-29 : `2.0.0` jamais taguée → `3.0.0`
->   reproposée).
+> ⚠️ **Rotation** : un PAT expire. À renouveler avant échéance (même scope, même
+> nom de secret), sinon les releases se rebloquent silencieusement.
 >
-> **Rattrapage manuel** d'une release bloquée (le contenu de `main` est déjà bon
-> : `package.json`, `.release-please-manifest.json` et `CHANGELOG.md` portent la
-> bonne version) :
+> 🛟 **Filet de sécurité — symptôme d'un token absent/expiré** : la PR de
+> release n'aboutit plus, et faute de tag publié release-please **re-propose une
+> version toujours plus haute à chaque push** (boucle observée le 2026-05-29 :
+> `2.0.0` jamais taguée → `3.0.0` reproposée). **Rattrapage manuel** (le contenu
+> de `main` est déjà bon : `package.json`, `.release-please-manifest.json` et
+> `CHANGELOG.md` portent la bonne version) :
 >
 > ```bash
 > # 1. Publier le tag + la release sur le HEAD de main
