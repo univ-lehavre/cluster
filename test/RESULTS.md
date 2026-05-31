@@ -273,9 +273,19 @@ kubectl apply --server-side -f \
     https://raw.githubusercontent.com/ceph/ceph-csi-operator/v0.3.0/deploy/all-in-one/install.yaml
 ```
 
-**Statut prod** : **bloquant** — le drift se reproduira identique en prod.
-Action requise : ajouter `storage/ceph/csi-operator.yaml` au dépôt + documenter
-dans le RUNBOOK Ceph qu'il faut l'appliquer **avant** `cluster.yaml`.
+**Statut prod** : ~~bloquant~~ → **RÉSOLU** (cf. note ci-dessous), pas via le
+`ceph-csi-operator` mais en **désactivant** la délégation à cet opérateur.
+
+> ✅ **Résolu (commit `1bc5a17`, 2026-05-29 ; confirmé au Run #3)** : plutôt que
+> d'ajouter `csi-operator.yaml`/`csi-drivers.yaml`, `operator.yaml` pose
+> **`ROOK_USE_CSI_OPERATOR: "false"`** → Rook utilise son **CSI intégré
+> classique** (les plugins `csi-rbdplugin`/`csi-cephfsplugin` sont déployés par
+> l'operator lui-même), sans le `ceph-csi-operator` séparé, donc **sans** les
+> CRDs `csi.ceph.io` ni d'objets `Driver` à créer. Au Run #3, Phase 3
+> (HEALTH_OK) et Phase 4 (PVC Bound) passent **sans rien appliquer à la main**.
+> Ne PAS versionner `csi-operator.yaml`/`csi-drivers.yaml` : ce serait
+> réintroduire la complexité que le flag évite (#8 et #9 tombent tous deux avec
+> ce flag).
 
 ### 🟠 #9 — Driver CSI pas instancié → PVC pending (impact PROD)
 
@@ -284,8 +294,9 @@ dans le RUNBOOK Ceph qu'il faut l'appliquer **avant** `cluster.yaml`.
 Sans eux : `PVC` reste `Pending` avec
 `Waiting for external provisioner 'rook-ceph.rbd.csi.ceph.com'`.
 
-**Statut** : non corrigé dans ce run. À documenter pour Phase 3 prod :
-`storage/ceph/csi-drivers.yaml` qui pose les Driver CRs RBD + CephFS.
+**Statut** : **RÉSOLU avec #8** — `ROOK_USE_CSI_OPERATOR: "false"` supprime la
+notion même d'objet `Driver` (CSI intégré). Plus de `csi-drivers.yaml` à poser.
+Confirmé au Run #3 : PVC test **Bound**, plugins CSI Running.
 
 ### 🟠 #10 — OSDs Pending : `osd.requests.memory=2Gi` (banc-spécifique)
 
@@ -309,7 +320,8 @@ passe.
 - ✅ **Phase 1-2** : bootstrap + Cilium, 3 nœuds Ready (drifts #4/#7 ne se
   reproduisent plus — `kubelet_node_ip` + route ClusterIP en place).
 - ✅ **Phase 3** : Rook-Ceph **HEALTH_OK**, `metadataDevice: sde`, pas d'erreur
-  CSI (drift #8 résolu via `csi-operator`).
+  CSI — drifts #8/#9 résolus via `ROOK_USE_CSI_OPERATOR: "false"` (CSI intégré,
+  pas le `ceph-csi-operator` séparé), aucun manifeste CSI à appliquer.
 - ✅ **Phase 4** : 1 seule SC default, PVC test Bound.
 - ✅ **Phase 5** : WordPress + MySQL Running ; **smoke-test datalake S3 vert**
   (PUT/LIST/GET/DIFF) après #12. 5 OBC applicatifs créés.
@@ -445,7 +457,9 @@ auto-documenté, idempotent, avec cleanup automatique :
 | 07  | Cilium connectivity test        | Tests Cilium                                       |
 | 08  | Audit requests/limits Rook-Ceph | Dimensionnement vs scheduling                      |
 
-**État** : les 8 scripts sont **écrits, shellcheck vert, prêts à dérouler**.
-Leur **exécution complète sur le banc** est gated par le drift #9 (Driver CSI).
-En prod, ils tourneront de bout en bout après que `csi-operator.yaml` +
-`csi-drivers.yaml` soient appliqués.
+**État** : les 8 scripts sont **écrits, shellcheck vert, prêts à dérouler**. Le
+blocage CSI (drift #9) qui empêchait leur exécution est **levé** depuis
+`ROOK_USE_CSI_OPERATOR: "false"` (cf. #8/#9) : le Run #3 a validé PVC Bound +
+smoke-test S3, donc le stockage bloc et objet répond. Reste à **les dérouler
+01-08 de bout en bout et consigner les exit codes réels** (prochaine session de
+banc) — c'est désormais possible.

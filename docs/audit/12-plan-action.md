@@ -40,7 +40,7 @@ récupération. Un seul incident peut être irréversible.
 | 12  | **bats-core** sur les fonctions pures de `state.sh` (classification passwd, comptage HDD, parsing) — **meilleur ROI du dépôt**                                          | [09](09-langage-scripts.md) | Moyen  |
 | 13  | **Corriger les faux-positifs** des scénarios 04 et 05 (`exit 1` à l'expiration des boucles d'attente)                                                                   | [02](02-tests.md)           | Faible |
 | 14  | **Passer le parsing `ceph` en `-f json \| jq`** (scénarios 03/05) ; robustifier le passage de données de `state.sh` (JSON+jq) ; lire `getent shadow` au lieu de `chage` | [09](09-langage-scripts.md) | Faible |
-| 15  | Résoudre le drift #9 (CSI) puis dérouler les 8 scénarios de bout en bout et consigner les exit codes                                                                    | [02](02-tests.md)           | Moyen  |
+| 15  | ~~Résoudre le drift #9 (CSI)~~ ✅ fait (`ROOK_USE_CSI_OPERATOR: "false"`) → reste : dérouler les 8 scénarios de bout en bout et consigner les exit codes                | [02](02-tests.md)           | Moyen  |
 
 ## Priorité 5 — Découvrabilité & opérabilité jour 2
 

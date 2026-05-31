@@ -80,6 +80,13 @@ unitaire Ansible (`molecule`).
   attendant, marquer les scénarios « non validés » plutôt que « reproductibles
   ».
 
+  > ℹ️ **Mise à jour 2026-05-31** : le drift #9 est résolu — mais **pas** en
+  > ajoutant `csi-operator.yaml`/`csi-drivers.yaml` (qui réintroduiraient la
+  > complexité). `operator.yaml` pose `ROOK_USE_CSI_OPERATOR: "false"` → CSI
+  > intégré, plus de CRDs `csi.ceph.io` ni d'objet `Driver`. Le Run #3 a validé
+  > PVC Bound + smoke-test S3 ; le blocage des scénarios 01-08 est donc levé,
+  > reste à les dérouler de bout en bout. Cf. RESULTS.md #8/#9.
+
 ### Mineur — Scénario 03 ne teste pas la continuité des I/O annoncée
 
 - **Fichier** : `test/scenarios/03-worker-loss.sh`
