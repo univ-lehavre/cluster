@@ -43,14 +43,36 @@ cleanup() {
     fi
     kubectl -n "$NS" delete -f "${HERE}/user-smoke.yaml" --wait=false 2>/dev/null || true
 }
+# Le trap EXIT est posé plus bas, une fois forward_cleanup défini, pour
+# fermer aussi l'éventuel port-forward. Si on échoue avant (création OBC /
+# attente store), ce trap précoce garantit quand même le cleanup OBC.
 trap cleanup EXIT
 
 # ─── 1. Création du user + bucket ─────────────────────────────────────
 log "Apply ${HERE}/user-smoke.yaml (CephObjectStoreUser + ObjectBucketClaim)…"
 kubectl apply -f "${HERE}/user-smoke.yaml"
 
-log "Attendre que le Secret de l'OBC soit créé (timeout 60s)…"
-for _ in $(seq 1 30); do
+# L'OBC ne peut converger qu'une fois le RGW joignable. Sur un banc lent
+# (arm64), le RGW met 80-120 s à démarrer après le CephObjectStore : sans
+# cette attente, le provisioner OBC boucle sur « connection refused » et le
+# Secret n'apparaît jamais dans le délai. On attend donc d'abord le store
+# Ready + un pod RGW Ready, PUIS le Secret. Délai global réglable.
+STORE=${STORE:-datalake}
+RGW_TIMEOUT=${RGW_TIMEOUT:-240}
+SECRET_TIMEOUT=${SECRET_TIMEOUT:-120}
+
+log "Attendre le CephObjectStore ${STORE} Ready (timeout ${RGW_TIMEOUT}s)…"
+kubectl -n "$NS" wait --for=jsonpath='{.status.phase}'=Ready \
+    "cephobjectstore/${STORE}" --timeout="${RGW_TIMEOUT}s" \
+    || fail "CephObjectStore ${STORE} pas Ready. Vérifier : kubectl -n ${NS} describe cephobjectstore ${STORE}"
+
+log "Attendre qu'un pod RGW soit Ready (timeout ${RGW_TIMEOUT}s)…"
+kubectl -n "$NS" wait --for=condition=Ready pod \
+    -l "app=rook-ceph-rgw,rook_object_store=${STORE}" --timeout="${RGW_TIMEOUT}s" \
+    || fail "Aucun pod RGW Ready. Vérifier : kubectl -n ${NS} get pods -l app=rook-ceph-rgw"
+
+log "Attendre que le Secret de l'OBC soit créé (timeout ${SECRET_TIMEOUT}s)…"
+for _ in $(seq 1 "$((SECRET_TIMEOUT / 2))"); do
     if kubectl -n "$NS" get secret "$OBC" >/dev/null 2>&1; then
         break
     fi
@@ -65,16 +87,40 @@ AWS_SECRET_ACCESS_KEY=$(kubectl -n "$NS" get secret "$OBC" -o jsonpath='{.data.A
 BUCKET_HOST=$(kubectl -n "$NS" get configmap "$OBC" -o jsonpath='{.data.BUCKET_HOST}' || true)
 BUCKET_PORT=$(kubectl -n "$NS" get configmap "$OBC" -o jsonpath='{.data.BUCKET_PORT}' || true)
 
-# Endpoint S3 : utiliser ENDPOINT en priorité, sinon BUCKET_HOST:BUCKET_PORT
-# du ConfigMap (résolvable depuis l'intérieur du cluster), sinon
-# port-forward sur le service rook-ceph-rgw-datalake.
+# Endpoint S3, par ordre de priorité :
+#   1. ENDPOINT explicite (override).
+#   2. BUCKET_HOST:BUCKET_PORT du ConfigMap SI l'hôte est résolvable d'ici
+#      (cas « lancé dans un pod du cluster » : DNS interne *.svc joignable).
+#   3. Fallback port-forward sur le service RGW (cas « lancé depuis le poste
+#      de contrôle » : le DNS interne *.svc n'est pas résolvable). C'est le
+#      chemin utilisé par run-phases.sh.
+PF_PID=""
+forward_cleanup() { [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null || true; }
+trap 'forward_cleanup; cleanup' EXIT
+
 if [ -n "${ENDPOINT:-}" ]; then
     S3_ENDPOINT="$ENDPOINT"
-elif [ -n "$BUCKET_HOST" ] && [ -n "$BUCKET_PORT" ]; then
-    # Probable que ça ne marche que dans un pod du cluster, sinon fallback
+elif [ -n "$BUCKET_HOST" ] && [ -n "$BUCKET_PORT" ] \
+    && host "$BUCKET_HOST" >/dev/null 2>&1; then
     S3_ENDPOINT="http://${BUCKET_HOST}:${BUCKET_PORT}"
 else
-    fail "Pas d'ENDPOINT : passer ENDPOINT=http://… ou lancer dans un pod du cluster"
+    # Port-forward sur le service RGW. Port local fixe pour rester idempotent.
+    RGW_SVC=${RGW_SVC:-rook-ceph-rgw-${STORE}}
+    RGW_SVC_PORT=${RGW_SVC_PORT:-80}
+    PF_LOCAL_PORT=${PF_LOCAL_PORT:-38080}
+    log "DNS interne non résolvable d'ici → port-forward svc/${RGW_SVC} ${PF_LOCAL_PORT}→${RGW_SVC_PORT}"
+    kubectl -n "$NS" port-forward "svc/${RGW_SVC}" "${PF_LOCAL_PORT}:${RGW_SVC_PORT}" \
+        >/dev/null 2>&1 &
+    PF_PID=$!
+    # Attendre que le tunnel accepte les connexions (max 20s).
+    for _ in $(seq 1 20); do
+        if curl -fsS -o /dev/null "http://127.0.0.1:${PF_LOCAL_PORT}/" 2>/dev/null; then
+            break
+        fi
+        kill -0 "$PF_PID" 2>/dev/null || fail "port-forward RGW interrompu (svc/${RGW_SVC} introuvable ?)"
+        sleep 1
+    done
+    S3_ENDPOINT="http://127.0.0.1:${PF_LOCAL_PORT}"
 fi
 
 log "Endpoint : $S3_ENDPOINT  | Bucket : $BUCKET  | KeyID : ${AWS_ACCESS_KEY_ID:0:8}…"

@@ -63,16 +63,19 @@ echo
 
 Outil S3 utilisé : `mc` (MinIO client, prioritaire) ou `aws` (CLI v2).
 
-### Depuis le poste de contrôle (via port-forward)
+### Depuis le poste de contrôle (port-forward automatique)
+
+Pré-requis : un client S3 sur le PATH — `mc` (`brew install minio-mc`) **ou**
+`aws` (CLI v2). Le DNS interne `*.svc` n'étant pas résolvable depuis le poste,
+le script ouvre **lui-même** un `kubectl port-forward` vers le service RGW et le
+referme en sortie. Aucun terminal séparé ni `ENDPOINT` à fournir :
 
 ```bash
-# 1. Port-forward le service RGW dans un autre terminal :
-kubectl -n rook-ceph port-forward svc/rook-ceph-rgw-datalake 8080:80
-
-# 2. Lancer le smoke-test :
-ENDPOINT=http://localhost:8080 \
-  bash storage/ceph/storageClass/datalake/smoke-test.sh
+bash storage/ceph/storageClass/datalake/smoke-test.sh
 ```
+
+Pour pointer un endpoint externe (Tailscale, NodePort…), surcharger
+`ENDPOINT=http://… bash …smoke-test.sh` (court-circuite le port-forward).
 
 ### Depuis un pod du cluster (sans port-forward)
 
@@ -85,15 +88,18 @@ kubectl -n rook-ceph run smoke --rm -it --image=minio/mc -- sh -c "
 "
 ```
 
-(En pratique on lance ça sur le poste de contrôle après port-forward — c'est
-plus simple.)
+(En pratique on lance ça sur le poste de contrôle — le port-forward automatique
+rend cette variante intra-pod rarement nécessaire.)
 
 ### Lecture attendue
 
 ```text
 [14:02:00] Apply storage/ceph/storageClass/datalake/user-smoke.yaml …
-[14:02:01] Attendre que le Secret de l'OBC soit créé (timeout 60s)…
-[14:02:08] Endpoint : http://localhost:8080  | Bucket : smoke  | KeyID : ABCD…
+[14:02:01] Attendre le CephObjectStore datalake Ready (timeout 240s)…
+[14:02:02] Attendre qu'un pod RGW soit Ready (timeout 240s)…
+[14:02:06] Attendre que le Secret de l'OBC soit créé (timeout 120s)…
+[14:02:07] DNS interne non résolvable d'ici → port-forward svc/rook-ceph-rgw-datalake 38080→80
+[14:02:08] Endpoint : http://127.0.0.1:38080  | Bucket : smoke  | KeyID : ABCD…
 [14:02:08] Outil : mc (MinIO client)
 [14:02:08] PUT  → smoke/smoke/upload.txt
 [14:02:08] LIST → smoke/smoke
