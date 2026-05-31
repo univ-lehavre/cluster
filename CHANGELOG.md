@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.6](https://github.com/univ-lehavre/cluster/compare/v2.1.5...v2.1.6) (2026-05-31)
+
+
+### Documentation
+
+* acte que les drifts [#8](https://github.com/univ-lehavre/cluster/issues/8)/[#9](https://github.com/univ-lehavre/cluster/issues/9) (CSI) sont résolus par ROOK_USE_CSI_OPERATOR=false ([eb01f68](https://github.com/univ-lehavre/cluster/commit/eb01f68dc1c22760da152bc7566ed71c37dbfec6))
+* acte que les drifts CSI [#8](https://github.com/univ-lehavre/cluster/issues/8)/[#9](https://github.com/univ-lehavre/cluster/issues/9) sont résolus par ROOK_USE_CSI_OPERATOR=false ([1cb8700](https://github.com/univ-lehavre/cluster/commit/1cb87006abe39bb6c78e2c4638538b6ad7ec0f37))
+
 ## [2.1.5](https://github.com/univ-lehavre/cluster/compare/v2.1.4...v2.1.5) (2026-05-31)
 
 
