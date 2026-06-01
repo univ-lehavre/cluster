@@ -21,14 +21,11 @@
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "release": "commit-and-tag-version",
-    "release:dry": "commit-and-tag-version --dry-run",
     "prepare": "lefthook install"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.0.0",
     "@commitlint/config-conventional": "^21.0.0",
-    "commit-and-tag-version": "^12.5.0",
     "jscpd": "^4.2.4",
     "lefthook": "^2.0.0",
     "prettier": "^3.3.0",
