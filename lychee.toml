@@ -1,0 +1,13 @@
+# Configuration lychee (vérification des liens — audit P8 #35).
+#
+# Mode hors-ligne (les liens externes sont flaky en CI) ; on ne valide que les
+# liens internes / fichiers du dépôt.
+
+# Liens à ignorer : chemins vers des fichiers volontairement GITIGNORÉS
+# (générés à l'exécution, jamais commités) mais légitimement référencés dans la
+# doc comme emplacement attendu.
+exclude_path = ["test/multi-node/inventory.yaml"]
+
+# Ne pas vérifier les fragments/ancres (#section) : trop de faux positifs sur
+# les titres accentués/emoji ; markdownlint couvre déjà la structure.
+include_fragments = false
