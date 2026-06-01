@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.8](https://github.com/univ-lehavre/cluster/compare/v2.1.7...v2.1.8) (2026-06-01)
+
+
+### Documentation
+
+* glossaire néophyte en tête de doc (audit P2 — pédagogie 2/5) ([#29](https://github.com/univ-lehavre/cluster/issues/29)) ([5e7a12a](https://github.com/univ-lehavre/cluster/commit/5e7a12a9864f0cf49cf9056068373f7f9b17b0d8))
+* **p2:** ajoute un glossaire néophyte + le met en tête de doc ([5e7a12a](https://github.com/univ-lehavre/cluster/commit/5e7a12a9864f0cf49cf9056068373f7f9b17b0d8))
+
 ## [2.1.7](https://github.com/univ-lehavre/cluster/compare/v2.1.6...v2.1.7) (2026-06-01)
 
 
