@@ -65,6 +65,29 @@ jobs:
         with:
           working_directory: bootstrap/
 
+  # Vérification de syntaxe des playbooks (audit P2 / 02-tests) : complète
+  # ansible-lint (qui valide les bonnes pratiques) par un `--syntax-check` qui
+  # garantit que chaque playbook se PARSE (includes, rôles, templating).
+  ansible-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ansible-core
+        run: pipx install ansible-core
+      - name: Install collections
+        run: ansible-galaxy collection install --force -r bootstrap/requirements.yml
+      - name: Syntax-check des playbooks
+        working-directory: bootstrap
+        run: |
+          rc=0
+          for p in *.yaml; do
+            # hosts.yaml est un inventaire, pas un playbook → on le saute.
+            [ "$p" = "hosts.yaml" ] && continue
+            echo "== syntax-check $p =="
+            ansible-playbook -i hosts.yaml --syntax-check "$p" || rc=1
+          done
+          exit $rc
+
   jscpd:
     runs-on: ubuntu-latest
     steps:
