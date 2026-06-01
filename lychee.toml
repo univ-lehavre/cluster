@@ -5,8 +5,10 @@
 
 # Liens à ignorer : chemins vers des fichiers volontairement GITIGNORÉS
 # (générés à l'exécution, jamais commités) mais légitimement référencés dans la
-# doc comme emplacement attendu.
-exclude_path = ["test/multi-node/inventory.yaml"]
+# doc comme emplacement attendu. `exclude` est une regex sur l'URI résolue
+# (lychee transforme les liens relatifs en file:///… → exclude_path ne matche
+# pas, contrairement à exclude).
+exclude = ["test/multi-node/inventory\\.yaml"]
 
 # Ne pas vérifier les fragments/ancres (#section) : trop de faux positifs sur
 # les titres accentués/emoji ; markdownlint couvre déjà la structure.
