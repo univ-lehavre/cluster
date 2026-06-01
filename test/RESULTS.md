@@ -463,16 +463,44 @@ Une fois le blocage CSI levé (`ROOK_USE_CSI_OPERATOR: "false"`, #8/#9) et le
 banc correctement dimensionné (#10 → `osd.requests=512Mi`), les scénarios ont
 été déroulés sur le poste de contrôle :
 
-| #   | Exit | Verdict                                                                  |
-| --- | ---- | ------------------------------------------------------------------------ |
-| 01  | 0    | ✅ PVC RBD Bound + write/read identique                                  |
-| 02  | 0    | ✅ donnée survit au reschedule de pod                                    |
-| 06  | 0    | ✅ object store S3 PUT/GET/DIFF                                          |
-| 07  | 0    | ✅ connectivité Cilium (après fix faux-positif log-scan, cf. ci-dessous) |
-| 08  | 0/1  | ✅ portable + assertion OSD Pending (strict=prod / `ALLOW_PENDING_OSD`)  |
-| 03  | 1\*  | ⚠️ **résilience Ceph OK** ; échec sur **artefact banc** (cf. encadré)    |
-| 04  | —    | non déroulé (même classe d'artefacts banc que 03 au restore)             |
-| 05  | —    | skip attendu (< 5 hôtes)                                                 |
+| #   | Exit | Verdict                                                                    |
+| --- | ---- | -------------------------------------------------------------------------- |
+| 01  | 0    | ✅ PVC RBD Bound + write/read identique                                    |
+| 02  | 0    | ✅ donnée survit au reschedule de pod                                      |
+| 06  | 0    | ✅ object store S3 PUT/GET/DIFF                                            |
+| 07  | 0    | ✅ connectivité Cilium (après fix faux-positif log-scan, cf. ci-dessous)   |
+| 08  | 0/1  | ✅ portable + assertion OSD Pending (strict=prod / `ALLOW_PENDING_OSD`)    |
+| 03  | 1\*  | ⚠️ **résilience Ceph OK** ; échec sur **artefact banc** (cf. encadré)      |
+| 04  | —    | non déroulé (même classe d'artefacts banc que 03 au restore)               |
+| 05  | —    | skip attendu (< 5 hôtes)                                                   |
+| 09  | 0    | ✅ **restauration etcd PROUVÉE** (témoin supprimé → revient après restore) |
+
+### 09 — restauration etcd validée (2026-06-01, banc single-node)
+
+Le test que l'audit pointait comme « le plus critique manquant » (un backup non
+restauré n'est pas un backup) est désormais **vert**. Déroulé : ConfigMap témoin
+→ `etcd-snapshot.sh` → suppression du témoin → procédure RUNBOOK
+(`etcdctl snapshot restore` + remplacement data-dir + restart kubelet) → **le
+témoin réapparaît à l'identique**. Logs clés :
+
+```
+✓ snapshot : /var/lib/etcd-backups/etcd-…​.db
+✓ témoin supprimé
+✓ restauration appliquée
+✓ témoin restauré à l'identique : restored-…​
+✓ Snapshot etcd RESTAURABLE — backup prouvé.
+```
+
+- **Pas de reboot de VM** → aucun artefact banc (contrairement à 03/04). La
+  procédure tourne _sur_ le control plane via SSH.
+- A fonctionné **node `NotReady`** (Cilium en `ImagePullBackOff` faute d'accès
+  quay.io depuis la VM ce jour-là) : le restore etcd ne dépend ni du CNI ni d'un
+  node Ready — seulement de l'API server + etcd.
+- **Gap prod détecté** : `etcdctl` (paquet `etcd-client`) n'est **pas** installé
+  par le bootstrap (seul `crictl` l'est, via `cri-tools`/#13). Le scénario 09
+  l'installe au vol, mais en **urgence de restauration prod**, devoir
+  `apt install etcd-client` est un risque. → candidat à ajouter au rôle
+  `etcd-backup` ou `k8s-install` (même esprit que le fix #13 crictl).
 
 **Trois bugs de scénarios corrigés en chemin** (commits `test/`) :
 

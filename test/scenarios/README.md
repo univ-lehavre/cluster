@@ -24,7 +24,8 @@ test/scenarios/
 ├── 05-replication-bump.sh            ← passage réplica ×3 → ×5
 ├── 06-object-store-smoke.sh          ← smoke-test datalake S3
 ├── 07-cilium-connectivity.sh         ← test connectivité E/W Cilium
-└── 08-resource-limits-audit.sh       ← audit requests/limits Ceph
+├── 08-resource-limits-audit.sh       ← audit requests/limits Ceph
+└── 09-etcd-restore.sh                ← restauration etcd (backup restaurable)
 ```
 
 Chaque script :
@@ -38,16 +39,28 @@ Chaque script :
 
 ## Matrice des scénarios
 
-| #   | Scénario              | Tests                                                   | Durée   | Couverture                             |
-| --- | --------------------- | ------------------------------------------------------- | ------- | -------------------------------------- |
-| 01  | PVC RBD write/read    | StorageClass défaut, PVC Bound, écriture/lecture        | ~1 min  | Stockage bloc fonctionnel              |
-| 02  | Reschedule pod        | Delete pod, re-création, **données persistantes**       | ~30s    | Découplage pod ↔ volume                |
-| 03  | Worker loss           | Halt 1 worker, observation, restore                     | ~5 min  | Réplicat ×3 + recovery Ceph            |
-| 04  | Control plane loss    | Halt control plane, observation API + workloads         | ~5 min  | SPOF assumé, etcd backup               |
-| 05  | Replication bump      | Pool ×3 → ×5 (si 5+ hôtes), refill                      | ~5 min  | Évolution capacité (skip si < 5 hôtes) |
-| 06  | Object store smoke    | datalake-ec + bucket + PUT/GET/DELETE                   | ~3 min  | Stockage objet S3                      |
-| 07  | Cilium connectivity   | `cilium connectivity test` standard + Hubble si activé  | ~10 min | Réseau Pod-to-Pod, E/W, NetworkPolicy  |
-| 08  | Resource limits audit | Inspection des `requests`/`limits` actuels vs banc/prod | ~10s    | Cohérence dimensionnement              |
+| #   | Scénario              | Tests                                                                         | Durée   | Couverture                                      |
+| --- | --------------------- | ----------------------------------------------------------------------------- | ------- | ----------------------------------------------- |
+| 01  | PVC RBD write/read    | StorageClass défaut, PVC Bound, écriture/lecture                              | ~1 min  | Stockage bloc fonctionnel                       |
+| 02  | Reschedule pod        | Delete pod, re-création, **données persistantes**                             | ~30s    | Découplage pod ↔ volume                         |
+| 03  | Worker loss           | Halt 1 worker, observation, restore                                           | ~5 min  | Réplicat ×3 + recovery Ceph                     |
+| 04  | Control plane loss    | Halt control plane, observation API + workloads                               | ~5 min  | SPOF assumé, etcd backup                        |
+| 05  | Replication bump      | Pool ×3 → ×5 (si 5+ hôtes), refill                                            | ~5 min  | Évolution capacité (skip si < 5 hôtes)          |
+| 06  | Object store smoke    | datalake-ec + bucket + PUT/GET/DELETE                                         | ~3 min  | Stockage objet S3                               |
+| 07  | Cilium connectivity   | `cilium connectivity test` standard + Hubble si activé                        | ~10 min | Réseau Pod-to-Pod, E/W, NetworkPolicy           |
+| 08  | Resource limits audit | Inspection des `requests`/`limits` actuels vs banc/prod                       | ~10s    | Cohérence dimensionnement                       |
+| 09  | Restauration etcd     | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient | ~3 min  | **Backup etcd RESTAURABLE** (pas juste produit) |
+
+> 🔑 **09 — restauration etcd validée (2026-06-01).** Contrairement à 03/04, le
+> 09 **ne reboote aucune VM** : il exerce la procédure du RUNBOOK _sur_ le
+> control plane via SSH (stop kubelet → `etcdctl snapshot restore` →
+> remplacement du data-dir → start kubelet), donc **sans** artefact banc. Il
+> prouve la _restaurabilité_ par un témoin (un ConfigMap supprimé qui réapparaît
+> après restore). Validé sur banc single-node — fonctionne même node `NotReady`
+> (le restore etcd ne dépend pas du CNI). Note : `etcdctl` (paquet
+> `etcd-client`) doit être présent sur le control plane — le scénario l'installe
+> au besoin ; en prod, l'ajouter au provisionnement si la restauration doit être
+> rapide.
 
 > ⚠️ **03 / 04 — la phase « restore » d'un nœud ne se valide PAS sur ce banc.**
 > Ne pas y retourner. La phase **« perte »** est utile et valable en prod (Ceph
