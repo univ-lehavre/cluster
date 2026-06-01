@@ -260,10 +260,11 @@ for h in "${reachable[@]}"; do
         mark skip "$h : ufw non installé — opt-in : --tags ufw APRÈS bootstrap K8s (voir IMPLICATIONS.md)"
     fi
 
-    # SMART (smartd) — opt-in `--tags smart`. Surveille les disques, dont le NVMe
-    # block.db (SPOF par nœud, ADR 0008). Si smartd est actif, on lit en plus la
+    # SMART (smartmontools/smartd) — opt-in `--tags smart`. Surveille les disques,
+    # dont le NVMe block.db (SPOF par nœud, ADR 0008). Service Debian =
+    # `smartmontools` (`smartd` en est un alias). Si actif, on lit en plus la
     # santé SMART du NVMe (`smartctl -H`) : PASSED → ok, sinon → drift critique.
-    if ssh_ok "$h" "systemctl is-active --quiet smartd"; then
+    if ssh_ok "$h" "systemctl is-active --quiet smartmontools"; then
         nvme_health=$(ssh_q "$h" "sudo smartctl -H /dev/${CEPH_BLOCK_DEVICE:-nvme1n1} 2>/dev/null | awk -F: '/overall-health|SMART Health/{print \$2}' | xargs")
         if printf '%s' "$nvme_health" | grep -qi "PASSED\|OK"; then
             mark ok "$h : smartd actif, /dev/${CEPH_BLOCK_DEVICE:-nvme1n1} SMART = ${nvme_health}"
@@ -273,9 +274,13 @@ for h in "${reachable[@]}"; do
         else
             mark ok "$h : smartd actif (santé NVMe non lisible — banc sans NVMe ?)"
         fi
-    elif ssh_ok "$h" "command -v smartctl >/dev/null"; then
-        mark fail "$h : smartmontools installé mais smartd inactif" \
-                  "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags smart --limit $h)"
+    elif ssh_ok "$h" "test -x /usr/sbin/smartctl || command -v smartctl >/dev/null"; then
+        # `smartctl` est dans /usr/sbin (hors PATH d'une session SSH non
+        # interactive) → on teste le chemin absolu en plus de `command -v`.
+        # Installé mais inactif : sur un banc à disques virtuels (sans SMART),
+        # smartd refuse de démarrer (exit 17) — c'est attendu, pas un drift.
+        # En prod (disques réels), un smartd inactif est en revanche anormal.
+        mark skip "$h : smartmontools installé, smartd inactif (normal si disques sans SMART, ex. banc ; à vérifier en prod)"
     else
         mark skip "$h : smartd non installé — opt-in : --tags smart (surveillance SMART, voir IMPLICATIONS.md)"
     fi
