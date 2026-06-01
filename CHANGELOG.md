@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.2.0](https://github.com/univ-lehavre/cluster/compare/v2.1.9...v2.2.0) (2026-06-01)
+
+
+### Features
+
+* **backup:** sauvegarde des données applicatives par VolumeSnapshots CSI (P1) ([9f67cb7](https://github.com/univ-lehavre/cluster/commit/9f67cb72f4bd3b8475b7ffe5d322f53fa45d81a6))
+* **backup:** sauvegarde données applicatives par VolumeSnapshots CSI (audit P1 + ADR 0013) ([#34](https://github.com/univ-lehavre/cluster/issues/34)) ([9f67cb7](https://github.com/univ-lehavre/cluster/commit/9f67cb72f4bd3b8475b7ffe5d322f53fa45d81a6))
+
 ## [2.1.9](https://github.com/univ-lehavre/cluster/compare/v2.1.8...v2.1.9) (2026-06-01)
 
 
