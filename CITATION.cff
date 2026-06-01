@@ -1,0 +1,32 @@
+# Métadonnées de citation — format Citation File Format (https://citation-file-format.github.io/).
+# GitHub affiche un bouton « Cite this repository » à partir de ce fichier.
+cff-version: 1.2.0
+title: 'cluster — plateforme Kubernetes hyperconvergée (Debian, Cilium, Rook-Ceph)'
+message: >-
+  Si vous utilisez ce dépôt dans un travail de recherche, merci de le citer
+  à l'aide des métadonnées ci-dessous.
+type: software
+authors:
+  - given-names: Pierre-Olivier
+    family-names: Chasset
+    email: pierre-olivier.chasset@univ-lehavre.fr
+    affiliation: Université Le Havre Normandie
+    # Renseigner l'ORCID quand disponible (https://orcid.org/) :
+    # orcid: 'https://orcid.org/0000-0000-0000-0000'
+repository-code: 'https://github.com/univ-lehavre/cluster'
+abstract: >-
+  Infrastructure-as-Code d'une plateforme Kubernetes hyperconvergée de
+  recherche : bootstrap Ansible sur Debian, CNI Cilium, stockage distribué
+  Rook-Ceph, et la documentation opérationnelle associée.
+keywords:
+  - kubernetes
+  - ceph
+  - cilium
+  - infrastructure-as-code
+  - ansible
+  - hyperconvergence
+license: MIT
+version: 2.6.1
+date-released: '2026-06-01'
+# Renseigner un DOI (ex. Zenodo) pour une citation pérenne :
+# doi: '10.5281/zenodo.XXXXXXX'

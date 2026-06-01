@@ -1,0 +1,8 @@
+# Code owners — révision automatiquement demandée à ces comptes sur toute PR
+# touchant les chemins correspondants. Voir
+# https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Projet mono-mainteneur : tout le dépôt appartient au mainteneur. Affiner par
+# sous-arbre si l'équipe s'élargit.
+
+* @chasset
