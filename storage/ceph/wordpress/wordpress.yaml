@@ -46,9 +46,23 @@ spec:
         app: wordpress
         tier: frontend
     spec:
+      # Durcissement PARTIEL (cf. audit P6 / trivy). L'image apache écoute sur
+      # le port 80 (privilégié) et démarre en root pour le binder puis droppe
+      # vers www-data — d'où PAS de runAsNonRoot ni readOnlyRootFilesystem ici
+      # (les casserait ; apache écrit /var/run/apache2, la conf, etc.). On
+      # applique ce qui tient sans reconfigurer l'exemple. Le résidu KSV-0118/
+      # 0014 est acté dans .trivyignore (entrée wordpress justifiée).
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - image: wordpress:7.0-php8.3-apache
           name: wordpress
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+              add: ['NET_BIND_SERVICE', 'SETUID', 'SETGID', 'CHOWN', 'DAC_OVERRIDE']
           env:
             - name: WORDPRESS_DB_HOST
               value: wordpress-mysql

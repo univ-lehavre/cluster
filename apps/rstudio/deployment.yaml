@@ -13,9 +13,19 @@ spec:
       labels:
         app: rstudio
     spec:
+      # Durcissement PARTIEL (cf. audit P6 / trivy). rstudio-server (image
+      # rocker) s'initialise en root (PAM, gestion des sessions utilisateur) et
+      # écrit sur son rootfs (/var/run/rstudio-server, /tmp, …) — d'où PAS de
+      # runAsNonRoot ni readOnlyRootFilesystem (les casserait). On applique ce
+      # qui tient ; le résidu KSV-0118/0014 est acté dans .trivyignore.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: rstudio
           image: rocker/geospatial:4.6.0
+          securityContext:
+            allowPrivilegeEscalation: false
           ports:
             - containerPort: 8787
           env:

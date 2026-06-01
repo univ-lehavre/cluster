@@ -46,9 +46,25 @@ spec:
         app: wordpress
         tier: mysql
     spec:
+      # Durcissement (cf. audit P6 / trivy KSV-0118, KSV-0014). L'image mysql
+      # tourne en uid 999 (mysql) ; fsGroup 999 donne au groupe l'accès en
+      # écriture au PVC. rootfs en lecture seule : les chemins inscriptibles
+      # (socket, tmp, run) sont des emptyDir dédiés.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - image: mysql:8.4
           name: mysql
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
@@ -61,7 +77,15 @@ spec:
           volumeMounts:
             - name: mysql-persistent-storage
               mountPath: /var/lib/mysql
+            - name: run
+              mountPath: /var/run/mysqld
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: mysql-persistent-storage
           persistentVolumeClaim:
             claimName: mysql-pv-claim
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
