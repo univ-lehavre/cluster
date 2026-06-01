@@ -81,3 +81,5 @@ pre-push:
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
     ansible-lint:
       run: ansible-lint bootstrap/
+    jscpd:
+      run: pnpm lint:dup

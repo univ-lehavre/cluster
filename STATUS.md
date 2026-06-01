@@ -1,6 +1,6 @@
 # STATUS — avancement du durcissement (audit → mise en œuvre)
 
-> **Dernière mise à jour : 2026-06-01 22:00 CEST.** Document vivant —
+> **Dernière mise à jour : 2026-06-01 22:42 CEST.** Document vivant —
 > **horodater toute modification** (en-tête ci-dessus + la date entre crochets
 > sur chaque ligne modifiée). État du dépôt à la **v2.11.3**.
 
@@ -84,15 +84,15 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 8 — Hygiène
 
-| #   | Action                                         | État                                                           |
-| --- | ---------------------------------------------- | -------------------------------------------------------------- |
-| 32  | Supprimer `bootstrap/bootstrap/`               | ✅ [2026-06-01]                                                |
-| 33  | editLink/ignoreDeadLinks/socialLinks ; READMEs | ❓ [2026-06-01]                                                |
-| 34  | Parité lint (jscpd pre-push, lint dans pnpm)   | ❓ [2026-06-01]                                                |
-| 35  | markdownlint + lychee en CI                    | ✅ [2026-06-01] 2 jobs CI + config tolérante                   |
-| 36  | Lint .sh.j2/.pl (+ patch K8s/actions)          | ⚠️ [2026-06-01] lint .sh.j2/.pl fait ; patch K8s/actions reste |
-| 37  | Compléter tables README                        | ❓ [2026-06-01]                                                |
-| 38  | Factoriser ssh-report.sh / lib.sh ; SSH_OPTS   | ❓ [2026-06-01]                                                |
+| #   | Action                                         | État                                                                                                 |
+| --- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 32  | Supprimer `bootstrap/bootstrap/`               | ✅ [2026-06-01]                                                                                      |
+| 33  | editLink/ignoreDeadLinks/socialLinks ; READMEs | ✅ [2026-06-01] editLink→univ-lehavre, socialLinks, ignoreDeadLinks ciblé, README platform/apps/docs |
+| 34  | Parité lint (jscpd pre-push, lint dans pnpm)   | ✅ [2026-06-01] jscpd au pre-push + lint:k8s/lint:ansible dans `pnpm lint`                           |
+| 35  | markdownlint + lychee en CI                    | ✅ [2026-06-01] 2 jobs CI + config tolérante                                                         |
+| 36  | Lint .sh.j2/.pl (+ patch K8s/actions)          | ⚠️ [2026-06-01] lint .sh.j2/.pl fait ; patch K8s/actions reste                                       |
+| 37  | Compléter tables README                        | ✅ [2026-06-01] README racine (test/docs) + bootstrap (playbooks)                                    |
+| 38  | Factoriser ssh-report.sh / lib.sh ; SSH_OPTS   | 🔲 [2026-06-01] dette assumée (refactor scripts critiques, non validable hors banc)                  |
 
 ### ADR à formaliser
 

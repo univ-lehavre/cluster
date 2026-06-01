@@ -18,7 +18,7 @@
     "lint:ansible": "ansible-lint bootstrap/",
     "lint:dup": "jscpd .",
     "test:shell": "bats test/unit/",
-    "lint": "pnpm format:check && pnpm lint:yaml && pnpm lint:shell && pnpm lint:dup && pnpm test:shell",
+    "lint": "pnpm format:check && pnpm lint:yaml && pnpm lint:shell && pnpm lint:k8s && pnpm lint:ansible && pnpm lint:dup && pnpm test:shell",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
