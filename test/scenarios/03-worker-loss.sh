@@ -50,7 +50,8 @@ kubectl uncordon "$VICTIM" 2>/dev/null || true
 
 log "Attendre HEALTH_OK (5 min max)"
 for _ in $(seq 1 30); do
-    health=$(ceph health 2>/dev/null | awk '{print $1}')
+    # Parsing JSON robuste (cf. audit P9 #14) plutôt que `ceph health | awk`.
+    health=$(ceph health -f json 2>/dev/null | jq -r '.status' 2>/dev/null)
     if [ "$health" = "HEALTH_OK" ]; then
         log "✓ Ceph revenu HEALTH_OK"
         ceph status | head -10

@@ -46,14 +46,20 @@ log "Restore $CONTROL"
 (cd "$VAGRANT_DIR" && vagrant up "$CONTROL")
 
 log "Attendre l'API K8s (5 min max)"
+api_back=0
 for _ in $(seq 1 30); do
     if kubectl get nodes >/dev/null 2>&1; then
         log "✓ API K8s répond à nouveau"
         kubectl get nodes
+        api_back=1
         break
     fi
     sleep 10
 done
+if [ "$api_back" -ne 1 ]; then
+    log "✗ ÉCHEC : l'API K8s n'est pas revenue après 5 min (restore $CONTROL KO ?)"
+    exit 1
+fi
 
 log "Vérifier qu'un snapshot etcd a été produit pendant l'arrêt"
 ssh debian@"$CONTROL" 'sudo ls -la /var/lib/etcd-backups/ | tail -5'
