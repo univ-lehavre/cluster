@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.11.2](https://github.com/univ-lehavre/cluster/compare/v2.11.1...v2.11.2) (2026-06-01)
+
+
+### Documentation
+
+* **safeguards:** trivy/bats/jscpd ajoutés aux checks requis (anti-régression main) ([48ce530](https://github.com/univ-lehavre/cluster/commit/48ce5306d7fb868b98a8feb1a7cc74c79bdbe0c2))
+* **safeguards:** trivy/bats/jscpd requis en branch protection ([#64](https://github.com/univ-lehavre/cluster/issues/64)) ([48ce530](https://github.com/univ-lehavre/cluster/commit/48ce5306d7fb868b98a8feb1a7cc74c79bdbe0c2))
+
 ## [2.11.1](https://github.com/univ-lehavre/cluster/compare/v2.11.0...v2.11.1) (2026-06-01)
 
 
