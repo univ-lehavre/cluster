@@ -238,6 +238,26 @@ for h in "${reachable[@]}"; do
             mark skip "$h : $svc non installé — opt-in : --tags $local_tag (voir IMPLICATIONS.md)"
         fi
     done
+
+    # UFW (pare-feu) — opt-in `--tags ufw`, à activer APRÈS le bootstrap K8s.
+    # Comme les autres couches : absent = opt-in non activé (skip) ; installé
+    # mais inactif = drift (fail). En PLUS, si UFW est actif on vérifie que la
+    # règle inter-nœuds (plage cluster) est présente : un UFW actif SANS cette
+    # règle coupe les flux K8s/Cilium/Ceph → drift critique.
+    ufw_status=$(ssh_q "$h" 'sudo ufw status 2>/dev/null | head -1')
+    if printf '%s' "$ufw_status" | grep -q "Status: active"; then
+        if ssh_ok "$h" "sudo ufw status | grep -Eq '10\\.67\\.|ALLOW.*Anywhere.*30000:32767|${h}'"; then
+            mark ok "$h : ufw actif avec règles cluster (couche ufw)"
+        else
+            mark fail "$h : ufw actif SANS règle inter-nœuds — risque de coupure cluster" \
+                      "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags ufw --limit $h)"
+        fi
+    elif ssh_ok "$h" "command -v ufw >/dev/null"; then
+        mark fail "$h : ufw installé mais inactif" \
+                  "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags ufw --limit $h)"
+    else
+        mark skip "$h : ufw non installé — opt-in : --tags ufw APRÈS bootstrap K8s (voir IMPLICATIONS.md)"
+    fi
 done
 
 # ─── Couche 3 — Bootstrap Kubernetes (CRI + paquets + endpoint) ────────────

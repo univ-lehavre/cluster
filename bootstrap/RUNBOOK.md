@@ -315,12 +315,19 @@ sortie de `sshd -T`, dernier `unattended-upgrades.log`, alias root, IPs bannies
 par fail2ban, règles auditd chargées, état UFW, expiration mot de passe. Lecture
 seule, ne modifie rien.
 
-> ⚠️ **UFW × Kubernetes** : le rôle `network/ufw.yml` durcit le pare-feu. Pour
-> que les workers puissent joindre le control plane et que Cilium fonctionne, il
-> faut autoriser les ports K8s/Cilium (`6443/tcp`, `10250/tcp`, `2379-2380/tcp`,
-> `30000-32767/tcp`, VXLAN `8472/udp`, Cilium health `4240/tcp`) — soit en
-> étendant `roles/network/files/ufw.yml`, soit en reportant l'activation d'UFW à
-> après le bootstrap du cluster.
+> ⚠️ **UFW × Kubernetes** : le rôle `network/ufw.yml` durcit le pare-feu avec un
+> jeu de règles complet K8s/Cilium/Ceph (audit P6 #24). Plutôt qu'énumérer les
+> ~30 ports inter-nœuds, il **autorise tout le trafic entre nœuds du cluster**
+> (plage `CLUSTER_CIDR`, défaut `10.67.2.0/22`) — ce qui couvre API server,
+> etcd, kubelet, VXLAN Cilium et mon/osd Ceph sans risque d'oubli — puis
+> restreint les accès externes : **SSH limité** à `SSH_ADMIN_CIDR` (défaut =
+> réseau cluster) et plage **NodePort** `30000-32767/tcp` ouverte pour les
+> services exposés.
+>
+> **À n'activer qu'APRÈS le bootstrap K8s** (`secure.yml --tags ufw`) : activer
+> UFW avant que le cluster existe couperait l'init. L'état d'UFW est surveillé
+> par [`state.sh`](state.sh) (couche 2) — un UFW actif sans la règle
+> inter-nœuds, ou installé mais inactif, est signalé comme **drift**.
 
 La désactivation du swap n'apparaît plus ici : elle est gérée automatiquement
 par le rôle Ansible `k8s-pre-install` du présent dépôt (`checks.yaml`).
