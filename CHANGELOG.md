@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.10.0](https://github.com/univ-lehavre/cluster/compare/v2.9.0...v2.10.0) (2026-06-01)
+
+
+### Features
+
+* **ops:** surveillance SMART des disques (smartd + state.sh) (audit P5 [#19](https://github.com/univ-lehavre/cluster/issues/19)) ([#57](https://github.com/univ-lehavre/cluster/issues/57)) ([fae5c26](https://github.com/univ-lehavre/cluster/commit/fae5c264f2fd39484b90efd7c1ff8d238316928b))
+* **ops:** surveillance SMART des disques via smartd + couche state.sh (audit P5 [#19](https://github.com/univ-lehavre/cluster/issues/19)) ([fae5c26](https://github.com/univ-lehavre/cluster/commit/fae5c264f2fd39484b90efd7c1ff8d238316928b))
+
 ## [2.9.0](https://github.com/univ-lehavre/cluster/compare/v2.8.0...v2.9.0) (2026-06-01)
 
 
