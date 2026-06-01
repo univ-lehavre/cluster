@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.11.4](https://github.com/univ-lehavre/cluster/compare/v2.11.3...v2.11.4) (2026-06-01)
+
+
+### Documentation
+
+* 13 checks requis en branch protection ([#71](https://github.com/univ-lehavre/cluster/issues/71)) ([161e735](https://github.com/univ-lehavre/cluster/commit/161e7353865bb1a5ecac5379661677451ead52d7))
+* 13 checks requis en branch protection (ajout markdownlint/lychee/ansible-syntax/scripts-extra) ([161e735](https://github.com/univ-lehavre/cluster/commit/161e7353865bb1a5ecac5379661677451ead52d7))
+
 ## [2.11.3](https://github.com/univ-lehavre/cluster/compare/v2.11.2...v2.11.3) (2026-06-01)
 
 
