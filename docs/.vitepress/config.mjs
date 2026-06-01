@@ -154,6 +154,23 @@ export default defineConfig({
             text: '0013 — Sauvegarde données applicatives',
             link: '/docs/decisions/0013-sauvegarde-donnees-applicatives',
           },
+          {
+            text: '0014 — Durcissement kubeadm',
+            link: '/docs/decisions/0014-durcissement-kubeadm-init',
+          },
+          {
+            text: "0015 — Stratégie d'upgrade K8s",
+            link: '/docs/decisions/0015-strategie-upgrade-kubernetes',
+          },
+          { text: '0016 — Observabilité', link: '/docs/decisions/0016-observabilite' },
+          {
+            text: '0017 — Langage des scripts',
+            link: '/docs/decisions/0017-langage-des-scripts',
+          },
+          {
+            text: '0018 — Rook-Ceph vs Longhorn',
+            link: '/docs/decisions/0018-rook-ceph-vs-longhorn',
+          },
         ],
       },
       {
