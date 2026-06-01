@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.6.1](https://github.com/univ-lehavre/cluster/compare/v2.6.0...v2.6.1) (2026-06-01)
+
+
+### Documentation
+
+* ajoute STATUS.md (avancement audit + écarts plan/audits détaillés) ([89aa6c5](https://github.com/univ-lehavre/cluster/commit/89aa6c56fee2a92578ac5f4dde4c29049e13d48a))
+* ajoute STATUS.md (avancement audit + écarts plan/audits) ([#45](https://github.com/univ-lehavre/cluster/issues/45)) ([89aa6c5](https://github.com/univ-lehavre/cluster/commit/89aa6c56fee2a92578ac5f4dde4c29049e13d48a))
+
 ## [2.6.0](https://github.com/univ-lehavre/cluster/compare/v2.5.0...v2.6.0) (2026-06-01)
 
 
