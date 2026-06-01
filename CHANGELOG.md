@@ -14,6 +14,20 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.7.0](https://github.com/univ-lehavre/cluster/compare/v2.6.2...v2.7.0) (2026-06-01)
+
+
+### Features
+
+* **dx:** ajoute un Justfile racine + section README « Par où commencer » (audit P10 [#16](https://github.com/univ-lehavre/cluster/issues/16)) ([f5864aa](https://github.com/univ-lehavre/cluster/commit/f5864aaa22587261ede2ca53a562e1b1eb2af445))
+* **dx:** Justfile racine + « Par où commencer » dans le README (audit P10 [#16](https://github.com/univ-lehavre/cluster/issues/16)) ([#51](https://github.com/univ-lehavre/cluster/issues/51)) ([f5864aa](https://github.com/univ-lehavre/cluster/commit/f5864aaa22587261ede2ca53a562e1b1eb2af445))
+
+
+### Bug Fixes
+
+* **tests:** scénarios 03/04/05 échouent à l'expiration + parsing ceph en JSON (audit P4 [#13](https://github.com/univ-lehavre/cluster/issues/13)/[#14](https://github.com/univ-lehavre/cluster/issues/14)) ([0af1f25](https://github.com/univ-lehavre/cluster/commit/0af1f2549eeb982d188c551ea43561529afbd698))
+* **tests:** scénarios 03/04/05 fiabilisés (audit P4 [#13](https://github.com/univ-lehavre/cluster/issues/13)/[#14](https://github.com/univ-lehavre/cluster/issues/14)) ([#50](https://github.com/univ-lehavre/cluster/issues/50)) ([0af1f25](https://github.com/univ-lehavre/cluster/commit/0af1f2549eeb982d188c551ea43561529afbd698))
+
 ## [2.6.2](https://github.com/univ-lehavre/cluster/compare/v2.6.1...v2.6.2) (2026-06-01)
 
 
