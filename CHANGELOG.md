@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.5.0](https://github.com/univ-lehavre/cluster/compare/v2.4.0...v2.5.0) (2026-06-01)
+
+
+### Features
+
+* **securite:** jeu de règles UFW K8s/Cilium/Ceph + SSH restreint (audit P6 [#24](https://github.com/univ-lehavre/cluster/issues/24)) ([#41](https://github.com/univ-lehavre/cluster/issues/41)) ([c3e9e88](https://github.com/univ-lehavre/cluster/commit/c3e9e88bbf224c2baa44024122ba05f8c5e3ea7c))
+* **securite:** jeu de règles UFW K8s/Cilium/Ceph + SSH restreint + drift state.sh (audit P6 [#24](https://github.com/univ-lehavre/cluster/issues/24)) ([c3e9e88](https://github.com/univ-lehavre/cluster/commit/c3e9e88bbf224c2baa44024122ba05f8c5e3ea7c))
+
 ## [2.4.0](https://github.com/univ-lehavre/cluster/compare/v2.3.0...v2.4.0) (2026-06-01)
 
 
