@@ -77,6 +77,7 @@ export default defineConfig({
           { text: 'CephFS', link: '/storage/ceph/storageClass/filesystem/' },
           { text: 'Datalake (S3)', link: '/storage/ceph/storageClass/datalake/' },
           { text: 'Exemple WordPress', link: '/storage/ceph/wordpress/' },
+          { text: 'Sauvegarde (VolumeSnapshots)', link: '/storage/ceph/backup/' },
         ],
       },
       {
@@ -147,6 +148,10 @@ export default defineConfig({
             link: '/docs/decisions/0011-registry-http-sans-auth',
           },
           { text: '0012 — RStudio sans auth', link: '/docs/decisions/0012-rstudio-disable-auth' },
+          {
+            text: '0013 — Sauvegarde données applicatives',
+            link: '/docs/decisions/0013-sauvegarde-donnees-applicatives',
+          },
         ],
       },
       {

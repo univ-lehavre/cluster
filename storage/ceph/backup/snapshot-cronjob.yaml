@@ -1,0 +1,132 @@
+# Snapshots programmés des PVC critiques (cf. ADR 0013).
+#
+# Opt-in par PVC : seuls les PVC portant le label `backup=daily` sont
+# snapshotés. Pour protéger un volume, ajouter à son PVC :
+#   metadata:
+#     labels:
+#       backup: daily
+#
+# Le CronJob crée un VolumeSnapshot horodaté par PVC labellisé, puis applique
+# une rétention (garde les KEEP derniers par PVC). RPO ≈ fréquence du schedule.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: volume-snapshotter
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/part-of: ceph-backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: volume-snapshotter
+  labels:
+    app.kubernetes.io/part-of: ceph-backup
+rules:
+  - apiGroups: ['']
+    resources: ['persistentvolumeclaims']
+    verbs: ['get', 'list']
+  - apiGroups: ['snapshot.storage.k8s.io']
+    resources: ['volumesnapshots']
+    verbs: ['get', 'list', 'create', 'delete']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: volume-snapshotter
+  labels:
+    app.kubernetes.io/part-of: ceph-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: volume-snapshotter
+subjects:
+  - kind: ServiceAccount
+    name: volume-snapshotter
+    namespace: rook-ceph
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: volume-snapshot-daily
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/part-of: ceph-backup
+spec:
+  # RPO 24 h (cf. ADR 0013). 02:30 — heure creuse.
+  schedule: '30 2 * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: ceph-backup
+        spec:
+          serviceAccountName: volume-snapshotter
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: snapshotter
+              # kubectl épinglé (cf. ADR 0006 : pas de :latest).
+              image: bitnami/kubectl:1.34
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ['ALL']
+              env:
+                # Nombre de snapshots conservés par PVC (rétention).
+                - name: KEEP
+                  value: '7'
+                # VolumeSnapshotClass par défaut (RBD ; surcharger par PVC si CephFS).
+                - name: SNAPCLASS
+                  value: csi-rbdplugin-snapclass
+              command: ['/bin/bash', '-c']
+              args:
+                - |
+                  set -euo pipefail
+                  ts="$(date -u +%Y%m%d-%H%M%S)"
+                  # PVC opt-in (label backup=daily), tous namespaces.
+                  kubectl get pvc -A -l backup=daily \
+                    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
+                  | while read -r ns pvc; do
+                      [ -z "$ns" ] && continue
+                      snap="snap-${pvc}-${ts}"
+                      echo "[$(date -u +%H:%M:%S)] snapshot ${ns}/${snap} <- pvc/${pvc}"
+                      kubectl apply -f - <<EOF
+                  apiVersion: snapshot.storage.k8s.io/v1
+                  kind: VolumeSnapshot
+                  metadata:
+                    name: ${snap}
+                    namespace: ${ns}
+                    labels:
+                      app.kubernetes.io/part-of: ceph-backup
+                      backup-of: ${pvc}
+                  spec:
+                    volumeSnapshotClassName: ${SNAPCLASS}
+                    source:
+                      persistentVolumeClaimName: ${pvc}
+                  EOF
+                      # Rétention : garder les KEEP plus récents pour ce PVC.
+                      mapfile -t old < <(kubectl get volumesnapshot -n "$ns" \
+                        -l "backup-of=${pvc}" \
+                        --sort-by=.metadata.creationTimestamp \
+                        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+                        | head -n "-${KEEP}")
+                      for s in "${old[@]}"; do
+                        [ -z "$s" ] && continue
+                        echo "[$(date -u +%H:%M:%S)] rétention: suppression ${ns}/${s}"
+                        kubectl delete volumesnapshot -n "$ns" "$s" --wait=false
+                      done
+                    done
+                  echo "snapshots terminés."
