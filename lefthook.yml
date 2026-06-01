@@ -66,6 +66,7 @@ pre-push:
           ':!:pnpm-workspace.yaml' \
           ':!:.yamllint.yaml' \
           ':!:.trivyignore.yaml' \
+          ':!:.markdownlint-cli2.yaml' \
           ':!:storage/ceph/crds.yaml' \
           ':!:storage/ceph/common.yaml' \
           ':!:storage/ceph/operator.yaml' \
