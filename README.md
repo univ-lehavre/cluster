@@ -11,6 +11,11 @@ services transverses.
 publiée automatiquement depuis `main` par
 [.github/workflows/docs.yml](.github/workflows/docs.yml).
 
+> 🔰 **Nouveau sur le sujet ?** Les termes techniques (Kubernetes, etcd, OSD,
+> PVC, erasure coding, quorum…) sont définis en langage simple dans le
+> [**glossaire**](docs/glossaire.md) — à garder ouvert à côté en lisant les
+> runbooks.
+
 ## Structure
 
 | Dossier                          | Rôle                                          |
