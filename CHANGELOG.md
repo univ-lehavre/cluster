@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.11.1](https://github.com/univ-lehavre/cluster/compare/v2.11.0...v2.11.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **securite:** securityContext pod metrics-server (corrige trivy sur main) ([#62](https://github.com/univ-lehavre/cluster/issues/62)) ([064a057](https://github.com/univ-lehavre/cluster/commit/064a05715f59c88eebdc29f6bfc7b76a072ade30))
+* **securite:** securityContext pod sur metrics-server (corrige trivy KSV-0118 sur main) ([064a057](https://github.com/univ-lehavre/cluster/commit/064a05715f59c88eebdc29f6bfc7b76a072ade30))
+
 ## [2.11.0](https://github.com/univ-lehavre/cluster/compare/v2.10.0...v2.11.0) (2026-06-01)
 
 
