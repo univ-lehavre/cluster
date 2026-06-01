@@ -1,0 +1,16 @@
+# code: language=ansible
+# Mise à jour des paquets de l'OS (apt full-upgrade + reboot si requis) sur tout
+# le parc. Renommé `upgrade.yaml` → `os-upgrade.yaml` (audit P5 #18) pour lever
+# l'ambiguïté avec l'upgrade Kubernetes (k8s-upgrade.yaml).
+- name: Mise à jour de l'OS sur tout le parc
+  hosts:
+    - cloud
+    - vm
+  pre_tasks:
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: os-upgrade.yaml
+  roles:
+    - upgrade-os

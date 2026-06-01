@@ -358,7 +358,7 @@ workers:
 Ensuite, exécutez les playbooks Ansible pour installer Kubernetes.
 
 ```bash
-ansible-playbook -i ./hosts.yaml ./upgrade.yaml
+ansible-playbook -i ./hosts.yaml ./os-upgrade.yaml
 ansible-playbook -i ./hosts.yaml ./checks.yaml
 ansible-playbook -i ./hosts.yaml ./cri.yaml
 ansible-playbook -i ./hosts.yaml ./kubeadm.yaml
@@ -532,8 +532,33 @@ done
 ### Mise à jour des systèmes d’exploitation
 
 ```bash
-ansible-playbook -i ./hosts.yaml ./upgrade.yaml
+ansible-playbook -i ./hosts.yaml ./os-upgrade.yaml
 ```
+
+### Mise à jour de Kubernetes (upgrade in-place — ADR 0015)
+
+Montée de version K8s **in-place**, séquencée (control plane d'abord, puis
+workers un par un). **Une mineure à la fois** ; vérifier la compat croisée
+Cilium/Rook/Ceph
+([ADR 0006](../docs/decisions/0006-matrice-de-versions-et-politique-de-bump.md))
+**avant**, et **valider sur le banc multi-node** d'abord.
+
+```bash
+# Patch (1.34.x → 1.34.y) :
+ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+  -e k8s_upgrade_version=1.34.9
+
+# Mineure (1.34 → 1.35) : bascule aussi le dépôt apt vers la mineure cible.
+ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+  -e k8s_upgrade_version=1.35.0 -e k8s_upgrade_repo_minor=v1.35
+```
+
+Le playbook draine chaque nœud avant son upgrade et le `uncordon` ensuite ; un
+seul nœud est indisponible à la fois. L'API est brièvement coupée pendant
+l'`apply` sur le control plane (SPOF assumé,
+[ADR 0002](../docs/decisions/0002-control-plane-unique-avec-endpoint.md)).
+Détails et compromis :
+[ADR 0015](../docs/decisions/0015-strategie-upgrade-kubernetes.md).
 
 ### Sauvegarde etcd (SPOF assumé)
 

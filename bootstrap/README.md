@@ -15,7 +15,8 @@ de serveurs Debian.
 | [`initialisation.yaml`](initialisation.yaml) | Initialisation du cluster avec `kubeadm init`              |
 | [`cni.sh`](cni.sh)                           | Installation du CNI Cilium (à lancer sur le control plane) |
 | [`join-workers.yaml`](join-workers.yaml)     | Ajout des nœuds workers                                    |
-| [`upgrade.yaml`](upgrade.yaml)               | Mise à jour OS de l'ensemble du parc                       |
+| [`os-upgrade.yaml`](os-upgrade.yaml)         | Mise à jour OS de l'ensemble du parc                       |
+| [`k8s-upgrade.yaml`](k8s-upgrade.yaml)       | Upgrade Kubernetes in-place, séquencé (ADR 0015)           |
 | [`roles/`](roles/)                           | Rôles Ansible utilisés par les playbooks                   |
 
 ## Procédure complète

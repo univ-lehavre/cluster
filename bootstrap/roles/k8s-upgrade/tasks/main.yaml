@@ -1,0 +1,122 @@
+# code: language=ansible
+# Upgrade Kubernetes IN-PLACE, séquencé (audit P5 #18 / ADR 0015).
+#
+# Stratégie (cf. ADR 0015 — stratégie d'upgrade K8s) :
+#   - Montées de PATCH et de MINEUR (ex. 1.34.x → 1.34.y, 1.34 → 1.35) : in-place
+#     via kubeadm, control plane d'abord puis workers un par un (drain/uncordon).
+#   - Sauts de plusieurs mineurs : NON supportés par kubeadm en une fois — passer
+#     mineur par mineur, ou rebuild (cf. ADR 0006 plafond de compat).
+#
+# Pré-requis : `k8s_upgrade_version` défini (ex. "1.34.9"), et
+# `k8s_upgrade_repo_minor` (ex. "v1.34") si la MINEURE change (le dépôt
+# pkgs.k8s.io est versionné par mineure → il faut basculer le repo avant).
+#
+# ⚠️ À jouer avec --limit pour contrôler le rythme. Ce rôle s'appuie sur la
+# distinction control plane / workers via les groupes d'inventaire (control /
+# workers). Le playbook k8s-upgrade.yaml orchestre l'ordre (serial).
+
+- name: Vérifier que la version cible est fournie
+  ansible.builtin.assert:
+    that:
+      - k8s_upgrade_version is defined
+      - k8s_upgrade_version | length > 0
+    fail_msg: >-
+      Définir k8s_upgrade_version (ex. -e k8s_upgrade_version=1.34.9).
+      Voir bootstrap/RUNBOOK.md § Mise à jour de Kubernetes.
+
+# Si la mineure change, basculer le dépôt pkgs.k8s.io (versionné par mineure).
+- name: Basculer le dépôt pkgs.k8s.io sur la mineure cible (si fournie)
+  become: true
+  when: k8s_upgrade_repo_minor | default('') | length > 0
+  block:
+    - name: Mettre à jour la clé du dépôt Kubernetes (mineure cible)
+      ansible.builtin.get_url:
+        url: 'https://pkgs.k8s.io/core:/stable:/{{ k8s_upgrade_repo_minor }}/deb/Release.key'
+        dest: /tmp/k8s-release.key
+        mode: '0644'
+    - name: Désarmoricer la clé en keyring
+      ansible.builtin.command:
+        cmd: gpg --batch --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --dearmor /tmp/k8s-release.key
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg.new
+      changed_when: true
+    - name: Pointer le dépôt apt sur la mineure cible
+      ansible.builtin.apt_repository:
+        repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ k8s_upgrade_repo_minor }}/deb/ /'
+        filename: kubernetes
+        state: present
+        update_cache: true
+
+# kubeadm doit être upgradé en premier (il pilote l'upgrade).
+- name: Lever le hold et installer kubeadm à la version cible
+  become: true
+  block:
+    - name: Unhold kubeadm
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: install
+    - name: Installer kubeadm={{ k8s_upgrade_version }}
+      ansible.builtin.apt:
+        name: 'kubeadm={{ k8s_upgrade_version }}-*'
+        state: present
+        allow_change_held_packages: true
+        update_cache: true
+    - name: Re-hold kubeadm
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: hold
+
+# ── Control plane : `kubeadm upgrade apply` (le 1er control plane uniquement) ──
+- name: Appliquer l'upgrade du control plane
+  become: true
+  when: inventory_hostname in groups['control']
+  block:
+    - name: Vérifier le plan d'upgrade (kubeadm upgrade plan)
+      ansible.builtin.command: 'kubeadm upgrade plan v{{ k8s_upgrade_version }}'
+      register: upgrade_plan
+      changed_when: false
+
+    - name: Appliquer l'upgrade du control plane (kubeadm upgrade apply)
+      ansible.builtin.command: 'kubeadm upgrade apply -y v{{ k8s_upgrade_version }}'
+      register: upgrade_apply
+      changed_when: "'successfully upgraded' in upgrade_apply.stdout"
+
+# ── Workers (et control planes secondaires) : `kubeadm upgrade node` ──────────
+- name: Appliquer l'upgrade du nœud (workers)
+  become: true
+  when: inventory_hostname in groups['workers']
+  ansible.builtin.command: kubeadm upgrade node
+  register: upgrade_node
+  changed_when: "'upgrade' in upgrade_node.stdout"
+
+# ── kubelet + kubectl : sur tous les nœuds, après kubeadm ─────────────────────
+- name: Mettre à jour kubelet et kubectl à la version cible
+  become: true
+  block:
+    - name: Unhold kubelet et kubectl
+      ansible.builtin.dpkg_selections:
+        name: '{{ item }}'
+        selection: install
+      loop:
+        - kubelet
+        - kubectl
+    - name: Installer kubelet/kubectl={{ k8s_upgrade_version }}
+      ansible.builtin.apt:
+        name:
+          - 'kubelet={{ k8s_upgrade_version }}-*'
+          - 'kubectl={{ k8s_upgrade_version }}-*'
+        state: present
+        allow_change_held_packages: true
+        update_cache: true
+    - name: Re-hold kubelet et kubectl
+      ansible.builtin.dpkg_selections:
+        name: '{{ item }}'
+        selection: hold
+      loop:
+        - kubelet
+        - kubectl
+    - name: Recharger et redémarrer kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        daemon_reload: true
+        state: restarted

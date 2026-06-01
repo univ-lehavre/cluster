@@ -29,3 +29,4 @@ Format léger inspiré de Michael Nygard :
 | 0012 | [RStudio sans authentification (`DISABLE_AUTH=true`)](0012-rstudio-disable-auth.md)                  | Accepted |
 | 0013 | [Sauvegarde des données applicatives (VolumeSnapshots CSI)](0013-sauvegarde-donnees-applicatives.md) | Accepted |
 | 0014 | [Durcissement du plan de contrôle (`kubeadm init` nu)](0014-durcissement-kubeadm-init.md)            | Accepted |
+| 0015 | [Stratégie d'upgrade Kubernetes (in-place vs rebuild)](0015-strategie-upgrade-kubernetes.md)         | Accepted |

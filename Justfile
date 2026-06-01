@@ -69,6 +69,15 @@ join-workers:
 etcd-backup:
     ansible-playbook -i {{ inventory }} bootstrap/etcd-backup.yaml
 
+# Mise à jour des paquets OS (full-upgrade + reboot si requis) sur tout le parc.
+os-upgrade:
+    ansible-playbook -i {{ inventory }} bootstrap/os-upgrade.yaml
+
+# Upgrade Kubernetes in-place, séquencé (ADR 0015). Ex : `just k8s-upgrade 1.34.9`.
+# Mineure : ajouter le dépôt via -e (voir RUNBOOK § Mise à jour de Kubernetes).
+k8s-upgrade version:
+    ansible-playbook -i {{ inventory }} bootstrap/k8s-upgrade.yaml -e k8s_upgrade_version={{ version }}
+
 # Rollback du bootstrap K8s (DESTRUCTIF — exige confirm=yes).
 rollback confirm="no":
     ansible-playbook -i {{ inventory }} bootstrap/rollback.yaml -e confirm={{ confirm }}

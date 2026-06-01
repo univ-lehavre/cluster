@@ -1,0 +1,76 @@
+# code: language=ansible
+# Upgrade Kubernetes in-place, séquencé (audit P5 #18 / ADR 0015).
+#
+# Usage :
+#   ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+#     -e k8s_upgrade_version=1.34.9
+#   # Montée de mineure (bascule aussi le dépôt apt) :
+#   ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+#     -e k8s_upgrade_version=1.35.0 -e k8s_upgrade_repo_minor=v1.35
+#
+# Ordre imposé par kubeadm :
+#   1. Control plane (kubeadm upgrade apply) — drainé puis restauré.
+#   2. Workers UN PAR UN (serial: 1) : drain → kubeadm upgrade node → kubelet →
+#      uncordon. Un seul worker indisponible à la fois (les workloads se
+#      replanifient sur les autres).
+#
+# ⚠️ Lire bootstrap/RUNBOOK.md § Mise à jour de Kubernetes AVANT. Valider sur le
+# banc multi-node d'abord. Ne pas sauter plusieurs mineures en une fois.
+
+# ── 1. Control plane ─────────────────────────────────────────────────────────
+- name: Upgrade du control plane
+  hosts: control
+  serial: 1
+  pre_tasks:
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: k8s-upgrade.yaml
+    - name: Drain du control plane (depuis lui-même)
+      become: true
+      ansible.builtin.command: >-
+        kubectl drain {{ inventory_hostname }}
+        --ignore-daemonsets --delete-emptydir-data --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+  roles:
+    - k8s-upgrade
+  post_tasks:
+    - name: Uncordon du control plane
+      become: true
+      ansible.builtin.command: 'kubectl uncordon {{ inventory_hostname }}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+
+# ── 2. Workers, un par un ────────────────────────────────────────────────────
+- name: Upgrade des workers (un par un)
+  hosts: workers
+  serial: 1
+  pre_tasks:
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: k8s-upgrade.yaml
+    - name: Drain du worker (depuis le control plane)
+      delegate_to: "{{ groups['control'][0] }}"
+      become: true
+      ansible.builtin.command: >-
+        kubectl drain {{ inventory_hostname }}
+        --ignore-daemonsets --delete-emptydir-data --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+  roles:
+    - k8s-upgrade
+  post_tasks:
+    - name: Uncordon du worker (depuis le control plane)
+      delegate_to: "{{ groups['control'][0] }}"
+      become: true
+      ansible.builtin.command: 'kubectl uncordon {{ inventory_hostname }}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
