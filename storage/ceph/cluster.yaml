@@ -83,6 +83,10 @@ spec:
   # enable prometheus alerting for cluster
   monitoring:
     # requires Prometheus to be pre-installed
+    # Reste à `false` volontairement (audit P5 #17 / ADR 0016) : l'activer sans
+    # opérateur Prometheus ferait créer des PrometheusRule/ServiceMonitor dont
+    # les CRDs sont absents → erreurs. À passer `true` au palier 2 (déploiement
+    # kube-prometheus). L'exporter Ceph est déjà actif (metricsDisabled: false).
     enabled: false
     # Whether to disable the metrics reported by Ceph. If false, the prometheus mgr module and Ceph exporter are enabled.
     # If true, the prometheus mgr module and Ceph exporter are both disabled. Default is false.
