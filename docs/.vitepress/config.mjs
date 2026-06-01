@@ -38,6 +38,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Accueil', link: '/' },
+      { text: 'Par où commencer', link: '/docs/demarrage' },
       { text: 'Glossaire', link: '/docs/glossaire' },
       { text: "Plan d'action", link: '/docs/audit/12-plan-action' },
       { text: 'Banc de test', link: '/test/' },
@@ -47,6 +48,7 @@ export default defineConfig({
         text: 'Pour démarrer',
         items: [
           { text: 'Accueil', link: '/' },
+          { text: 'Par où commencer', link: '/docs/demarrage' },
           { text: 'Glossaire', link: '/docs/glossaire' },
           { text: 'Garde-fous', link: '/SAFEGUARDS' },
           { text: 'Contribuer', link: '/CONTRIBUTING' },
