@@ -1,6 +1,6 @@
 # STATUS — avancement du durcissement (audit → mise en œuvre)
 
-> **Dernière mise à jour : 2026-06-01 17:45 CEST.** Document vivant —
+> **Dernière mise à jour : 2026-06-01 17:57 CEST.** Document vivant —
 > **horodater toute modification** (en-tête ci-dessus + la date entre crochets
 > sur chaque ligne modifiée). État du dépôt à la **v2.6.1**.
 
@@ -73,14 +73,14 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 7 — Gouvernance
 
-| #   | Action                                         | État                                                |
-| --- | ---------------------------------------------- | --------------------------------------------------- |
-| 26  | `CITATION.cff`                                 | ✅ [2026-06-01] créé (ORCID/DOI à compléter)        |
-| 27  | `SECURITY.md` + Private Vuln. Reporting        | ✅ [2026-06-01] créé                                |
-| 28  | Versionnement : retirer commit-and-tag-version | ✅ [2026-06-01] retiré (release-please seul)        |
-| 29  | Branch protection GitHub                       | ❓ [2026-06-01] 0 review + checks requis — à durcir |
-| 30  | Licence subtree (MIT/NOTICE/SPDX)              | ❓ [2026-06-01] LICENSE présent                     |
-| 31  | CODE_OF_CONDUCT, templates, CODEOWNERS         | ✅ [2026-06-01] créés (.github/ + racine)           |
+| #   | Action                                         | État                                                              |
+| --- | ---------------------------------------------- | ----------------------------------------------------------------- |
+| 26  | `CITATION.cff`                                 | ✅ [2026-06-01] créé (ORCID/DOI à compléter)                      |
+| 27  | `SECURITY.md` + Private Vuln. Reporting        | ✅ [2026-06-01] créé                                              |
+| 28  | Versionnement : retirer commit-and-tag-version | ✅ [2026-06-01] retiré (release-please seul)                      |
+| 29  | Branch protection GitHub                       | ✅ [2026-06-01] strict + conversation resolution (cf. SAFEGUARDS) |
+| 30  | Licence subtree (MIT/NOTICE/SPDX)              | ✅ [2026-06-01] `NOTICE` (subtree Unlicense vs MIT)               |
+| 31  | CODE_OF_CONDUCT, templates, CODEOWNERS         | ✅ [2026-06-01] créés (.github/ + racine)                         |
 
 ### Priorité 8 — Hygiène
 

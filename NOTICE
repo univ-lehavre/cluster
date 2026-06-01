@@ -1,0 +1,32 @@
+NOTICE — licences du dépôt « cluster »
+======================================
+
+Ce dépôt est distribué sous licence MIT (voir LICENSE), sauf pour le
+sous-arbre indiqué ci-dessous.
+
+Sous-arbre sous licence distincte
+---------------------------------
+
+  Chemin   : bootstrap/security/
+  Origine  : https://github.com/univ-lehavre/server-security
+             (fusionné via `git subtree`)
+  Licence  : The Unlicense (domaine public) — voir
+             bootstrap/security/LICENSE
+  DOI      : https://doi.org/10.5281/zenodo.16983614
+
+Le code de `bootstrap/security/` provient du projet `server-security` (même
+propriétaire, Université Le Havre Normandie) et conserve sa licence d'origine,
+The Unlicense. The Unlicense (dédicace au domaine public) est compatible avec
+une redistribution sous MIT : l'ensemble du dépôt peut être utilisé selon les
+termes de LICENSE (MIT), `bootstrap/security/` restant en outre disponible dans
+le domaine public.
+
+Identification SPDX
+-------------------
+
+  - Dépôt (par défaut)      : SPDX-License-Identifier: MIT
+  - bootstrap/security/**   : SPDX-License-Identifier: Unlicense
+
+En cas de doute sur un fichier, la licence applicable est celle du LICENSE le
+plus proche dans l'arborescence (LICENSE racine = MIT ;
+bootstrap/security/LICENSE = Unlicense).

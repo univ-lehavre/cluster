@@ -52,6 +52,24 @@ Posés par [Lefthook](https://lefthook.dev/) au premier `pnpm install` (config :
 | `jscpd`        | détection de code dupliqué (seuil 5 %)  |
 | `commitlint`   | commits de la PR (Conventional Commits) |
 
+### Branch protection sur `main` (réglage GitHub — audit P7 #29)
+
+Configurée côté GitHub (non versionnable, documentée ici pour mémoire) :
+
+- **Pull request obligatoire** (pas de push direct — doublé par le hook
+  `no-direct-push-to-main`).
+- **6 checks requis** avant merge : `prettier`, `yamllint`, `shellcheck`,
+  `kubeconform`, `ansible-lint`, `commitlint`.
+- **`strict: true`** : la branche doit être **à jour avec `main`** (checks
+  rejoués sur le dernier état) avant merge.
+- **Résolution des conversations requise**.
+- **0 review requise** : choix assumé pour un repo **mono-mainteneur** — exiger
+  une approbation bloquerait l'auto-merge des PR de release (cf. release-please
+  ci-dessous : aucun second relecteur disponible).
+
+> Vérifier / réappliquer :
+> `gh api repos/univ-lehavre/cluster/branches/main/protection`.
+
 [`.github/workflows/docs.yml`](.github/workflows/docs.yml) :
 
 - À chaque PR : `pnpm docs:build` (validation — pas de dead link, base path
