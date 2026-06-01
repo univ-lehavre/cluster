@@ -59,6 +59,7 @@ pre-push:
           ':!:pnpm-lock.yaml' \
           ':!:pnpm-workspace.yaml' \
           ':!:.yamllint.yaml' \
+          ':!:.trivyignore.yaml' \
           ':!:storage/ceph/crds.yaml' \
           ':!:storage/ceph/common.yaml' \
           ':!:storage/ceph/operator.yaml' \
