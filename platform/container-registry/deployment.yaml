@@ -24,7 +24,9 @@ spec:
         - name: registry
           # distribution v3 (CNCF) — successeur de docker/distribution v2.
           # API HTTP Registry V2 inchangée, supporte OCI 1.1.
-          image: registry:3.1.1
+          # Épinglé par digest (audit P11 #11) : tag conservé pour lisibilité,
+          # digest immuable (ADR 0006). MAJ via renovate.
+          image: registry:3.1.1@sha256:6ad90ba0078c20cbdaa26b08aa2005a6ba409234f50f485d25eadd604704511e
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000

@@ -9,7 +9,7 @@
   "description": "Veille de dépendances alignée sur l'ADR 0006 : PR dédiées (jamais d'auto-merge → 'pas de bump silencieux'), rythme mensuel groupé (les bumps sont rares), validation banc avant prod laissée à l'humain.",
   "packageRules": [
     {
-      "description": "Composants cluster critiques (K8s/Cilium/Rook/Ceph) : PR séparées et non groupées, car l'ADR 0006 impose une vérification de compat croisée release-notes avant chaque montée.",
+      "description": "Composants cluster critiques (K8s/Cilium/Rook/Ceph) : PR séparées et non groupées, car l'ADR 0006 impose une vérification de compat croisée release-notes avant chaque montée. Les images déjà épinglées par digest (rook/ceph, ceph, registry — audit P11 #11) voient leur digest mis à jour par renovate à chaque bump.",
       "matchPackageNames": [
         "/cilium/",
         "/rook/",
