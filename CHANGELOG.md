@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.4.0](https://github.com/univ-lehavre/cluster/compare/v2.3.0...v2.4.0) (2026-06-01)
+
+
+### Features
+
+* **securite:** ajoute des NetworkPolicies default-deny par namespace (audit P6 [#22](https://github.com/univ-lehavre/cluster/issues/22)) ([e8c0836](https://github.com/univ-lehavre/cluster/commit/e8c08361ceea854d1c15986238c57b49a56653dd))
+* **securite:** NetworkPolicies default-deny par namespace (audit P6 [#22](https://github.com/univ-lehavre/cluster/issues/22)) ([#39](https://github.com/univ-lehavre/cluster/issues/39)) ([e8c0836](https://github.com/univ-lehavre/cluster/commit/e8c08361ceea854d1c15986238c57b49a56653dd))
+
 ## [2.3.0](https://github.com/univ-lehavre/cluster/compare/v2.2.0...v2.3.0) (2026-06-01)
 
 
