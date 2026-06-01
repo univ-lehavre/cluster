@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.3.0](https://github.com/univ-lehavre/cluster/compare/v2.2.0...v2.3.0) (2026-06-01)
+
+
+### Features
+
+* **securite:** durcit les workloads + allowlist trivy ciblée (audit P6) ([#37](https://github.com/univ-lehavre/cluster/issues/37)) ([dc19fa4](https://github.com/univ-lehavre/cluster/commit/dc19fa430fa57a5a4e78eeb0ed2f15dcb1ed9035))
+
 ## [2.2.0](https://github.com/univ-lehavre/cluster/compare/v2.1.9...v2.2.0) (2026-06-01)
 
 
