@@ -12,7 +12,7 @@ nommage que la prod, cf. [drift 0b](../RESULTS.md).
 > les routes locales vers les vrais serveurs (cf.
 > [drift #6 dans RESULTS.md](../RESULTS.md)). Un pre-flight dans le Vagrantfile
 > refuse le `up` si la collision est détectée.
-
+>
 > Pour un cycle rapide Phase 1-2 uniquement (sans Ceph), préférer le
 > [banc mono-nœud](../single-node/) qui démarre en quelques minutes.
 
@@ -48,7 +48,7 @@ Réserves :
 **Pas de configuration `/etc/vbox/networks.conf` requise** : la plage
 `192.168.67.0/24` est dans `192.168.0.0/16`, autorisée par défaut par VirtualBox
 sur macOS. (Ce n'était pas le cas de l'ancienne plage `10.67.2.0/24` — cf. drift
-#6.)
+n° 6.)
 
 ## RAM consommée
 

@@ -1,0 +1,34 @@
+# Configuration markdownlint (audit P8 #35).
+#
+# On cible les vrais défauts de structure Markdown, PAS le style typographique
+# déjà géré par prettier (proseWrap, espacements). Les règles désactivées le
+# sont parce qu'elles font doublon avec prettier, ou sont inadaptées à nos docs
+# (blocs de code larges, HTML occasionnel, emojis en titres).
+config:
+  # MD013 : longueur de ligne — prettier gère le proseWrap (80) ; les
+  # dépassements restants sont des tableaux/blocs de code légitimes.
+  MD013: false
+  # MD033 : HTML inline — utilisé ponctuellement (badges, <br>) à dessein.
+  MD033: false
+  # MD041 : un fichier peut commencer par autre chose qu'un H1 (frontmatter,
+  # badge DOI). Non pertinent ici.
+  MD041: false
+  # MD024 : titres identiques autorisés s'ils sont dans des sections distinctes
+  # (ex. plusieurs « ### Ce qui change » dans IMPLICATIONS.md).
+  MD024:
+    siblings_only: true
+  # MD036 : l'audit utilise « _Note : 4,2 / 5_ » en emphase (choix de style des
+  # rapports, pas un titre de section). Toléré.
+  MD036: false
+  # MD034 : « URLs nues » — nos cas sont des adresses e-mail de contact
+  # (SECURITY.md, CODE_OF_CONDUCT.md), pas des liens à encadrer.
+  MD034: false
+
+# Fichiers/dossiers ignorés.
+ignores:
+  - 'node_modules/**'
+  - 'docs/.vitepress/dist/**'
+  - 'docs/.vitepress/cache/**'
+  - 'CHANGELOG.md' # généré par release-please
+  - 'bootstrap/security/CHANGELOG.md' # subtree, historique
+  - 'pnpm-lock.yaml'

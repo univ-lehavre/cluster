@@ -61,7 +61,7 @@ Chaque script :
 > `etcd-client`) doit être présent sur le control plane — le scénario l'installe
 > au besoin ; en prod, l'ajouter au provisionnement si la restauration doit être
 > rapide.
-
+>
 > ⚠️ **03 / 04 — la phase « restore » d'un nœud ne se valide PAS sur ce banc.**
 > Ne pas y retourner. La phase **« perte »** est utile et valable en prod (Ceph
 > passe en `HEALTH_WARN`, les OSD survivants tiennent les I/O — réplicat ×3 /

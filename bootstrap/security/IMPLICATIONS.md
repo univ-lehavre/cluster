@@ -246,7 +246,7 @@ sudo grep -i 'ban' /var/log/fail2ban.log | tail
 
 `/etc/ssh/sshd_config.d/00-hardening.conf` contient :
 
-```
+```text
 PasswordAuthentication no
 PubkeyAuthentication yes
 PermitRootLogin no

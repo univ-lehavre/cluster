@@ -90,6 +90,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:shell
 
+  # Lint Markdown (structure) — config tolérante (.markdownlint-cli2.yaml) :
+  # cible les vrais défauts, pas le style typographique géré par prettier.
+  markdownlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: '**/*.md'
+
+  # Vérification des liens (lychee) — mode hors-ligne : ne valide que les liens
+  # internes / fichiers (les liens externes sont flaky en CI et hors de notre
+  # contrôle). Couvre les liens cassés vers des fichiers/ancres du dépôt.
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: '--offline --no-progress "**/*.md"'
+          fail: true
+
   # Scan de posture sécurité IaC (manifestes K8s, Dockerfile-like, config).
   # Échoue sur HIGH/CRITICAL. Les compromis actés sont listés, CIBLÉS PAR
   # CHEMIN et justifiés dans .trivyignore.yaml (cf. ADR 0010/0011/0012 + P6).

@@ -53,7 +53,7 @@ Box : `bento/debian-13` arm64 v202510.26.0, kernel `6.12.48+deb13-arm64`.
 
 **Symptôme** :
 
-```
+```text
 A customization command failed:
 ["storageattach", :id, "--storagectl", "SATA Controller", "--port", "1", …]
 Stderr: Could not find a controller named 'SATA Controller'
@@ -483,7 +483,7 @@ restauré n'est pas un backup) est désormais **vert**. Déroulé : ConfigMap t�
 (`etcdctl snapshot restore` + remplacement data-dir + restart kubelet) → **le
 témoin réapparaît à l'identique**. Logs clés :
 
-```
+```text
 ✓ snapshot : /var/lib/etcd-backups/etcd-…​.db
 ✓ témoin supprimé
 ✓ restauration appliquée

@@ -97,13 +97,16 @@ toute autoconfiguration échoue : il faut configurer l’IP **manuellement**.
    with firmware » il est trouvé sur le média lui-même. Le pilote noyau
    **`bnxt_en`** est ensuite chargé automatiquement.
 3. **Si rien n’est détecté**, basculer en console (`Alt+F2`) pour diagnostic :
+
    ```bash
    lspci -nn | grep -i ethernet   # doit lister le BCM57416 (vendor 14e4)
    modprobe bnxt_en               # force le chargement du pilote
    dmesg | tail -30               # cherche les erreurs de firmware
    ```
+
    Revenir à l’installateur (`Alt+F1`) et relancer « Détecter le matériel réseau
    ».
+
 4. **Choix de l’interface** (l’installateur le demande en mode expert s’il y en
    a plusieurs) → choisir **`ens10f0np0`** (le port câblé ; les 3 autres ports
    n’ont pas de lien).
