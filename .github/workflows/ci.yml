@@ -35,6 +35,26 @@ jobs:
         with:
           severity: warning
 
+  # Scripts qui échappent au job shellcheck par leur extension (audit P3 #36) :
+  # le template `.sh.j2` (corps bash, sans jinja) et le script Perl `.pl`.
+  scripts-extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck du template etcd-snapshot.sh.j2
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck --severity=warning --shell=bash \
+            bootstrap/roles/etcd-backup/templates/etcd-snapshot.sh.j2
+      - name: perl -c des scripts Perl
+        run: |
+          rc=0
+          for f in $(git ls-files '*.pl'); do
+            echo "== perl -c $f =="
+            perl -c "$f" || rc=1
+          done
+          exit $rc
+
   kubeconform:
     runs-on: ubuntu-latest
     steps:

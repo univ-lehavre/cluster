@@ -47,6 +47,10 @@ pre-push:
           -not -path './node_modules/*' \
           -not -path './.git/*' \
           -print0 | xargs -0 shellcheck
+        # Template bash (.sh.j2, sans jinja) + scripts Perl (audit P3 #36).
+        shellcheck --shell=bash \
+          bootstrap/roles/etcd-backup/templates/etcd-snapshot.sh.j2
+        for f in $(git ls-files '*.pl'); do perl -c "$f"; done
     bats:
       run: pnpm test:shell
     kubeconform:
