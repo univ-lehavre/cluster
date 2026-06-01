@@ -179,24 +179,22 @@ for h in "${reachable[@]}"; do
     # (= premier boot post-install). L'arithmétique se fait côté serveur
     # (GNU date) pour rester compatible avec un poste de contrôle macOS.
     pw_result=$(ssh_script "$h" <<'REMOTE'
-# Forcer la locale C : sinon chage et `date -d` lisent le format français
-# (ex. "Dernière modification du mot de passe : mai 28, 2026") qui n'est
-# pas parsable par GNU date en mode anglais.
-last=$(LANG=C LC_ALL=C chage -l debian 2>/dev/null | awk -F: '/Last password change/{print $2}' | xargs)
-install=$(stat -c '%y' /etc/machine-id 2>/dev/null | cut -d' ' -f1)
-if [ -z "$last" ] || [ -z "$install" ]; then
+# Lecture via `getent shadow` (audit P9 #14) plutôt que la sortie humaine de
+# `chage` : le 3ᵉ champ de shadow est le nombre de JOURS depuis epoch du dernier
+# changement de mot de passe — un entier directement comparable, insensible à la
+# locale (le parsing de `chage -l` cassait sur le format français).
+last_days=$(sudo getent shadow debian 2>/dev/null | cut -d: -f3)
+# Date d'install = création de /etc/machine-id (premier boot post-install),
+# convertie en jours depuis epoch.
+install_epoch=$(stat -c '%Y' /etc/machine-id 2>/dev/null || echo 0)
+if [ -z "$last_days" ] || ! [ "$last_days" -eq "$last_days" ] 2>/dev/null || [ "$install_epoch" -eq 0 ]; then
     echo "UNKNOWN 0"
     exit 0
 fi
-le=$(LANG=C date -d "$last" +%s 2>/dev/null || echo 0)
-ie=$(LANG=C date -d "$install" +%s 2>/dev/null || echo 0)
-if [ "$le" -eq 0 ] || [ "$ie" -eq 0 ]; then
-    echo "UNKNOWN 0"
-    exit 0
-fi
-now=$(date +%s)
-install_age_days=$(( (now - ie) / 86400 ))
-diff_days=$(( (le - ie) / 86400 ))
+install_days=$(( install_epoch / 86400 ))
+now_days=$(( $(date +%s) / 86400 ))
+install_age_days=$(( now_days - install_days ))
+diff_days=$(( last_days - install_days ))
 # `chage` stocke la date au jour près (pas l'heure). Si l'install date
 # du jour même (ou d'hier), un passwd fait dans la foulée donne la même
 # date que machine-id → ambigu. On ne se prononce qu'à partir de
