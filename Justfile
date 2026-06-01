@@ -69,6 +69,10 @@ join-workers:
 etcd-backup:
     ansible-playbook -i {{ inventory }} bootstrap/etcd-backup.yaml
 
+# Rapatrie le dernier snapshot etcd hors-nœud (→ etcd-snapshots/). À planifier.
+etcd-fetch:
+    ansible-playbook -i {{ inventory }} bootstrap/etcd-fetch.yaml
+
 # Mise à jour des paquets OS (full-upgrade + reboot si requis) sur tout le parc.
 os-upgrade:
     ansible-playbook -i {{ inventory }} bootstrap/os-upgrade.yaml

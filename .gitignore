@@ -20,6 +20,10 @@ node_modules/
 !.env.example
 secrets/
 
+# Snapshots etcd rapatriés hors-nœud (etcd-fetch.yaml) — contiennent TOUS les
+# Secrets du cluster, ne JAMAIS versionner.
+etcd-snapshots/
+
 # Temp
 tmp/
 *.tmp

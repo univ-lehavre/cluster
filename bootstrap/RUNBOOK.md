@@ -587,6 +587,21 @@ restauration. Mitigations :
    ls -la /var/lib/etcd-backups/
    ```
 
+3. **Copie hors-nœud** via [`etcd-fetch.yaml`](etcd-fetch.yaml) (audit P1 #3) :
+   les snapshots du point 2 restent **sur le control plane** → perdus si
+   `dirqual1` meurt. Ce playbook rapatrie le snapshot le plus récent vers le
+   **poste de contrôle** (dossier `etcd-snapshots/`, gitignoré) :
+
+   ```bash
+   ansible-playbook -i ./hosts.yaml ./etcd-fetch.yaml
+   ```
+
+   **RPO** = fréquence de ce fetch. Recommandé : le planifier côté admin (cron /
+   launchd), p. ex. toutes les 6 h → RPO ≤ 6 h hors-nœud (et ≤ 1 h sur le nœud
+   via le timer horaire). ⚠️ Le snapshot contient **tous les Secrets** (etcd non
+   chiffré, [ADR 0014](../docs/decisions/0014-durcissement-kubeadm-init.md)) :
+   garder `etcd-snapshots/` sur un poste de confiance.
+
 #### Restauration etcd (procédure)
 
 Sur le control plane à restaurer (ou un nouveau nœud qui va prendre sa place),

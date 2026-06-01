@@ -1,0 +1,53 @@
+---
+# Copie HORS-NŒUD des snapshots etcd (audit P1 #3 / ADR 0002).
+#
+# Le rôle `etcd-backup` produit des snapshots horaires, mais ils restent SUR le
+# control plane (`/var/lib/etcd-backups`, LV dédié). Si `dirqual1` est perdu
+# (SPOF, ADR 0002), on perd etcd ET ses sauvegardes. Ce playbook récupère le
+# snapshot le plus récent vers le POSTE DE CONTRÔLE (hors-nœud), où il survit à
+# la perte du nœud.
+#
+# RPO réel = fréquence à laquelle ce playbook est lancé (voir RUNBOOK). À
+# planifier côté admin (cron/launchd) — ex. toutes les 6 h :
+#   0 */6 * * * cd <repo>/bootstrap && ansible-playbook -i hosts.yaml etcd-fetch.yaml
+#
+# ⚠️ Les snapshots contiennent TOUS les Secrets du cluster (etcd non chiffré,
+# cf. ADR 0014). La destination locale `etcd-snapshots/` est gitignorée et doit
+# rester sur un poste de confiance (idéalement chiffré au repos).
+
+- name: Récupérer les snapshots etcd hors-nœud
+  hosts: control
+  become: true
+  gather_facts: false
+  vars:
+    # Destination locale (sur le poste de contrôle), relative au dépôt.
+    etcd_fetch_dest: '{{ playbook_dir }}/../etcd-snapshots'
+  tasks:
+    - name: Trouver le snapshot etcd le plus récent
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: set -o pipefail; ls -1t /var/lib/etcd-backups/etcd-*.db 2>/dev/null | head -n1
+      register: latest_snapshot
+      changed_when: false
+      failed_when: false
+
+    - name: Vérifier qu'un snapshot existe
+      ansible.builtin.assert:
+        that:
+          - latest_snapshot.stdout | length > 0
+        fail_msg: >-
+          Aucun snapshot dans /var/lib/etcd-backups sur {{ inventory_hostname }}.
+          Le rôle etcd-backup est-il appliqué et son timer actif ?
+          (ansible-playbook -i ./hosts.yaml ./etcd-backup.yaml)
+
+    - name: Rapatrier le snapshot vers le poste de contrôle (hors-nœud)
+      ansible.builtin.fetch:
+        src: '{{ latest_snapshot.stdout }}'
+        dest: '{{ etcd_fetch_dest }}/{{ inventory_hostname }}/'
+        flat: true
+
+    - name: Confirmer la copie locale
+      ansible.builtin.debug:
+        msg: >-
+          Snapshot {{ latest_snapshot.stdout | basename }} copié dans
+          {{ etcd_fetch_dest }}/{{ inventory_hostname }}/ (hors-nœud).
