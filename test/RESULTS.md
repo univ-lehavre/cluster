@@ -496,11 +496,14 @@ témoin réapparaît à l'identique**. Logs clés :
 - A fonctionné **node `NotReady`** (Cilium en `ImagePullBackOff` faute d'accès
   quay.io depuis la VM ce jour-là) : le restore etcd ne dépend ni du CNI ni d'un
   node Ready — seulement de l'API server + etcd.
-- **Gap prod détecté** : `etcdctl` (paquet `etcd-client`) n'est **pas** installé
-  par le bootstrap (seul `crictl` l'est, via `cri-tools`/#13). Le scénario 09
-  l'installe au vol, mais en **urgence de restauration prod**, devoir
-  `apt install etcd-client` est un risque. → candidat à ajouter au rôle
-  `etcd-backup` ou `k8s-install` (même esprit que le fix #13 crictl).
+- **Gap prod détecté → RÉSOLU** : `etcdctl` (paquet `etcd-client`) n'était
+  **pas** installé par le bootstrap (seul `crictl` l'est, via `cri-tools`/#13),
+  alors que la restauration en a besoin sur l'hôte (etcd arrêté → pas de
+  `crictl exec`). En urgence, devoir `apt install etcd-client` était un risque.
+  **Corrigé** : le rôle [`etcd-backup`](../bootstrap/roles/etcd-backup/)
+  installe désormais `etcd-client` (control-plane-only, même esprit que
+  crictl/#13). Le scénario 09 vérifie sa présence et n'installe plus qu'en
+  secours, avec un WARN si le rôle n'a pas tourné.
 
 **Trois bugs de scénarios corrigés en chemin** (commits `test/`) :
 

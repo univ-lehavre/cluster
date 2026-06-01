@@ -85,16 +85,16 @@ ok "témoin supprimé"
 # ─── 4. Restaurer le snapshot (procédure RUNBOOK, sur le control plane) ───
 log "Restauration etcd sur ${CP_IP} (stop kubelet → restore → start kubelet)"
 cp_ssh "sudo cp '${SNAP}' /tmp/etcd-snapshot.db"
-# Tout le bloc en root distant ; etcdctl est invoqué via crictl dans le
-# conteneur etcd (image distroless, cf. drift #14) n'est PAS utilisable ici
-# car etcd est arrêté — on utilise l'etcdctl de l'hôte s'il existe, sinon le
-# binaire du paquet etcd-client. On reste fidèle au RUNBOOK : etcdctl hôte.
+# Tout le bloc en root distant. La restauration utilise l'etcdctl de l'HÔTE
+# (etcd est arrêté → pas de `crictl exec` dans le conteneur comme au snapshot).
+# `etcd-client` est normalement posé par le rôle etcd-backup ; s'il manque, on
+# l'installe en AVERTISSANT (signe que le rôle n'a pas tourné sur ce nœud).
 cp_ssh 'sudo bash -s' <<'REMOTE' || die "procédure de restauration échouée"
 set -euo pipefail
-command -v etcdctl >/dev/null 2>&1 || {
-  echo "etcdctl absent sur l'hôte — installation (cri-tools fournit crictl, pas etcdctl)"
+if ! command -v etcdctl >/dev/null 2>&1; then
+  echo "WARN: etcdctl absent — le rôle etcd-backup aurait dû poser etcd-client. Installation de secours."
   apt-get update -qq && apt-get install -y -qq etcd-client
-}
+fi
 systemctl stop kubelet
 crictl ps -q 2>/dev/null | xargs -r crictl stop >/dev/null 2>&1 || true
 crictl ps -q 2>/dev/null | xargs -r crictl rm >/dev/null 2>&1 || true
