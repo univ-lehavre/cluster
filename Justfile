@@ -82,6 +82,12 @@ k8s-upgrade version:
 rollback confirm="no":
     ansible-playbook -i {{ inventory }} bootstrap/rollback.yaml -e confirm={{ confirm }}
 
+# ─── Observabilité (ADR 0016) ───────────────────────────────────────────────
+
+# Déploie metrics-server (kubectl top + HPA). Stack Prometheus = palier 2.
+metrics-server:
+    kubectl apply -f platform/metrics-server/metrics-server.yaml
+
 # ─── Documentation (site VitePress) ─────────────────────────────────────────
 
 # Sert la doc en local (http://localhost:5173).
