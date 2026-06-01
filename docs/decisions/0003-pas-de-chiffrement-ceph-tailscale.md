@@ -72,6 +72,13 @@ Accepted (2026-05-28).
   classifiées).
 - Le réseau cluster cesse d'être isolé (point d'entrée externe direct).
 
+**Repli OSS si dépendance Tailscale problématique.** Si la dépendance au service
+hébergé Tailscale (control plane SaaS) devient un souci (souveraineté, coût,
+disponibilité), **[Headscale](https://github.com/juanfont/headscale)** — une
+réimplémentation open-source auto-hébergeable du control plane Tailscale —
+permet de garder le même modèle (clients `tailscale`, ACL) sans le SaaS. Non
+déployé aujourd'hui ; noté comme porte de sortie.
+
 Cf. également [ADR 0011](0011-registry-http-sans-auth.md),
 [ADR 0012](0012-rstudio-disable-auth.md) qui s'appuient sur la même hypothèse de
 réseau de confiance.

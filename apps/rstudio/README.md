@@ -18,6 +18,13 @@ pour le contexte complet et les garde-fous opérationnels.
 > confiance ou à des utilisateurs externes. Y revenir avant tout élargissement
 > du périmètre d'accès.
 
+**SPOF applicatif assumé** (audit P8) : `replicas: 1` sur PVC RBD
+(`ReadWriteOnce`) → pas de scale-out, et la perte du nœud hébergeant le pod rend
+RStudio indisponible le temps que Kubernetes le replanifie ailleurs et
+**rattache le volume RBD** (quelques minutes ; les données survivent, réplicat
+×3). Acceptable pour un usage recherche mono-utilisateur. HA réelle = bascule
+sur CephFS (`ReadWriteMany`) + plusieurs replicas, hors périmètre actuel.
+
 ## Installation
 
 ```bash

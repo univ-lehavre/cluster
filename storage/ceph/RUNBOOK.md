@@ -72,6 +72,34 @@ Quand l'inspection est terminée :
 kubectl -n rook-ceph delete deploy/rook-ceph-tools
 ```
 
+## Capacité et dimensionnement (audit P8)
+
+Surveiller le **taux de remplissage** : un pool Ceph qui approche `nearfull` (85
+% par défaut) dégrade les performances, et `full` (95 %) **bloque les
+écritures**. Depuis la toolbox :
+
+```bash
+ceph df                 # %USED par pool + espace brut/dispo
+ceph osd df             # remplissage par OSD (repérer un déséquilibre)
+ceph health detail      # alertes nearfull/backfillfull/full explicites
+```
+
+**Capacité de ce cluster** : 4 nœuds × 12 HDD × 5,5 TiB ≈ **264 TiB brut**, soit
+~**88 TiB utiles** en réplicat ×3 (cf.
+[ADR 0009](../../docs/decisions/0009-pourquoi-4-noeuds.md)).
+
+**Ajouter de la capacité** : remplacer un disque défaillant ou ajouter des HDD
+se fait à chaud — `useAllDevices: true` ([cluster.yaml](cluster.yaml)) fait
+détecter et intégrer les nouveaux disques bruts par l'operator (la découverte
+automatique étant désactivée, cf. ADR : c'est le redéploiement du `CephCluster`
+qui les prend en compte). Après ajout, Ceph rééquilibre (`backfill`) —
+surveiller `ceph status` jusqu'au retour `HEALTH_OK`.
+
+**GC du registry** : le PVC `registry-pvc` ne se vide pas tout seul quand on
+supprime des tags. Le `CronJob` de garbage-collection
+([garbage-collect-cronjob.yaml](../../platform/container-registry/garbage-collect-cronjob.yaml))
+récupère l'espace ; le déclencher manuellement si le PVC se remplit.
+
 ## Classes de stockage
 
 `rook-ceph-block-replicated` est annotée

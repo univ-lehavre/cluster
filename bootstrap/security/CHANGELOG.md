@@ -1,5 +1,12 @@
 # server-security
 
+> ❄️ **Changelog historique GELÉ — ne pas maintenir ici.** Ce fichier provient
+> du projet source [`server-security`](https://github.com/univ-lehavre/server-security)
+> (format Changesets) d'où ce dossier est issu par `git subtree`. Il est
+> **figé** : le versionnement du dépôt `cluster` est assuré par release-please
+> (cf. [`CHANGELOG.md`](../../CHANGELOG.md) racine, [ADR 0006]). Conservé pour
+> mémoire de l'historique amont uniquement.
+
 ## 2.0.0
 
 ### Major Changes

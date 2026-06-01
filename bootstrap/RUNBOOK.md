@@ -452,6 +452,16 @@ Chaque playbook bootstrap invoque en `pre_tasks` le rôle
 Format : timestamp UTC ISO-8601, nom du playbook, identité de l'opérateur sur le
 poste de contrôle (`$USER@hostname`), nom du compte SSH côté serveur (`debian`).
 
+> ⚠️ **Ce n'est pas une preuve de non-répudiation** (audit P6). L'identité
+> opérateur (`$USER@hostname`) provient de variables d'environnement **côté
+> contrôle** — falsifiables par celui qui lance le playbook. Ce journal est un
+> outil d'**exploitation** (« quel playbook a tourné quand »), pas une preuve
+> opposable. Pour la traçabilité forte, s'appuyer sur ce qui est journalisé
+> **côté serveur** et non falsifiable par l'opérateur : `sshd` en
+> **`LogLevel VERBOSE`** (déjà posé par le rôle sshd — empreinte de clé publique
+> à chaque connexion) et **`auditd`** (couche `--tags audit` — syscalls
+> privilégiés). Corréler les deux donne « quelle clé, quand, quels actes ».
+
 Lecture :
 
 ```bash
