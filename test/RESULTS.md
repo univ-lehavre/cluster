@@ -100,6 +100,31 @@ for uuid in $(VBoxManage list hdds | awk '/^UUID/ {print $2}'); do
 done
 ```
 
+### 🟢 0d — DNS NAT injoignable + `jq` absent (câblés dans le Vagrantfile)
+
+**Symptôme** : `apt-get`/`git` échouent dans les VMs (« pas de réseau ») alors
+que la connectivité IP marche (`ping 1.1.1.1` OK) ; et les scénarios de banc
+appellent `jq`, absent de la box.
+
+**Cause** : le DHCP du LAN injecte dans la VM des résolveurs (box/université)
+**injoignables depuis le NAT VirtualBox**. La résolution DNS échoue donc, ce qui
+ressemble à une coupure réseau totale.
+
+**Correctif appliqué** (provisioning persistant, survit à `vagrant destroy`) —
+dans le bloc `config.vm.provision "shell"` de
+[`test/multi-node/Vagrantfile`](multi-node/Vagrantfile) :
+
+- `supersede domain-name-servers 10.0.2.3, 1.1.1.1;` ajouté à
+  `/etc/dhcp/dhclient.conf` → le DHCP ne réécrase plus le DNS (persiste au
+  reboot/renew) ;
+- `/etc/resolv.conf` écrit immédiatement sur le DNS proxy NAT VBox (`10.0.2.3`)
+  - public (`1.1.1.1`) pour le boot courant ;
+- `jq` installé via `apt-get` une fois le DNS réparé.
+
+Le bloc est idempotent (`grep -q` avant ajout, `command -v jq` avant install) :
+rejeu de `vagrant provision` sans effet de bord. **Sans objet en prod** : les
+serveurs HPE ont un DNS interne joignable et `jq` provisionné par les rôles.
+
 ### 🔴 3 — `kubeadm init` annonce IP NAT (10.0.2.15) au lieu du réseau privé
 
 **Symptôme** : `join-workers.yaml` échoue avec

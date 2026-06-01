@@ -89,6 +89,26 @@ Vagrant.configure("2") do |config|
     echo 'debian ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/debian
     chmod 440 /etc/sudoers.d/debian
 
+    # ── DNS : forcer des résolveurs joignables depuis le NAT VirtualBox ──
+    # Le DHCP du LAN injecte des résolveurs (box/uni) INJOIGNABLES depuis le
+    # NAT de la VM → apt/git échouent (« pas de réseau » alors que la
+    # connectivité IP marche, cf. RESULTS.md drift 0d). On force le DNS proxy NAT
+    # VirtualBox (10.0.2.3) + un public (1.1.1.1), de façon persistante :
+    #   - `supersede` dans dhclient.conf : le DHCP ne réécrase plus le DNS ;
+    #   - écriture immédiate de resolv.conf pour le boot courant.
+    # Persiste à travers `vagrant destroy` car porté par le provisioning.
+    if ! grep -q '10.0.2.3' /etc/dhcp/dhclient.conf 2>/dev/null; then
+      echo 'supersede domain-name-servers 10.0.2.3, 1.1.1.1;' >> /etc/dhcp/dhclient.conf
+    fi
+    printf 'nameserver 10.0.2.3\\nnameserver 1.1.1.1\\n' > /etc/resolv.conf
+
+    # ── Outils requis par les scénarios de banc / state.sh ──────────────
+    # `jq` (parsing JSON des sorties ceph/kubectl) absent de la box : on
+    # l'installe une fois le DNS réparé. Idempotent.
+    if ! command -v jq >/dev/null 2>&1; then
+      apt-get update -qq && apt-get install -y -qq jq
+    fi
+
     # Route persistante via systemd-networkd drop-in
     install -d /etc/systemd/network/10-eth1.network.d
     cat > /etc/systemd/network/10-eth1.network.d/k8s-services-route.conf <<'NET'
