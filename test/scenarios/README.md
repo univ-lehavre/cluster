@@ -40,7 +40,11 @@ test/scenarios/
 ├── 06-object-store-smoke.sh          ← smoke-test datalake S3
 ├── 07-cilium-connectivity.sh         ← test connectivité E/W Cilium
 ├── 08-resource-limits-audit.sh       ← audit requests/limits Ceph
-└── 09-etcd-restore.sh                ← restauration etcd (backup restaurable)
+├── 09-etcd-restore.sh                ← restauration etcd (backup restaurable)
+├── 10-pod-security-admission.sh      ← PodSecurity bloque les pods dangereux
+├── 11-networkpolicy-default-deny.sh  ← Cilium applique default-deny + allow
+├── 12-securitycontext-runtime.sh     ← securityContext appliqué au runtime
+└── 13-host-node-hardening.sh         ← durcissement hôte (réutilise state.sh)
 ```
 
 Chaque script :
@@ -54,17 +58,21 @@ Chaque script :
 
 ## Matrice des scénarios
 
-| #   | Scénario              | Tests                                                                         | Durée   | Couverture                                      |
-| --- | --------------------- | ----------------------------------------------------------------------------- | ------- | ----------------------------------------------- |
-| 01  | PVC RBD write/read    | StorageClass défaut, PVC Bound, écriture/lecture                              | ~1 min  | Stockage bloc fonctionnel                       |
-| 02  | Reschedule pod        | Delete pod, re-création, **données persistantes**                             | ~30s    | Découplage pod ↔ volume                         |
-| 03  | Worker loss           | Halt 1 worker, observation, restore                                           | ~5 min  | Réplicat ×3 + recovery Ceph                     |
-| 04  | Control plane loss    | Halt control plane, observation API + workloads                               | ~5 min  | SPOF assumé, etcd backup                        |
-| 05  | Replication bump      | Pool ×3 → ×5 (si 5+ hôtes), refill                                            | ~5 min  | Évolution capacité (skip si < 5 hôtes)          |
-| 06  | Object store smoke    | datalake-ec + bucket + PUT/GET/DELETE                                         | ~3 min  | Stockage objet S3                               |
-| 07  | Cilium connectivity   | `cilium connectivity test` standard + Hubble si activé                        | ~10 min | Réseau Pod-to-Pod, E/W, NetworkPolicy           |
-| 08  | Resource limits audit | Inspection des `requests`/`limits` actuels vs banc/prod                       | ~10s    | Cohérence dimensionnement                       |
-| 09  | Restauration etcd     | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient | ~3 min  | **Backup etcd RESTAURABLE** (pas juste produit) |
+| #   | Scénario                | Tests                                                                         | Durée   | Couverture                                      |
+| --- | ----------------------- | ----------------------------------------------------------------------------- | ------- | ----------------------------------------------- |
+| 01  | PVC RBD write/read      | StorageClass défaut, PVC Bound, écriture/lecture                              | ~1 min  | Stockage bloc fonctionnel                       |
+| 02  | Reschedule pod          | Delete pod, re-création, **données persistantes**                             | ~30s    | Découplage pod ↔ volume                         |
+| 03  | Worker loss             | Halt 1 worker, observation, restore                                           | ~5 min  | Réplicat ×3 + recovery Ceph                     |
+| 04  | Control plane loss      | Halt control plane, observation API + workloads                               | ~5 min  | SPOF assumé, etcd backup                        |
+| 05  | Replication bump        | Pool ×3 → ×5 (si 5+ hôtes), refill                                            | ~5 min  | Évolution capacité (skip si < 5 hôtes)          |
+| 06  | Object store smoke      | datalake-ec + bucket + PUT/GET/DELETE                                         | ~3 min  | Stockage objet S3                               |
+| 07  | Cilium connectivity     | `cilium connectivity test` standard + Hubble si activé                        | ~10 min | Réseau Pod-to-Pod, E/W, NetworkPolicy           |
+| 08  | Resource limits audit   | Inspection des `requests`/`limits` actuels vs banc/prod                       | ~10s    | Cohérence dimensionnement                       |
+| 09  | Restauration etcd       | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient | ~3 min  | **Backup etcd RESTAURABLE** (pas juste produit) |
+| 10  | Pod Security admission  | Pod privileged/hostNetwork **rejeté** à l'admission ; pod conforme admis      | ~1 min  | Durcissement pod (PSA, ADR 0014)                |
+| 11  | NetworkPolicy deny      | default-deny coupe l'egress ; allow-dns le rouvre **ciblé** (appliqué Cilium) | ~2 min  | Durcissement réseau (NetworkPolicy + CNI)       |
+| 12  | securityContext runtime | Pod durci démarre ; non-root + rootfs RO **vérifiés au runtime**              | ~1 min  | Durcissement pod (runAsNonRoot/readOnlyRootFS)  |
+| 13  | Host/node hardening     | Réutilise `state.sh` → **PASS/FAIL** sur les couches hôte (sshd, auditd…)     | ~30s    | Durcissement hôte (secure.yml + first-access)   |
 
 > 🔑 **09 — restauration etcd validée (2026-06-01).** Contrairement à 03/04, le
 > 09 **ne reboote aucune VM** : il exerce la procédure du RUNBOOK _sur_ le
@@ -88,6 +96,21 @@ Chaque script :
 > prod) : on s'en abstient délibérément. Le restore réel se teste **en prod**,
 > au rebuild des serveurs, où ces artefacts n'existent pas. Déroulé et analyse
 > complète : [../RESULTS.md](../RESULTS.md) (section déroulé scénarios + #7).
+
+### Groupe durcissement (10-13)
+
+> 🔒 **10-13 — durcissement (pod + hôte), validés banc 2026-06-01.** Ce groupe
+> teste la **sécurité**, pas la résilience. Les **10/11/12** sont des assertions
+> 100 % transposables en prod (admission API, application des NetworkPolicy par
+> le CNI, contrainte runtime du conteneur — aucune dépendance arm64/Vagrant). Le
+> **13** réutilise [`bootstrap/state.sh`](../../bootstrap/state.sh) (source de
+> vérité du dépôt) et n'échoue que sur un drift host `✗` — une couche opt-in non
+> activée reste un `skip` (cf.
+> [IMPLICATIONS.md](../../bootstrap/security/IMPLICATIONS.md)). Sur le banc, le
+> 13 sort **FAIL attendu** tant que `first-access.sh` n'y a pas posé le
+> durcissement sshd (le banc utilise le compte Vagrant) ; en prod (sshd durci +
+> couches `secure.yml` actives) il passe. Il a besoin de l'accès SSH aux nœuds
+> (`SSH_OPTS`/`HOSTS`), pas de `kubectl`.
 
 ## Réponses aux questions opérationnelles
 
@@ -154,6 +177,40 @@ Cf. scénario 07 :
   Service, Pod ↔ World, NetworkPolicy, etc.).
 - Test custom : déployer 2 pods sur des nœuds différents, vérifier le ping
   pod-to-pod via tunnel VXLAN.
+
+### Le durcissement (pod / hôte) est-il vérifié ?
+
+Oui, par les scénarios 10-13 :
+
+- **Pod (10/11/12)** — `kubectl`-only, comme 01-08 :
+
+  ```bash
+  bash test/scenarios/10-pod-security-admission.sh    # PSA bloque privileged/hostNetwork
+  bash test/scenarios/11-networkpolicy-default-deny.sh # Cilium applique default-deny + allow
+  bash test/scenarios/12-securitycontext-runtime.sh    # non-root + rootfs RO au runtime
+  ```
+
+  Ils créent leur propre namespace, posent les contraintes (PSA `baseline`,
+  `default-deny-all`, `securityContext` durci) et **vérifient le comportement
+  réel** (rejet à l'admission, egress coupé, écriture rootfs refusée). Ce que
+  PSA et `securityContext` couvrent est tracé dans
+  [ADR 0014](../../docs/decisions/0014-durcissement-kubeadm-init.md).
+
+- **Hôte (13)** — a besoin de l'**accès SSH** aux nœuds (pas de `kubectl`) :
+
+  ```bash
+  HOSTS='dirqual1 dirqual2 dirqual3' bash test/scenarios/13-host-node-hardening.sh
+  # banc (port forwardé Vagrant, un nœud à la fois) :
+  HOSTS=127.0.0.1 SSH_OPTS='-p 2222 -i ~/.vagrant.d/insecure_private_keys/vagrant.key.rsa' \
+    USER_REMOTE=debian bash test/scenarios/13-host-node-hardening.sh
+  ```
+
+  Il **réutilise** [`bootstrap/state.sh`](../../bootstrap/state.sh) et échoue
+  sur tout drift des couches hôte (sshd durci, auditd, fail2ban, postfix, ufw,
+  smartd). `STRICT_OPTIN=1` fait en plus échouer si **aucune** couche
+  `secure.yml` n'est active (attendu en prod). Une couche opt-in non activée
+  reste un `skip` neutre (cf.
+  [IMPLICATIONS.md](../../bootstrap/security/IMPLICATIONS.md)).
 
 ## Exécution
 
