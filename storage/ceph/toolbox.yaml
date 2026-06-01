@@ -19,7 +19,10 @@ spec:
       serviceAccountName: rook-ceph-default
       containers:
         - name: rook-ceph-tools
-          image: quay.io/ceph/ceph:v19
+          # Aligné sur la version du cluster (cluster.yaml) — éviter le skew de
+          # version majeure entre la toolbox et les daemons Ceph. Tag explicite
+          # (pas de :vN flottant), cf. ADR 0006.
+          image: quay.io/ceph/ceph:v20.2.1
           command:
             - /bin/bash
             - -c
