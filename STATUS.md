@@ -1,8 +1,8 @@
 # STATUS — avancement du durcissement (audit → mise en œuvre)
 
-> **Dernière mise à jour : 2026-06-01 18:38 CEST.** Document vivant —
+> **Dernière mise à jour : 2026-06-01 20:29 CEST.** Document vivant —
 > **horodater toute modification** (en-tête ci-dessus + la date entre crochets
-> sur chaque ligne modifiée). État du dépôt à la **v2.6.2**.
+> sur chaque ligne modifiée). État du dépôt à la **v2.11.1**.
 
 Suivi de la mise en œuvre du plan d'audit
 ([`docs/audit/12-plan-action.md`](docs/audit/12-plan-action.md)) et des écarts
@@ -18,12 +18,12 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 1 — Résilience & données
 
-| #   | Action                                   | État                                                |
-| --- | ---------------------------------------- | --------------------------------------------------- |
-| 1   | Tester restauration etcd (banc)          | ✅ [2026-06-01] `test/scenarios/09-etcd-restore.sh` |
-| 2   | Sauvegarde données applicatives          | ✅ [2026-06-01] ADR 0013 + VolumeSnapshots          |
-| 3   | Copier snapshots etcd hors-nœud + RPO    | ❓ [2026-06-01] à vérifier (fetch/push S3 ?)        |
-| 4   | Qualifier datasets twitter/reddit (RGPD) | 🔲 [2026-06-01] décision référent/DPO               |
+| #   | Action                                   | État                                                                  |
+| --- | ---------------------------------------- | --------------------------------------------------------------------- |
+| 1   | Tester restauration etcd (banc)          | ✅ [2026-06-01] `test/scenarios/09-etcd-restore.sh`                   |
+| 2   | Sauvegarde données applicatives          | ✅ [2026-06-01] ADR 0013 + VolumeSnapshots                            |
+| 3   | Copier snapshots etcd hors-nœud + RPO    | ✅ [2026-06-01] `etcd-fetch.yaml` (fetch poste de contrôle) + RPO doc |
+| 4   | Qualifier datasets twitter/reddit (RGPD) | 🔲 [2026-06-01] décision référent/DPO                                 |
 
 ### Priorité 2 — Néophyte
 
@@ -35,12 +35,12 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 3 — Supply chain
 
-| #   | Action                             | État                                                    |
-| --- | ---------------------------------- | ------------------------------------------------------- |
-| 8   | Job trivy en CI                    | ✅ [2026-06-01]                                         |
-| 9   | renovate / dependabot              | 🔲 [2026-06-01] `renovate.json` présent — app à activer |
-| 10  | Toolbox Ceph alignée v20.2.1       | ✅ [2026-06-01]                                         |
-| 11  | Épingler images par digest @sha256 | 🔲 [2026-06-01] aucun digest                            |
+| #   | Action                             | État                                                         |
+| --- | ---------------------------------- | ------------------------------------------------------------ |
+| 8   | Job trivy en CI                    | ✅ [2026-06-01]                                              |
+| 9   | renovate / dependabot              | 🔲 [2026-06-01] `renovate.json` présent — app à activer      |
+| 10  | Toolbox Ceph alignée v20.2.1       | ✅ [2026-06-01]                                              |
+| 11  | Épingler images par digest @sha256 | ✅ [2026-06-01] rook/ceph/registry/metrics-server par digest |
 
 ### Priorité 4 — Tests & scripts
 
@@ -53,12 +53,12 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 5 — Opérabilité jour 2
 
-| #   | Action                                           | État                                          |
-| --- | ------------------------------------------------ | --------------------------------------------- |
-| 16  | `Justfile` racine + « Par où commencer »         | ✅ [2026-06-01] `Justfile` + README → RUNBOOK |
-| 17  | Observabilité (metrics-server / kube-prometheus) | 🔲 [2026-06-01]                               |
-| 18  | Runbook + playbook `kubeadm upgrade` ; renommer  | 🔲 [2026-06-01]                               |
-| 19  | Surveillance SMART NVMe                          | 🔲 [2026-06-01]                               |
+| #   | Action                                           | État                                                                             |
+| --- | ------------------------------------------------ | -------------------------------------------------------------------------------- |
+| 16  | `Justfile` racine + « Par où commencer »         | ✅ [2026-06-01] `Justfile` + README → RUNBOOK                                    |
+| 17  | Observabilité (metrics-server / kube-prometheus) | ✅ [2026-06-01] metrics-server + ADR 0016 (Prometheus = palier 2 différé)        |
+| 18  | Runbook + playbook `kubeadm upgrade` ; renommer  | ✅ [2026-06-01] `k8s-upgrade.yaml` + ADR 0015 ; `upgrade.yaml`→`os-upgrade.yaml` |
+| 19  | Surveillance SMART NVMe                          | ✅ [2026-06-01] rôle `smartmon` (smartd) + couche state.sh                       |
 
 ### Priorité 6 — Sécurité ✅ (close sauf #20)
 
@@ -73,14 +73,14 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 7 — Gouvernance
 
-| #   | Action                                         | État                                                              |
-| --- | ---------------------------------------------- | ----------------------------------------------------------------- |
-| 26  | `CITATION.cff`                                 | ✅ [2026-06-01] créé (ORCID/DOI à compléter)                      |
-| 27  | `SECURITY.md` + Private Vuln. Reporting        | ✅ [2026-06-01] créé                                              |
-| 28  | Versionnement : retirer commit-and-tag-version | ✅ [2026-06-01] retiré (release-please seul)                      |
-| 29  | Branch protection GitHub                       | ✅ [2026-06-01] strict + conversation resolution (cf. SAFEGUARDS) |
-| 30  | Licence subtree (MIT/NOTICE/SPDX)              | ✅ [2026-06-01] `NOTICE` (subtree Unlicense vs MIT)               |
-| 31  | CODE_OF_CONDUCT, templates, CODEOWNERS         | ✅ [2026-06-01] créés (.github/ + racine)                         |
+| #   | Action                                         | État                                                                                  |
+| --- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 26  | `CITATION.cff`                                 | ✅ [2026-06-01] créé (ORCID/DOI à compléter)                                          |
+| 27  | `SECURITY.md` + Private Vuln. Reporting        | ✅ [2026-06-01] créé                                                                  |
+| 28  | Versionnement : retirer commit-and-tag-version | ✅ [2026-06-01] retiré (release-please seul)                                          |
+| 29  | Branch protection GitHub                       | ✅ [2026-06-01] strict + 9 checks requis (tous les jobs CI) + conversation resolution |
+| 30  | Licence subtree (MIT/NOTICE/SPDX)              | ✅ [2026-06-01] `NOTICE` (subtree Unlicense vs MIT)                                   |
+| 31  | CODE_OF_CONDUCT, templates, CODEOWNERS         | ✅ [2026-06-01] créés (.github/ + racine)                                             |
 
 ### Priorité 8 — Hygiène
 
@@ -96,14 +96,14 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### ADR à formaliser
 
-| ADR                                   | État            |
-| ------------------------------------- | --------------- |
-| 0013 — sauvegarde données             | ✅ [2026-06-01] |
-| 0014 — durcissement kubeadm           | ✅ [2026-06-01] |
-| 0015 — langage scripts (bash/jq/bats) | 🔲 [2026-06-01] |
-| ADR upgrade K8s (rebuild vs in-place) | 🔲 [2026-06-01] |
-| ADR Rook-Ceph vs Longhorn             | 🔲 [2026-06-01] |
-| ADR observabilité                     | 🔲 [2026-06-01] |
+| ADR                                        | État                              |
+| ------------------------------------------ | --------------------------------- |
+| 0013 — sauvegarde données                  | ✅ [2026-06-01]                   |
+| 0014 — durcissement kubeadm                | ✅ [2026-06-01]                   |
+| 0015 — stratégie d'upgrade K8s             | ✅ [2026-06-01]                   |
+| 0016 — observabilité (paliers)             | ✅ [2026-06-01]                   |
+| ADR langage scripts (bash/jq/python3/bats) | 🔲 [2026-06-01] prochain n° libre |
+| ADR Rook-Ceph vs Longhorn                  | 🔲 [2026-06-01] prochain n° libre |
 
 ---
 
@@ -166,3 +166,12 @@ digests seulement).
   désormais isolée dans `classify_passwd`
   ([state-classify.sh](bootstrap/lib/state-classify.sh)), donc le changement de
   source de date sera local et couvert par bats. _[2026-06-01]_
+- **Branch protection durcie après incident** : `trivy`/`bats`/`jscpd` n'étaient
+  pas des checks requis → une PR avec `trivy` rouge (metrics-server, KSV-0118)
+  s'est auto-mergée et a cassé `main`. Corrigé (securityContext pod) + **les 9
+  jobs CI sont désormais tous requis**. Leçon : tout nouveau job CI doit être
+  ajouté aux required checks, sinon il est contournable par l'auto-merge.
+  _[2026-06-01]_
+- **Actions hors-code en attente** : **#9** activer l'app GitHub Renovate sur le
+  repo (config `renovate.json` prête, 0 PR à ce jour) ; **#4** qualification
+  RGPD des datasets `twitter`/`reddit` (référent/DPO). _[2026-06-01]_
