@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.6.2](https://github.com/univ-lehavre/cluster/compare/v2.6.1...v2.6.2) (2026-06-01)
+
+
+### Documentation
+
+* gouvernance projet — Priorité 7 complète (audit P7 [#26](https://github.com/univ-lehavre/cluster/issues/26)-[#31](https://github.com/univ-lehavre/cluster/issues/31)) ([#47](https://github.com/univ-lehavre/cluster/issues/47)) ([1a2c5ee](https://github.com/univ-lehavre/cluster/commit/1a2c5ee1a8d4e45f7da7c13fa0ec9ef0919262ac))
+
 ## [2.6.1](https://github.com/univ-lehavre/cluster/compare/v2.6.0...v2.6.1) (2026-06-01)
 
 
