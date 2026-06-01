@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.6.0](https://github.com/univ-lehavre/cluster/compare/v2.5.0...v2.6.0) (2026-06-01)
+
+
+### Features
+
+* **securite:** ClusterIP + ADR durcissement kubeadm/PodSecurity (audit P6 [#21](https://github.com/univ-lehavre/cluster/issues/21) & [#25](https://github.com/univ-lehavre/cluster/issues/25)) ([#43](https://github.com/univ-lehavre/cluster/issues/43)) ([4f10596](https://github.com/univ-lehavre/cluster/commit/4f105965b46c955005808ea249eedae778633c5d))
+
 ## [2.5.0](https://github.com/univ-lehavre/cluster/compare/v2.4.0...v2.5.0) (2026-06-01)
 
 
