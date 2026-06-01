@@ -47,14 +47,22 @@ sleep 60
 ceph status | head -10
 
 log "Attendre HEALTH_OK (10 min max — temps de réplication)"
+healthy=0
 for _ in $(seq 1 60); do
-    h=$(ceph health 2>/dev/null | awk '{print $1}')
+    # Parsing JSON robuste (cf. audit P9 #14) plutôt que `ceph health | awk`.
+    h=$(ceph health -f json 2>/dev/null | jq -r '.status' 2>/dev/null)
     if [ "$h" = "HEALTH_OK" ]; then
         log "✓ HEALTH_OK après bump"
+        healthy=1
         break
     fi
     sleep 10
 done
+if [ "$healthy" -ne 1 ]; then
+    log "✗ ÉCHEC : Ceph n'a pas convergé vers HEALTH_OK après 10 min (réplication bloquée ?)"
+    ceph status | head -10
+    exit 1
+fi
 
 ceph status | head -10
 ceph osd pool get "$(kubectl -n rook-ceph get cephblockpool "$POOL_NAME" -o jsonpath='{.spec.parameters.poolName}' || echo "$POOL_NAME")" size 2>/dev/null || true
