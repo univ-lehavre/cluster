@@ -14,6 +14,16 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.11.0](https://github.com/univ-lehavre/cluster/compare/v2.10.0...v2.11.0) (2026-06-01)
+
+
+### Features
+
+* **ops:** copie hors-nœud des snapshots etcd + RPO (audit P1 [#3](https://github.com/univ-lehavre/cluster/issues/3)) ([#59](https://github.com/univ-lehavre/cluster/issues/59)) ([9b1823e](https://github.com/univ-lehavre/cluster/commit/9b1823e9d0ab4a5484fa3c45c247186c4eb15efe))
+* **ops:** copie hors-nœud des snapshots etcd via fetch + RPO documenté (audit P1 [#3](https://github.com/univ-lehavre/cluster/issues/3)) ([9b1823e](https://github.com/univ-lehavre/cluster/commit/9b1823e9d0ab4a5484fa3c45c247186c4eb15efe))
+* **ops:** metrics-server + ADR observabilité par paliers (audit P5 [#17](https://github.com/univ-lehavre/cluster/issues/17)) ([7376b8c](https://github.com/univ-lehavre/cluster/commit/7376b8c7cf4d003fb99e7cd969c6ef4dfb2ed9c2))
+* **ops:** observabilité — metrics-server + ADR par paliers (audit P5 [#17](https://github.com/univ-lehavre/cluster/issues/17)) ([#60](https://github.com/univ-lehavre/cluster/issues/60)) ([7376b8c](https://github.com/univ-lehavre/cluster/commit/7376b8c7cf4d003fb99e7cd969c6ef4dfb2ed9c2))
+
 ## [2.10.0](https://github.com/univ-lehavre/cluster/compare/v2.9.0...v2.10.0) (2026-06-01)
 
 
