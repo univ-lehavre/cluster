@@ -8,13 +8,17 @@
 # `HEALTH_OK` côté Ceph pour ne pas enchaîner sur un cluster encore dégradé.
 #
 # Usage :
-#   test/scenarios/run-all.sh                  # tous les scénarios
+#   test/scenarios/run-all.sh                  # tous les scénarios (kubectl)
 #   SKIP='03 04' test/scenarios/run-all.sh     # exclure des scénarios (par n°)
 #   ONLY='01 02 07' test/scenarios/run-all.sh  # n'exécuter que ceux-là
+#   HOSTS='dirqual1 dirqual2' test/scenarios/run-all.sh  # inclut le 13 (host)
 #
 # ⚠️ Sur le banc Vagrant, la phase « restore » des scénarios 03/04 ne se valide
 # pas (artefacts arm64 sans valeur prod — cf. test/scenarios/README.md). Les
 # exclure avec SKIP='03 04' sur le banc.
+#
+# ℹ️ Le scénario 13 (durcissement hôte) interroge les nœuds par SSH (pas
+# kubectl) : sauté par défaut, joué si HOSTS est défini ou via ONLY='13'.
 #
 # Sortie : 0 si tous les scénarios joués passent, 1 sinon.
 set -uo pipefail
@@ -42,6 +46,13 @@ wait_health_ok() {
 # Scénarios destructifs (changent l'état du cluster) → attente HEALTH_OK après.
 is_destructive() { case "$1" in 03|04|05) return 0 ;; *) return 1 ;; esac; }
 
+# Le scénario 13 (durcissement hôte) interroge les nœuds par SSH (via state.sh),
+# pas par kubectl. Il a donc besoin de HOSTS/SSH_OPTS et n'a pas sa place dans un
+# run kubectl-only : on le saute par défaut, sauf si HOSTS est défini (signe que
+# l'opérateur a fourni l'accès SSH). Le forcer explicitement via ONLY le joue
+# quand même.
+needs_ssh() { case "$1" in 13) return 0 ;; *) return 1 ;; esac; }
+
 results=()
 rc_global=0
 
@@ -50,6 +61,11 @@ for script in [0-9][0-9]-*.sh; do
     if [ -n "$ONLY" ] && ! grep -qw "$num" <<<"$ONLY"; then continue; fi
     if [ -n "$SKIP" ] && grep -qw "$num" <<<"$SKIP"; then
         results+=("SKIP  $script")
+        continue
+    fi
+    # Skip auto des scénarios SSH si aucun HOSTS fourni et pas demandé via ONLY.
+    if needs_ssh "$num" && [ -z "${HOSTS:-}" ] && ! grep -qw "$num" <<<"$ONLY"; then
+        results+=("SKIP  $script (host hardening — fournir HOSTS='dirqual1 …' ou ONLY='$num')")
         continue
     fi
 

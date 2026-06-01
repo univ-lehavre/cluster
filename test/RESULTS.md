@@ -559,3 +559,49 @@ témoin réapparaît à l'identique**. Logs clés :
 > halt/up d'un nœud exige de reposer la route + resync NTP **hors scénario** ;
 > la prod n'en a pas besoin. À terme, scinder 03 en « perte » (assertion prod)
 > et « restore » (best-effort banc).
+
+## Run #5 (2026-06-01) — scénarios de durcissement (pod + hôte)
+
+Ajout et validation des **scénarios 10-13** (sécurité, pas résilience). Banc
+multi-node `192.168.67.0/24`, 3 VMs Debian 13 arm64, cluster K8s 1.34.8 + Cilium
+1.19.4 (3 nœuds `Ready`). Scénarios exécutés sur `dirqual1` (`kubectl` via
+`admin.conf`) ; le 13 lancé depuis le poste de contrôle (SSH).
+
+| #   | Scénario                | Résultat banc | Assertion clé                                                      |
+| --- | ----------------------- | ------------- | ------------------------------------------------------------------ |
+| 10  | Pod Security admission  | ✅ PASS       | pod `privileged` **et** `hostNetwork` rejetés ; pod conforme admis |
+| 11  | NetworkPolicy deny      | ✅ PASS       | egress coupé sous default-deny ; `allow-dns` rouvre le seul DNS    |
+| 12  | securityContext runtime | ✅ PASS       | pod durci Running ; UID 65532 ; écriture `/` refusée, volume OK    |
+| 13  | Host/node hardening     | ✅ mécanique  | parse `state.sh`, isole le bloc hôte, PASS/FAIL correct            |
+
+**Détail 10** — l'API rejette à l'admission :
+`violates PodSecurity "baseline:latest": privileged (…)` et
+`host namespaces (hostNetwork=true)`. Le pod conforme démarre (avec le warning
+`restricted` attendu, non bloquant car `warn`, pas `enforce`). Comportement
+**identique en prod** (contrôleur d'admission API, ADR 0014).
+
+**Détail 11** — preuve que **Cilium applique** les NetworkPolicy : `wget https`
+réussit sans policy, échoue (timeout) sous `default-deny-all`, et reste coupé
+après `allow-dns` alors que `nslookup` remarche. L'`allow` est chirurgical.
+
+**Détail 12** — le `securityContext` est **réellement** appliqué au runtime (pas
+seulement déclaré) : `echo > /oops` → `Read-only file system`, `id -u` ≠ 0,
+écriture sur l'`emptyDir` monté OK. Complète le contrôle statique trivy.
+
+**Détail 13** — réutilise [`bootstrap/state.sh`](../bootstrap/state.sh) plutôt
+que de redupliquer les checks. Sur ce banc il sort **FAIL attendu** : 2 drifts
+hôte (`sshd drop-in absent`, `PasswordAuthentication` encore autorisé) car
+`first-access.sh` n'est jamais joué sur le banc (compte Vagrant + clé). Les
+couches `secure.yml` jouées au Run #4 (postfix/auditd/fail2ban) ressortent bien
+`✓ (couche …)`. La branche succès du parsing (bloc hôte sans `✗`, en excluant
+les `✗` des sections K8s) est vérifiée séparément → sortie 0. **En prod**, sshd
+durci + couches actives → PASS. Le 13 a besoin de `SSH_OPTS`/`HOSTS` (pas
+`kubectl`) et est **sauté par défaut** dans `run-all.sh` sans `HOSTS`.
+
+> 🐛 **Bug latent corrigé en passant.** Le pattern `labels: { $LABEL }` (où
+> `LABEL="clé=valeur"`) produit du YAML invalide (`=` interdit dans un mapping)
+> — révélé en jouant le 10. Tous les scénarios écrivent désormais le label en
+> YAML correct (`clé: "valeur"`) et ne gardent `LABEL` (`clé=valeur`) que pour
+> `kubectl label` / les sélecteurs `-l`. Les **scénarios 01 et 02** portaient le
+> même bug (jamais exécutés sur le banc, gatés par les drifts CSI au Run #2) :
+> **corrigés ici** par cohérence.

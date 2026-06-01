@@ -14,7 +14,10 @@ NS=${NAMESPACE:-test-scenarios}
 PVC=pvc-02-reschedule
 POD=pod-02-reschedule
 KEEP=${KEEP:-0}
-LABEL="test.cluster.dev/scenario=02-pod-rescheduling"
+# En YAML inline, le label s'écrit `clé: "valeur"` (le format `clé=valeur` n'est
+# valable que pour `kubectl label` / les sélecteurs `-l`).
+SC_KEY="test.cluster.dev/scenario"
+SC_VAL="02-pod-rescheduling"
 
 log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
 
@@ -34,14 +37,14 @@ expected="data-survives-$(date -u +%s)"
 kubectl -n "$NS" apply -f - <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: { name: $PVC, labels: { $LABEL } }
+metadata: { name: $PVC, labels: { "$SC_KEY": "$SC_VAL" } }
 spec:
   accessModes: [ReadWriteOnce]
   resources: { requests: { storage: 100Mi } }
 ---
 apiVersion: v1
 kind: Pod
-metadata: { name: $POD, labels: { $LABEL } }
+metadata: { name: $POD, labels: { "$SC_KEY": "$SC_VAL" } }
 spec:
   restartPolicy: Never
   containers:
@@ -68,7 +71,7 @@ log "Recréer le pod, monter le même PVC, lire le fichier"
 kubectl -n "$NS" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
-metadata: { name: $POD, labels: { $LABEL } }
+metadata: { name: $POD, labels: { "$SC_KEY": "$SC_VAL" } }
 spec:
   restartPolicy: Never
   containers:
