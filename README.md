@@ -16,6 +16,22 @@ publiée automatiquement depuis `main` par
 > [**glossaire**](docs/glossaire.md) — à garder ouvert à côté en lisant les
 > runbooks.
 
+## Par où commencer
+
+| Je veux…                                | Aller voir                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------- |
+| **installer le cluster** (pas à pas)    | [`bootstrap/RUNBOOK.md`](bootstrap/RUNBOOK.md) — la séquence de référence |
+| **opérer Ceph** (storage)               | [`storage/ceph/RUNBOOK.md`](storage/ceph/RUNBOOK.md)                      |
+| **voir les raccourcis de commandes**    | [`Justfile`](Justfile) — `just` pour la liste (nomme l'existant)          |
+| **vérifier l'état du cluster**          | `just state` (ou [`bootstrap/state.sh`](bootstrap/state.sh))              |
+| **tester avant la prod**                | [`test/`](test/) — banc Vagrant ; `just bench all`                        |
+| **comprendre les choix d'architecture** | [`docs/decisions/`](docs/decisions/) (ADR)                                |
+| **suivre l'avancement du durcissement** | [`STATUS.md`](STATUS.md) · audit complet : [`docs/audit/`](docs/audit/)   |
+
+> Le [`Justfile`](Justfile) n'est **pas** un orchestrateur : il donne des
+> raccourcis découvrables (`just lint`, `just state`, `just bench ceph`).
+> L'ordre d'installation canonique reste décrit dans le RUNBOOK.
+
 ## Structure
 
 | Dossier                          | Rôle                                          |

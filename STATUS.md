@@ -53,12 +53,12 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 5 — Opérabilité jour 2
 
-| #   | Action                                           | État            |
-| --- | ------------------------------------------------ | --------------- |
-| 16  | `Justfile` racine + « Par où commencer »         | 🔲 [2026-06-01] |
-| 17  | Observabilité (metrics-server / kube-prometheus) | 🔲 [2026-06-01] |
-| 18  | Runbook + playbook `kubeadm upgrade` ; renommer  | 🔲 [2026-06-01] |
-| 19  | Surveillance SMART NVMe                          | 🔲 [2026-06-01] |
+| #   | Action                                           | État                                          |
+| --- | ------------------------------------------------ | --------------------------------------------- |
+| 16  | `Justfile` racine + « Par où commencer »         | ✅ [2026-06-01] `Justfile` + README → RUNBOOK |
+| 17  | Observabilité (metrics-server / kube-prometheus) | 🔲 [2026-06-01]                               |
+| 18  | Runbook + playbook `kubeadm upgrade` ; renommer  | 🔲 [2026-06-01]                               |
+| 19  | Surveillance SMART NVMe                          | 🔲 [2026-06-01]                               |
 
 ### Priorité 6 — Sécurité ✅ (close sauf #20)
 
