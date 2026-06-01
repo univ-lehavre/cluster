@@ -28,3 +28,4 @@ Format léger inspiré de Michael Nygard :
 | 0011 | [Registry interne HTTP sans authentification](0011-registry-http-sans-auth.md)                       | Accepted |
 | 0012 | [RStudio sans authentification (`DISABLE_AUTH=true`)](0012-rstudio-disable-auth.md)                  | Accepted |
 | 0013 | [Sauvegarde des données applicatives (VolumeSnapshots CSI)](0013-sauvegarde-donnees-applicatives.md) | Accepted |
+| 0014 | [Durcissement du plan de contrôle (`kubeadm init` nu)](0014-durcissement-kubeadm-init.md)            | Accepted |

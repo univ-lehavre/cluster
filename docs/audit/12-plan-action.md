@@ -53,14 +53,14 @@ récupération. Un seul incident peut être irréversible.
 
 ## Priorité 6 — Sécurité (durcissement defense-in-depth)
 
-| #   | Action                                                                                                                                                            | Constat source       | Effort  |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------- |
-| 20  | **Matérialiser l'hypothèse réseau** : committer le Tailscale operator + ACL et le marquer **requis** (ou documenter le contrôle réseau réel dans `SAFEGUARDS.md`) | [06](06-securite.md) | Moyen   |
-| 21  | **`ClusterConfiguration` kubeadm** : audit-policy + `EncryptionConfiguration` (Secrets etcd) + PodSecurity admission ; ou tracer le choix en ADR                  | [06](06-securite.md) | Moyen   |
-| 22  | **NetworkPolicies / CiliumNetworkPolicy** de base (default-deny par namespace)                                                                                    | [06](06-securite.md) | Moyen   |
-| 23  | **`securityContext` sur RStudio** (drop ALL, seccomp, runAsNonRoot)                                                                                               | [06](06-securite.md) | Trivial |
-| 24  | **Jeu de règles UFW K8s/Cilium/Ceph** prêt à l'emploi ; restreindre SSH à la plage d'admin ; signaler l'absence d'UFW comme drift                                 | [06](06-securite.md) | Moyen   |
-| 25  | Dashboard Ceph en ClusterIP ; Service WordPress en ClusterIP                                                                                                      | [06](06-securite.md) | Trivial |
+| #   | Action                                                                                                                                                                                                           | Constat source       | Effort  |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------- |
+| 20  | ⏸️ **REPORTÉ sine die** — Matérialiser l'hypothèse réseau : committer le Tailscale operator + ACL et le marquer **requis** (ou documenter le contrôle réseau réel dans `SAFEGUARDS.md`)                          | [06](06-securite.md) | Moyen   |
+| 21  | ✅ **Fait** ([ADR 0014](../decisions/0014-durcissement-kubeadm-init.md)) — `ClusterConfiguration` kubeadm : audit-policy + `EncryptionConfiguration` (Secrets etcd) + PodSecurity admission ; choix tracé en ADR | [06](06-securite.md) | Moyen   |
+| 22  | ✅ **Fait** ([platform/network-policies/](../../platform/network-policies/)) — NetworkPolicies de base (default-deny par namespace)                                                                              | [06](06-securite.md) | Moyen   |
+| 23  | ✅ **Fait** — `securityContext` sur RStudio (+ wordpress, mysql) (drop ALL, seccomp, runAsNonRoot)                                                                                                               | [06](06-securite.md) | Trivial |
+| 24  | ✅ **Fait** ([ufw.yml](../../bootstrap/security/roles/network/tasks/ufw.yml)) — Jeu de règles UFW K8s/Cilium/Ceph ; SSH restreint ; absence d'UFW signalée comme drift                                           | [06](06-securite.md) | Moyen   |
+| 25  | ✅ **Fait** — Dashboard Ceph en ClusterIP ; Service WordPress en ClusterIP                                                                                                                                       | [06](06-securite.md) | Trivial |
 
 ## Priorité 7 — Gouvernance & conformité projet
 

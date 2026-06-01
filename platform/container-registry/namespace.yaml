@@ -2,3 +2,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: registry
+  labels:
+    # Pod Security admission (ADR 0014) : bloque les pods privilégiés/hostPath/
+    # hostNetwork dès l'admission. `baseline` enforce (le registry durci le
+    # respecte) ; `restricted` en warn pour préparer un durcissement futur.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
