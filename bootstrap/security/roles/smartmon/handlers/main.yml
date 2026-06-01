@@ -1,6 +1,9 @@
 - name: Restart smartd
   become: true
   ansible.builtin.service:
-    name: smartd
+    name: smartmontools
     state: restarted
+  # Tolère l'échec là où aucun disque n'expose de SMART (banc à disques
+  # virtuels) ; en prod le service redémarre normalement.
+  failed_when: false
   listen: Restart smartd

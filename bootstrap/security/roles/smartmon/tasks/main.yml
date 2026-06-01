@@ -23,8 +23,27 @@
         mode: '0644'
       notify: Restart smartd
 
-    - name: Activer et démarrer smartd
+    # Le service canonique sur Debian est `smartmontools.service` (`smartd` n'en
+    # est qu'un alias). On l'active toujours ; le démarrage peut échouer là où
+    # AUCUN disque n'expose de SMART (ex. banc VirtualBox : disques virtio sans
+    # SMART → smartd sort en status 17). En prod (disques HPE réels), il démarre.
+    # On n'échoue donc pas le playbook sur ce cas, signalé explicitement.
+    - name: Activer smartmontools (smartd) au démarrage
       ansible.builtin.systemd:
-        name: smartd
-        state: started
+        name: smartmontools
         enabled: true
+
+    - name: Démarrer smartmontools (tolère l'absence de SMART sur disques virtuels)
+      ansible.builtin.systemd:
+        name: smartmontools
+        state: started
+      register: smartmon_smartd_start
+      failed_when: false
+
+    - name: Avertir si smartd n'a pas pu démarrer (aucun disque SMART détecté)
+      ansible.builtin.debug:
+        msg: >-
+          smartd installé et activé, mais le démarrage a échoué : aucun disque
+          n'expose de SMART monitorable (attendu sur un banc à disques virtuels ;
+          en prod sur matériel réel, vérifier `systemctl status smartmontools`).
+      when: smartmon_smartd_start is defined and smartmon_smartd_start.failed | default(false)
