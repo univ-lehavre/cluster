@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.9.0](https://github.com/univ-lehavre/cluster/compare/v2.8.0...v2.9.0) (2026-06-01)
+
+
+### Features
+
+* **ops:** upgrade K8s in-place + renomme upgrade.yaml → os-upgrade.yaml (audit P5 [#18](https://github.com/univ-lehavre/cluster/issues/18)) ([#55](https://github.com/univ-lehavre/cluster/issues/55)) ([f24e356](https://github.com/univ-lehavre/cluster/commit/f24e356ac0127e21bfa734a953a8406ae66882d9))
+* **ops:** upgrade K8s in-place séquencé + renomme upgrade.yaml en os-upgrade.yaml (audit P5 [#18](https://github.com/univ-lehavre/cluster/issues/18)) ([f24e356](https://github.com/univ-lehavre/cluster/commit/f24e356ac0127e21bfa734a953a8406ae66882d9))
+
 ## [2.8.0](https://github.com/univ-lehavre/cluster/compare/v2.7.0...v2.8.0) (2026-06-01)
 
 
