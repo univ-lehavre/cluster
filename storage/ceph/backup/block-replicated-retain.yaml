@@ -1,0 +1,37 @@
+# StorageClass bloc répliqué en reclaimPolicy: Retain (cf. ADR 0013).
+#
+# Variante « précieuse » de `rook-ceph-block-replicated` : MÊME pool répliqué
+# ×3, mais un `delete pvc` LIBÈRE la réclamation sans DÉTRUIRE le volume Ceph
+# (le PV passe `Released` → récupérable manuellement). À utiliser pour les
+# volumes applicatifs persistants (bases, données utilisateur), via :
+#   spec:
+#     storageClassName: rook-ceph-block-replicated-retain
+#
+# La SC par défaut reste `rook-ceph-block-replicated` (Delete) pour les volumes
+# jetables/éphémères — on ne force pas Retain partout (sinon accumulation de PV
+# Released orphelins). Le choix est explicite, par PVC.
+#
+# Réutilise le pool `rook-ceph-block-replicated-pool` défini dans
+# storage/ceph/storageClass/block-replicated.yaml (à appliquer avant).
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: rook-ceph-block-replicated-retain
+  labels:
+    app.kubernetes.io/part-of: ceph-backup
+provisioner: rook-ceph.rbd.csi.ceph.com
+parameters:
+  clusterID: rook-ceph
+  pool: rook-ceph-block-replicated-pool
+  imageFormat: '2'
+  imageFeatures: layering,fast-diff,object-map,deep-flatten,exclusive-lock
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+  csi.storage.k8s.io/fstype: ext4
+allowVolumeExpansion: true
+reclaimPolicy: Retain

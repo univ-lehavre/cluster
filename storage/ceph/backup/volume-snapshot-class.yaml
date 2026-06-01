@@ -1,0 +1,32 @@
+# VolumeSnapshotClass pour Ceph-CSI (RBD bloc + CephFS).
+# Cf. ADR 0013 — sauvegarde des données applicatives par VolumeSnapshots.
+#
+# deletionPolicy: Retain → supprimer un VolumeSnapshot ne détruit PAS le
+# snapshot Ceph sous-jacent (sécurité : un cleanup K8s ne perd pas la sauvegarde).
+# Le snapshot Ceph doit alors être purgé explicitement (toolbox) si besoin.
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: csi-rbdplugin-snapclass
+  labels:
+    app.kubernetes.io/part-of: ceph-backup
+driver: rook-ceph.rbd.csi.ceph.com
+deletionPolicy: Retain
+parameters:
+  clusterID: rook-ceph
+  csi.storage.k8s.io/snapshotter-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/snapshotter-secret-namespace: rook-ceph
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: csi-cephfsplugin-snapclass
+  labels:
+    app.kubernetes.io/part-of: ceph-backup
+driver: rook-ceph.cephfs.csi.ceph.com
+deletionPolicy: Retain
+parameters:
+  clusterID: rook-ceph
+  csi.storage.k8s.io/snapshotter-secret-name: rook-csi-cephfs-provisioner
+  csi.storage.k8s.io/snapshotter-secret-namespace: rook-ceph
