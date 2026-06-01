@@ -1,8 +1,8 @@
 # STATUS — avancement du durcissement (audit → mise en œuvre)
 
-> **Dernière mise à jour : 2026-06-01 17:57 CEST.** Document vivant —
+> **Dernière mise à jour : 2026-06-01 18:38 CEST.** Document vivant —
 > **horodater toute modification** (en-tête ci-dessus + la date entre crochets
-> sur chaque ligne modifiée). État du dépôt à la **v2.6.1**.
+> sur chaque ligne modifiée). État du dépôt à la **v2.6.2**.
 
 Suivi de la mise en œuvre du plan d'audit
 ([`docs/audit/12-plan-action.md`](docs/audit/12-plan-action.md)) et des écarts
@@ -44,12 +44,12 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 4 — Tests & scripts
 
-| #   | Action                                       | État                                     |
-| --- | -------------------------------------------- | ---------------------------------------- |
-| 12  | bats-core sur `state.sh` (« meilleur ROI »)  | 🔲 [2026-06-01] aucun test bats          |
-| 13  | Faux-positifs scénarios 04/05                | ❓ [2026-06-01] à vérifier               |
-| 14  | Parsing `ceph -f json \| jq` + getent shadow | 🔲 [2026-06-01]                          |
-| 15  | Dérouler 8 scénarios + exit codes            | ❓ [2026-06-01] drift #9 CSI déjà résolu |
+| #   | Action                                         | État                                                |
+| --- | ---------------------------------------------- | --------------------------------------------------- |
+| 12  | bats-core sur `state.sh` (« meilleur ROI »)    | ✅ [2026-06-01] `test/unit/` (18 tests, PR #48)     |
+| 13  | Faux-positifs scénarios 04/05                  | ✅ [2026-06-01] `exit 1` à l'expiration des boucles |
+| 14  | Parsing `ceph -f json \| jq` (scénarios 03/05) | ✅ [2026-06-01] (`getent shadow` : voir note)       |
+| 15  | Dérouler 8 scénarios + exit codes              | ❓ [2026-06-01] drift #9 CSI déjà résolu            |
 
 ### Priorité 5 — Opérabilité jour 2
 
@@ -160,3 +160,9 @@ digests seulement).
 - **Releases** : automatiques (release-please + auto-merge, PAT
   `RELEASE_PLEASE_TOKEN`). Penser à la **rotation du PAT** avant expiration.
   _[2026-06-01]_
+- **#14 reliquat** : le parsing `ceph` est passé en `-f json | jq` (scénarios
+  03/05), mais la lecture de `getent shadow` au lieu de `chage` dans `state.sh`
+  (classification passwd) **reste à faire** — la logique de classification est
+  désormais isolée dans `classify_passwd`
+  ([state-classify.sh](bootstrap/lib/state-classify.sh)), donc le changement de
+  source de date sera local et couvert par bats. _[2026-06-01]_
