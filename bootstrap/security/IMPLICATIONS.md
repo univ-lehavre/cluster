@@ -19,6 +19,7 @@ Vue d'ensemble :
 | Alert        | `alert`, `mail`             | 🟢 faible           | Redirection des mails root vers une adresse opérée              |
 | Audit        | `audit`, `auditd`           | 🟢 faible           | Journalisation des appels système sensibles                     |
 | Detection    | `detection`, `fail2ban`     | 🟡 modéré           | Bannissement automatique des IP qui forcent SSH                 |
+| Smart        | `smart`, `smartd`           | 🟢 faible           | Surveillance SMART des disques (alerte sur le NVMe block.db)    |
 | Network SSHD | `sshd`                      | 🟡 modéré           | Déjà appliqué par [`first-access.sh`](../first-access.sh)       |
 | SSH keys     | `ssh-keys`                  | 🟢 faible           | Re-déploie la clé publique (déjà fait par `first-access.sh`)    |
 | OS upgrade   | `upgrade`                   | 🟠 reboot immédiat  | `apt full-upgrade` + reboot, un nœud à la fois                  |
@@ -45,6 +46,9 @@ ansible-playbook -i ../hosts.yaml secure.yml --tags audit
 
 # 4. Détection / anti-brute-force SSH
 ansible-playbook -i ../hosts.yaml secure.yml --tags detection
+
+# 4 bis. Surveillance SMART des disques (alerte mail sur le NVMe block.db ; cf. ADR 0008)
+ansible-playbook -i ../hosts.yaml secure.yml --tags smart
 
 # 5. Vérification/réapplication du drop-in sshd (idempotent)
 ansible-playbook -i ../hosts.yaml secure.yml --tags sshd

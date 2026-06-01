@@ -11,6 +11,7 @@
 #   ansible-playbook -i ../hosts.yaml secure.yml --tags alert      # mail root
 #   ansible-playbook -i ../hosts.yaml secure.yml --tags audit      # auditd
 #   ansible-playbook -i ../hosts.yaml secure.yml --tags detection  # fail2ban
+#   ansible-playbook -i ../hosts.yaml secure.yml --tags smart      # smartd (SMART disques)
 #   ansible-playbook -i ../hosts.yaml secure.yml --tags sshd       # re-pose sshd (déjà fait par first-access.sh)
 #   ansible-playbook -i ../hosts.yaml secure.yml --tags ssh-keys   # re-dépose les clés
 #   ansible-playbook -i ../hosts.yaml secure.yml --tags ufw        # ⚠️ APRÈS bootstrap K8s
@@ -75,6 +76,14 @@
         - never
         - detection
         - fail2ban
+
+    - name: Smart — surveillance SMART des disques (smartd)
+      ansible.builtin.import_role:
+        name: smartmon
+      tags:
+        - never
+        - smart
+        - smartd
 
     - name: Network — sshd (déjà posé par first-access.sh, opt-in)
       ansible.builtin.import_role:

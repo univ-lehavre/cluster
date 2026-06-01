@@ -1,0 +1,30 @@
+# Surveillance SMART des disques (audit P5 #19 / ADR 0008).
+#
+# `smartmontools` (smartd) surveille en continu l'état SMART des disques —
+# en particulier le NVMe `block.db` (nvme1n1), SPOF par nœud : sa perte = perte
+# des 12 OSDs HDD du nœud (cf. ADR 0008). smartd envoie un mail à root dès qu'un
+# attribut SMART se dégrade ; la couche `alert` (postfix) redirige root vers
+# l'adresse d'exploitation. Couche opt-in (`--tags smart`).
+- name: Surveillance SMART (smartd)
+  become: true
+  block:
+    - name: Installer smartmontools
+      ansible.builtin.apt:
+        name: smartmontools
+        state: present
+        update_cache: true
+
+    - name: Configurer smartd (surveillance + mail root sur dégradation)
+      ansible.builtin.copy:
+        src: smartd.conf
+        dest: /etc/smartd.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart smartd
+
+    - name: Activer et démarrer smartd
+      ansible.builtin.systemd:
+        name: smartd
+        state: started
+        enabled: true

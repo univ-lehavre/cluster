@@ -1,0 +1,6 @@
+- name: Restart smartd
+  become: true
+  ansible.builtin.service:
+    name: smartd
+    state: restarted
+  listen: Restart smartd

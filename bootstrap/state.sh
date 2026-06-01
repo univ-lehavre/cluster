@@ -261,6 +261,26 @@ for h in "${reachable[@]}"; do
     else
         mark skip "$h : ufw non installé — opt-in : --tags ufw APRÈS bootstrap K8s (voir IMPLICATIONS.md)"
     fi
+
+    # SMART (smartd) — opt-in `--tags smart`. Surveille les disques, dont le NVMe
+    # block.db (SPOF par nœud, ADR 0008). Si smartd est actif, on lit en plus la
+    # santé SMART du NVMe (`smartctl -H`) : PASSED → ok, sinon → drift critique.
+    if ssh_ok "$h" "systemctl is-active --quiet smartd"; then
+        nvme_health=$(ssh_q "$h" "sudo smartctl -H /dev/${CEPH_BLOCK_DEVICE:-nvme1n1} 2>/dev/null | awk -F: '/overall-health|SMART Health/{print \$2}' | xargs")
+        if printf '%s' "$nvme_health" | grep -qi "PASSED\|OK"; then
+            mark ok "$h : smartd actif, /dev/${CEPH_BLOCK_DEVICE:-nvme1n1} SMART = ${nvme_health}"
+        elif [ -n "$nvme_health" ]; then
+            mark fail "$h : smartd actif mais /dev/${CEPH_BLOCK_DEVICE:-nvme1n1} SMART = ${nvme_health}" \
+                      "drainer $h, remplacer le NVMe block.db, laisser Rook recréer les OSDs (ADR 0008)"
+        else
+            mark ok "$h : smartd actif (santé NVMe non lisible — banc sans NVMe ?)"
+        fi
+    elif ssh_ok "$h" "command -v smartctl >/dev/null"; then
+        mark fail "$h : smartmontools installé mais smartd inactif" \
+                  "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags smart --limit $h)"
+    else
+        mark skip "$h : smartd non installé — opt-in : --tags smart (surveillance SMART, voir IMPLICATIONS.md)"
+    fi
 done
 
 # ─── Couche 3 — Bootstrap Kubernetes (CRI + paquets + endpoint) ────────────
