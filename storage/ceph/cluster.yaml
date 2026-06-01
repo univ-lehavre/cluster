@@ -24,9 +24,9 @@ spec:
     # Épinglé par digest (audit P11 #11) : tag conservé pour lisibilité, digest
     # immuable pour la reproductibilité (ADR 0006). MAJ via renovate.
     image: quay.io/ceph/ceph:v20.2.1@sha256:716b9433f2a76d5985868017f97e7ba5969b689f045ef992608bb8331f6b5d75
-    # Whether to allow unsupported versions of Ceph. Currently Reef and Squid are supported.
-    # Future versions such as Tentacle (v20) would require this to be set to `true`.
-    # Do not set to true in production.
+    # Autoriser une version de Ceph non supportée par cette version de Rook.
+    # Rook 1.19 supporte Tentacle (v20.2.1, déployé ici) → `false` convient
+    # (cf. ADR 0006). Ne pas mettre `true` en production.
     allowUnsupported: false
   # The path on the host where configuration files will be persisted. Must be specified. If there are multiple clusters, the directory must be unique for each cluster.
   # Important: if you reinstall the cluster, make sure you delete this directory from each host or else the mons will fail to start on the new cluster.
