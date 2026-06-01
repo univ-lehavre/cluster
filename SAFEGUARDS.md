@@ -31,6 +31,7 @@ Posés par [Lefthook](https://lefthook.dev/) au premier `pnpm install` (config :
 | `prettier --check`       | tous les `*.{yaml,yml,md,json}`                                  |
 | `yamllint .`             | tout le dépôt                                                    |
 | `shellcheck`             | tous les `*.sh`                                                  |
+| `bats`                   | tests unitaires des fonctions pures de `state.sh` (`test/unit/`) |
 | `kubeconform`            | tous les manifestes K8s (hors CRDs Rook + values.yaml Helm)      |
 | `ansible-lint`           | tous les rôles et playbooks (`production` profile)               |
 
@@ -39,18 +40,19 @@ Posés par [Lefthook](https://lefthook.dev/) au premier `pnpm install` (config :
 
 ## CI GitHub Actions (chaque PR + chaque push `main`)
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) — **8 jobs en parallèle**
-:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) — **jobs en parallèle** :
 
-| Job            | Vérifie                                 |
-| -------------- | --------------------------------------- |
-| `prettier`     | format complet du dépôt                 |
-| `yamllint`     | tous les YAML                           |
-| `shellcheck`   | tous les scripts shell                  |
-| `kubeconform`  | manifestes K8s                          |
-| `ansible-lint` | rôles/playbooks (production profile)    |
-| `jscpd`        | détection de code dupliqué (seuil 5 %)  |
-| `commitlint`   | commits de la PR (Conventional Commits) |
+| Job            | Vérifie                                           |
+| -------------- | ------------------------------------------------- |
+| `prettier`     | format complet du dépôt                           |
+| `yamllint`     | tous les YAML                                     |
+| `shellcheck`   | tous les scripts shell                            |
+| `bats`         | fonctions pures de `state.sh` (`pnpm test:shell`) |
+| `kubeconform`  | manifestes K8s                                    |
+| `ansible-lint` | rôles/playbooks (production profile)              |
+| `jscpd`        | détection de code dupliqué (seuil 5 %)            |
+| `trivy`        | posture sécurité IaC (HIGH/CRITICAL)              |
+| `commitlint`   | commits de la PR (Conventional Commits)           |
 
 ### Branch protection sur `main` (réglage GitHub — audit P7 #29)
 

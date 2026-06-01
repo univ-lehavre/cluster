@@ -47,6 +47,8 @@ pre-push:
           -not -path './node_modules/*' \
           -not -path './.git/*' \
           -print0 | xargs -0 shellcheck
+    bats:
+      run: pnpm test:shell
     kubeconform:
       run: |
         # On part des seuls fichiers VERSIONNÉS (git ls-files) : exclut

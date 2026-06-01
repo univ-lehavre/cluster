@@ -83,6 +83,19 @@ mark() {
 
 section() { printf '\n%s── %s ──%s\n' "$B" "$1" "$N"; }
 
+# Fonctions PURES de classification (testées par bats — test/unit/state-classify.bats).
+# shellcheck source=lib/state-classify.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/lib/state-classify.sh"
+
+# mark_classified "STATUS|message" ["remedy"]
+#   Pont entre la sortie des fonctions classify_* et `mark`. Découpe le verdict
+#   sur le premier '|'. La remedy (optionnelle) n'est utilisée que si fail.
+mark_classified() {
+    local verdict=$1 remedy=${2:-} h_prefix=${3:-}
+    local status=${verdict%%|*} msg=${verdict#*|}
+    mark "$status" "${h_prefix}${msg}" "$remedy"
+}
+
 # ─── Joignabilité ──────────────────────────────────────────────────────────
 section "Joignabilité SSH"
 reachable=()
@@ -198,21 +211,11 @@ fi
 REMOTE
     )
     read -r pw_status pw_days <<<"$pw_result"
-    case "$pw_status" in
-        MOD)
-            mark ok "$h : mot de passe debian modifié (~${pw_days} j après install)"
-            ;;
-        NEVER)
-            mark fail "$h : mot de passe debian JAMAIS modifié depuis l'install" \
-                      "ssh $h sudo passwd debian (ou NEW_DEBIAN_PASSWORD=... bash bootstrap/first-access.sh $h)"
-            ;;
-        AMBIGUOUS)
-            mark skip "$h : install récent (${pw_days} j) — check passwd ambigu, re-vérifier dans 2 jours"
-            ;;
-        *)
-            mark skip "$h : impossible de lire les dates passwd/install (sudo ? chage ? machine-id ?)"
-            ;;
-    esac
+    # Verdict via la fonction pure (testée par bats). La remedy reste ici car
+    # elle dépend de l'hôte courant.
+    mark_classified "$(classify_passwd "$pw_status" "$pw_days")" \
+        "ssh $h sudo passwd debian (ou NEW_DEBIAN_PASSWORD=... bash bootstrap/first-access.sh $h)" \
+        "$h : "
 done
 
 # ─── Couche 2 — Hardening OS (opt-in par couche) ───────────────────────────
@@ -364,49 +367,20 @@ REMOTE
     nvme_state=${nvme_state:-?}
     rook_state=${rook_state:-?}
 
-    # HDD bruts
-    if [ "$hdd_total" = "?" ] || [ -z "$hdd_total" ]; then
-        mark skip "$h : impossible d'inspecter les disques (sudo ? wipefs ?)"
-    elif [ "$hdd_clean" -ge "$CEPH_MIN_HDD" ] && [ "$hdd_dirty" -eq 0 ]; then
-        mark ok "$h : ${hdd_clean}/${hdd_total} HDD bruts (≥ ${CEPH_MIN_HDD} requis)"
-    elif [ "$hdd_dirty" -gt 0 ]; then
-        mark fail "$h : ${hdd_dirty} HDD avec partition/signature résiduelle" \
-                  "bash storage/ceph/cleanup.sh (ou wipefs -a /dev/sdX) sur $h"
-    else
-        mark fail "$h : ${hdd_clean}/${hdd_total} HDD bruts (< ${CEPH_MIN_HDD} requis)" \
-                  "vérifier l'inventaire matériel — pas assez de disques détectés"
-    fi
+    # HDD bruts — verdict via fonction pure (testée par bats).
+    mark_classified "$(classify_hdd "$hdd_total" "$hdd_clean" "$hdd_dirty" "$CEPH_MIN_HDD")" \
+        "bash storage/ceph/cleanup.sh (ou wipefs -a /dev/sdX) sur $h ; sinon vérifier l'inventaire matériel" \
+        "$h : "
 
-    # NVMe block.db
-    case "$nvme_state" in
-        clean)
-            mark ok "$h : /dev/${CEPH_BLOCK_DEVICE} présent et brut (block.db)"
-            ;;
-        dirty)
-            mark fail "$h : /dev/${CEPH_BLOCK_DEVICE} présent mais a une signature/partition" \
-                      "blkdiscard /dev/${CEPH_BLOCK_DEVICE} (ou bash storage/ceph/cleanup.sh)"
-            ;;
-        absent)
-            mark skip "$h : /dev/${CEPH_BLOCK_DEVICE} absent — banc sans NVMe ? OK en dev"
-            ;;
-        *)
-            mark skip "$h : état NVMe indéterminé ($nvme_state)"
-            ;;
-    esac
+    # NVMe block.db — verdict via fonction pure.
+    mark_classified "$(classify_device_state "$nvme_state" "/dev/${CEPH_BLOCK_DEVICE} (block.db)")" \
+        "blkdiscard /dev/${CEPH_BLOCK_DEVICE} (ou bash storage/ceph/cleanup.sh)" \
+        "$h : "
 
-    # /var/lib/rook
-    case "$rook_state" in
-        clean)
-            mark ok "$h : /var/lib/rook absent ou vide"
-            ;;
-        dirty)
-            mark fail "$h : /var/lib/rook contient des résidus d'un précédent Rook" \
-                      "sudo rm -rf /var/lib/rook sur $h (pré-requis avant Phase 3)"
-            ;;
-        *)
-            mark skip "$h : état /var/lib/rook indéterminé"
-            ;;
-    esac
+    # /var/lib/rook — verdict via fonction pure.
+    mark_classified "$(classify_device_state "$rook_state" "/var/lib/rook")" \
+        "sudo rm -rf /var/lib/rook sur $h (pré-requis avant Phase 3)" \
+        "$h : "
 done
 
 # ─── Couche 4 — CNI Cilium (cluster-level) ─────────────────────────────────

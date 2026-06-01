@@ -17,7 +17,8 @@
     "lint:k8s": "git ls-files -z -- '*.yaml' ':!:bootstrap/**' ':!:pnpm-lock.yaml' ':!:pnpm-workspace.yaml' ':!:.yamllint.yaml' ':!:.trivyignore.yaml' ':!:storage/ceph/crds.yaml' ':!:storage/ceph/common.yaml' ':!:storage/ceph/operator.yaml' ':!:storage/ceph/cluster.yaml' ':!:storage/ceph/dashboard.yaml' ':!:storage/ceph/toolbox.yaml' ':!:platform/k8s-dashboard/values.yaml' ':!:test/*/inventory.yaml' | xargs -0 -r kubeconform -strict -ignore-missing-schemas -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'",
     "lint:ansible": "ansible-lint bootstrap/",
     "lint:dup": "jscpd .",
-    "lint": "pnpm format:check && pnpm lint:yaml && pnpm lint:shell && pnpm lint:dup",
+    "test:shell": "bats test/unit/",
+    "lint": "pnpm format:check && pnpm lint:yaml && pnpm lint:shell && pnpm lint:dup && pnpm test:shell",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@commitlint/cli": "^21.0.0",
     "@commitlint/config-conventional": "^21.0.0",
+    "bats": "^1.13.0",
     "jscpd": "^4.2.4",
     "lefthook": "^2.0.0",
     "prettier": "^3.3.0",

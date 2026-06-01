@@ -14,6 +14,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^21.0.0
         version: 21.0.1
+      bats:
+        specifier: ^1.13.0
+        version: 1.13.0
       jscpd:
         specifier: ^4.2.4
         version: 4.2.4
@@ -752,6 +755,10 @@ packages:
 
   badgen@3.3.2:
     resolution: {integrity: sha512-fbQwK9norfdzbdsoPwbLIAmgBXDGEme3jeIyqPAH7o6vp9lmuLHS7uXULvOiQ6XnMLkYNG4gDjILf74hgtTAug==}
+
+  bats@1.13.0:
+    resolution: {integrity: sha512-giSYKGTOcPZyJDbfbTtzAedLcNWdjCLbXYU3/MwPnjyvDXzu6Dgw8d2M+8jHhZXSmsCMSQqCp+YBsJ603UO4vQ==}
+    hasBin: true
 
   birpc@2.9.0:
     resolution: {integrity: sha512-KrayHS5pBi69Xi9JmvoqrIgYGDkD6mcSe/i6YKi3w5kekCLzrX4+nawcXqrj2tIp50Kw/mT/s3p+GVK0A0sKxw==}
@@ -2301,6 +2308,8 @@ snapshots:
       '@babel/types': 7.29.7
 
   badgen@3.3.2: {}
+
+  bats@1.13.0: {}
 
   birpc@2.9.0: {}
 
