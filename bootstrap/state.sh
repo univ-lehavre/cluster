@@ -598,6 +598,29 @@ else
     fi
 fi
 
+# ─── Couche 7b — Exposition réseau (audit P6 #25 / #06) ────────────────────
+# Tous les Services applicatifs ont été passés en ClusterIP (#25). Un Service
+# de type NodePort ou LoadBalancer expose un port au-delà du cluster → ici,
+# c'est un DRIFT (régression de #25 ou exposition non tracée). On exclut
+# `kubernetes-dashboard` (le chart Helm peut légitimement varier).
+section "Exposition réseau (Services NodePort / LoadBalancer)"
+if ! kubectl_ready; then
+    mark skip "kubectl indisponible"
+else
+    exposed=$(kubectl_q get svc -A \
+        -o jsonpath='{range .items[?(@.spec.type=="NodePort")]}{.metadata.namespace}/{.metadata.name} (NodePort){"\n"}{end}{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name} (LoadBalancer){"\n"}{end}' \
+        2>/dev/null | grep -v '^kubernetes-dashboard/' | grep -v '^$' || true)
+    if [ -z "$exposed" ]; then
+        mark ok "aucun Service NodePort/LoadBalancer hors cluster (tout en ClusterIP)"
+    else
+        while IFS= read -r svc; do
+            [ -n "$svc" ] || continue
+            mark fail "Service exposé hors cluster : $svc" \
+                      "repasser ce Service en ClusterIP (cf. ADR 0003 / audit P6 #25) ou tracer l'exposition"
+        done <<<"$exposed"
+    fi
+fi
+
 # ─── Résumé ────────────────────────────────────────────────────────────────
 section "Résumé"
 printf "  ${G}%d ok${N}   ${R}%d drift${N}   ${D}%d non applicable${N}\n" \
@@ -609,5 +632,5 @@ if [ "$fail_n" -gt 0 ]; then
     exit 1
 fi
 
-printf '\n%sÉtat conforme%s sur les 7 couches couvertes par ce script.\n' "$G" "$N"
+printf '\n%sÉtat conforme%s sur toutes les couches couvertes par ce script.\n' "$G" "$N"
 printf 'Consulter %sbootstrap/RUNBOOK.md%s pour la prochaine grande étape.\n' "$C" "$N"
