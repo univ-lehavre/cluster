@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "timezone": "Europe/Paris",
+  "schedule": ["before 6am on the first day of the month"],
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "chore(deps):",
+  "description": "Veille de dépendances alignée sur l'ADR 0006 : PR dédiées (jamais d'auto-merge → 'pas de bump silencieux'), rythme mensuel groupé (les bumps sont rares), validation banc avant prod laissée à l'humain.",
+  "packageRules": [
+    {
+      "description": "Composants cluster critiques (K8s/Cilium/Rook/Ceph) : PR séparées et non groupées, car l'ADR 0006 impose une vérification de compat croisée release-notes avant chaque montée.",
+      "matchPackageNames": [
+        "/cilium/",
+        "/rook/",
+        "/ceph/",
+        "/kubernetes/",
+        "/kubeadm/",
+        "/kubelet/"
+      ],
+      "groupName": null,
+      "schedule": ["before 6am on the first day of the month"],
+      "labels": ["dependencies", "cluster-critical", "needs-bench-validation"]
+    },
+    {
+      "description": "Patchs/mineurs des outils de dev (devDependencies npm) : groupés en une seule PR mensuelle pour limiter le bruit.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "outils dev (devDependencies)"
+    },
+    {
+      "description": "Actions GitHub : groupées, pinnées par digest (ADR 0006 : pinning + digest pour les composants critiques de la chaîne).",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "pinDigests": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "schedule": ["at any time"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  }
+}

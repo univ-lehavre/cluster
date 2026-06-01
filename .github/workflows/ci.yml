@@ -87,6 +87,23 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint:dup
 
+  # Scan de posture sécurité IaC (manifestes K8s, Dockerfile-like, config).
+  # Échoue sur HIGH/CRITICAL. Les compromis actés en ADR (0010/0011/0012) sont
+  # listés dans .trivyignore avec leur justification.
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy config/IaC scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          trivyignores: .trivyignore
+          skip-dirs: node_modules,test/**/.vagrant
+
   commitlint:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
