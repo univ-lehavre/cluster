@@ -1,0 +1,27 @@
+# Registry : Service ClusterIP :80 → conteneur :5000, exposé aussi via Tailscale.
+# Ingress ouvert sur 5000 depuis n'importe où — TOUT le cluster (et le kubelet)
+# pull/push des images ici, donc on ne restreint pas la source. Egress : API
+# server. (DNS couvert par allow-dns-egress.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-registry
+  namespace: registry
+spec:
+  podSelector:
+    matchLabels:
+      app: registry
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 5000
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 6443

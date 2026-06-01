@@ -1,0 +1,14 @@
+# Nie tout le trafic (ingress + egress) pour TOUS les pods du namespace
+# `default`. Les flux légitimes sont ré-ouverts par les policies `allow-*`
+# de ce dossier. Sans ce socle, les `allow` n'ont aucun effet (NetworkPolicy
+# est additif : en l'absence de toute policy, tout est permis).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

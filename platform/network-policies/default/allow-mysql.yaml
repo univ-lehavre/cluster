@@ -1,0 +1,24 @@
+# MySQL (tier: mysql) : ISOLÉ. N'accepte d'ingress :3306 QUE depuis le pod
+# WordPress frontend du même namespace — c'est le cœur de la valeur de cette
+# segmentation. Aucun egress métier nécessaire (DNS déjà couvert par allow-dns).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mysql-from-wordpress
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: wordpress
+      tier: mysql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: wordpress
+              tier: frontend
+      ports:
+        - protocol: TCP
+          port: 3306

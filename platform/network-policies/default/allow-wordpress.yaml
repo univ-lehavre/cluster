@@ -1,0 +1,37 @@
+# WordPress (tier: frontend) : Service exposé sur :80 (LoadBalancer) → ingress
+# ouvert depuis n'importe où. Egress vers MySQL (:3306) et l'API server.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-wordpress
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: wordpress
+      tier: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # HTTP public (LoadBalancer / Tailscale) — le frontend est fait pour être joint.
+    - ports:
+        - protocol: TCP
+          port: 80
+  egress:
+    # Accès à la base MySQL du même namespace.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: wordpress
+              tier: mysql
+      ports:
+        - protocol: TCP
+          port: 3306
+    # API server Kubernetes (config in-cluster, token SA).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 6443

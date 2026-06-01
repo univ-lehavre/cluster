@@ -1,0 +1,27 @@
+# RStudio : Service ClusterIP :80 → conteneur :8787, exposé aussi via Tailscale.
+# Ingress ouvert sur 8787 (le port réel du pod ; le Service fait le mapping
+# 80→8787, mais une NetworkPolicy cible le port du POD). Egress : API server.
+# (DNS couvert par allow-dns-egress.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rstudio
+  namespace: rstudio
+spec:
+  podSelector:
+    matchLabels:
+      app: rstudio
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8787
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 6443
