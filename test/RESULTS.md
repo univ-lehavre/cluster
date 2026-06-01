@@ -605,3 +605,46 @@ durci + couches actives → PASS. Le 13 a besoin de `SSH_OPTS`/`HOSTS` (pas
 > `kubectl label` / les sélecteurs `-l`. Les **scénarios 01 et 02** portaient le
 > même bug (jamais exécutés sur le banc, gatés par les drifts CSI au Run #2) :
 > **corrigés ici** par cohérence.
+
+## Run #6 (2026-06-02) — durcissement réseau Cilium (WireGuard + Hubble)
+
+Activation du chiffrement transparent **WireGuard** (pod-to-pod) et de
+**Hubble** (relay + CLI, sans UI) dans [`bootstrap/cni.sh`](../bootstrap/cni.sh)
+— [ADR 0019](../docs/decisions/0019-durcissement-reseau-cilium.md). Banc
+multi-node (3 nœuds, K8s 1.34.8, Cilium 1.19.4), kernel 6.12 (module `wireguard`
+présent).
+
+| Vérification                          | Résultat banc                                           |
+| ------------------------------------- | ------------------------------------------------------- |
+| `cilium status` après upgrade+rollout | ✅ Cilium/Operator/Envoy OK, **Hubble Relay OK** (1/1)  |
+| `cilium encrypt status`               | ✅ `Encryption: Wireguard (3/3 nodes)`                  |
+| Interface `cilium_wg0` + peers        | ✅ présente, **2 peers** par nœud (mesh complet)        |
+| `hubble observe`                      | ✅ flux réels pod-to-pod (trafic OSD Ceph) visibles     |
+| Ceph après bascule                    | ✅ `HEALTH_OK` (warn transitoire ~70 s, cf. ci-dessous) |
+| Scénario 14 (reproductible)           | ✅ PASS (3/3 assertions)                                |
+
+### 🟠 #16 — `cilium upgrade` ne roule pas les agents → WireGuard inactif
+
+**Symptôme** : après `cilium upgrade` avec `encryption.enabled=true`, la
+ConfigMap porte `enable-wireguard=true` mais `cilium encrypt status` rapporte
+`Disabled` et aucune interface `cilium_wg0` n'est créée.
+
+**Cause** : `cilium upgrade` met à jour la ConfigMap **sans rouler le
+DaemonSet** quand seules des valeurs changent. Les agents (âge 12 h, 0 restart)
+gardent l'ancienne config ; le `config-drift-checker` le dit explicitement dans
+les logs agent :
+`Mismatch found key=enable-wireguard actual=false expectedValue=true`.
+
+**Correctif appliqué** (dans `cni.sh`) : après l'upgrade, **forcer**
+`kubectl rollout restart daemonset/cilium deployment/cilium-operator` +
+`rollout status`, puis **vérifier** `cilium encrypt status` et **échouer le
+script** si WireGuard n'est pas réellement actif. Après rollout : WireGuard
+actif sur 3/3 nœuds (confirmé). Idempotent (un restart sans changement de config
+recrée les pods à l'identique). Sans objet à l'install initiale (les agents
+démarrent directement avec la bonne config).
+
+> ⚠️ **Bascule WireGuard à chaud = `HEALTH_WARN` transitoire.** Le rollout des
+> agents reconstruit le datapath → Ceph signale brièvement des « slow OSD
+> heartbeats » (`longest 2089 ms` → décroît → `HEALTH_OK` en ~70 s sur le banc).
+> Pas de perte de données, pas d'OSD down. **En prod : appliquer hors heure de
+> pointe.** Le scénario 14 ne dégrade rien (lecture seule du datapath).

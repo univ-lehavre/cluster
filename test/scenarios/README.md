@@ -44,7 +44,8 @@ test/scenarios/
 ├── 10-pod-security-admission.sh      ← PodSecurity bloque les pods dangereux
 ├── 11-networkpolicy-default-deny.sh  ← Cilium applique default-deny + allow
 ├── 12-securitycontext-runtime.sh     ← securityContext appliqué au runtime
-└── 13-host-node-hardening.sh         ← durcissement hôte (réutilise state.sh)
+├── 13-host-node-hardening.sh         ← durcissement hôte (réutilise state.sh)
+└── 14-cilium-encryption-hubble.sh    ← WireGuard actif + Hubble (ADR 0019)
 ```
 
 Chaque script :
@@ -58,21 +59,22 @@ Chaque script :
 
 ## Matrice des scénarios
 
-| #   | Scénario                | Tests                                                                         | Durée   | Couverture                                      |
-| --- | ----------------------- | ----------------------------------------------------------------------------- | ------- | ----------------------------------------------- |
-| 01  | PVC RBD write/read      | StorageClass défaut, PVC Bound, écriture/lecture                              | ~1 min  | Stockage bloc fonctionnel                       |
-| 02  | Reschedule pod          | Delete pod, re-création, **données persistantes**                             | ~30s    | Découplage pod ↔ volume                         |
-| 03  | Worker loss             | Halt 1 worker, observation, restore                                           | ~5 min  | Réplicat ×3 + recovery Ceph                     |
-| 04  | Control plane loss      | Halt control plane, observation API + workloads                               | ~5 min  | SPOF assumé, etcd backup                        |
-| 05  | Replication bump        | Pool ×3 → ×5 (si 5+ hôtes), refill                                            | ~5 min  | Évolution capacité (skip si < 5 hôtes)          |
-| 06  | Object store smoke      | datalake-ec + bucket + PUT/GET/DELETE                                         | ~3 min  | Stockage objet S3                               |
-| 07  | Cilium connectivity     | `cilium connectivity test` standard + Hubble si activé                        | ~10 min | Réseau Pod-to-Pod, E/W, NetworkPolicy           |
-| 08  | Resource limits audit   | Inspection des `requests`/`limits` actuels vs banc/prod                       | ~10s    | Cohérence dimensionnement                       |
-| 09  | Restauration etcd       | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient | ~3 min  | **Backup etcd RESTAURABLE** (pas juste produit) |
-| 10  | Pod Security admission  | Pod privileged/hostNetwork **rejeté** à l'admission ; pod conforme admis      | ~1 min  | Durcissement pod (PSA, ADR 0014)                |
-| 11  | NetworkPolicy deny      | default-deny coupe l'egress ; allow-dns le rouvre **ciblé** (appliqué Cilium) | ~2 min  | Durcissement réseau (NetworkPolicy + CNI)       |
-| 12  | securityContext runtime | Pod durci démarre ; non-root + rootfs RO **vérifiés au runtime**              | ~1 min  | Durcissement pod (runAsNonRoot/readOnlyRootFS)  |
-| 13  | Host/node hardening     | Réutilise `state.sh` → **PASS/FAIL** sur les couches hôte (sshd, auditd…)     | ~30s    | Durcissement hôte (secure.yml + first-access)   |
+| #   | Scénario                   | Tests                                                                         | Durée   | Couverture                                         |
+| --- | -------------------------- | ----------------------------------------------------------------------------- | ------- | -------------------------------------------------- |
+| 01  | PVC RBD write/read         | StorageClass défaut, PVC Bound, écriture/lecture                              | ~1 min  | Stockage bloc fonctionnel                          |
+| 02  | Reschedule pod             | Delete pod, re-création, **données persistantes**                             | ~30s    | Découplage pod ↔ volume                            |
+| 03  | Worker loss                | Halt 1 worker, observation, restore                                           | ~5 min  | Réplicat ×3 + recovery Ceph                        |
+| 04  | Control plane loss         | Halt control plane, observation API + workloads                               | ~5 min  | SPOF assumé, etcd backup                           |
+| 05  | Replication bump           | Pool ×3 → ×5 (si 5+ hôtes), refill                                            | ~5 min  | Évolution capacité (skip si < 5 hôtes)             |
+| 06  | Object store smoke         | datalake-ec + bucket + PUT/GET/DELETE                                         | ~3 min  | Stockage objet S3                                  |
+| 07  | Cilium connectivity        | `cilium connectivity test` standard + Hubble si activé                        | ~10 min | Réseau Pod-to-Pod, E/W, NetworkPolicy              |
+| 08  | Resource limits audit      | Inspection des `requests`/`limits` actuels vs banc/prod                       | ~10s    | Cohérence dimensionnement                          |
+| 09  | Restauration etcd          | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient | ~3 min  | **Backup etcd RESTAURABLE** (pas juste produit)    |
+| 10  | Pod Security admission     | Pod privileged/hostNetwork **rejeté** à l'admission ; pod conforme admis      | ~1 min  | Durcissement pod (PSA, ADR 0014)                   |
+| 11  | NetworkPolicy deny         | default-deny coupe l'egress ; allow-dns le rouvre **ciblé** (appliqué Cilium) | ~2 min  | Durcissement réseau (NetworkPolicy + CNI)          |
+| 12  | securityContext runtime    | Pod durci démarre ; non-root + rootfs RO **vérifiés au runtime**              | ~1 min  | Durcissement pod (runAsNonRoot/readOnlyRootFS)     |
+| 13  | Host/node hardening        | Réutilise `state.sh` → **PASS/FAIL** sur les couches hôte (sshd, auditd…)     | ~30s    | Durcissement hôte (secure.yml + first-access)      |
+| 14  | Cilium encryption + Hubble | WireGuard **actif** (`cilium_wg0`, peers) + `hubble observe` opérationnel     | ~30s    | Durcissement réseau (WireGuard + Hubble, ADR 0019) |
 
 > 🔑 **09 — restauration etcd validée (2026-06-01).** Contrairement à 03/04, le
 > 09 **ne reboote aucune VM** : il exerce la procédure du RUNBOOK _sur_ le
@@ -111,6 +113,13 @@ Chaque script :
 > durcissement sshd (le banc utilise le compte Vagrant) ; en prod (sshd durci +
 > couches `secure.yml` actives) il passe. Il a besoin de l'accès SSH aux nœuds
 > (`SSH_OPTS`/`HOSTS`), pas de `kubectl`.
+>
+> Le **14** (durcissement réseau Cilium,
+> [ADR 0019](../../docs/decisions/0019-durcissement-reseau-cilium.md)) vérifie
+> que le chiffrement **WireGuard** est réellement actif dans le datapath
+> (`cilium_wg0` + peers, pas seulement la config) et que **Hubble** retourne des
+> flux. Pré-requis : Cilium installé par [`cni.sh`](../../bootstrap/cni.sh) avec
+> `encryption.enabled` + `hubble.enabled`. `kubectl`-only.
 
 ## Réponses aux questions opérationnelles
 
@@ -171,12 +180,17 @@ Cf. scénario 04. Récap :
 
 ### Tests Cilium
 
-Cf. scénario 07 :
+Cf. scénarios 07 et 14 :
 
-- `cilium connectivity test` — suite officielle, 200+ checks (Pod ↔ Pod, Pod ↔
-  Service, Pod ↔ World, NetworkPolicy, etc.).
-- Test custom : déployer 2 pods sur des nœuds différents, vérifier le ping
-  pod-to-pod via tunnel VXLAN.
+- **07** — `cilium connectivity test` : suite officielle, 200+ checks (Pod ↔
+  Pod, Pod ↔ Service, Pod ↔ World, NetworkPolicy, etc.).
+- **14** — durcissement réseau
+  ([ADR 0019](../../docs/decisions/0019-durcissement-reseau-cilium.md)) : le
+  trafic pod-to-pod inter-nœuds est **chiffré par WireGuard**
+  (`encryption.enabled`, interface `cilium_wg0`) et **Hubble** (relay + CLI,
+  sans UI) est activé pour l'observabilité des flux (`hubble observe`). Le
+  scénario 14 vérifie que les deux sont **réellement opérationnels**, pas
+  seulement configurés.
 
 ### Le durcissement (pod / hôte) est-il vérifié ?
 

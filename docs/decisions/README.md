@@ -33,3 +33,4 @@ Format léger inspiré de Michael Nygard :
 | 0016 | [Observabilité (metrics-server maintenant, Prometheus plus tard)](0016-observabilite.md)             | Accepted |
 | 0017 | [Langage des scripts (bash / jq / python3 / bats)](0017-langage-des-scripts.md)                      | Accepted |
 | 0018 | [Rook-Ceph plutôt que Longhorn](0018-rook-ceph-vs-longhorn.md)                                       | Accepted |
+| 0019 | [Durcissement réseau Cilium (WireGuard + Hubble)](0019-durcissement-reseau-cilium.md)                | Accepted |
