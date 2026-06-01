@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.8.0](https://github.com/univ-lehavre/cluster/compare/v2.7.0...v2.8.0) (2026-06-01)
+
+
+### Features
+
+* **securite:** épingle par digest les images critiques (audit P11 [#11](https://github.com/univ-lehavre/cluster/issues/11)) ([#53](https://github.com/univ-lehavre/cluster/issues/53)) ([0715112](https://github.com/univ-lehavre/cluster/commit/0715112fe17ca687b0ba65b9f90c580f3d44d9aa))
+* **securite:** épingle par digest les images critiques rook/ceph/registry (audit P11 [#11](https://github.com/univ-lehavre/cluster/issues/11)) ([0715112](https://github.com/univ-lehavre/cluster/commit/0715112fe17ca687b0ba65b9f90c580f3d44d9aa))
+
 ## [2.7.0](https://github.com/univ-lehavre/cluster/compare/v2.6.2...v2.7.0) (2026-06-01)
 
 
