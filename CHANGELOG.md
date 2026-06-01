@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.9](https://github.com/univ-lehavre/cluster/compare/v2.1.8...v2.1.9) (2026-06-01)
+
+
+### Bug Fixes
+
+* **etcd-backup:** installe etcd-client (etcdctl prêt pour la restauration) ([1cd0aa0](https://github.com/univ-lehavre/cluster/commit/1cd0aa06c8baa82271c65e25a44dd798d5028371))
+* **etcd-backup:** installe etcd-client pour une restauration sans apt en urgence ([#32](https://github.com/univ-lehavre/cluster/issues/32)) ([1cd0aa0](https://github.com/univ-lehavre/cluster/commit/1cd0aa06c8baa82271c65e25a44dd798d5028371))
+
 ## [2.1.8](https://github.com/univ-lehavre/cluster/compare/v2.1.7...v2.1.8) (2026-06-01)
 
 
