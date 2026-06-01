@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.11.3](https://github.com/univ-lehavre/cluster/compare/v2.11.2...v2.11.3) (2026-06-01)
+
+
+### Documentation
+
+* **status:** passe de mise à jour du tableau de bord ([c6bfbf6](https://github.com/univ-lehavre/cluster/commit/c6bfbf69ced430801f732f67f46cc5e1c2e2fbf4))
+* **status:** passe de mise à jour du tableau de bord (v2.11.1) ([#66](https://github.com/univ-lehavre/cluster/issues/66)) ([c6bfbf6](https://github.com/univ-lehavre/cluster/commit/c6bfbf69ced430801f732f67f46cc5e1c2e2fbf4))
+
 ## [2.11.2](https://github.com/univ-lehavre/cluster/compare/v2.11.1...v2.11.2) (2026-06-01)
 
 
