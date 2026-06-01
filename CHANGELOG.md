@@ -14,6 +14,22 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.1.7](https://github.com/univ-lehavre/cluster/compare/v2.1.6...v2.1.7) (2026-06-01)
+
+
+### Bug Fixes
+
+* **test:** scénario 07 — scoper check-log-errors au temps de test ([27f6417](https://github.com/univ-lehavre/cluster/commit/27f6417c4df8966887388117bf0398381d7f9712))
+* **test:** scénario 08 portable (column macOS) + assertion OSD Pending ([4210834](https://github.com/univ-lehavre/cluster/commit/42108344ac569bad1b120c2f96fb272c2e05bb1e))
+* **test:** surcharge banc osd.requests.memory 2Gi -&gt; 512Mi dans run-phases ([b613338](https://github.com/univ-lehavre/cluster/commit/b613338711936d48ec53dfc209eeb270373965de))
+
+
+### Documentation
+
+* **test:** déroulé scénarios 01-08 + périmètre résilience vs artefacts banc ([ceed941](https://github.com/univ-lehavre/cluster/commit/ceed9418e9b6f1582213dd5fc9027cd671064b8b))
+* **test:** note — ne pas (re)tester le restore d'un nœud sur le banc ([7397b1b](https://github.com/univ-lehavre/cluster/commit/7397b1b95dbbcc5dcfe64e5202cf5d0c32658155))
+* **test:** note — ne pas retester le restore d'un nœud sur le banc ([0212212](https://github.com/univ-lehavre/cluster/commit/02122127c3018dfaed581ecae4bf4fe01bc13d10))
+
 ## [2.1.6](https://github.com/univ-lehavre/cluster/compare/v2.1.5...v2.1.6) (2026-05-31)
 
 
