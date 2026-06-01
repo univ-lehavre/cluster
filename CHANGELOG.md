@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.12.0](https://github.com/univ-lehavre/cluster/compare/v2.11.5...v2.12.0) (2026-06-01)
+
+
+### Features
+
+* **securite:** durcissement réseau Cilium (WireGuard + Hubble) ([#78](https://github.com/univ-lehavre/cluster/issues/78)) ([93dfe21](https://github.com/univ-lehavre/cluster/commit/93dfe2171d749ad28591835c17a75a9c6158a547))
+
 ## [2.11.5](https://github.com/univ-lehavre/cluster/compare/v2.11.4...v2.11.5) (2026-06-01)
 
 
