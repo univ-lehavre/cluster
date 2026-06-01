@@ -1,8 +1,8 @@
 # STATUS — avancement du durcissement (audit → mise en œuvre)
 
-> **Dernière mise à jour : 2026-06-01 20:29 CEST.** Document vivant —
+> **Dernière mise à jour : 2026-06-01 22:00 CEST.** Document vivant —
 > **horodater toute modification** (en-tête ci-dessus + la date entre crochets
-> sur chaque ligne modifiée). État du dépôt à la **v2.11.1**.
+> sur chaque ligne modifiée). État du dépôt à la **v2.11.3**.
 
 Suivi de la mise en œuvre du plan d'audit
 ([`docs/audit/12-plan-action.md`](docs/audit/12-plan-action.md)) et des écarts
@@ -27,11 +27,11 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 2 — Néophyte
 
-| #   | Action                      | État                                         |
-| --- | --------------------------- | -------------------------------------------- |
-| 5   | Glossaire                   | ✅ [2026-06-01] `docs/glossaire.md` (249 l.) |
-| 6   | Gloser chaque terme + liens | ❓ [2026-06-01] vérif fine                   |
-| 7   | Page `docs/demarrage.md`    | 🔲 [2026-06-01] absente                      |
+| #   | Action                      | État                                          |
+| --- | --------------------------- | --------------------------------------------- |
+| 5   | Glossaire                   | ✅ [2026-06-01] `docs/glossaire.md` (249 l.)  |
+| 6   | Gloser chaque terme + liens | ❓ [2026-06-01] vérif fine                    |
+| 7   | Page `docs/demarrage.md`    | ✅ [2026-06-01] `docs/demarrage.md` + sidebar |
 
 ### Priorité 3 — Supply chain
 
@@ -84,26 +84,26 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 8 — Hygiène
 
-| #   | Action                                         | État                    |
-| --- | ---------------------------------------------- | ----------------------- |
-| 32  | Supprimer `bootstrap/bootstrap/`               | ✅ [2026-06-01]         |
-| 33  | editLink/ignoreDeadLinks/socialLinks ; READMEs | ❓ [2026-06-01]         |
-| 34  | Parité lint (jscpd pre-push, lint dans pnpm)   | ❓ [2026-06-01]         |
-| 35  | markdownlint + lychee en CI                    | 🔲 [2026-06-01] absents |
-| 36  | ADR 0005 + patch K8s + actions GitHub          | ❓ [2026-06-01]         |
-| 37  | Compléter tables README                        | ❓ [2026-06-01]         |
-| 38  | Factoriser ssh-report.sh / lib.sh ; SSH_OPTS   | ❓ [2026-06-01]         |
+| #   | Action                                         | État                                                           |
+| --- | ---------------------------------------------- | -------------------------------------------------------------- |
+| 32  | Supprimer `bootstrap/bootstrap/`               | ✅ [2026-06-01]                                                |
+| 33  | editLink/ignoreDeadLinks/socialLinks ; READMEs | ❓ [2026-06-01]                                                |
+| 34  | Parité lint (jscpd pre-push, lint dans pnpm)   | ❓ [2026-06-01]                                                |
+| 35  | markdownlint + lychee en CI                    | ✅ [2026-06-01] 2 jobs CI + config tolérante                   |
+| 36  | Lint .sh.j2/.pl (+ patch K8s/actions)          | ⚠️ [2026-06-01] lint .sh.j2/.pl fait ; patch K8s/actions reste |
+| 37  | Compléter tables README                        | ❓ [2026-06-01]                                                |
+| 38  | Factoriser ssh-report.sh / lib.sh ; SSH_OPTS   | ❓ [2026-06-01]                                                |
 
 ### ADR à formaliser
 
-| ADR                                        | État                              |
-| ------------------------------------------ | --------------------------------- |
-| 0013 — sauvegarde données                  | ✅ [2026-06-01]                   |
-| 0014 — durcissement kubeadm                | ✅ [2026-06-01]                   |
-| 0015 — stratégie d'upgrade K8s             | ✅ [2026-06-01]                   |
-| 0016 — observabilité (paliers)             | ✅ [2026-06-01]                   |
-| ADR langage scripts (bash/jq/python3/bats) | 🔲 [2026-06-01] prochain n° libre |
-| ADR Rook-Ceph vs Longhorn                  | 🔲 [2026-06-01] prochain n° libre |
+| ADR                                       | État            |
+| ----------------------------------------- | --------------- |
+| 0013 — sauvegarde données                 | ✅ [2026-06-01] |
+| 0014 — durcissement kubeadm               | ✅ [2026-06-01] |
+| 0015 — stratégie d'upgrade K8s            | ✅ [2026-06-01] |
+| 0016 — observabilité (paliers)            | ✅ [2026-06-01] |
+| 0017 — langage des scripts (bash/jq/bats) | ✅ [2026-06-01] |
+| 0018 — Rook-Ceph vs Longhorn              | ✅ [2026-06-01] |
 
 ---
 
@@ -118,7 +118,14 @@ n'invente rien, mais son chapeau (« toutes les recommandations ») est
 n'ont pas été reportées dans la Priorité 8. Ci-dessous les omissions
 **opérationnelles** (les cosmétiques sont regroupées en fin).
 
-### Omissions opérationnelles (à intégrer au backlog) — [2026-06-01]
+### Omissions opérationnelles — [2026-06-01]
+
+> **Quasi toutes traitées** dans le lot « audit-backlog » : runner `run-all.sh`,
+> `--syntax-check` CI, lint `.sh.j2`/`.pl`, vérif exposition `state.sh`,
+> capacité Ceph, SPOF apps, Headscale (ADR 0003), CHANGELOG subtree gelé,
+> audit-log non-répudiation. **Restent** : scénario 03 continuité I/O et
+> scénarios légers registry/rstudio (`02-tests:90`/`:100`) — à faire avec le
+> banc.
 
 | Réf source           | Recommandation absente du plan                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------- |
