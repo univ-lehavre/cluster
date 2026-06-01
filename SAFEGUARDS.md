@@ -60,11 +60,13 @@ Configurée côté GitHub (non versionnable, documentée ici pour mémoire) :
 
 - **Pull request obligatoire** (pas de push direct — doublé par le hook
   `no-direct-push-to-main`).
-- **9 checks requis** avant merge (= tous les jobs CI) : `prettier`, `yamllint`,
-  `shellcheck`, `kubeconform`, `ansible-lint`, `commitlint`, **`trivy`**,
-  **`bats`**, **`jscpd`**. Les 3 derniers ont été ajoutés après un incident où
-  une PR avec `trivy` rouge s'est auto-mergée et a cassé `main` (trivy n'était
-  pas requis) : désormais aucun job CI ne peut être contourné par l'auto-merge.
+- **13 checks requis** avant merge (= tous les jobs CI) : `prettier`,
+  `yamllint`, `shellcheck`, `kubeconform`, `ansible-lint`, `commitlint`,
+  `trivy`, `bats`, `jscpd`, `markdownlint`, `lychee`, `ansible-syntax`,
+  `scripts-extra`. **Tout job CI doit être ajouté à cette liste** : un job non
+  requis se contourne par l'auto-merge et peut casser `main` (vécu deux fois —
+  `trivy`, puis `lychee`). Règle : nouveau job → l'ajouter aux required checks
+  une fois vu vert.
 - **`strict: true`** : la branche doit être **à jour avec `main`** (checks
   rejoués sur le dernier état) avant merge.
 - **Résolution des conversations requise**.

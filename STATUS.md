@@ -73,14 +73,14 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 7 — Gouvernance
 
-| #   | Action                                         | État                                                                                  |
-| --- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 26  | `CITATION.cff`                                 | ✅ [2026-06-01] créé (ORCID/DOI à compléter)                                          |
-| 27  | `SECURITY.md` + Private Vuln. Reporting        | ✅ [2026-06-01] créé                                                                  |
-| 28  | Versionnement : retirer commit-and-tag-version | ✅ [2026-06-01] retiré (release-please seul)                                          |
-| 29  | Branch protection GitHub                       | ✅ [2026-06-01] strict + 9 checks requis (tous les jobs CI) + conversation resolution |
-| 30  | Licence subtree (MIT/NOTICE/SPDX)              | ✅ [2026-06-01] `NOTICE` (subtree Unlicense vs MIT)                                   |
-| 31  | CODE_OF_CONDUCT, templates, CODEOWNERS         | ✅ [2026-06-01] créés (.github/ + racine)                                             |
+| #   | Action                                         | État                                                                                   |
+| --- | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 26  | `CITATION.cff`                                 | ✅ [2026-06-01] créé (ORCID/DOI à compléter)                                           |
+| 27  | `SECURITY.md` + Private Vuln. Reporting        | ✅ [2026-06-01] créé                                                                   |
+| 28  | Versionnement : retirer commit-and-tag-version | ✅ [2026-06-01] retiré (release-please seul)                                           |
+| 29  | Branch protection GitHub                       | ✅ [2026-06-01] strict + 13 checks requis (tous les jobs CI) + conversation resolution |
+| 30  | Licence subtree (MIT/NOTICE/SPDX)              | ✅ [2026-06-01] `NOTICE` (subtree Unlicense vs MIT)                                    |
+| 31  | CODE_OF_CONDUCT, templates, CODEOWNERS         | ✅ [2026-06-01] créés (.github/ + racine)                                              |
 
 ### Priorité 8 — Hygiène
 
