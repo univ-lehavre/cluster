@@ -10,7 +10,10 @@ spec:
   selector:
     app: wordpress
     tier: frontend
-  type: LoadBalancer
+  # ClusterIP (audit P6 #25) : pas d'exposition externe directe. Accès via
+  # `kubectl port-forward` ou Tailscale. Cohérent avec le réseau isolé (ADR 0003)
+  # — l'exemple WordPress n'a pas vocation à être publié sur Internet.
+  type: ClusterIP
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

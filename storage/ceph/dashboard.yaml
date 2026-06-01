@@ -17,4 +17,6 @@ spec:
     rook_cluster: rook-ceph
     mgr_role: active
   sessionAffinity: None
-  type: NodePort
+  # ClusterIP (audit P6 #25) : le dashboard Ceph n'est pas exposé hors cluster.
+  # Accès via `kubectl -n rook-ceph port-forward svc/rook-ceph-mgr-dashboard-external-https 8443:8443`.
+  type: ClusterIP
