@@ -16,7 +16,19 @@ export default defineConfig({
   lang: 'fr-FR',
   cleanUrls: true,
   lastUpdated: true,
-  ignoreDeadLinks: true,
+  // Liste CIBLÉE plutôt que `true` global (audit P4 #33) : VitePress vérifie
+  // désormais les liens entre pages du site, mais on tolère les liens vers des
+  // fichiers de CODE (scripts, rôles Ansible, Justfile…) que la doc référence
+  // légitimement — VitePress ne les sert pas (il ne rend que le Markdown), mais
+  // ils sont valides sur GitHub. lychee (CI) couvre déjà ces liens fichiers.
+  ignoreDeadLinks: [
+    /\.(sh|pl|j2|yaml|yml|toml|cff|conf)$/, // fichiers de code/config
+    /\/Justfile$/,
+    /\/Vagrantfile$/,
+    // Dossiers de code liés depuis la doc (VitePress les résout en /index) :
+    /\/(roles|lib|templates|files|examples)\//,
+    /\/test\/unit\//,
+  ],
 
   srcExclude: [
     'node_modules/**',
@@ -201,8 +213,9 @@ export default defineConfig({
     returnToTopLabel: 'Retour en haut',
     lastUpdated: { text: 'Dernière mise à jour' },
     editLink: {
-      pattern: 'https://github.com/pochasset/cluster/edit/main/:path',
+      pattern: 'https://github.com/univ-lehavre/cluster/edit/main/:path',
       text: 'Modifier cette page sur GitHub',
     },
+    socialLinks: [{ icon: 'github', link: 'https://github.com/univ-lehavre/cluster' }],
   },
 })

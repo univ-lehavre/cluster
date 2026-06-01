@@ -34,12 +34,14 @@ publiée automatiquement depuis `main` par
 
 ## Structure
 
-| Dossier                          | Rôle                                          |
-| -------------------------------- | --------------------------------------------- |
-| [`bootstrap/`](bootstrap/)       | Installation initiale de Kubernetes (Ansible) |
-| [`storage/ceph/`](storage/ceph/) | Stockage distribué (Rook-Ceph)                |
-| [`platform/`](platform/)         | Services transverses (dashboard, registry)    |
-| [`apps/`](apps/)                 | Charges applicatives (RStudio)                |
+| Dossier                          | Rôle                                                                 |
+| -------------------------------- | -------------------------------------------------------------------- |
+| [`bootstrap/`](bootstrap/)       | Installation initiale de Kubernetes (Ansible)                        |
+| [`storage/ceph/`](storage/ceph/) | Stockage distribué (Rook-Ceph)                                       |
+| [`platform/`](platform/)         | Services transverses (dashboard, registry, metrics, NetworkPolicies) |
+| [`apps/`](apps/)                 | Charges applicatives (RStudio)                                       |
+| [`test/`](test/)                 | Bancs Vagrant + scénarios reproductibles                             |
+| [`docs/`](docs/)                 | Glossaire, démarrage, ADR, audit (site VitePress)                    |
 
 ## Qualité — garde-fous en place
 
