@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.11.5](https://github.com/univ-lehavre/cluster/compare/v2.11.4...v2.11.5) (2026-06-01)
+
+
+### Bug Fixes
+
+* **smartmon:** service smartmontools (vs smartd) + tolère l'absence de SMART (test banc) ([425f7c3](https://github.com/univ-lehavre/cluster/commit/425f7c38a7300e80722bf51b2186d1922c3696e7))
+* **smartmon:** service smartmontools + tolère l'absence de SMART (révélé par test banc) ([#74](https://github.com/univ-lehavre/cluster/issues/74)) ([425f7c3](https://github.com/univ-lehavre/cluster/commit/425f7c38a7300e80722bf51b2186d1922c3696e7))
+
 ## [2.11.4](https://github.com/univ-lehavre/cluster/compare/v2.11.3...v2.11.4) (2026-06-01)
 
 
