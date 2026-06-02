@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.12.3](https://github.com/univ-lehavre/cluster/compare/v2.12.2...v2.12.3) (2026-06-02)
+
+
+### Documentation
+
+* **status:** réaligne STATUS.md sur v2.12.2 (durcissement + run banc) ([#85](https://github.com/univ-lehavre/cluster/issues/85)) ([21f65c6](https://github.com/univ-lehavre/cluster/commit/21f65c698004f10218a19d9f12afc3c5a0bd6178))
+
 ## [2.12.2](https://github.com/univ-lehavre/cluster/compare/v2.12.1...v2.12.2) (2026-06-02)
 
 
