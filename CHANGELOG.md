@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.12.1](https://github.com/univ-lehavre/cluster/compare/v2.12.0...v2.12.1) (2026-06-02)
+
+
+### Refactor
+
+* **securite:** first-access.sh seule source du durcissement sshd ([#80](https://github.com/univ-lehavre/cluster/issues/80)) ([50c3b47](https://github.com/univ-lehavre/cluster/commit/50c3b47e99597e1e839150bb1ae93210f897bd15))
+
 ## [2.12.0](https://github.com/univ-lehavre/cluster/compare/v2.11.5...v2.12.0) (2026-06-01)
 
 
