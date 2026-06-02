@@ -85,12 +85,13 @@ markdownlint, link-checker).
 
 ### Suggestion — Warnings yamllint cosmétiques non corrigés
 
-- **Fichier** : `storage/ceph/storageClass/*.yaml`,
-  `bootstrap/security/roles/network/tasks/sshd.yml:124`
+- **Fichier** : `storage/ceph/storageClass/*.yaml` (le second fichier cité à
+  l'origine, `roles/network/tasks/sshd.yml`, a depuis été **supprimé** —
+  durcissement sshd unifié dans `first-access.sh`).
 - **Constat** : 9 « missing starting space in comment » + 1 ligne de 269
   caractères ; verts car `level: warning`, mais polluent la sortie.
-- **Recommandation** : corriger (`#x` → `# x`, découper la ligne 124) ; permet
-  de passer `comments` en `error` sur les fichiers maison.
+- **Recommandation** : corriger (`#x` → `# x`) ; permet de passer `comments` en
+  `error` sur les fichiers maison.
 
 ### Suggestion — Pas de markdownlint ni de vérificateur de liens
 

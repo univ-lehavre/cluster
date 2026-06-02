@@ -72,10 +72,12 @@ bloquer automatiquement les IP malveillantes détectées dans les logs.
 
 ### network
 
-Le rôle - dans le fichier `./roles/network` - met en place la sécurité réseau.
-Il applique des règles UFW (`ufw.yml`), installe/configure le serveur SSH
-(`sshd.yml`) avec un mécanisme de rollback en cas d’échec, et déploie les clés
-publiques pour l’accès (`ssh.yml`).
+Le rôle - dans le fichier `./roles/network` - applique les règles du pare-feu
+UFW (`ufw.yml`). C’est désormais sa **seule** responsabilité : le durcissement
+`sshd` et le dépôt de la clé publique sont assurés **uniquement** par
+[`bootstrap/first-access.sh`](../first-access.sh) (drop-in
+`/etc/ssh/sshd_config.d/`, clé via `ssh-copy-id`). Les anciennes tasks
+`sshd.yml`/`ssh.yml` faisaient doublon et ont été supprimées.
 
 ### os
 

@@ -50,8 +50,8 @@ ansible-playbook -i ../hosts.yaml secure.yml --tags detection
 # 4 bis. Surveillance SMART des disques (alerte mail sur le NVMe block.db ; cf. ADR 0008)
 ansible-playbook -i ../hosts.yaml secure.yml --tags smart
 
-# 5. Vérification/réapplication du drop-in sshd (idempotent)
-ansible-playbook -i ../hosts.yaml secure.yml --tags sshd
+# Le durcissement sshd et le dépôt des clés sont assurés UNIQUEMENT par
+# bootstrap/first-access.sh (les anciens tags sshd/ssh-keys ont été retirés).
 
 # Tout faire d'un coup (sauf upgrade et ufw, plus risqués)
 ansible-playbook -i ../hosts.yaml secure.yml --tags os,alert,audit,detection
@@ -235,12 +235,16 @@ sudo grep -i 'ban' /var/log/fail2ban.log | tail
 
 ---
 
-## Network/sshd — `--tags sshd` (opt-in, déjà posé par first-access.sh)
+## Durcissement sshd — posé par `first-access.sh` (source unique)
 
-> Cette couche est en `never` parce que [`first-access.sh`](../first-access.sh)
-> dépose le **même** drop-in `00-hardening.conf` avant que cluster ne soit
-> joignable par Ansible. Le rôle `network/sshd.yml` est conservé pour _re-poser_
-> le réglage si une dérive est détectée.
+> Le durcissement `sshd` est assuré **uniquement** par
+> [`first-access.sh`](../first-access.sh), qui dépose le drop-in
+> `00-hardening.conf` avant même que le cluster soit joignable par Ansible. Il
+> n'y a **plus** de tag `sshd` dans `secure.yml` : l'ancienne task
+> `network/sshd.yml` (doublon, avec un `AllowUsers` variable) a été supprimée.
+> Pour re-poser le réglage ou corriger une dérive, **relancer
+> `first-access.sh`** (idempotent) ; `bootstrap/state.sh` détecte l'absence du
+> drop-in.
 
 ### Ce qui change
 

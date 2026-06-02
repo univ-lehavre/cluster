@@ -270,10 +270,11 @@ gestion du compte admin (expiration mot de passe). Origine :
 `univ-lehavre/server-security` (DOI
 [`10.5281/zenodo.16983614`](https://doi.org/10.5281/zenodo.16983614)).
 
-Le `sshd` est déjà durci par `first-access.sh` (drop-in) avant ce passage ; si
-le rôle `network/sshd` retouche `sshd`, ses changements doivent rester
-**cohérents** avec le drop-in (ordre alphanumérique des `*.conf` ; ce dernier
-gagne en cas de conflit de directive).
+Le `sshd` est durci **uniquement** par `first-access.sh` (drop-in
+`/etc/ssh/sshd_config.d/00-hardening.conf`), de même que le dépôt de la clé
+publique (`ssh-copy-id`). `secure.yml` ne re-touche plus le `sshd` ni les clés :
+les anciens tags `sshd`/`ssh-keys` (doublon Ansible, avec un `AllowUsers`
+variable risqué) ont été retirés. `first-access.sh` est la **source unique**.
 
 Le playbook `secure.yml` est **entièrement opt-in** : sans `--tags`, il ne
 touche à rien (il charge juste les variables). Voir
@@ -294,8 +295,6 @@ ansible-playbook -i ../hosts.yaml secure.yml --tags os          # mises à jour 
 ansible-playbook -i ../hosts.yaml secure.yml --tags alert       # postfix + redirection mail root
 ansible-playbook -i ../hosts.yaml secure.yml --tags audit       # auditd + règles
 ansible-playbook -i ../hosts.yaml secure.yml --tags detection   # fail2ban (anti-brute-force SSH)
-ansible-playbook -i ../hosts.yaml secure.yml --tags sshd        # re-applique drop-in sshd (déjà fait par first-access.sh)
-ansible-playbook -i ../hosts.yaml secure.yml --tags ssh-keys    # re-dépose les clés
 ansible-playbook -i ../hosts.yaml secure.yml --tags upgrade     # apt full-upgrade + reboot (serial:1) — opérationnel
 ansible-playbook -i ../hosts.yaml secure.yml --tags ufw         # APRÈS bootstrap K8s — cf. ports
 ```
