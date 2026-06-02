@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.15.1](https://github.com/univ-lehavre/cluster/compare/v2.15.0...v2.15.1) (2026-06-02)
+
+
+### Documentation
+
+* **audit:** note de réflexion admission/runtime (Kyverno/Falco/Tetragon) ([#97](https://github.com/univ-lehavre/cluster/issues/97)) ([3c26a24](https://github.com/univ-lehavre/cluster/commit/3c26a24f06cf09c29989daffefb11b7eaf2ecd20))
+
 ## [2.15.0](https://github.com/univ-lehavre/cluster/compare/v2.14.0...v2.15.0) (2026-06-02)
 
 
