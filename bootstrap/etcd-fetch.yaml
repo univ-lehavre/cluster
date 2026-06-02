@@ -46,8 +46,20 @@
         dest: '{{ etcd_fetch_dest }}/{{ inventory_hostname }}/'
         flat: true
 
+    # `fetch` ne pose pas de mode → la copie locale hérite du umask du poste
+    # (souvent 0644, lisible par les autres comptes). Le snapshot contient TOUT
+    # l'état du cluster (Secrets chiffrés, mais ConfigMaps/specs en clair) :
+    # on restreint à 0600. Mitigation retenue au lieu du chiffrement du fichier
+    # (cf. ADR 0014 § snapshots) ; à compléter par un poste de confiance chiffré.
+    - name: Restreindre les permissions de la copie locale (0600)
+      ansible.builtin.file:
+        path: '{{ etcd_fetch_dest }}/{{ inventory_hostname }}/{{ latest_snapshot.stdout | basename }}'
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
     - name: Confirmer la copie locale
       ansible.builtin.debug:
         msg: >-
           Snapshot {{ latest_snapshot.stdout | basename }} copié dans
-          {{ etcd_fetch_dest }}/{{ inventory_hostname }}/ (hors-nœud).
+          {{ etcd_fetch_dest }}/{{ inventory_hostname }}/ (hors-nœud, 0600).
