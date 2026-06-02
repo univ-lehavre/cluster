@@ -1,0 +1,17 @@
+# Exposition tout-Cilium (ADR 0020) — bordure L7, GatewayClass.
+#
+# Déclare la classe de Gateway servie par Cilium. Remplace le rôle de contrôleur
+# d'ingress (ingress-nginx) par l'implémentation Gateway API de Cilium (Envoy
+# intégré). La GatewayClass N'EST PAS auto-créée par Cilium → on la versionne.
+#
+# Pré-requis : gatewayAPI.enabled=true + kubeProxyReplacement=true (cni.sh) et
+# les CRDs Gateway API v1.4.1 pré-installés (voir gateway-api-crds.md).
+#
+# apiVersion : gateway.networking.k8s.io/v1 (API standard, GA).
+# controllerName EXACT : io.cilium/gateway-controller.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: cilium
+spec:
+  controllerName: io.cilium/gateway-controller

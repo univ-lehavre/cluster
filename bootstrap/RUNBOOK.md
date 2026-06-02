@@ -382,19 +382,36 @@ bash ./cni.sh
 cilium connectivity test
 ```
 
-#### Optionnel — `kubeProxyReplacement`
+#### Exposition réseau tout-Cilium (`kubeProxyReplacement` + LB-IPAM + L2 + Gateway API)
 
-Cilium peut remplacer `kube-proxy` (mode IPVS+eBPF), avec de meilleures perfs
-réseau et moins de composants à maintenir. **Non activé par défaut** dans
-[`cni.sh`](cni.sh) — décision conservatrice (l'install nominale est plus simple
-à dépanner).
+Cilium assure l'**exposition réseau** du cluster, en remplacement de MetalLB et
+d'ingress-nginx
+([ADR 0020](../docs/decisions/0020-exposition-reseau-tout-cilium.md)).
+[`cni.sh`](cni.sh) arme désormais, à l'install **et** à l'upgrade :
 
-Pour l'activer plus tard sur un cluster déjà bootstrapé, repasser
-`cilium install` avec
-`--set kubeProxyReplacement=true --set k8sServiceHost=cluster-api --set k8sServicePort=6443`,
-puis retirer `kube-proxy`
-(`kubectl -n kube-system delete daemonset kube-proxy + iptables-save | grep KUBE | iptables-restore -n`).
-Tester sur le banc multi-nœuds avant.
+- **`kubeProxyReplacement=true`** (datapath eBPF) + `k8sServiceHost=cluster-api`
+  - `k8sServicePort=6443` (obligatoires sans kube-proxy : l'agent ne joint plus
+    l'API via la ClusterIP `kubernetes.default`). En 1.19 le flag est un booléen
+    et active déjà NodePort/HostPort/ExternalIPs.
+- **LB-IPAM + `l2announcements.enabled=true`** (+ `k8sClientRateLimit` relevé) :
+  IP LoadBalancer + annonce ARP, remplacent MetalLB.
+- **`gatewayAPI.enabled=true`** : bordure L7 (Envoy intégré), remplace
+  ingress-nginx.
+
+Les pools/policies/GatewayClass sont des CRs versionnés sous
+[`platform/cilium-expo/`](../platform/cilium-expo/) ; les **CRDs Gateway API
+v1.4.1 doivent être pré-installées** (voir le README de cet addon).
+
+Retrait de `kube-proxy` : sur un cluster **neuf**, `kubeadm init` ne le déploie
+plus (`skipPhases: [addon/kube-proxy]` dans la config kubeadm). Sur un cluster
+**existant**, `cni.sh` le retire **après** avoir vérifié
+`KubeProxyReplacement: True`, puis purge les règles iptables `KUBE-*` (à répéter
+sur chaque nœud : `iptables-save | grep -v KUBE | iptables-restore`, en root).
+
+**Valider sur le banc multi-nœuds avant la prod** : pas de régression de
+service-routing après la bascule eBPF (Ceph `HEALTH_OK`, CoreDNS, ClusterIP
+applicatifs), attribution d'IP du pool, annonce ARP, failover L2. La plage prod
+du pool LB-IPAM reste **TODO** (arbitrage admin réseau, ADR 0020).
 
 ### Join workers to cluster
 

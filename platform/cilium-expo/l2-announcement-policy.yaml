@@ -1,0 +1,36 @@
+# Exposition tout-Cilium (ADR 0020) — annonce L2 (ARP).
+#
+# CiliumL2AnnouncementPolicy : un nœud élu (lease) répond aux requêtes ARP pour
+# les IP du pool LB-IPAM, les rendant joignables sur le LAN. Remplace le
+# L2Advertisement MetalLB. Pré-requis : l2announcements.enabled=true et
+# kubeProxyReplacement=true (posés par bootstrap/cni.sh).
+#
+# apiVersion : cilium.io/v2alpha1 — ce CRD RESTE en alpha en 1.19 (à la
+# différence du pool LB-IPAM en cilium.io/v2). Piège classique : versions
+# différentes pour les deux CR cilium.io.
+#
+# Cadrage non-HA (ADR 0002/0009) : L2 = failover d'IP mono-nœud, PAS de
+# répartition de charge — un seul nœud annonce une IP donnée à la fois.
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: banc-vagrant-l2
+spec:
+  # Vide → tous les Service type=LoadBalancer éligibles (dont le Gateway).
+  serviceSelector:
+    matchLabels: {}
+  # Annoncer depuis les workers, pas le control-plane (SPOF unique, ADR 0002) ;
+  # l'init pose déjà exclude-from-external-load-balancers sur tous les nœuds —
+  # ce nodeSelector garde la cohérence et limite le jeu de candidats annonceurs.
+  nodeSelector:
+    matchExpressions:
+      - key: node-role.kubernetes.io/control-plane
+        operator: DoesNotExist
+  # Interface d'annonce. Banc Vagrant/VirtualBox : eth0 = NAT, eth1 = réseau
+  # privé inter-VM (cf. test/multi-node, kubelet --node-ip sur eth1). On annonce
+  # STRICTEMENT sur eth1 (regex ancrée) — jamais sur le NAT. La valeur est une
+  # liste de regex ; adapter en prod si l'interface porte un autre nom.
+  interfaces:
+    - '^eth1$'
+  # Annoncer les IP de type LoadBalancer (issues du pool LB-IPAM).
+  loadBalancerIPs: true

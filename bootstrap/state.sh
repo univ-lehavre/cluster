@@ -606,17 +606,34 @@ fi
 # ─── Couche 7b — Exposition réseau (audit P6 #25 / #06) ────────────────────
 # Tous les Services applicatifs ont été passés en ClusterIP (#25). Un Service
 # de type NodePort ou LoadBalancer expose un port au-delà du cluster → ici,
-# c'est un DRIFT (régression de #25 ou exposition non tracée). On exclut
-# `kubernetes-dashboard` (le chart Helm peut légitimement varier).
+# c'est un DRIFT (régression de #25 ou exposition non tracée). Exceptions
+# TRACÉES :
+#   - `kubernetes-dashboard` (le chart Helm peut légitimement varier) ;
+#   - les Service LoadBalancer créés par un Gateway de bordure Cilium (label
+#     `gateway.networking.k8s.io/gateway-name`) : c'est le point d'entrée unique
+#     de l'exposition tout-Cilium (ADR 0020). Le principe #25 reste : services
+#     applicatifs en ClusterIP, exposition SEULEMENT via la bordure Gateway.
 section "Exposition réseau (Services NodePort / LoadBalancer)"
 if ! kubectl_ready; then
     mark skip "kubectl indisponible"
 else
+    # Allowlist : `ns/nom` des Service portés par un Gateway (bordure ADR 0020).
+    gw_svcs=$(kubectl_q get svc -A -l gateway.networking.k8s.io/gateway-name \
+        -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' \
+        2>/dev/null || true)
     exposed=$(kubectl_q get svc -A \
         -o jsonpath='{range .items[?(@.spec.type=="NodePort")]}{.metadata.namespace}/{.metadata.name} (NodePort){"\n"}{end}{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name} (LoadBalancer){"\n"}{end}' \
         2>/dev/null | grep -v '^kubernetes-dashboard/' | grep -v '^$' || true)
+    # Retirer les Service de bordure Gateway (exception tracée, ADR 0020).
+    if [ -n "$gw_svcs" ]; then
+        while IFS= read -r gw; do
+            [ -n "$gw" ] || continue
+            exposed=$(printf '%s\n' "$exposed" | grep -v "^${gw} " || true)
+        done <<<"$gw_svcs"
+    fi
+    exposed=$(printf '%s' "$exposed" | grep -v '^$' || true)
     if [ -z "$exposed" ]; then
-        mark ok "aucun Service NodePort/LoadBalancer hors cluster (tout en ClusterIP)"
+        mark ok "aucun Service NodePort/LoadBalancer hors cluster (hors bordure Gateway tracée)"
     else
         while IFS= read -r svc; do
             [ -n "$svc" ] || continue

@@ -8,6 +8,13 @@
    (et non plus une map comme en v1beta3). #}
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
+# Exposition tout-Cilium (ADR 0020) : Cilium remplace kube-proxy
+# (kubeProxyReplacement, datapath eBPF). On NE déploie donc PAS l'addon
+# kube-proxy à l'init — c'est plus propre qu'un déploiement suivi d'un retrait
+# (pas de fenêtre de coexistence, pas de règles iptables KUBE-* à purger sur un
+# cluster neuf). Cilium est armé ensuite par bootstrap/cni.sh.
+skipPhases:
+  - addon/kube-proxy
 {% if control_plane_ip | default('') | length > 0 %}
 localAPIEndpoint:
   # Banc multi-node : annoncer l'IP du réseau privé inter-VM (pas le NAT).

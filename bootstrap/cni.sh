@@ -46,6 +46,13 @@ fi
 #     en ligne de commande suffit pour un cluster mono-admin et n'ajoute pas de
 #     surface web exposée (cf. ADR 0019). Complète l'ADR 0016 (metrics-server),
 #     sur l'axe RÉSEAU et non métrologique.
+#
+# Exposition réseau tout-Cilium (ADR 0020). Cilium remplace MetalLB ET
+# ingress-nginx : kube-proxy replacement (datapath eBPF), LB-IPAM + L2
+# announcements (IP LoadBalancer + annonce ARP), Gateway API (bordure L7). Les
+# pools/policies/Gateway sont des CRs versionnés sous platform/cilium-expo/ ;
+# ici on n'arme que les FEATURES côté agent. Appliqué à l'install ET à l'upgrade
+# → convergent en rejouant le script (même invariant que le durcissement 0019).
 CILIUM_ARGS=(
   --version "${CILIUM_VERSION}"
   --set ipam.operator.clusterPoolIPv4PodCIDRList=10.244.0.0/16
@@ -55,6 +62,30 @@ CILIUM_ARGS=(
   # Observabilité réseau : Hubble + Relay, sans UI — ADR 0019.
   --set hubble.enabled=true
   --set hubble.relay.enabled=true
+  # ── Exposition tout-Cilium (ADR 0020) ──────────────────────────────────
+  # kube-proxy replacement (eBPF). En 1.19 le flag est un BOOLÉEN (true/false ;
+  # les anciennes valeurs strict/partial/probe ont disparu) et active déjà
+  # NodePort/HostPort/ExternalIPs (flags --enable-* retirés en 1.19 → ne pas
+  # les poser). Sans kube-proxy, l'agent ne joint plus l'API via la ClusterIP
+  # kubernetes.default → lui donner l'endpoint en dur est OBLIGATOIRE.
+  # `cluster-api` est résolu par /etc/hosts du nœud (rôle k8s-install) ; les
+  # pods cilium-agent sont en hostNetwork → ils utilisent ce resolver.
+  --set kubeProxyReplacement=true
+  --set k8sServiceHost=cluster-api
+  --set k8sServicePort=6443
+  # LB-IPAM + L2 announcements (remplacent MetalLB). LB-IPAM n'a pas de flag
+  # (actif dès qu'un CiliumLoadBalancerIPPool existe). L2 crée un Lease par
+  # Service LB renouvelé en continu → relever k8sClientRateLimit (défauts 5-10
+  # QPS vite saturés). qps/burst dimensionnés pour ~250 services LB ; ajuster
+  # avec QPS = #services / leaseRenewDeadline (défaut 5s). L2 = BETA en 1.19.
+  --set l2announcements.enabled=true
+  --set k8sClientRateLimit.qps=50
+  --set k8sClientRateLimit.burst=100
+  # Gateway API (remplace ingress-nginx). Active enable-envoy-config ; l7Proxy
+  # est déjà à true par défaut. Les CRDs Gateway API (v1.4.1) sont pré-installés
+  # par platform/cilium-expo/ (Cilium ne les embarque pas). On n'active PAS
+  # ingressController.enabled (API Ingress historique, distincte).
+  --set gatewayAPI.enabled=true
 )
 if cilium status > /dev/null 2>&1; then
   echo "Cilium déjà installé — cilium upgrade (réconciliation des valeurs)."
@@ -90,4 +121,36 @@ else
   echo "✗ WireGuard configuré mais INACTIF dans le datapath (cilium encrypt status)." >&2
   echo "  Vérifier le support kernel (module 'wireguard') et les logs cilium-agent." >&2
   exit 1
+fi
+
+# ─── Retrait de kube-proxy (ADR 0020) ──────────────────────────────────────
+# ORDRE OBLIGATOIRE : on ne retire kube-proxy qu'APRÈS avoir vérifié que Cilium
+# prend réellement le relais (KubeProxyReplacement: True). Retirer kube-proxy
+# avant que l'agent ne sache joindre l'API server casserait le redémarrage des
+# agents. Tout est idempotent (`--ignore-not-found`, et la purge iptables est
+# sans effet sur un nœud déjà nettoyé).
+echo "Vérification du remplacement de kube-proxy par Cilium…"
+if kubectl -n kube-system exec ds/cilium -- cilium-dbg status --verbose 2>/dev/null \
+    | grep -qi 'KubeProxyReplacement:\s*True'; then
+  echo "✓ KubeProxyReplacement actif — retrait de kube-proxy."
+  # Stoppe kube-proxy géré par kubeadm (DaemonSet + ConfigMap).
+  kubectl -n kube-system delete ds kube-proxy --ignore-not-found
+  kubectl -n kube-system delete cm kube-proxy --ignore-not-found
+  # Purge des règles iptables résiduelles SUR CE NŒUD (le delete du DaemonSet ne
+  # les retire pas). À rejouer sur chaque autre nœud (boucle SSH côté banc /
+  # prod). Commande officielle Cilium. ip6tables uniquement si IPv6 actif.
+  if command -v iptables-save > /dev/null 2>&1; then
+    sudo sh -c 'iptables-save | grep -v KUBE | iptables-restore' \
+      && echo "✓ règles iptables KUBE-* purgées sur $(hostname)." \
+      || echo "⚠️ purge iptables non effectuée (à faire manuellement)." >&2
+  fi
+  echo "ℹ️  Purge iptables à RÉPÉTER sur les autres nœuds (root) :"
+  echo "    iptables-save | grep -v KUBE | iptables-restore"
+  echo "ℹ️  Durabilité : kubeadm recrée kube-proxy à l'init/upgrade. Le rendu"
+  echo "    permanent est posé via skipPhases: [addon/kube-proxy] dans la config"
+  echo "    kubeadm (rôle k8s-initialization) — déjà appliqué aux nouveaux clusters."
+else
+  echo "✗ KubeProxyReplacement pas encore True — kube-proxy CONSERVÉ (sûr)." >&2
+  echo "  Re-vérifier : kubectl -n kube-system exec ds/cilium -- cilium-dbg status --verbose" >&2
+  echo "  Ne PAS retirer kube-proxy tant que Cilium n'a pas pris le relais (ADR 0020)." >&2
 fi
