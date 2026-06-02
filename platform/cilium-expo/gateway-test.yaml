@@ -19,8 +19,10 @@ metadata:
 spec:
   gatewayClassName: cilium
   # Pour une terminaison TLS en bordure (cohérent ADR 0003 : TLS en bordure, pas
-  # en interne), ajouter un second listener HTTPS à cette liste. Créer d'abord le
-  # Secret : kubectl create secret tls test-tls --cert=tls.crt --key=tls.key -n default
+  # en interne) — bordure = entrée du LAN privé, le cluster n'est PAS exposé sur
+  # Internet → CA interne, pas ACME (ADR 0020). Ajouter un listener HTTPS, après
+  # avoir créé le Secret :
+  #   kubectl create secret tls test-tls --cert=tls.crt --key=tls.key -n default
   # puis un listener { name: websecure, protocol: HTTPS, port: 443,
   # tls: { mode: Terminate, certificateRefs: [{ kind: Secret, name: test-tls }] },
   # allowedRoutes: { namespaces: { from: Same } } }. Le 443 sort sur la même IP LB.

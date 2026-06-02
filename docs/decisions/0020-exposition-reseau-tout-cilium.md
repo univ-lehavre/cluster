@@ -17,6 +17,14 @@ faut (a) **allouer** des IP virtuelles depuis un pool et (b) **annoncer** ces IP
 sur le LAN pour qu'elles soient joignables. Il faut aussi un point d'entrée
 HTTP(S) en bordure (routage par host/path, terminaison TLS).
 
+> **« Bordure » = bordure du réseau privé, pas Internet.** Le cluster de
+> production **n'est pas accessible depuis l'extérieur** (cohérent ADR 0003 :
+> réseau `10.67.2.0/22` isolé). Les IP du pool sont annoncées sur le **LAN
+> interne** ; le Gateway est le point d'entrée des **clients internes** (LAN /
+> VPN), jamais d'Internet. Conséquence directe pour le TLS de bordure (étape
+> cert-manager suivante) : **ACME/Let's Encrypt est exclu** (challenge
+> injoignable depuis l'extérieur) → une **CA interne** sera utilisée.
+
 Le plan, calqué sur le benchmark DataOps, prévoyait deux briques OSS externes :
 **étape 1.1 = MetalLB** (`IPAddressPool` + `L2Advertisement`) puis **étape 1.2 =
 ingress-nginx** (contrôleur d'ingress exposé via une IP MetalLB). Le plan note
