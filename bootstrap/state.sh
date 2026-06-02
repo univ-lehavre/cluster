@@ -603,6 +603,43 @@ else
     fi
 fi
 
+# ─── TLS de bordure (cert-manager, CA interne — ADR 0021) ──────────────────
+# cert-manager émet/renouvelle le cert du listener HTTPS du Gateway via une CA
+# INTERNE (pas ACME, cluster non exposé). On vérifie le déploiement et que la
+# chaîne d'émetteurs est prête. Skip propre tant que l'addon n'est pas déployé.
+section "TLS de bordure (cert-manager)"
+if ! kubectl_ready; then
+    mark skip "kubectl indisponible"
+elif ! kubectl_q get ns cert-manager >/dev/null 2>&1; then
+    mark skip "cert-manager : namespace absent (kubectl apply -f platform/cert-manager/cert-manager.yaml)"
+else
+    cm_not_ready=$(kubectl_q -n cert-manager get pods --no-headers 2>/dev/null \
+        | awk '$3 != "Running" && $3 != "Completed" {print $1}' | tr '\n' ' ')
+    cm_total=$(kubectl_q -n cert-manager get pods --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$cm_total" = "0" ]; then
+        mark skip "cert-manager : aucun pod (kubectl apply -f platform/cert-manager/cert-manager.yaml)"
+    elif [ -z "$cm_not_ready" ]; then
+        mark ok "cert-manager : ${cm_total} pods Running"
+    else
+        mark fail "cert-manager : pods non Running : $cm_not_ready" \
+                  "kubectl -n cert-manager describe pods"
+    fi
+
+    # Émetteur CA interne prêt (Ready=True) — la racine doit être émise.
+    if kubectl_q get clusterissuer internal-ca >/dev/null 2>&1; then
+        ca_ready=$(kubectl_q get clusterissuer internal-ca \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+        if [ "$ca_ready" = "True" ]; then
+            mark ok "cert-manager : ClusterIssuer internal-ca Ready (CA interne)"
+        else
+            mark fail "cert-manager : ClusterIssuer internal-ca non Ready (${ca_ready:-?})" \
+                      "kubectl describe clusterissuer internal-ca ; vérifier le Secret root-ca-secret"
+        fi
+    else
+        mark skip "cert-manager : ClusterIssuer internal-ca absent (kubectl apply -f platform/cert-manager/issuers.yaml)"
+    fi
+fi
+
 # ─── Couche 7b — Exposition réseau (audit P6 #25 / #06) ────────────────────
 # Tous les Services applicatifs ont été passés en ClusterIP (#25). Un Service
 # de type NodePort ou LoadBalancer expose un port au-delà du cluster → ici,
