@@ -4,6 +4,7 @@ Services transverses du cluster (au-delà du bootstrap K8s et du stockage Ceph).
 
 | Composant                                    | Rôle                                                           |
 | -------------------------------------------- | -------------------------------------------------------------- |
+| [`cert-manager/`](cert-manager/)             | TLS de bordure via CA interne (cf. ADR 0021)                   |
 | [`cilium-expo/`](cilium-expo/)               | Exposition tout-Cilium : LB-IPAM + L2 + Gateway API (ADR 0020) |
 | [`container-registry/`](container-registry/) | Registry d'images interne (distribution v3, RBD ×3)            |
 | [`k8s-dashboard/`](k8s-dashboard/)           | Kubernetes Dashboard (Helm, tokens éphémères — cf. ADR 0010)   |

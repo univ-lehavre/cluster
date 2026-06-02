@@ -44,3 +44,19 @@ misconfigurations:
   - id: KSV-0014 # rootfs read-only impossible (rstudio-server root + écritures)
     paths:
       - 'apps/rstudio/deployment.yaml'
+
+  # ── cert-manager vendored (bundle officiel v1.20.2) — RBAC inhérent ───────
+  # Manifeste amont appliqué tel quel (épinglé par digest, cf. ADR 0021). Le
+  # RBAC de cert-manager EST sa fonction : le durcir casserait l'émission.
+  - id: KSV-0041 # « manage secrets » : cert-manager STOCKE les certs (tls.crt/
+    # tls.key) dans des Secrets — objet même du composant.
+    paths:
+      - 'platform/cert-manager/cert-manager.yaml'
+  - id: KSV-0056 # RBAC services/endpoints/ingresses : requis par les solvers
+    # ACME et le gateway-shim (réconciliation Gateway/HTTPRoute).
+    paths:
+      - 'platform/cert-manager/cert-manager.yaml'
+  - id: KSV-0114 # le cainjector INJECTE le CA bundle dans les
+    # {mutating,validating}webhookconfigurations — sa raison d'être.
+    paths:
+      - 'platform/cert-manager/cert-manager.yaml'

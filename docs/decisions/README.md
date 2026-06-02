@@ -35,3 +35,4 @@ Format léger inspiré de Michael Nygard :
 | 0018 | [Rook-Ceph plutôt que Longhorn](0018-rook-ceph-vs-longhorn.md)                                       | Accepted |
 | 0019 | [Durcissement réseau Cilium (WireGuard + Hubble)](0019-durcissement-reseau-cilium.md)                | Accepted |
 | 0020 | [Exposition réseau tout-Cilium (LB-IPAM + L2 + Gateway API)](0020-exposition-reseau-tout-cilium.md)  | Accepted |
+| 0021 | [cert-manager + CA interne (TLS de bordure)](0021-cert-manager-ca-interne.md)                        | Accepted |
