@@ -127,7 +127,9 @@ phase_up() {
 phase_bootstrap() {
     preflight
     log "Phases 1-2 — bootstrap K8s + CNI"
-    for pb in upgrade checks cri kubeadm control-planes initialisation join-workers; do
+    # NB : `os-upgrade` (et non `upgrade`) — renommé à l'audit P5 #18 pour lever
+    # l'ambiguïté avec l'upgrade Kubernetes (k8s-upgrade.yaml). Ordre = RUNBOOK.
+    for pb in os-upgrade checks cri kubeadm control-planes initialisation join-workers; do
         log "  ansible-playbook ${pb}.yaml"
         ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/${pb}.yaml"
     done
@@ -178,17 +180,26 @@ phase_ceph() {
     grep -q "metadataDevice: 'sde'" "${cluster_bench}" || die "surcharge metadataDevice=sde non appliquée"
     grep -q "memory: '512Mi'" "${cluster_bench}" || die "surcharge osd.requests.memory=512Mi non appliquée"
 
-    log "  apply crds → common → operator"
+    # SURCHARGE BANC : dé-épingler les images @sha256 (drift 0e).
+    # Les images Ceph (rook/ceph operator, quay.io/ceph/ceph cluster+toolbox)
+    # sont épinglées par DIGEST (audit P11 #11, PR #53). Un digest pointe vers
+    # UNE archi : ceux du dépôt sont amd64 (prod x86_64), corrects en prod. Sur
+    # ce banc ARM64, l'image amd64 donne `exec format error` (operator crashe en
+    # boucle). On retombe donc sur le TAG (multi-arch) côté banc UNIQUEMENT — le
+    # livrable garde son digest amd64 intact. `sed` retire le suffixe @sha256:….
+    undigest() { sed -E 's/(image:[[:space:]]*[^@[:space:]]+)@sha256:[0-9a-f]+/\1/'; }
+
+    log "  apply crds → common → operator (images dé-épinglées pour arm64)"
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/crds.yaml"
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/common.yaml"
-    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/operator.yaml"
+    undigest < "${REPO}/storage/ceph/operator.yaml" | "${KUBECTL[@]}" apply -f -
     retry 180 5 operator_ready \
         || die "rook-ceph-operator pas Ready"
     ok "operator Ready"
 
-    log "  apply cluster-bench.yaml + toolbox"
-    "${KUBECTL[@]}" apply -f "${cluster_bench}"
-    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/toolbox.yaml"
+    log "  apply cluster-bench.yaml + toolbox (images dé-épinglées pour arm64)"
+    undigest < "${cluster_bench}" | "${KUBECTL[@]}" apply -f -
+    undigest < "${REPO}/storage/ceph/toolbox.yaml" | "${KUBECTL[@]}" apply -f -
 
     # GATE : HEALTH_OK (peut prendre 5-15 min)
     log "Attente HEALTH_OK (max 20 min)"
@@ -221,6 +232,21 @@ phase_sc() {
         | python3 -c "import sys,json;print(sum(1 for i in json.load(sys.stdin)['items'] if i['metadata'].get('annotations',{}).get('storageclass.kubernetes.io/is-default-class')=='true'))")
     [ "${ndefault}" = "1" ] || die "il faut exactement 1 SC default, trouvé : ${ndefault}"
     ok "1 seule StorageClass default"
+
+    # PRÉ-CONDITION : la config CSI doit lister les monitors AVANT de créer le
+    # PVC test. Au tout premier déploiement, le CSI provisioner démarre parfois
+    # avant que l'operator ait peuplé `rook-ceph-csi-config` → un PVC créé dans
+    # cette fenêtre échoue (« empty monitor list ») et reste en backoff. On
+    # attend donc que la config porte des monitors (mons en quorum) avant de
+    # provisionner — sinon faux gate rouge au premier run from-scratch.
+    log "  Attente de la config CSI (monitors peuplés)"
+    csi_monitors_ready() {
+        "${KUBECTL[@]}" -n rook-ceph get cm rook-ceph-csi-config \
+            -o jsonpath='{.data.csi-cluster-config-json}' 2>/dev/null \
+            | grep -q '"monitors":\["'
+    }
+    retry 180 5 csi_monitors_ready \
+        || die "config CSI sans monitors après 3 min (mons en quorum ?)"
 
     # GATE 2 : PVC test → Bound
     log "  PVC test (Bound ?)"

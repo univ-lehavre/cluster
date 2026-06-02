@@ -783,3 +783,58 @@ sans objet en prod.
 > [bootstrap/RUNBOOK.md](../bootstrap/RUNBOOK.md) (§ Rotation de la clé de
 > chiffrement etcd). Pas de KMS (choix ADR 0003) — rotation sur
 > événement/échéance.
+
+## Run #9 (2026-06-02) — rebuild GREENFIELD complet (from scratch)
+
+Premier rebuild **intégral depuis zéro** : `vagrant destroy` des 3 VMs +
+`run-phases.sh` (up → bootstrap → ceph → sc → workloads → etcd). But : prouver
+que le bootstrap part de rien et arrive à un cluster **complet et durci**, en
+intégrant tout le travail récent (chiffrement etcd, audit, WireGuard,
+PodSecurity). Les runs précédents repartaient d'un cluster déjà bootstrappé —
+celui-ci exerce **réellement** la séquence d'init.
+
+| Phase     | Gate                                                | Résultat                     |
+| --------- | --------------------------------------------------- | ---------------------------- |
+| up        | 3 VMs + disques sd[b-e]                             | ✅                           |
+| bootstrap | 3 nœuds Ready (+ WireGuard 3/3 dès l'init)          | ✅                           |
+| ceph      | HEALTH_OK                                           | ✅ (après fix drift 0e)      |
+| sc        | PVC Bound                                           | ✅ (après pré-condition CSI) |
+| workloads | wordpress + datalake smoke-test S3 (PUT/GET/DELETE) | ✅                           |
+| etcd      | snapshot 24 Mo + intégrité + timer                  | ✅                           |
+
+**Durcissements vérifiés _nativement_ sur le cluster from-scratch** (≠ activés à
+chaud) : un Secret créé par le bootstrap est `k8s:enc:secretbox:v1:key1:…` dans
+etcd (chiffré dès la naissance, sans réécriture) ; audit-log à 7982+ entrées
+Metadata ; `enable-wireguard=true`. **Scénarios sécurité rejoués** sur le
+cluster neuf : 10 (PodSecurity), 11 (NetworkPolicy/Cilium), 12
+(securityContext), 14 (WireGuard+Hubble), 15 (chiffrement etcd + audit) — **tous
+PASS**.
+
+> 🎯 **Ce run a une vraie valeur** : il a révélé **trois défauts d'outillage que
+> seul un greenfield expose** (les runs incrémentaux les sautaient). Tous
+> corrigés dans `test/multi-node/run-phases.sh` :
+
+### 🔴 #21 — `run-phases.sh` appelait `upgrade.yaml` (renommé `os-upgrade.yaml`)
+
+La boucle bootstrap référençait `upgrade.yaml`, renommé `os-upgrade.yaml` à
+l'audit P5 #18. Invisible aux runs partant d'un cluster déjà bootstrappé.
+**Corrigé** : `os-upgrade` dans la séquence (alignée sur le RUNBOOK).
+
+### 🟠 0e — Images Ceph épinglées par digest **amd64** vs banc **arm64**
+
+Le pinning par digest (audit P11 #11, PR #53) fixe l'image à **une**
+architecture — amd64 (correct en prod x86_64). Sur le banc arm64, l'operator
+Rook crashe en boucle : `exec /usr/local/bin/rook: exec format error`. **Sans
+objet en prod.** **Surcharge banc** (`run-phases.sh`, fonction `undigest`) :
+retombe sur le **tag multi-arch** pour operator/cluster/toolbox côté banc
+UNIQUEMENT ; le livrable garde son digest amd64 intact (sécurité supply-chain
+prod préservée).
+
+### 🟠 #22 — Gate `sc` : PVC test créé avant propagation de la config CSI
+
+Au premier déploiement, le CSI provisioner démarre parfois **avant** que
+l'operator ait peuplé `rook-ceph-csi-config` → le PVC échoue
+(`empty monitor list`) et reste en backoff, faisant échouer le gate. **Corrigé**
+: pré-condition qui attend que la config CSI liste les monitors (mons en quorum)
+**avant** de créer le PVC test. Vérifié : un PVC neuf passe `Bound` une fois la
+config peuplée.
