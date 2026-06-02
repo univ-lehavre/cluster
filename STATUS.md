@@ -1,8 +1,8 @@
 # STATUS — avancement du durcissement (audit → mise en œuvre)
 
-> **Dernière mise à jour : 2026-06-01 22:42 CEST.** Document vivant —
+> **Dernière mise à jour : 2026-06-02 12:00 CEST.** Document vivant —
 > **horodater toute modification** (en-tête ci-dessus + la date entre crochets
-> sur chaque ligne modifiée). État du dépôt à la **v2.11.3**.
+> sur chaque ligne modifiée). État du dépôt à la **v2.12.2**.
 
 Suivi de la mise en œuvre du plan d'audit
 ([`docs/audit/12-plan-action.md`](docs/audit/12-plan-action.md)) et des écarts
@@ -14,7 +14,8 @@ Légende : ✅ fait · 🔲 à faire · ⏸️ reporté · ❓ à vérifier fine
 
 ## 1. Avancement par priorité
 
-_État vérifié dans le code le **2026-06-01**._
+_État vérifié dans le code le **2026-06-01**, complété le **2026-06-02**
+(durcissement réseau Cilium, run intégral banc, refactor sshd)._
 
 ### Priorité 1 — Résilience & données
 
@@ -44,12 +45,12 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 4 — Tests & scripts
 
-| #   | Action                                         | État                                                |
-| --- | ---------------------------------------------- | --------------------------------------------------- |
-| 12  | bats-core sur `state.sh` (« meilleur ROI »)    | ✅ [2026-06-01] `test/unit/` (18 tests, PR #48)     |
-| 13  | Faux-positifs scénarios 04/05                  | ✅ [2026-06-01] `exit 1` à l'expiration des boucles |
-| 14  | Parsing `ceph -f json \| jq` (scénarios 03/05) | ✅ [2026-06-01] (`getent shadow` : voir note)       |
-| 15  | Dérouler 8 scénarios + exit codes              | ❓ [2026-06-01] drift #9 CSI déjà résolu            |
+| #   | Action                                         | État                                                                             |
+| --- | ---------------------------------------------- | -------------------------------------------------------------------------------- |
+| 12  | bats-core sur `state.sh` (« meilleur ROI »)    | ✅ [2026-06-01] `test/unit/` (18 tests, PR #48)                                  |
+| 13  | Faux-positifs scénarios 04/05                  | ✅ [2026-06-01] `exit 1` à l'expiration des boucles                              |
+| 14  | Parsing `ceph -f json \| jq` (scénarios 03/05) | ✅ [2026-06-01] (`getent shadow` : voir note)                                    |
+| 15  | Dérouler 8 scénarios + exit codes              | ✅ [2026-06-02] run intégral 01-14 sur banc (Run #7) ; 06/11 fiabilisés (PR #82) |
 
 ### Priorité 5 — Opérabilité jour 2
 
@@ -62,14 +63,15 @@ _État vérifié dans le code le **2026-06-01**._
 
 ### Priorité 6 — Sécurité ✅ (close sauf #20)
 
-| #   | Action                            | État                                                  |
-| --- | --------------------------------- | ----------------------------------------------------- |
-| 20  | Tailscale operator / ACL          | ⏸️ [2026-06-01] **reporté sine die**                  |
-| 21  | Durcissement kubeadm              | ✅ [2026-06-01] ADR 0014 + PodSecurity baseline       |
-| 22  | NetworkPolicies default-deny      | ✅ [2026-06-01] `platform/network-policies/` (PR #39) |
-| 23  | securityContext workloads         | ✅ [2026-06-01] (PR #37)                              |
-| 24  | UFW K8s/Cilium/Ceph + SSH + drift | ✅ [2026-06-01] (PR #41)                              |
-| 25  | Services en ClusterIP             | ✅ [2026-06-01] (PR #43)                              |
+| #   | Action                                          | État                                                                                                               |
+| --- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 20  | Tailscale operator / ACL                        | ⏸️ [2026-06-01] **reporté sine die**                                                                               |
+| 21  | Durcissement kubeadm                            | ✅ [2026-06-01] ADR 0014 + PodSecurity baseline                                                                    |
+| 22  | NetworkPolicies default-deny                    | ✅ [2026-06-01] `platform/network-policies/` (PR #39)                                                              |
+| 23  | securityContext workloads                       | ✅ [2026-06-01] (PR #37)                                                                                           |
+| 24  | UFW K8s/Cilium/Ceph + SSH + drift               | ✅ [2026-06-01] (PR #41)                                                                                           |
+| 25  | Services en ClusterIP                           | ✅ [2026-06-01] (PR #43)                                                                                           |
+| 25b | Durcissement réseau Cilium (WireGuard + Hubble) | ✅ [2026-06-02] ADR 0019 + `cni.sh` (PR #78) — défense en profondeur (chiffrement pod-to-pod) ; validé banc Run #6 |
 
 ### Priorité 7 — Gouvernance
 
@@ -104,6 +106,7 @@ _État vérifié dans le code le **2026-06-01**._
 | 0016 — observabilité (paliers)            | ✅ [2026-06-01] |
 | 0017 — langage des scripts (bash/jq/bats) | ✅ [2026-06-01] |
 | 0018 — Rook-Ceph vs Longhorn              | ✅ [2026-06-01] |
+| 0019 — durcissement réseau Cilium         | ✅ [2026-06-02] |
 
 ---
 
@@ -126,6 +129,15 @@ n'ont pas été reportées dans la Priorité 8. Ci-dessous les omissions
 > audit-log non-répudiation. **Restent** : scénario 03 continuité I/O et
 > scénarios légers registry/rstudio (`02-tests:90`/`:100`) — à faire avec le
 > banc.
+>
+> **[2026-06-02] Extension de la couverture de test** au-delà des 8 scénarios
+> initiaux : ajout des scénarios de **durcissement** 10-14 (PodSecurity,
+> NetworkPolicy default-deny, securityContext runtime, host hardening via
+> `state.sh`, Cilium WireGuard+Hubble) — PR #77 et #78. Run intégral validé (Run
+> #7) ; bug latent label YAML corrigé sur 01/02 ; 06 (propagation RC du
+> smoke-test) et 11 (sonde réseau interne) fiabilisés (PR #82). Procédure de
+> suppression d'un `CephObjectStore` (ordre OBC→store) tracée au RUNBOOK Ceph
+> (PR #83, cf. RESULTS #19).
 
 | Réf source           | Recommandation absente du plan                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------- |
@@ -157,11 +169,18 @@ digests seulement).
 
 ## 3. Notes de méthode
 
-- **Banc de test** : certaines validations (UFW, NetworkPolicies sur
-  rstudio/registry) **n'ont pas pu être exécutées** sur le banc Vagrant — les
-  VMs n'ont pas d'accès Internet (apt/pull d'images impossibles). Validé alors
-  statiquement (ansible-lint/kubeconform) + #22 prouvé sur le namespace
-  `default`. _[2026-06-01]_
+- **Banc de test** : ~~les VMs n'ont pas d'accès Internet~~ **corrigé
+  [2026-06-02]** — le fix DNS NAT + `jq` est câblé dans le `Vagrantfile` (drift
+  0d, PR #76), les VMs résolvent et `apt`/`git` fonctionnent. Les
+  NetworkPolicies, PodSecurity, securityContext et le durcissement réseau Cilium
+  sont désormais **validés en réel** sur le banc (scénarios 10-14, Run #6/#7),
+  pas seulement statiquement. _[2026-06-02]_
+- **Durcissement sshd unifié [2026-06-02]** : `first-access.sh` est la **source
+  unique** du drop-in `00-hardening.conf` et du dépôt de clé ; le rôle Ansible
+  redondant `network/sshd.yml`+`ssh.yml` a été supprimé (PR #80). Conséquence
+  banc : `AllowUsers debian` bloque le compte `vagrant` → on opère le banc en
+  SSH direct `debian@127.0.0.1:<port>` (`vagrant ssh` ne marche plus, plus
+  fidèle à la prod). _[2026-06-02]_
 - **Restore de nœud sur le banc** : ne pas chercher à valider (artefacts
   Vagrant/arm64 sans valeur prod) — cf. mémoire projet. _[2026-06-01]_
 - **Releases** : automatiques (release-please + auto-merge, PAT
