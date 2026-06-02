@@ -1,0 +1,29 @@
+{# Chiffrement at-rest des Secrets dans etcd (ADR 0014).
+
+   Provider `secretbox` (XSalsa20-Poly1305) : moderne, rapide, sans dépendance à
+   un KMS externe — cohérent avec l'ADR 0003 (pas de Vault à gérer pour un
+   cluster mono-admin / réseau privé).
+
+   Ordre des providers = priorité. `secretbox` est en tête → il CHIFFRE les
+   écritures. `identity` (= clair) en dernier → permet de LIRE les Secrets
+   écrits avant l'activation du chiffrement (sinon l'API server ne pourrait pas
+   les déchiffrer). Une fois tous les Secrets réécrits (cf. RUNBOOK), `identity`
+   pourrait être retiré ; on le garde pour la robustesse au bootstrap.
+
+   ROTATION : ajouter une nouvelle clé secretbox en 1ʳᵉ position, garder
+   l'ancienne en 2ᵉ, redémarrer l'API server, réécrire les Secrets, puis retirer
+   l'ancienne. Procédure détaillée : storage|bootstrap/RUNBOOK.md.
+
+   La clé `k8s_enc_key` est générée sur le nœud (32 octets aléatoires base64),
+   stockée hors dépôt ({{ k8s_enc_dir }}, 0600 root). JAMAIS commitée. #}
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+  - resources:
+      - secrets
+    providers:
+      - secretbox:
+          keys:
+            - name: key1
+              secret: {{ k8s_enc_key }}
+      - identity: {}

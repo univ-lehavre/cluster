@@ -1,19 +1,79 @@
 # code: language=ansible
 - name: Install kubernetes on control plane nodes
   block:
+    # ── Durcissement du plan de contrôle (ADR 0014) ────────────────────────
+    # Posé AVANT l'init : chiffrement at-rest des Secrets etcd + audit-policy.
+    - name: Create hardening directories (encryption + audit)
+      become: true
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '{{ item.mode }}'
+      loop:
+        - path: '{{ k8s_enc_dir }}'
+          mode: '0700'
+        - path: '{{ k8s_audit_dir }}'
+          mode: '0755'
+        - path: '{{ k8s_audit_log_dir }}'
+          mode: '0750'
+
+    # Clé de chiffrement secretbox : 32 octets aléatoires base64. Générée UNE
+    # SEULE FOIS (creates:) — la régénérer rendrait illisibles les Secrets déjà
+    # chiffrés. Stockée hors dépôt, 0600 root, jamais commitée.
+    - name: Generate the etcd Secret encryption key (once)
+      become: true
+      ansible.builtin.shell: 'umask 077 && openssl rand -base64 32 > {{ k8s_enc_dir }}/key1.b64'
+      args:
+        creates: '{{ k8s_enc_dir }}/key1.b64'
+
+    - name: Read the encryption key
+      become: true
+      ansible.builtin.slurp:
+        src: '{{ k8s_enc_dir }}/key1.b64'
+      register: k8s_initialization_enc_key
+
+    - name: Render EncryptionConfiguration
+      become: true
+      ansible.builtin.template:
+        src: encryption-config.yaml.j2
+        dest: '{{ k8s_enc_dir }}/encryption-config.yaml'
+        owner: root
+        group: root
+        mode: '0600'
+      vars:
+        k8s_enc_key: '{{ k8s_initialization_enc_key.content | b64decode | trim }}'
+
+    - name: Render audit policy
+      become: true
+      ansible.builtin.copy:
+        src: audit-policy.yaml
+        dest: '{{ k8s_audit_dir }}/audit-policy.yaml'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Render kubeadm init config
+      become: true
+      ansible.builtin.template:
+        src: kubeadm-config.yaml.j2
+        dest: /etc/kubernetes/kubeadm-config.yaml
+        owner: root
+        group: root
+        mode: '0600'
+
     - name: Initialize the control plane
       become: true
       become_method: ansible.builtin.sudo
-      # `--apiserver-advertise-address` est posé automatiquement si la
-      # variable `control_plane_ip` est définie (typiquement sur le banc
-      # multi-node : annoncer l'IP du réseau privé inter-VM au lieu du
-      # NAT par défaut). En prod, on laisse la variable vide et kubeadm
-      # détecte l'IP de l'interface principale.
+      # Init via `--config` (et non plus en flags) pour pouvoir poser le
+      # chiffrement etcd et l'audit-policy, absents de la CLI kubeadm. Le
+      # fichier kubeadm-config.yaml reprend l'endpoint, le port et (sur le banc)
+      # l'advertiseAddress ; `--upload-certs` reste un flag.
       ansible.builtin.command: >-
         kubeadm init
-        --control-plane-endpoint {{ control_plane_endpoint }}:{{ control_plane_port }}
+        --config /etc/kubernetes/kubeadm-config.yaml
         --upload-certs
-        {{ '--apiserver-advertise-address=' ~ control_plane_ip if control_plane_ip | default('') | length > 0 else '' }}
       args:
         creates: /etc/kubernetes/admin.conf
 

@@ -1,0 +1,55 @@
+{# Configuration kubeadm (ADR 0014) — durcissement du plan de contrôle.
+   Remplace l'init en ligne de commande pour pouvoir poser, dès l'init :
+     - le chiffrement at-rest des Secrets etcd (EncryptionConfiguration) ;
+     - la politique d'audit de l'API server.
+   Ces deux réglages ne sont PAS exposés en flags `kubeadm init`.
+
+   Format v1beta4 (kubeadm ≥ 1.31) : `extraArgs` est une LISTE de {name,value}
+   (et non plus une map comme en v1beta3). #}
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+{% if control_plane_ip | default('') | length > 0 %}
+localAPIEndpoint:
+  # Banc multi-node : annoncer l'IP du réseau privé inter-VM (pas le NAT).
+  # En prod (control_plane_ip vide), kubeadm détecte l'interface principale.
+  advertiseAddress: {{ control_plane_ip }}
+  bindPort: {{ control_plane_port }}
+{% endif %}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+controlPlaneEndpoint: {{ control_plane_endpoint }}:{{ control_plane_port }}
+apiServer:
+  extraArgs:
+    # Chiffrement at-rest des Secrets dans etcd (provider secretbox).
+    - name: encryption-provider-config
+      value: {{ k8s_enc_dir }}/encryption-config.yaml
+    # Politique d'audit + destination + rotation des logs.
+    - name: audit-policy-file
+      value: {{ k8s_audit_dir }}/audit-policy.yaml
+    - name: audit-log-path
+      value: {{ k8s_audit_log_dir }}/audit.log
+    - name: audit-log-maxage
+      value: "30"
+    - name: audit-log-maxbackup
+      value: "10"
+    - name: audit-log-maxsize
+      value: "100"
+  # Monter les fichiers de config + le répertoire de logs dans le static pod
+  # de l'API server (qui tourne en conteneur, donc ne voit pas l'hôte par défaut).
+  extraVolumes:
+    - name: encryption-config
+      hostPath: {{ k8s_enc_dir }}
+      mountPath: {{ k8s_enc_dir }}
+      readOnly: true
+      pathType: DirectoryOrCreate
+    - name: audit-policy
+      hostPath: {{ k8s_audit_dir }}
+      mountPath: {{ k8s_audit_dir }}
+      readOnly: true
+      pathType: DirectoryOrCreate
+    - name: audit-log
+      hostPath: {{ k8s_audit_log_dir }}
+      mountPath: {{ k8s_audit_log_dir }}
+      readOnly: false
+      pathType: DirectoryOrCreate

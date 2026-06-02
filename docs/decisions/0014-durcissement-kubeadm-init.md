@@ -59,71 +59,96 @@ labels sont à poser à la main
 (`kubectl label ns default pod-security.kubernetes.io/enforce=baseline`) ou via
 le futur manifeste si l'exemple WordPress migre vers un namespace dédié.
 
-### 2. `EncryptionConfiguration` (Secrets etcd) — **dette assumée**, à faire au rebuild
+### 2. `EncryptionConfiguration` (Secrets etcd) — **implémenté** [2026-06-02]
 
-Le chiffrement at-rest des Secrets dans etcd nécessite un `--config` kubeadm
-posant un `EncryptionConfiguration` (provider `secretbox` ou `aescbc`) **dès
-l'init** — donc applicable proprement uniquement à la **reconstruction
-greenfield** du cluster, pas à chaud sans réécrire les Secrets existants.
+Le chiffrement at-rest des Secrets dans etcd se pose via un `--config` kubeadm
+**dès l'init**. C'est désormais fait : le rôle
+[`k8s-initialization`](../../bootstrap/roles/k8s-initialization/) passe à
+`kubeadm init --config` (au lieu des flags) avec un `EncryptionConfiguration`
+provider **`secretbox`** (XSalsa20-Poly1305 ; pas de KMS externe à gérer,
+cohérent avec l'ADR 0003).
 
-Décision : **non implémenté pour l'instant, tracé comme dette.** Justification
-du report (pas de l'abandon) :
+Mise en œuvre :
 
-- La compensation principale (ADR 0003) tient : etcd n'est joignable que sur le
-  réseau privé, et les snapshots ont des permissions restreintes.
-- Le risque résiduel réel est le **vol d'un snapshot** ou l'**accès disque au
-  nœud control plane** — scénarios hors du modèle de menace réseau isolé.
+- la **clé** (32 octets aléatoires base64) est générée **sur le nœud au
+  bootstrap**, stockée dans `/etc/kubernetes/enc/key1.b64` (0600 root, **hors
+  dépôt, jamais commitée**) et **une seule fois** (`creates:` — la régénérer
+  rendrait illisibles les Secrets déjà chiffrés) ;
+- l'`EncryptionConfiguration` liste `secretbox` (chiffre) puis `identity`
+  (permet de lire les Secrets écrits avant activation) ;
+- montée dans le static pod de l'API server via `apiServer.extraVolumes`.
 
-À implémenter **au prochain rebuild** : `EncryptionConfiguration` secretbox +
-clé hors dépôt (montée par Ansible Vault ou fichier non versionné), via le
-`--config` kubeadm. Lié au chiffrement des snapshots etcd (constat audit
-voisin).
+**Validé sur banc** (RESULTS Run #8, scénario
+[`15-etcd-encryption-audit.sh`](../../test/scenarios/15-etcd-encryption-audit.sh))
+: la valeur brute d'un Secret lue dans etcd via `etcdctl` commence par
+`k8s:enc:secretbox:v1:key1:` (et non en clair).
 
-### 3. Audit-policy API server — **dette assumée**, à faire avec le `--config`
+> **Rotation de clé.** Procédure manuelle documentée au
+> [`bootstrap/RUNBOOK.md`](../../bootstrap/RUNBOOK.md) (§ Rotation de la clé de
+> chiffrement etcd) : ajouter une 2ᵉ clé en tête → redémarrer l'API server →
+> réécrire tous les Secrets → retirer l'ancienne clé. Déroulée et prouvée
+> réversible par le scénario 15 (`ROTATE=1`, le Secret témoin survit). Pas de
+> KMS / rotation automatique — choix assumé pour un cluster mono-admin (cf.
+> ADR 0003) ; à revoir si le cluster s'ouvre.
 
-L'audit-policy API server (journalisation des appels) se pose aussi via le
-`--config` kubeadm (`apiServer.extraArgs.audit-policy-file` + `audit-log-path`).
-Même contrainte que le point 2 (modifie l'init) → groupé avec lui.
+Risque résiduel restant : la **clé vit en clair sur le disque du control plane**
+(`/etc/kubernetes/enc/`). Un accès disque au nœud control plane reste donc hors
+de portée de cette protection — mais le **vol d'un snapshot etcd** (le risque n°
+1 visé) est désormais couvert (les Secrets y sont chiffrés). Reste à chiffrer
+les snapshots eux-mêmes au repos (constat audit voisin).
 
-Décision : **non implémenté, tracé comme dette**, à livrer en même temps que
-l'`EncryptionConfiguration` au rebuild, avec une policy `Metadata`-level par
-défaut (journalise qui/quoi/quand sans le corps des requêtes). Compensation
-actuelle : l'audit-log **Ansible**
-([`audit-log`](../../bootstrap/roles/audit-log/)) trace les playbooks joués, et
-`auditd` côté nœud les syscalls privilégiés — mais ni l'un ni l'autre ne couvre
-les appels API directs (`kubectl` d'un humain).
+### 3. Audit-policy API server — **implémenté** [2026-06-02]
+
+Posée par le même `kubeadm --config` (`apiServer.extraArgs.audit-policy-file` +
+`audit-log-path` + rotation `audit-log-max*`). Politique **`Metadata`-level**
+par défaut
+([`audit-policy.yaml`](../../bootstrap/roles/k8s-initialization/files/audit-policy.yaml))
+: journalise qui/quoi/quand sans le corps des requêtes, avec exclusion
+(`level: None`) du bruit (lectures kubelet/scheduler, `/healthz`, events,
+leases). Logs dans `/var/log/kubernetes/audit/audit.log`.
+
+**Validé sur banc** (scénario 15) : l'audit-log est produit et contient des
+entrées `Metadata`. Couvre désormais les **appels API directs** (`kubectl` d'un
+humain), que l'audit-log Ansible et `auditd` ne voyaient pas.
 
 ## Statut
 
-Accepted (2026-06-01).
+Accepted (2026-06-01). Points 2 et 3 **implémentés le 2026-06-02** (PR
+durcissement etcd/audit) — cet ADR n'est donc plus en partie « dette ».
 
 ## Conséquences
 
 **Bénéfices.**
 
-- Les trois manques sont désormais **explicitement décidés**, plus des trous
-  silencieux : PodSecurity activable tout de suite, chiffrement etcd et
-  audit-policy planifiés avec leur condition de réalisation (le rebuild).
+- Les trois manques sont désormais **traités** : PodSecurity `baseline` actif,
+  **chiffrement etcd et audit-policy implémentés** (plus en dette) via le
+  `--config` kubeadm.
 - PodSecurity `baseline` pose une barrière contre les pods privilégiés sans
   dépendre du `--config` kubeadm ni risquer l'init.
+- Les Secrets sont **chiffrés at-rest** dans etcd (et donc dans les snapshots) ;
+  les appels API directs sont **journalisés** (audit-policy Metadata).
 
 **Coûts assumés.**
 
-- **Secrets etcd en clair** jusqu'au rebuild : un snapshot volé ou un accès
-  disque au control plane expose les Secrets. Risque accepté dans le modèle
-  réseau isolé / mono-admin, à lever au rebuild.
-- **Pas de journal des appels API** : une action via `kubectl` (avec un
-  kubeconfig admin) n'est pas tracée côté API. Le cluster étant mono-admin, la
-  traçabilité repose sur l'audit-log Ansible et la discipline d'accès au
-  kubeconfig.
+- **Clé de chiffrement en clair sur le control plane** (`/etc/kubernetes/enc/`,
+  0600 root) : un accès disque au nœud control plane permet de la lire. Pas de
+  KMS (choix ADR 0003). Le risque visé (vol de snapshot etcd) est couvert ; le
+  durcissement au-delà (KMS, chiffrement de la partition) est hors modèle.
+- **Volume d'audit-log** : la policy Metadata + exclusions limite le volume,
+  mais l'audit-log croît — rotation `audit-log-max*` posée (30 j / 10 backups /
+  100 Mo).
+- **Migration à chaud** : sur un cluster déjà init (≠ greenfield), activer le
+  chiffrement laisse les Secrets **existants** en clair jusqu'à réécriture
+  (`kubectl get secrets -A -o json | kubectl replace -f -`). Au bootstrap from
+  scratch, tous les Secrets naissent chiffrés.
 
 ## À revoir
 
-- **Au prochain rebuild** : implémenter `EncryptionConfiguration` (secretbox) +
-  audit-policy via `--config` kubeadm dans
-  [`k8s-initialization`](../../bootstrap/roles/k8s-initialization/tasks/main.yaml).
-  Cet ADR passera alors en partie « superseded ».
-- Si le cluster s'ouvre au-delà du mono-tenant / réseau isolé → ces deux points
-  deviennent bloquants (à faire avant ouverture).
+- **Chiffrer les snapshots etcd** au repos (constat audit voisin) — la clé de
+  chiffrement etcd les protège déjà partiellement (Secrets chiffrés dedans),
+  mais le reste du snapshot est en clair.
+- Si le cluster s'ouvre au-delà du mono-tenant / réseau isolé → envisager un
+  **KMS** (rotation gérée) au lieu de la clé secretbox locale, et passer la
+  policy d'audit à `Request`/`RequestResponse` sur les ressources sensibles.
 - Envisager `restricted` en `enforce` (au lieu de `baseline`) une fois tous les
   workloads vérifiés conformes.

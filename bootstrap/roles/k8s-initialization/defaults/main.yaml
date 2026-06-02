@@ -1,0 +1,6 @@
+# code: language=ansible
+# Emplacements des fichiers de durcissement du plan de contrôle (ADR 0014),
+# montés dans le static pod de l'API server.
+k8s_enc_dir: /etc/kubernetes/enc # clé + EncryptionConfiguration (0600 root)
+k8s_audit_dir: /etc/kubernetes/audit # politique d'audit (0644 root)
+k8s_audit_log_dir: /var/log/kubernetes/audit # destination des logs d'audit

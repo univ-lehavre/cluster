@@ -1,0 +1,44 @@
+# Politique d'audit de l'API server Kubernetes (ADR 0014).
+#
+# Niveau par défaut : Metadata — journalise QUI a fait QUOI QUAND (utilisateur,
+# verbe, ressource, code de réponse) SANS le corps des requêtes/réponses. Suffit
+# à la traçabilité d'un cluster mono-admin sans exploser le volume de logs ni
+# capturer de données sensibles (le corps d'un Secret, par ex.).
+#
+# Posée par kubeadm via apiServer.extraArgs.audit-policy-file. Les logs sortent
+# dans /var/log/kubernetes/audit/audit.log (rotation gérée par les
+# audit-log-max* du manifeste API server).
+apiVersion: audit.k8s.io/v1
+kind: Policy
+# Ne pas générer d'étape "RequestReceived" (un événement par requête entrante) :
+# on ne garde que l'étape terminale, ça divise le volume par deux sans perte de
+# traçabilité.
+omitStages:
+  - RequestReceived
+rules:
+  # Bruit pur : ne pas auditer les lectures sur les ressources très bavardes
+  # (le kubelet/controllers lisent en boucle endpoints, leases, events…).
+  - level: None
+    resources:
+      - group: ''
+        resources: [endpoints, services/status]
+      - group: coordination.k8s.io
+        resources: [leases]
+      - group: ''
+        resources: [events]
+  - level: None
+    users: [system:kube-scheduler, system:kube-proxy, system:apiserver]
+    verbs: [get, list, watch]
+  - level: None
+    userGroups: [system:nodes]
+    verbs: [get, list, watch]
+  # Les requêtes d'authentification/healthz/version ne portent aucune valeur.
+  - level: None
+    nonResourceURLs:
+      - /healthz*
+      - /livez*
+      - /readyz*
+      - /version
+      - /metrics
+  # Tout le reste : niveau Metadata (qui/quoi/quand, pas le corps).
+  - level: Metadata

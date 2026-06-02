@@ -645,3 +645,47 @@ kubectl get nodes      # attendre que les nœuds redeviennent Ready
 
 > Tester cette procédure **sur le banc multi-nœuds** avant d'en avoir besoin en
 > prod (cf. `test/multi-node/`).
+
+### Rotation de la clé de chiffrement etcd (ADR 0014)
+
+Les Secrets sont chiffrés at-rest dans etcd (provider `secretbox`, clé dans
+`/etc/kubernetes/enc/key1.b64`, posée au bootstrap par `k8s-initialization`).
+**Faire tourner la clé** sur événement (suspicion de compromission, départ d'un
+admin) ou échéance (ex. annuelle). La rotation est **manuelle** (pas de KMS —
+choix ADR 0003) ; elle ne perd aucune donnée si l'ordre est respecté.
+
+> ⚠️ Ne **jamais** se contenter de remplacer la clé : tant qu'un Secret reste
+> chiffré avec l'ancienne, la retirer le rend illisible. L'étape de réécriture
+> (3) est obligatoire.
+
+```bash
+ENC=/etc/kubernetes/enc/encryption-config.yaml
+
+# 1. Générer une nouvelle clé et l'ajouter EN TÊTE (key2 chiffre ; key1 reste
+#    pour déchiffrer l'existant). Éditer $ENC :
+#       providers:
+#         - secretbox:
+#             keys:
+#               - name: key2
+#                 secret: <openssl rand -base64 32>
+#               - name: key1
+#                 secret: <ancienne valeur>
+#         - identity: {}
+
+# 2. Redémarrer l'API server (static pod) → il connaît key2 + key1.
+sudo touch /etc/kubernetes/manifests/kube-apiserver.yaml
+# attendre que `kubectl version` réponde de nouveau
+
+# 3. Réécrire TOUS les Secrets → ils basculent sur key2 (la 1ʳᵉ clé).
+kubectl get secrets -A -o json | kubectl replace -f -
+
+# 4. Retirer key1 de $ENC (ne garder que key2), re-déclencher le redémarrage,
+#    et remplacer key1.b64 par la nouvelle clé pour les prochains bootstraps.
+sudo touch /etc/kubernetes/manifests/kube-apiserver.yaml
+```
+
+Vérifier qu'un Secret est bien chiffré après chaque étape (`k8s:enc:secretbox:`)
+via `etcdctl` — c'est ce que fait le scénario
+[`test/scenarios/15-etcd-encryption-audit.sh`](../test/scenarios/15-etcd-encryption-audit.sh)
+(`ROTATE=1` déroule et vérifie toute la rotation, témoin inclus). **Tester sur
+le banc avant la prod.**

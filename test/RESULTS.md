@@ -741,3 +741,45 @@ en dernier recours (données jetables seulement) : retirer les finalizers des
 > 11 sonde réseau interne). Les échecs propres au banc — egress `1.1.1.1` (07),
 > transport SSH/kubeconfig (09), `mc/aws` absent — sont **documentés, pas
 > contournés dans le code**.
+
+## Run #8 (2026-06-02) — chiffrement at-rest etcd + audit-policy (ADR 0014)
+
+Implémentation du `kubeadm init --config` (au lieu des flags) pour poser, dès
+l'init, le **chiffrement des Secrets etcd** (provider `secretbox`) et la
+**politique d'audit** de l'API server. Rôle
+[`k8s-initialization`](../bootstrap/roles/k8s-initialization/) + ADR 0014
+(points 2 et 3 passés de « dette » à « implémenté »).
+
+| Vérification                           | Résultat banc                                                     |
+| -------------------------------------- | ----------------------------------------------------------------- |
+| `kubeadm init phase … --config`        | ✅ manifeste API server régénéré avec les 3 flags                 |
+| Secret témoin lu dans etcd (`etcdctl`) | ✅ `k8s:enc:secretbox:v1:key1:…` (chiffré, pas en clair)          |
+| Audit-log API produit                  | ✅ 962 entrées `Metadata`                                         |
+| Rotation de clé (`ROTATE=1`)           | ✅ key2 ajoutée → restart → réécriture → témoin survit → rollback |
+| Cluster après activation               | ✅ 3 nœuds Ready, API Running, Ceph `HEALTH_OK`, datalake Ready   |
+| Scénario 15 (reproductible)            | ✅ PASS (sans et avec rotation)                                   |
+
+**Méthode de validation sur cluster déjà init.** Le banc ayant un cluster
+existant, le `kubeadm init --config` complet n'a pas été rejoué (destructif) ; à
+la place, `kubeadm init phase control-plane apiserver --config` a **régénéré le
+manifeste API server** à partir du `kubeadm-config.yaml` du livrable — ce qui
+valide le **vrai chemin de code kubeadm**, pas une approximation. Le chiffrement
+réel est ensuite prouvé via `etcdctl`. En prod (bootstrap from scratch), tous
+les Secrets naissent chiffrés ; sur un cluster déjà init, les Secrets existants
+restent en clair jusqu'à réécriture
+(`kubectl get secrets -A -o json | kubectl replace -f -`).
+
+### 🟢 #20 — `kubeadm upgrade` ne fetch pas la version (banc NAT, bénin)
+
+`kubeadm init phase … --config` émet
+`could not fetch a Kubernetes version from the internet … falling back to the local client version: v1.34.8`.
+Sans conséquence : le fallback sur la version locale est correct, le manifeste
+est généré normalement. Artefact du NAT VirtualBox (dl.k8s.io lent/injoignable),
+sans objet en prod.
+
+> 🔑 **Rotation testée.** Le scénario 15 (`ROTATE=1`) déroule les 4 étapes de
+> rotation et prouve qu'un Secret témoin reste lisible **et** chiffré tout du
+> long, puis restaure l'état d'origine. Procédure manuelle documentée au
+> [bootstrap/RUNBOOK.md](../bootstrap/RUNBOOK.md) (§ Rotation de la clé de
+> chiffrement etcd). Pas de KMS (choix ADR 0003) — rotation sur
+> événement/échéance.
