@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.15.2](https://github.com/univ-lehavre/cluster/compare/v2.15.1...v2.15.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **cni:** attendre la convergence de KubeProxyReplacement avant de retirer kube-proxy ([45cc9f2](https://github.com/univ-lehavre/cluster/commit/45cc9f2bc336ba2acb8da1f9cf08a23a05abfd95))
+* **cni:** convergence KubeProxyReplacement avant retrait kube-proxy (validé banc) ([#99](https://github.com/univ-lehavre/cluster/issues/99)) ([45cc9f2](https://github.com/univ-lehavre/cluster/commit/45cc9f2bc336ba2acb8da1f9cf08a23a05abfd95))
+
 ## [2.15.1](https://github.com/univ-lehavre/cluster/compare/v2.15.0...v2.15.1) (2026-06-02)
 
 
