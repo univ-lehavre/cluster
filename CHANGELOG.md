@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.13.0](https://github.com/univ-lehavre/cluster/compare/v2.12.3...v2.13.0) (2026-06-02)
+
+
+### Features
+
+* **securite:** chiffrement at-rest etcd + audit-policy via kubeadm --config ([#87](https://github.com/univ-lehavre/cluster/issues/87)) ([6acc49f](https://github.com/univ-lehavre/cluster/commit/6acc49f640cb17f2399eba8dc7668a6c411301ff))
+
 ## [2.12.3](https://github.com/univ-lehavre/cluster/compare/v2.12.2...v2.12.3) (2026-06-02)
 
 
