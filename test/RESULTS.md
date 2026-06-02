@@ -838,3 +838,35 @@ l'operator ait peuplé `rook-ceph-csi-config` → le PVC échoue
 : pré-condition qui attend que la config CSI liste les monitors (mons en quorum)
 **avant** de créer le PVC test. Vérifié : un PVC neuf passe `Bound` une fois la
 config peuplée.
+
+## Run #10 (2026-06-02) — exposition tout-Cilium (ADR 0020) sur banc
+
+Validation **réelle sur banc multi-node** (dirqual1/2/3, arm64, K8s 1.34.8,
+Cilium 1.19.4) du `cni.sh` modifié + des CRs `platform/cilium-expo/`. Banc
+préexistant en Cilium baseline (kube-proxy présent) ; snapshots pris avant.
+
+| Étape                                             | Gate                                                                                                                 | Résultat                |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `cni.sh` (kubeProxyReplacement + l2 + gatewayAPI) | ConfigMap + 3 agents `KubeProxyReplacement: True`                                                                    | ✅                      |
+| `k8sServiceHost=cluster-api`                      | résolu via `/etc/hosts` du nœud (hostNetwork)                                                                        | ✅                      |
+| Retrait kube-proxy                                | DaemonSet + CM supprimés, iptables `KUBE-*` purgées (3 nœuds)                                                        | ✅ (après fix #23)      |
+| Non-régression datapath                           | 3 nœuds Ready, CoreDNS Running, DNS+ClusterIP OK **sans kube-proxy** (`kubernetes.default` → `10.96.0.1`)            | ✅                      |
+| CRDs Gateway API v1.4.1                           | absents par défaut → installés (canal standard)                                                                      | ✅ (prérequis confirmé) |
+| `CiliumLoadBalancerIPPool` banc                   | `IPS AVAILABLE 11`, `CONFLICTING False`                                                                              | ✅                      |
+| `GatewayClass cilium`                             | `ACCEPTED True` (`io.cilium/gateway-controller`)                                                                     | ✅                      |
+| Gateway de test → IP du pool                      | `ADDRESS 192.168.67.240`, `PROGRAMMED True` ; Service LB dérivé `EXTERNAL-IP 192.168.67.240`                         | ✅                      |
+| Joignabilité L2 depuis l'hôte                     | ARP résout `.240` → MAC d'un nœud ; `curl http://192.168.67.240/` → **HTTP 404** (Envoy L7 répond, pas de HTTPRoute) | ✅                      |
+
+### 🔴 #23 — `cni.sh` concluait « KubeProxyReplacement False » à tort → kube-proxy jamais retiré
+
+La vérification post-bascule testait `KubeProxyReplacement: True` **une seule
+fois, immédiatement** après le `rollout restart` des agents. Or les pods
+`cilium` passent par une phase non-Ready (où `exec` échoue) puis reconvergent en
+**1-2 min** ; le test échouait donc systématiquement et kube-proxy n'était
+**jamais** retiré (le garde-fou « conserver kube-proxy si non confirmé » jouait
+à tort). **Corrigé** : on attend d'abord `rollout status daemonset/cilium`, puis
+on **sonde en boucle** (~3 min, sur un pod `status.phase=Running` explicite,
+tolérant aux `exec` en échec). Re-joué sur le banc : la 2ᵉ exécution détecte
+`True` et retire effectivement kube-proxy, sans régression DNS/ClusterIP. Le
+banc arm64 a par ailleurs confirmé que l'épinglage par **digest d'index
+multi-arch** (et non amd64) est correct (cf. #0e).

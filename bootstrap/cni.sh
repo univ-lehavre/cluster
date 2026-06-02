@@ -129,9 +129,30 @@ fi
 # avant que l'agent ne sache joindre l'API server casserait le redémarrage des
 # agents. Tout est idempotent (`--ignore-not-found`, et la purge iptables est
 # sans effet sur un nœud déjà nettoyé).
-echo "Vérification du remplacement de kube-proxy par Cilium…"
-if kubectl -n kube-system exec ds/cilium -- cilium-dbg status --verbose 2>/dev/null \
-    | grep -qi 'KubeProxyReplacement:\s*True'; then
+echo "Attente de l'armement de KubeProxyReplacement par les agents…"
+# Le rollout des agents Cilium ne bascule pas KubeProxyReplacement à True
+# instantanément : après le restart du DaemonSet, les pods passent par une
+# phase non-Ready (où `exec` échoue) PUIS reconvergent (observé : la bascule
+# n'est lisible qu'une fois les 3 agents Running + reconvergés, ~1-2 min sur
+# banc). On attend donc d'abord la fin du rollout, puis on SONDE en boucle
+# (tolérant aux exec en échec). Sinon on conclut « False » à tort pendant que
+# les agents redémarrent, et kube-proxy n'est jamais retiré. Budget : ~3 min,
+# puis on conserve kube-proxy (sûr).
+kubectl -n kube-system rollout status daemonset/cilium --timeout=2m 2>/dev/null || true
+kpr_ready=false
+for _ in $(seq 1 36); do
+  # exec sur un pod Running explicite (pas `ds/cilium` qui peut viser un pod
+  # en cours de redémarrage). On tolère l'absence momentanée de pod prêt.
+  pod=$(kubectl -n kube-system get pods -l k8s-app=cilium \
+        --field-selector=status.phase=Running -o name 2>/dev/null | head -1)
+  if [ -n "$pod" ] && kubectl -n kube-system exec "$pod" -- cilium-dbg status 2>/dev/null \
+      | grep -qiE 'KubeProxyReplacement:[[:space:]]+True'; then
+    kpr_ready=true
+    break
+  fi
+  sleep 5
+done
+if [ "$kpr_ready" = true ]; then
   echo "✓ KubeProxyReplacement actif — retrait de kube-proxy."
   # Stoppe kube-proxy géré par kubeadm (DaemonSet + ConfigMap).
   kubectl -n kube-system delete ds kube-proxy --ignore-not-found
@@ -150,7 +171,8 @@ if kubectl -n kube-system exec ds/cilium -- cilium-dbg status --verbose 2>/dev/n
   echo "    permanent est posé via skipPhases: [addon/kube-proxy] dans la config"
   echo "    kubeadm (rôle k8s-initialization) — déjà appliqué aux nouveaux clusters."
 else
-  echo "✗ KubeProxyReplacement pas encore True — kube-proxy CONSERVÉ (sûr)." >&2
-  echo "  Re-vérifier : kubectl -n kube-system exec ds/cilium -- cilium-dbg status --verbose" >&2
+  echo "✗ KubeProxyReplacement toujours False après 90 s — kube-proxy CONSERVÉ (sûr)." >&2
+  echo "  La bascule n'a pas convergé dans le délai. Re-vérifier puis rejouer ce" >&2
+  echo "  script (idempotent) : kubectl -n kube-system exec ds/cilium -- cilium-dbg status --verbose" >&2
   echo "  Ne PAS retirer kube-proxy tant que Cilium n'a pas pris le relais (ADR 0020)." >&2
 fi
