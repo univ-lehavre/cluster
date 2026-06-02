@@ -142,13 +142,41 @@ durcissement etcd/audit) — cet ADR n'est donc plus en partie « dette ».
   (`kubectl get secrets -A -o json | kubectl replace -f -`). Au bootstrap from
   scratch, tous les Secrets naissent chiffrés.
 
+## Chiffrement des snapshots etcd au repos — **dette close, assumée** [2026-06-02]
+
+Question voisine : faut-il **chiffrer le fichier snapshot etcd** (sur le control
+plane et sa copie hors-nœud) ? **Décision : non**, et la dette est close en
+l'assumant.
+
+Justification : depuis le point 2 ci-dessus, **les Secrets sont déjà chiffrés
+_dans_ etcd**, donc chiffrés à l'intérieur du snapshot. Ce qui reste en clair
+dans un snapshot, c'est l'**inventaire d'objets** (ConfigMaps, Deployments,
+specs, RBAC…) — de la **configuration**, pas des credentials. Chiffrer le
+contenant ajouterait :
+
+- une **paire de clés à gérer hors-nœud** : la clé privée de déchiffrement
+  devient un nouveau SPOF de restauration (la perdre = snapshots irrécupérables,
+  au pire moment) ;
+- une étape de déchiffrement dans la procédure de restauration d'urgence.
+
+Dans le modèle de menace (mono-tenant, réseau privé isolé, mono-admin — ADR
+0003), le surcoût opérationnel dépasse le gain. **Mitigation retenue** à la
+place : permissions strictes (`/var/lib/etcd-backups` en `0700`, snapshots
+`0600` root) et copie hors-nœud sur **poste de confiance** (cf. avertissement
+dans [`etcd-fetch.yaml`](../../bootstrap/etcd-fetch.yaml)).
+
+**Porte de sortie** si le modèle change (données réglementées, snapshots stockés
+hors d'un poste de confiance) : chiffrer le `.db` en **asymétrique `age`** — clé
+publique sur le control plane (chiffre, sans risque même si le nœud est
+compromis), clé privée gardée hors-nœud (déchiffre en restauration). C'est
+l'approche à privilégier le jour où c'est nécessaire ; non implémentée
+aujourd'hui par choix.
+
 ## À revoir
 
-- **Chiffrer les snapshots etcd** au repos (constat audit voisin) — la clé de
-  chiffrement etcd les protège déjà partiellement (Secrets chiffrés dedans),
-  mais le reste du snapshot est en clair.
 - Si le cluster s'ouvre au-delà du mono-tenant / réseau isolé → envisager un
-  **KMS** (rotation gérée) au lieu de la clé secretbox locale, et passer la
-  policy d'audit à `Request`/`RequestResponse` sur les ressources sensibles.
+  **KMS** (rotation gérée) au lieu de la clé secretbox locale, passer la policy
+  d'audit à `Request`/`RequestResponse` sur les ressources sensibles, et
+  **chiffrer les snapshots** (`age` asymétrique, cf. ci-dessus).
 - Envisager `restricted` en `enforce` (au lieu de `baseline`) une fois tous les
   workloads vérifiés conformes.
