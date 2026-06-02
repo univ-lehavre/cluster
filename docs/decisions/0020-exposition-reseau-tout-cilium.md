@@ -2,10 +2,10 @@
 
 ## Contexte
 
-L'exposition réseau du cluster reste à construire (Phase 1 du plan
-[`pipeline-collaborations`](../plans/2026-06-02-pipeline-collaborations.md)). Le
-cluster est bare-metal, kubeadm, **4 nœuds non-HA** (control-plane unique = SPOF
-assumé, cf. [ADR 0002](0002-control-plane-unique-avec-endpoint.md) et
+L'exposition réseau du cluster reste à construire (Phase 1 du plan pipeline de
+collaborations, dépôt applicatif). Le cluster est bare-metal, kubeadm, **4 nœuds
+non-HA** (control-plane unique = SPOF assumé, cf.
+[ADR 0002](0002-control-plane-unique-avec-endpoint.md) et
 [ADR 0009](0009-pourquoi-4-noeuds.md)). Cilium 1.19.4 est **déjà le CNI**
 ([`bootstrap/cni.sh`](../../bootstrap/cni.sh)), durci avec chiffrement WireGuard
 pod-to-pod + Hubble relay/CLI ([ADR 0019](0019-durcissement-reseau-cilium.md)).
