@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.12.2](https://github.com/univ-lehavre/cluster/compare/v2.12.1...v2.12.2) (2026-06-02)
+
+
+### Documentation
+
+* **ceph:** ordre de suppression d'un CephObjectStore (audit banc [#19](https://github.com/univ-lehavre/cluster/issues/19)) ([#83](https://github.com/univ-lehavre/cluster/issues/83)) ([626c734](https://github.com/univ-lehavre/cluster/commit/626c734a6cc7bfb03f6a4cbecad9c84cbea6d51a))
+
 ## [2.12.1](https://github.com/univ-lehavre/cluster/compare/v2.12.0...v2.12.1) (2026-06-02)
 
 
