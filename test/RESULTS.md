@@ -648,3 +648,96 @@ démarrent directement avec la bonne config).
 > heartbeats » (`longest 2089 ms` → décroît → `HEALTH_OK` en ~70 s sur le banc).
 > Pas de perte de données, pas d'OSD down. **En prod : appliquer hors heure de
 > pointe.** Le scénario 14 ne dégrade rien (lecture seule du datapath).
+
+## Run #7 (2026-06-02) — nettoyage du banc + rejeu intégral des scénarios
+
+Banc nettoyé puis **tous les scénarios rejoués** (sauf 03/04, dont la phase
+restore ne se valide pas sur ce banc — cf. avertissement plus haut). Au
+préalable : durcissement `sshd` posé sur les 3 VMs via `first-access.sh`
+(drop-in `00-hardening.conf`) pour que le scénario 13 puisse passer.
+
+| #   | Scénario                 | Résultat | Lecture                                                                        |
+| --- | ------------------------ | -------- | ------------------------------------------------------------------------------ |
+| 01  | PVC RBD write/read       | ✅ PASS  | PVC Bound, écriture/lecture identiques                                         |
+| 02  | Reschedule pod           | ✅ PASS  | donnée persistante au reschedule, PVC reste Bound                              |
+| 05  | Replication bump         | ⏭️ SKIP  | `NEW_SIZE=4 > 3 hôtes` : impossible (`failureDomain: host`)                    |
+| 06  | Object store smoke       | ⚙️ fix   | smoke-test échoue (race credentials S3) **et le scénario sort RC=1** (cf. #17) |
+| 07  | Cilium connectivity      | ⚠️ banc  | pod-to-pod/service OK ; seuls les tests egress `1.1.1.1` échouent (cf. #18)    |
+| 08  | Resource limits audit    | ✅ PASS  | 9 OSD, **0 Pending**, dimensionnement cohérent                                 |
+| 09  | Restauration etcd        | ⏭️ n/a   | nécessite single-node ou kubeconfig local relié (transport banc)               |
+| 10  | Pod Security admission   | ✅ PASS  | privileged/hostNetwork rejetés, conforme admis                                 |
+| 11  | NetworkPolicy deny       | ✅ PASS  | sonde DNS interne (cf. #18) : deny coupe, allow-dns rouvre ciblé               |
+| 12  | securityContext runtime  | ✅ PASS  | non-root, rootfs RO, volume RW                                                 |
+| 13  | Host/node hardening      | ✅ PASS  | 3 nœuds : sshd durci + couches OS, **aucun drift** (après first-access)        |
+| 14  | Cilium encryption+Hubble | ✅ PASS  | WireGuard 3/3, `cilium_wg0` 2 peers, Hubble 20 flux                            |
+
+> ✅ **13 passe vraiment maintenant.** Au Run #5 il sortait FAIL (sshd non durci
+> sur le banc). Après pose du drop-in `first-access.sh` sur les 3 VMs, les 3
+> nœuds ressortent sans drift host. Note : `AllowUsers debian` bloque le compte
+> `vagrant` → `vagrant ssh` ne fonctionne plus, on opère le banc en SSH direct
+> `debian@127.0.0.1:<port>` (plus fidèle à la prod, qui n'a pas de compte
+> vagrant).
+
+### 🟢 #17 — Scénario 06 : code de sortie du smoke-test masqué par le trap (corrigé)
+
+**Symptôme** : le smoke-test S3 échoue (`mc: access key ID … does not exist` /
+`Ni mc ni aws trouvés`) mais le scénario 06 ressortait en **RC=0** — faux
+positif.
+
+**Cause** : `bash smoke-test.sh` était la **dernière commande** du script ; le
+`trap cleanup EXIT` s'exécute ensuite et son dernier `kubectl delete … || true`
+(code 0) **écrase** le code de sortie.
+
+**Correctif appliqué** : capturer le RC du smoke-test (`|| smoke_rc=$?`) et
+`exit "$smoke_rc"` explicite. **Vérifié sur banc** : un smoke-test en échec
+ressort désormais en **RC=1**. Vaut en prod (un smoke-test S3 raté doit faire
+échouer le scénario partout). La race de credentials observée (OBC créé, clé pas
+encore propagée par le RGW recréé from scratch) est un timing du banc, sans
+objet sur un datalake stable en prod.
+
+### 🟢 #18 — Scénario 11 : sonde réseau dépendant d'Internet (corrigé)
+
+**Symptôme** : l'étape 1 du 11 (`wget https://1.1.1.1`) échouait par
+intermittence → faux « souci réseau ». Le `cilium connectivity test` (07) échoue
+de même sur ses tests `pod-to-cidr` vers `1.1.1.1`/`1.0.0.1`.
+
+**Cause** : `1.1.1.1` est **réservé côté banc** (DNS proxy NAT VirtualBox +
+`nameserver 1.1.1.1` posé dans le resolv.conf, drift 0d) → collision pour le
+trafic _data_ vers cette IP. Vérifié : l'egress pod **réel** marche
+(`pod → deb.debian.org` OK), le pod-to-pod **inter-nœuds chiffré** (WireGuard),
+les gros transferts (MTU) et le pod-to-service ClusterIP **fonctionnent tous**.
+**Aucune régression WireGuard/masquerade** — uniquement les IP
+`1.0.0.1/1.1.1.1`.
+
+**Correctif appliqué (11 seulement)** : remplacer la sonde egress Internet par
+une **sonde DNS interne** (egress vers `kube-system:53`) — déterministe et sans
+dépendance Internet. La preuve « allow chirurgical » teste qu'un egress non-DNS
+(API ClusterIP:443) reste coupé. **Vérifié PASS** sur banc. Un test de
+NetworkPolicy ne doit jamais dépendre d'Internet : ce correctif vaut en prod.
+**Le 07** (outil tiers `cilium connectivity test`) est laissé **inchangé** — on
+ne le sur-adapte pas au banc ; documenter qu'on l'exécute en prod (egress réel)
+ou en excluant `--test '!pod-to-cidr,!pod-to-world'` ponctuellement sur banc.
+
+### 🟠 #19 — Suppression d'un `CephObjectStore` qui contient des buckets (deadlock)
+
+**Symptôme** : le `CephObjectStore datalake` reste bloqué en `Deleting` ; les
+logs operator répètent _« will not be deleted until all dependents are removed:
+buckets … »_.
+
+**Cause** : Rook **protège les données** — il refuse de supprimer un object
+store tant qu'il reste des OBC/buckets. Si on supprime le store **avant** de
+vider les buckets, l'OBC ne peut plus se deprovisionner (RGW en cours de
+suppression) → deadlock mutuel (finalizers des deux côtés).
+
+**Ce que ça dit pour la PROD** (≠ artefact banc) : **toujours supprimer les OBC
+et vider les buckets AVANT de supprimer le `CephObjectStore`**. Déblocage manuel
+en dernier recours (données jetables seulement) : retirer les finalizers des
+`obc`/`objectbucket`, supprimer les buckets RGW
+(`radosgw-admin bucket rm --purge-objects`), puis retirer le finalizer du store.
+À tracer au RUNBOOK.
+
+> ℹ️ **Anti-sur-adaptation (consigne).** Le livrable est un bootstrap **prod**.
+> Seuls les **vrais bugs valables en prod** ont été corrigés (06 propagation RC,
+> 11 sonde réseau interne). Les échecs propres au banc — egress `1.1.1.1` (07),
+> transport SSH/kubeconfig (09), `mc/aws` absent — sont **documentés, pas
+> contournés dans le code**.

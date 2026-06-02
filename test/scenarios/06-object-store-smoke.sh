@@ -51,4 +51,17 @@ PF_PID=$!
 sleep 3
 
 log "Lancer le smoke-test S3 existant"
-ENDPOINT=http://localhost:8080 bash "$REPO/storage/ceph/storageClass/datalake/smoke-test.sh"
+# Capturer explicitement le code de sortie du smoke-test : sans ça, le
+# `trap cleanup EXIT` s'exécute après et son dernier `kubectl delete … || true`
+# (code 0) ÉCRASE le code de sortie du script — un smoke-test en échec
+# ressortait alors en RC=0 (faux positif). On mémorise donc le verdict et on
+# `exit` explicitement avec, pour que le trap ne le masque pas.
+smoke_rc=0
+ENDPOINT=http://localhost:8080 \
+    bash "$REPO/storage/ceph/storageClass/datalake/smoke-test.sh" || smoke_rc=$?
+if [ "$smoke_rc" -eq 0 ]; then
+    log "✓ Smoke-test S3 réussi (PUT/GET/DELETE)."
+else
+    log "✗ Smoke-test S3 en échec (rc=$smoke_rc) — voir la sortie ci-dessus."
+fi
+exit "$smoke_rc"

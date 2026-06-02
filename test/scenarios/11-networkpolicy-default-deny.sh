@@ -39,14 +39,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Exécute une commande réseau DANS le pod-sonde, avec un timeout côté shell
-# distant. Retourne le code de sortie de la commande distante.
+# Exécute une commande réseau DANS le pod-sonde. Retourne le code de sortie de
+# la commande distante.
 in_pod() { kubectl -n "$NS" exec "$POD" -- sh -c "$1"; }
 
-# Teste l'egress TCP 443 vers un hôte externe stable. `wget --timeout` borne
-# l'attente : sans policy → connecte ; sous default-deny → timeout (non-zéro).
-probe_https() { in_pod "wget -q -T 5 -O /dev/null https://1.1.1.1/ 2>/dev/null"; }
-# Teste la résolution DNS d'un service cluster (CoreDNS).
+# Sonde DISCRIMINANTE = résolution DNS d'un service cluster (egress vers
+# kube-system:53). On l'utilise comme signal unique du test, parce qu'elle est
+# INTERNE et DÉTERMINISTE : pas de dépendance à un egress Internet (peu fiable
+# sur un banc NAT — un `wget https://1.1.1.1` y échoue par intermittence, sans
+# rapport avec la NetworkPolicy testée). `nslookup` borne lui-même son attente.
 probe_dns() { in_pod "nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1"; }
 
 log "Namespace $NS"
@@ -68,16 +69,16 @@ spec:
 EOF
 kubectl -n "$NS" wait --for=condition=Ready --timeout=60s "pod/$POD"
 
-log "[1/3] AVANT policy — egress HTTPS doit RÉUSSIR"
-if probe_https; then
-    log "✓ egress sortant OK sans policy (état additif attendu : tout permis)"
+log "[1/3] AVANT policy — la résolution DNS doit RÉUSSIR"
+if probe_dns; then
+    log "✓ DNS résout sans policy (état additif attendu : tout permis)"
 else
-    log "✗ egress KO alors qu'aucune policy n'est posée — souci réseau/DNS du banc ?"
-    log "  (le banc doit avoir le DNS NAT + connectivité ; cf. RESULTS.md drift 0d)"
+    log "✗ DNS KO alors qu'aucune policy n'est posée — CoreDNS/kube-dns en panne ?"
+    log "  (vérifier kube-system : kubectl -n kube-system get pods -l k8s-app=kube-dns)"
     exit 1
 fi
 
-log "[2/3] Appliquer default-deny-all (ingress+egress) — egress doit être COUPÉ"
+log "[2/3] Appliquer default-deny-all (ingress+egress) — le DNS doit être COUPÉ"
 kubectl -n "$NS" apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -94,17 +95,17 @@ EOF
 log "  … attente application par Cilium (15s max)"
 deny_ok=0
 for _ in $(seq 1 15); do
-    if ! probe_https; then deny_ok=1; break; fi
+    if ! probe_dns; then deny_ok=1; break; fi
     sleep 1
 done
 if [ "$deny_ok" = "1" ]; then
-    log "✓ egress coupé sous default-deny — Cilium applique bien la policy"
+    log "✓ DNS coupé sous default-deny — Cilium applique bien la policy"
 else
-    log "✗ egress TOUJOURS ouvert après default-deny — Cilium n'applique pas la NetworkPolicy !"
+    log "✗ DNS TOUJOURS résolu après default-deny — Cilium n'applique pas la NetworkPolicy !"
     exit 1
 fi
 
-log "[3/3] Ajouter allow-dns — DNS doit REMARCHER, egress non-DNS rester coupé"
+log "[3/3] Ajouter allow-dns — la résolution DNS doit REMARCHER"
 kubectl -n "$NS" apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -137,9 +138,19 @@ if [ "$dns_ok" != "1" ]; then
 fi
 log "✓ DNS rétabli par allow-dns"
 
-# Le allow-dns ne doit PAS rouvrir l'egress HTTPS (preuve qu'il est ciblé).
-if probe_https; then
-    log "✗ egress HTTPS rouvert par allow-dns — la policy fuit au-delà du DNS"
+# Preuve que l'allow est CHIRURGICAL : il n'ouvre que le DNS (port 53). Un
+# egress NON-DNS vers un service interne (l'API ClusterIP sur 443, déterministe
+# et sans Internet) doit rester COUPÉ. On tente une connexion TCP brève ;
+# `nc -w` borne l'attente. Sous allow-dns seul, elle doit échouer.
+api_host=kubernetes.default.svc.cluster.local
+log "  vérifier que l'egress non-DNS (API:443) reste coupé"
+nondns_blocked=0
+for _ in $(seq 1 10); do
+    if ! in_pod "nc -z -w 3 $api_host 443 >/dev/null 2>&1"; then nondns_blocked=1; break; fi
+    sleep 1
+done
+if [ "$nondns_blocked" != "1" ]; then
+    log "✗ egress non-DNS (API:443) ouvert sous allow-dns — la policy fuit au-delà du DNS"
     exit 1
 fi
 log "✓ egress non-DNS reste coupé — l'allow est chirurgical"
