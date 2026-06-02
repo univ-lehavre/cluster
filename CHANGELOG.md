@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.13.1](https://github.com/univ-lehavre/cluster/compare/v2.13.0...v2.13.1) (2026-06-02)
+
+
+### Documentation
+
+* **securite:** clôt la dette chiffrement des snapshots etcd (assumée) ([#89](https://github.com/univ-lehavre/cluster/issues/89)) ([9544159](https://github.com/univ-lehavre/cluster/commit/95441591fca65d3f061224925ff90e0d4b28a79a))
+
 ## [2.13.0](https://github.com/univ-lehavre/cluster/compare/v2.12.3...v2.13.0) (2026-06-02)
 
 
