@@ -183,6 +183,10 @@ export default defineConfig({
             text: '0018 — Rook-Ceph vs Longhorn',
             link: '/docs/decisions/0018-rook-ceph-vs-longhorn',
           },
+          {
+            text: '0019 — Durcissement réseau Cilium',
+            link: '/docs/decisions/0019-durcissement-reseau-cilium',
+          },
         ],
       },
       {

@@ -21,6 +21,12 @@
 #   CP_IP   (défaut 192.168.67.11)   CP_PORT (défaut 22)
 #   SSH_KEY (défaut clé insecure Vagrant)   USER_REMOTE (défaut debian)
 #   ROTATE=1  déroule en plus le test de rotation (étape 3) — réversible
+#
+# NB : `set -uo pipefail` SANS `-e` — choix délibéré (≠ oubli). Le scénario
+# capture des codes retour attendus-non-zéro (ex. `n=$(... grep -c ...)` où grep
+# sort 1 si 0 match ; `read -r rc … < <(…)`), gère les erreurs explicitement
+# (`|| true`, `if ! …`, `rollback`) et borne ses propres attentes. Avec `-e`, ces
+# non-zéro nominaux tueraient le script prématurément.
 set -uo pipefail
 
 CP_IP=${CP_IP:-192.168.67.11}

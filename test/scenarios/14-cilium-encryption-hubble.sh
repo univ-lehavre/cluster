@@ -65,18 +65,33 @@ fi
 log "✓ Mesh WireGuard complet ($peers peer(s))"
 
 log "[3/3] Hubble observe — l'observabilité réseau doit retourner des flux"
-# Hubble peut nécessiter quelques flux ; on génère un peu de trafic DNS au cas où
-# le cluster serait au repos, puis on observe.
-flows=$(in_agent hubble observe --last 20 2>/dev/null | grep -c . || echo 0)
+# `hubble observe` peut : (a) échouer/timeout si le relay est KO, (b) réussir
+# mais ne rien retourner si le cluster est au repos. On DISTINGUE les deux : on
+# capture la sortie ET le code retour SÉPARÉMENT (sans masquer le rc par
+# `|| echo 0`), pour ne pas attribuer un timeout à un « 0 flux ». `|| true`
+# protège la capture sous `set -e` ; le vrai verdict est dans `hubble_rc`.
+hubble_out=$(in_agent timeout 15 hubble observe --last 20 2>/dev/null) && hubble_rc=0 || hubble_rc=$?
+if [ "${hubble_rc:-0}" -ne 0 ]; then
+    log "  hubble observe a échoué (rc=$hubble_rc) — relay pas prêt ? nouvel essai"
+    sleep 5
+    hubble_out=$(in_agent timeout 15 hubble observe --last 20 2>/dev/null) && hubble_rc=0 || hubble_rc=$?
+fi
+if [ "${hubble_rc:-0}" -ne 0 ]; then
+    log "✗ hubble observe échoue (rc=$hubble_rc) — Hubble Relay/agent non opérationnel"
+    log "  Vérifier : cilium status (Hubble Relay) ; bootstrap/cni.sh (hubble.enabled)"
+    exit 1
+fi
+flows=$(printf '%s' "$hubble_out" | grep -c . || true)
 if [ "${flows:-0}" -lt 1 ]; then
-    log "  aucun flux immédiat — génération d'un peu de trafic puis nouvel essai"
+    # commande OK mais aucun flux : générer un peu de trafic puis réessayer.
+    log "  Hubble répond mais 0 flux (cluster au repos) — génération de trafic"
     kubectl -n kube-system get svc kube-dns >/dev/null 2>&1 || true
     sleep 5
-    flows=$(in_agent hubble observe --last 20 2>/dev/null | grep -c . || echo 0)
+    hubble_out=$(in_agent timeout 15 hubble observe --last 20 2>/dev/null || true)
+    flows=$(printf '%s' "$hubble_out" | grep -c . || true)
 fi
 if [ "${flows:-0}" -lt 1 ]; then
-    log "✗ Hubble ne retourne aucun flux — relay/agent Hubble non opérationnel ?"
-    log "  Vérifier : cilium status (Hubble Relay) ; bootstrap/cni.sh (hubble.enabled)"
+    log "✗ Hubble opérationnel mais aucun flux observé même après trafic — à investiguer"
     exit 1
 fi
 log "✓ Hubble opérationnel ($flows flux observés)"

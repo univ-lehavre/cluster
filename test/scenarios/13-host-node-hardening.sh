@@ -26,6 +26,13 @@
 #   SSH_OPTS, USER_REMOTE passés tels quels à state.sh (cf. son en-tête)
 #   STRICT_OPTIN=1       fait AUSSI échouer si AUCUNE couche OS n'est active
 #                        (utile en prod où le durcissement est censé être posé)
+#
+# NB : `set -uo pipefail` SANS `-e` — choix délibéré (≠ oubli). Ce scénario
+# s'articule autour du CODE RETOUR de `state.sh` (`raw=$(... state.sh ...)` puis
+# `state_rc=$?`), or state.sh sort 1 en cas de drift — un cas NOMINAL ici. Avec
+# `-e`, la substitution `$(...)` non-zéro ferait sortir le script avant qu'on
+# lise `state_rc`. Les erreurs sont donc gérées explicitement (codes capturés,
+# `exit` ciblés).
 set -uo pipefail
 
 log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }

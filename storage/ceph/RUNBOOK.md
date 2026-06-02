@@ -227,14 +227,29 @@ Constaté sur banc (Run #7, cf. [test/RESULTS.md](../../test/RESULTS.md) #19).
 
 ### Pools, storage classes, cluster
 
-Supprimer les pools et storage classes :
+Supprimer les StorageClasses et les `CephBlockPool` **réellement créés** par la
+section « Bloc » ci-dessus (réplicat ×3 + les deux variantes EC). Le `delete`
+d'une ressource inexistante renvoie `NotFound` sans rien casser.
 
 ```bash
-kubectl delete -n rook-ceph cephblockpools.ceph.rook.io rook-ceph-block-pool
-kubectl delete storageclasses.storage.k8s.io rook-ceph-block
-kubectl delete -n rook-ceph cephblockpools.ceph.rook.io rook-ceph-block-replicated-pool
-kubectl delete storageclasses.storage.k8s.io rook-ceph-block-replicated
+# StorageClasses
+kubectl delete storageclass rook-ceph-block-replicated rook-ceph-block-ec-delete rook-ceph-block-ec
+
+# Pools (réplicat ×3)
+kubectl delete -n rook-ceph cephblockpool rook-ceph-block-replicated-pool
+# Pools EC (reclaim Delete)
+kubectl delete -n rook-ceph cephblockpool \
+  rook-ceph-block-ec-delete-metadata-pool rook-ceph-block-ec-delete-data-pool
+# Pools EC (reclaim Retain)
+kubectl delete -n rook-ceph cephblockpool \
+  rook-ceph-block-ec-metadata-pool rook-ceph-block-ec-data-pool
 ```
+
+> Adapter si seul un sous-ensemble a été appliqué. La SC objet
+> `rook-ceph-datalake` se retire séparément (cf. § Object store ci-dessus). Les
+> ressources `rook-ceph-block` / `rook-ceph-block-pool` du dossier
+> [`storageClass/examples/`](storageClass/examples/) ne sont **pas** créées par
+> ce RUNBOOK (réplicat ×1, démonstration uniquement).
 
 Détruire le cluster Ceph :
 

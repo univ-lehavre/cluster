@@ -83,13 +83,21 @@
         src: '{{ network_ufw_ssh_admin_cidr }}'
       notify: Restart UFW
 
-    # ── Services exposés au-delà du cluster ───────────────────────────────
-    # NodePort par défaut (kube-proxy / Cilium) : services publiés via NodePort.
-    - name: Autoriser la plage NodePort (services exposés)
+    # ── Plage NodePort — restreinte au réseau cluster ─────────────────────
+    # Le cluster expose ses services en ClusterIP (ADR — PR #43), pas en
+    # NodePort. Cette règle est donc surtout une garde si un NodePort légitime
+    # apparaît : on l'ouvre UNIQUEMENT depuis le réseau cluster
+    # (`network_ufw_cluster_cidr`), pas depuis le monde — un `allow` sans `src`
+    # exposerait toute la plage 30000:32767 à l'extérieur, ce qui contredit le
+    # choix ClusterIP. (Le trafic inter-nœuds est déjà couvert par la règle
+    # « tout autoriser entre nœuds » ci-dessus ; cette règle reste explicite
+    # pour documenter l'intention si la politique inter-nœuds est resserrée.)
+    - name: Autoriser la plage NodePort depuis le réseau cluster
       community.general.ufw:
         rule: allow
         port: '30000:32767'
         proto: tcp
+        src: '{{ network_ufw_cluster_cidr }}'
       notify: Restart UFW
 
     - name: Activer le logging UFW
