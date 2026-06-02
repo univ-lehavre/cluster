@@ -182,6 +182,51 @@ kubectl -n default get secret ceph-bucket \
 
 ## Désinstallation
 
+### Object store (datalake) — ORDRE OBLIGATOIRE
+
+> ⚠️ **Toujours supprimer les buckets/OBC AVANT le `CephObjectStore`.** Rook
+> protège les données : il refuse de supprimer un object store tant qu'il reste
+> des `ObjectBucketClaim`/buckets. Si on supprime le store en premier, le RGW
+> part en suppression et l'OBC ne peut plus se _deprovisionner_ → **deadlock
+> mutuel de finalizers** (les deux objets restent en `Deleting` indéfiniment ;
+> l'operator répète « will not be deleted until all dependents are removed »).
+
+Ordre correct :
+
+```bash
+# 1. Supprimer les OBC (chaque OBC vide puis retire son bucket S3).
+kubectl -n rook-ceph delete obc --all          # ou bucket par bucket
+# 2. Supprimer le CephObjectStoreUser éventuel.
+kubectl -n rook-ceph delete cephobjectstoreuser --all
+# 3. Attendre qu'il ne reste plus aucun bucket côté RGW.
+kubectl -n rook-ceph exec deploy/rook-ceph-tools -- radosgw-admin bucket list   # → []
+# 4. Seulement ensuite, supprimer le CephObjectStore.
+kubectl -n rook-ceph delete cephobjectstore datalake
+```
+
+**Déblocage si déjà en deadlock** (⚠️ données perdues — uniquement si jetables)
+:
+
+```bash
+# Retirer les finalizers des OBC/ObjectBucket coincés…
+for b in $(kubectl -n rook-ceph get obc -o name); do
+  kubectl -n rook-ceph patch "$b" --type merge -p '{"metadata":{"finalizers":[]}}'
+done
+for ob in $(kubectl get objectbucket -o name); do
+  kubectl patch "$ob" --type merge -p '{"metadata":{"finalizers":null}}'
+done
+# …purger les buckets RGW résiduels…
+kubectl -n rook-ceph exec deploy/rook-ceph-tools -- \
+  radosgw-admin bucket rm --bucket=<nom> --purge-objects
+# …puis, en dernier recours, le finalizer du store lui-même.
+kubectl -n rook-ceph patch cephobjectstore datalake --type merge \
+  -p '{"metadata":{"finalizers":null}}'
+```
+
+Constaté sur banc (Run #7, cf. [test/RESULTS.md](../../test/RESULTS.md) #19).
+
+### Pools, storage classes, cluster
+
 Supprimer les pools et storage classes :
 
 ```bash

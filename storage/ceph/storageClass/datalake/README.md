@@ -10,6 +10,11 @@ datalake pour les sources de données ingérées par le cluster.
 > Décision assumée pour ce datalake de recherche (ré-ingestible depuis les
 > sources upstream). Pour conserver les pools, passer à
 > `preservePoolsOnDelete: true` **avant** toute suppression.
+>
+> 🔑 **Ordre de suppression** : supprimer les **OBC/buckets AVANT** le
+> `CephObjectStore`, sinon deadlock de finalizers (le store attend les buckets,
+> l'OBC ne peut plus se deprovisionner). Procédure complète et déblocage :
+> [`../../RUNBOOK.md` § Désinstallation › Object store](../../RUNBOOK.md#object-store-datalake--ordre-obligatoire).
 
 ## Installation
 
