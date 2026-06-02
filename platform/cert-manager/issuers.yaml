@@ -1,0 +1,51 @@
+# Exposition tout-Cilium — TLS de bordure (ADR 0021). Chaîne de CA INTERNE
+# (PAS ACME : cluster non exposé à Internet, ADR 0003/0020).
+#
+# Pattern officiel cert-manager (« Bootstrapping CA Issuers ») :
+#   selfsigned-bootstrap (ClusterIssuer selfSigned)
+#     └─> root-ca (Certificate isCA, dans le namespace cert-manager)
+#           └─> internal-ca (ClusterIssuer ca) = émetteur courant des feuilles
+#
+# La racine est volontairement isolée : seul `internal-ca` est sollicité au
+# quotidien ; la clé racine n'est exposée qu'à l'émission/rotation.
+---
+# (1) Émetteur self-signed — sert UNIQUEMENT à amorcer la racine.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+# (2) Certificat de la CA racine du cluster (auto-signé via l'émetteur ci-dessus).
+# DOIT être dans le namespace `cert-manager` : un ClusterIssuer de type `ca`
+# résout son secretName dans le « cluster resource namespace » du contrôleur
+# (--cluster-resource-namespace, défaut `cert-manager`).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: cluster-dataops Internal Root CA
+  secretName: root-ca-secret # contiendra tls.crt, tls.key, ca.crt
+  duration: 87600h # 10 ans (racine)
+  renewBefore: 8760h # renouveler 1 an avant expiration
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# (3) Émetteur courant : CA interne référençant la racine. C'est lui qu'on
+# annote sur le Gateway (cert-manager.io/cluster-issuer: internal-ca).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: internal-ca
+spec:
+  ca:
+    secretName: root-ca-secret # résolu dans le namespace cert-manager

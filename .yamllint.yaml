@@ -26,3 +26,4 @@ ignore: |
   storage/ceph/dashboard.yaml
   storage/ceph/cluster.yaml
   storage/ceph/toolbox.yaml
+  platform/cert-manager/cert-manager.yaml

@@ -6,6 +6,9 @@ storage/ceph/dashboard.yaml
 storage/ceph/cluster.yaml
 storage/ceph/toolbox.yaml
 
+# Vendored upstream cert-manager bundle (épinglé par digest, non reformaté)
+platform/cert-manager/cert-manager.yaml
+
 # Common
 node_modules/
 package-lock.json

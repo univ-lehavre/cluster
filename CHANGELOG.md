@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.15.0](https://github.com/univ-lehavre/cluster/compare/v2.14.0...v2.15.0) (2026-06-02)
+
+
+### Features
+
+* **platform:** cert-manager + CA interne (TLS de bordure Gateway) ([#95](https://github.com/univ-lehavre/cluster/issues/95)) ([cbac5c9](https://github.com/univ-lehavre/cluster/commit/cbac5c9fa964a84507715a232f7ba14294b69cc6))
+
 ## [2.14.0](https://github.com/univ-lehavre/cluster/compare/v2.13.1...v2.14.0) (2026-06-02)
 
 

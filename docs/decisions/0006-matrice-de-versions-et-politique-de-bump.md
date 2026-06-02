@@ -14,15 +14,17 @@ par Cilium 1.19 et Rook 1.19, tous deux testés jusqu'à K8s 1.34).
 
 ### Matrice cible (mai 2026)
 
-| Composant       | Version cible              | Fichier piloté                                                                                        |
-| --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Kubernetes      | **1.34**                   | [`bootstrap/roles/k8s-install`](../../bootstrap/roles/k8s-install/) (clé + dépôt `pkgs.k8s.io/v1.34`) |
-| Cilium          | **1.19.x** (dernier patch) | [`bootstrap/cni.sh`](../../bootstrap/cni.sh) (CLI épinglée)                                           |
-| Rook            | **1.19.x**                 | [`storage/ceph/operator.yaml`](../../storage/ceph/operator.yaml) + `crds.yaml`/`common.yaml`          |
-| Ceph            | **20.2.1 Tentacle**        | [`storage/ceph/cluster.yaml`](../../storage/ceph/cluster.yaml) (image `quay.io/ceph/ceph:v20.2.1`)    |
-| containerd.io   | **2.2.4**                  | dépôt Docker (cf. [ADR 0005](0005-cri-containerd-via-depot-docker.md))                                |
-| Dashboard chart | **7.10.0**                 | [`platform/k8s-dashboard/manage.sh`](../../platform/k8s-dashboard/manage.sh) (`CHART_VERSION`)        |
-| Registry image  | **3.1.1**                  | [`platform/container-registry/deployment.yaml`](../../platform/container-registry/deployment.yaml)    |
+| Composant       | Version cible              | Fichier piloté                                                                                                 |
+| --------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Kubernetes      | **1.34**                   | [`bootstrap/roles/k8s-install`](../../bootstrap/roles/k8s-install/) (clé + dépôt `pkgs.k8s.io/v1.34`)          |
+| Cilium          | **1.19.x** (dernier patch) | [`bootstrap/cni.sh`](../../bootstrap/cni.sh) (CLI épinglée)                                                    |
+| Rook            | **1.19.x**                 | [`storage/ceph/operator.yaml`](../../storage/ceph/operator.yaml) + `crds.yaml`/`common.yaml`                   |
+| Ceph            | **20.2.1 Tentacle**        | [`storage/ceph/cluster.yaml`](../../storage/ceph/cluster.yaml) (image `quay.io/ceph/ceph:v20.2.1`)             |
+| containerd.io   | **2.2.4**                  | dépôt Docker (cf. [ADR 0005](0005-cri-containerd-via-depot-docker.md))                                         |
+| Dashboard chart | **7.10.0**                 | [`platform/k8s-dashboard/manage.sh`](../../platform/k8s-dashboard/manage.sh) (`CHART_VERSION`)                 |
+| Registry image  | **3.1.1**                  | [`platform/container-registry/deployment.yaml`](../../platform/container-registry/deployment.yaml)             |
+| Gateway API CRD | **1.4.1**                  | [`platform/cilium-expo/README.md`](../../platform/cilium-expo/) (pré-install, cf. ADR 0020)                    |
+| cert-manager    | **1.20.2**                 | [`platform/cert-manager/cert-manager.yaml`](../../platform/cert-manager/cert-manager.yaml) (images par digest) |
 
 Plafond commun K8s = **1.34** (limite de Cilium 1.19 et Rook 1.19 testés). Ceph
 Squid v19 sort d'EOL en septembre 2026 → Tentacle pour une install neuve.
