@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.14.0](https://github.com/univ-lehavre/cluster/compare/v2.13.1...v2.14.0) (2026-06-02)
+
+
+### Features
+
+* **platform:** exposition tout-Cilium (LB-IPAM + L2 + Gateway API) ([#93](https://github.com/univ-lehavre/cluster/issues/93)) ([2b29034](https://github.com/univ-lehavre/cluster/commit/2b290343b02c1dad00e105e26fbfcfd72b0126da))
+
 ## [2.13.1](https://github.com/univ-lehavre/cluster/compare/v2.13.0...v2.13.1) (2026-06-02)
 
 
