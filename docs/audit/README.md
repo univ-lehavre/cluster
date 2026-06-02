@@ -152,6 +152,10 @@ NVMe, mono-réplicas applicatifs), **stratégie d'upgrade Kubernetes**,
 bus-factor** (mainteneur quasi unique → formaliser les choix en ADR). Détails en
 [08-operabilite.md](08-operabilite.md).
 
+Réflexion ouverte (non décidée) sur l'**admission** et la **détection runtime**
+— Kyverno (CI / admission) vs Trivy (déjà en place), Falco vs Tetragon : voir
+[note-runtime-admission.md](note-runtime-admission.md).
+
 ---
 
 _Le détail dimension par dimension suit dans les fichiers numérotés. Chaque
