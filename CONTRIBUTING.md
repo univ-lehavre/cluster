@@ -21,9 +21,14 @@ emploie des valeurs d'exemple génériques**, jamais les valeurs réelles d'un
 déploiement (qui vivent dans une config locale non versionnée).
 
 - **À génériser** : IP / plages réseau (→ p. ex. `10.0.0.0/22`), noms de nœuds /
-  hôtes (→ `cp1`, `node1`…), noms d'organisation / sites (→ « l'organisation »),
-  marques de services tiers (→ « source de données ouverte », « backend d'auth
-  »…).
+  hôtes / PVC / buckets (→ `cp1`, `node1`…), noms d'organisation / sites (→ «
+  l'organisation »), **cas d'usage métier propres à un projet** (sources de
+  données, services applicatifs spécifiques → « source de données ouverte », «
+  backend d'auth »…).
+- **À GARDER** : les logiciels / bases qui _portent_ une décision (briques
+  d'infra que le dépôt propose : Ceph, MySQL, Cilium, cert-manager, Argo CD…) —
+  les occulter viderait l'ADR de son sens. _Garder ce que le dépôt propose comme
+  brique ; génériser ce qui n'a de sens que pour une instance._
 - **Valeur d'exemple _concrète_**, pas tournure vague (un `/22` ≠ un `/24`) ; le
   contexte chiffré qui fonde une décision est conservé.
 - **Spécificités réelles** = fichier de config **local non versionné**

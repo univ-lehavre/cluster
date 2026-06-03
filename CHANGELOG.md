@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.1](https://github.com/univ-lehavre/cluster/compare/v2.17.0...v2.17.1) (2026-06-03)
+
+
+### Documentation
+
+* **adr:** distinguer brique d'infra (à garder) vs identité (à génériser) ([#110](https://github.com/univ-lehavre/cluster/issues/110)) ([c06bcea](https://github.com/univ-lehavre/cluster/commit/c06bcea8dea3fa4f707f87a86369e99097c1f49e))
+
 ## [2.17.0](https://github.com/univ-lehavre/cluster/compare/v2.16.2...v2.17.0) (2026-06-03)
 
 
