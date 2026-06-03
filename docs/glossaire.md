@@ -112,6 +112,81 @@ machines, où qu'elles soient. Ici, c'est la compensation de sécurité qui perm
 d'exposer certains services en HTTP sans authentification (réseau supposé
 privé). Voir [ADR 0003](decisions/0003-pas-de-chiffrement-ceph-tailscale.md).
 
+## Exposition réseau (comment on atteint un service depuis l'extérieur du cluster)
+
+> Ces termes décrivent la chaîne qui rend une application **joignable depuis le
+> réseau local** (jamais Internet ici). Vue d'ensemble :
+> [architecture/exposition-reseau.md](architecture/exposition-reseau.md).
+
+### kube-proxy / kubeProxyReplacement
+
+Dans un Kubernetes « standard », un composant appelé **kube-proxy** programme
+des règles réseau (iptables) pour aiguiller le trafic vers les bons conteneurs.
+Cilium sait faire ce travail **lui-même**, en plus rapide (eBPF, directement
+dans le noyau) : c'est le **kubeProxyReplacement**. On supprime alors
+kube-proxy. Voir [ADR 0020](decisions/0020-exposition-reseau-tout-cilium.md).
+
+### LoadBalancer / LB-IPAM
+
+Un service de type **LoadBalancer** a besoin d'une **adresse IP fixe** par
+laquelle on l'atteint. Sur un cloud, le fournisseur la donne ; sur nos machines
+« nues » (bare-metal), personne ne la donne. **LB-IPAM** (IP Address Management)
+est la fonction de Cilium qui **pioche une IP dans une réserve** (un « pool »
+d'adresses) et l'attribue au service. Voir
+[ADR 0020](decisions/0020-exposition-reseau-tout-cilium.md).
+
+### Annonce L2 (L2 announcement / ARP)
+
+Une fois l'IP attribuée, encore faut-il que le réseau **sache où la trouver**.
+En mode **L2**, un nœud du cluster « crie » sur le réseau local (protocole
+**ARP**) « cette IP, c'est moi ! ». Un seul nœud le fait à la fois ; si ce nœud
+tombe, un autre prend le relais (bascule, _failover_) — ce n'est **pas** de la
+répartition de charge. Voir
+[ADR 0020](decisions/0020-exposition-reseau-tout-cilium.md).
+
+### Gateway API / HTTPRoute
+
+La façon moderne, standard, de décrire « quelle URL va vers quel service ». Un
+**Gateway** est la porte d'entrée (l'IP + le port + le HTTPS) ; une
+**HTTPRoute** est une règle d'aiguillage (« _ce_ nom de domaine, _ce_ chemin →
+_ce_ service »). Cilium implémente cette API (via Envoy) — on n'a donc pas
+besoin d'un outil séparé comme ingress-nginx. Voir
+[ADR 0020](decisions/0020-exposition-reseau-tout-cilium.md).
+
+### cert-manager / ClusterIssuer / CA interne
+
+**cert-manager** est l'outil qui **fabrique et renouvelle automatiquement** les
+certificats TLS (le « cadenas » HTTPS). Un **Issuer** (ou **ClusterIssuer**, sa
+version valable pour tout le cluster) est l'autorité qui les signe. Comme le
+cluster n'est **pas** joignable depuis Internet, on ne peut pas utiliser une
+autorité publique (Let's Encrypt) : on crée notre **propre autorité interne**
+(_CA interne_, _Certificate Authority_). Inconvénient : les navigateurs ne la
+connaissent pas, il faut leur **importer** son certificat racine une fois. Voir
+[ADR 0021](decisions/0021-cert-manager-ca-interne.md).
+
+### gateway-shim
+
+Le **pont** entre cert-manager et la Gateway API : on **annote** un Gateway, et
+cert-manager comprend tout seul qu'il doit produire le certificat du site et
+**remplir** le secret correspondant. Aucun certificat à gérer à la main. Voir
+[ADR 0021](decisions/0021-cert-manager-ca-interne.md).
+
+### GitOps / Argo CD / AppProject
+
+Le **GitOps** est un principe : **git est la source de vérité**. On décrit
+l'état voulu du cluster dans un dépôt git, et un outil le **réconcilie** en
+continu (applique les changements, corrige les écarts). **Argo CD** est cet
+outil ici. Un **AppProject** est un garde-fou : il **limite** ce qu'une
+application a le droit de déployer et où (quels dépôts, quels espaces de noms).
+Voir [ADR 0022](decisions/0022-argocd-gitops-applicatif.md).
+
+### gRPC / gRPC-Web
+
+Un protocole de communication efficace (utilisé par l'outil en ligne de commande
+d'Argo CD). Sa variante **gRPC-Web** le fait passer par du HTTP classique, ce
+qui lui permet de traverser une passerelle web (Gateway) sans configuration
+particulière — d'où l'option `--grpc-web` côté client.
+
 ## Stockage (Rook-Ceph)
 
 ### Ceph
