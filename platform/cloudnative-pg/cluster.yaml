@@ -1,0 +1,58 @@
+# Cluster PostgreSQL managé par CloudNativePG (étape 1.6, ADR 0024).
+#
+# Un seul Cluster HA (3 instances : 1 primary + 2 replicas, réplication streaming)
+# servant DEUX usages via deux bases logiques (cf. database.yaml) :
+#   - event log Dagster (1.7)
+#   - index pgvector (recherche sémantique, chargé par atlas)
+#
+# pgvector posé via Image Volume Extension (PG18, sans image custom) :
+# spec.postgresql.extensions monte l'image pgvector ; le CREATE EXTENSION est
+# déclaré côté Database (nom SQL = vector).
+#
+# Images épinglées par digest d'index multi-arch (ADR 0006), arm64 vérifié.
+# Sauvegardes vers S3 via le plugin Barman Cloud (cf. objectstore.yaml / backup.yaml).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgres
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+  namespace: postgres
+spec:
+  instances: 3 # HA : 1 primary + 2 replicas (réplication streaming)
+  # Operand PostgreSQL 18 (requis par les Image Volume Extensions).
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:e14f3ed42b14f3abeefc56468af42deb2abc3d9eddf2c465b875b2f0ec3ce3f6
+  postgresql:
+    # pgvector monté comme volume d'image (pas de shared_preload_libraries requis).
+    extensions:
+      - name: pgvector
+        image:
+          reference: ghcr.io/cloudnative-pg/pgvector:0.8.2-18-trixie@sha256:16410c599bd2bfea40653c05c67d98ab4c04befc53eaa3445a5f4cf898b1e98e
+  storage:
+    size: 5Gi
+    # PARAMÉTRABLE : défaut banc léger = standard (local-path).
+    # Topologie bare-metal : surcharger par rook-ceph-block-replicated (RBD ×3, ADR 0001 — JAMAIS
+    # EC 2+1 pour ce stateful) via config locale non versionnée (ADR 0023).
+    storageClass: standard
+  # Rôles propriétaires des deux bases logiques (cf. database.yaml). CNPG ne crée
+  # pas l'owner automatiquement → on les déclare ici (login, sans superuser).
+  # Mots de passe gérés par l'operator (Secrets dédiés) ; pas de creds en dur.
+  managed:
+    roles:
+      - name: dagster
+        login: true
+        ensure: present
+      - name: pgvector
+        login: true
+        ensure: present
+  # Sauvegardes/WAL archivés via le plugin Barman Cloud (TLS plugin<->operator par
+  # cert-manager). L'ObjectStore S3 est défini dans objectstore.yaml.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: pg-backup

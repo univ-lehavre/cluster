@@ -1,0 +1,31 @@
+# ObjectStore S3 pour les sauvegardes CNPG (étape 1.6, plugin Barman Cloud).
+#
+# Destination des sauvegardes/WAL. Endpoint et creds PARAMÉTRABLES :
+#   - Banc léger : SeaweedFS (http://seaweedfs.s3.svc.cluster.local:8333),
+#     creds du Secret pg-backup-s3 (cf. secret.example.yaml, valeurs de test).
+#   - Topologie bare-metal : RGW Ceph (http://rook-ceph-rgw-datalake.rook-ceph:80) + Secret non
+#     versionné (config locale, ADR 0023). Surcharger endpointURL + le Secret.
+#
+# Référencé par le Cluster (plugins[].parameters.barmanObjectName: pg-backup).
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: pg-backup
+  namespace: postgres
+spec:
+  configuration:
+    destinationPath: s3://cnpg-backups/
+    # PARAMÉTRABLE selon la topologie (cf. en-tête). SeaweedFS/RGW = path-style + http.
+    endpointURL: http://seaweedfs.s3.svc.cluster.local:8333
+    s3Credentials:
+      accessKeyId:
+        name: pg-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: pg-backup-s3
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
