@@ -100,11 +100,14 @@ jobs:
         working-directory: bootstrap
         run: |
           rc=0
+          # Le hosts.yaml réel n'est pas versionné (ADR 0023) ; en CI on utilise
+          # le modèle générique versionné comme inventaire.
+          inv=hosts.example.yaml
           for p in *.yaml; do
-            # hosts.yaml est un inventaire, pas un playbook → on le saute.
-            [ "$p" = "hosts.yaml" ] && continue
+            # Les inventaires (hosts*.yaml) ne sont pas des playbooks → on saute.
+            case "$p" in hosts.yaml | hosts.example.yaml) continue ;; esac
             echo "== syntax-check $p =="
-            ansible-playbook -i hosts.yaml --syntax-check "$p" || rc=1
+            ansible-playbook -i "$inv" --syntax-check "$p" || rc=1
           done
           exit $rc
 

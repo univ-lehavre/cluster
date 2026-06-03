@@ -12,7 +12,9 @@
 | `dirqual3` | 10.67.2.13 | worker                      |
 | `dirqual4` | 10.67.2.14 | worker                      |
 
-Rôles définis dans [`bootstrap/hosts.yaml`](../bootstrap/hosts.yaml).
+Rôles définis dans l'inventaire Ansible (modèle :
+[`bootstrap/hosts.example.yaml`](../bootstrap/hosts.example.yaml) ; le
+`hosts.yaml` réel n'est pas versionné — ADR 0023).
 
 ## Spécifications par nœud
 
