@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.2](https://github.com/univ-lehavre/cluster/compare/v2.17.1...v2.17.2) (2026-06-03)
+
+
+### Documentation
+
+* **architecture:** vues thématiques au-dessus des ADR (5 domaines) ([#111](https://github.com/univ-lehavre/cluster/issues/111)) ([36561b3](https://github.com/univ-lehavre/cluster/commit/36561b3ea4b949c8e6847095da1050fe99269d24))
+
 ## [2.17.1](https://github.com/univ-lehavre/cluster/compare/v2.17.0...v2.17.1) (2026-06-03)
 
 
