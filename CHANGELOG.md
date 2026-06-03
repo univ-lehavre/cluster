@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.4](https://github.com/univ-lehavre/cluster/compare/v2.17.3...v2.17.4) (2026-06-03)
+
+
+### Documentation
+
+* génériser IP et hostnames dans la prose infra (ADR 0023) ([#115](https://github.com/univ-lehavre/cluster/issues/115)) ([2dd8744](https://github.com/univ-lehavre/cluster/commit/2dd8744cbe8164408941c4d2617f68cb2425d641))
+
 ## [2.17.3](https://github.com/univ-lehavre/cluster/compare/v2.17.2...v2.17.3) (2026-06-03)
 
 
