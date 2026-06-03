@@ -57,7 +57,7 @@ Accepted (2026-06-01).
 **Coûts assumés.**
 
 - **SPOF control plane pendant son upgrade** : l'API est indisponible le temps
-  du `kubeadm upgrade apply` sur `dirqual1` (cluster mono-control-plane, cf.
+  du `kubeadm upgrade apply` sur `cp1` (cluster mono-control-plane, cf.
   [ADR 0002](0002-control-plane-unique-avec-endpoint.md)). Fenêtre courte,
   acceptée. Les workloads continuent de tourner (seul le plan de contrôle est
   momentanément indisponible).

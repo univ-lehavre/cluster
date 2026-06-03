@@ -64,8 +64,8 @@ l'ADR 0002 promet une procédure « testée sur le banc » qui ne l'est pas.
 
 - **Fichier** : `bootstrap/roles/etcd-backup/templates/etcd-snapshot.sh.j2:28`
 - **Constat** : snapshots écrits **uniquement** sur le control-plane lui-même.
-  Or le scénario qui les justifie (perte de `dirqual1`) est précisément celui où
-  le disque local devient inaccessible → perte simultanée d'etcd ET de ses
+  Or le scénario qui les justifie (perte de `cp1`) est précisément celui où le
+  disque local devient inaccessible → perte simultanée d'etcd ET de ses
   sauvegardes. _Ramené à mineur : SPOF assumé (ADR 0002), scénario corruption
   logique couvert, backups sur LV distinct ; le défaut est l'absence de copie
   off-site et de RPO documenté._

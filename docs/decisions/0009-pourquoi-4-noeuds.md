@@ -9,7 +9,7 @@ Apollo 2000 Gen10+ pouvant héberger 4 lames XL420.
 
 ## Décision
 
-**4 nœuds rigoureusement identiques** : `dirqual1-4` (10.67.2.11-14).
+**4 nœuds rigoureusement identiques** : `cp1`/`node1-3` (10.0.0.11-14).
 
 Topologie associée :
 

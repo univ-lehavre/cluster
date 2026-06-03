@@ -13,8 +13,8 @@ plutôt que HTTP sur 80.
 
 Le cluster :
 
-- est confiné au **réseau privé `10.67.2.0/22`** (port 10 GbE inter-nœuds, pas
-  de routage Internet) ;
+- est confiné au **réseau privé `10.0.0.0/22`** (port 10 GbE inter-nœuds, pas de
+  routage Internet) ;
 - a un seul administrateur, le tailnet Tailscale opérationnel pour l'accès
   distant est optionnel ;
 - héberge des données de recherche (article public, observation géoclimatique,
@@ -39,7 +39,7 @@ impose la gestion de clés (KMS, vault) et un overhead constant.
 
 La sécurité du transport est **déléguée au contrôle d'accès au réseau** :
 
-- intra-cluster : les flux restent confinés au `10.67.2.0/22` et au CIDR pods
+- intra-cluster : les flux restent confinés au `10.0.0.0/22` et au CIDR pods
   Cilium `10.244.0.0/16` ;
 - accès distant **optionnel** : tunnel Tailscale (chiffré bout-en-bout côté
   réseau) **si** l'operator est déployé ; sinon, `kubectl port-forward` depuis
@@ -59,7 +59,7 @@ Accepted (2026-05-28).
 
 **Coûts assumés.**
 
-- **Un attaquant qui passe sur le réseau cluster** (`10.67.2.0/22`) peut sniffer
+- **Un attaquant qui passe sur le réseau cluster** (`10.0.0.0/22`) peut sniffer
   tout le trafic Ceph et les credentials S3. La sécurité périmétrique du réseau
   privé est le seul rempart.
 - **Disques retirés du cluster** lisibles en clair (`ceph bluestore`). En cas de

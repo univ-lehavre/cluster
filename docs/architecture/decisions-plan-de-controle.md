@@ -12,7 +12,7 @@
 Le dimensionnement du cluster n'est pas neutre : il fixe le modèle de panne
 acceptable et conditionne la plupart des décisions de plan de contrôle. Le parc
 disponible est un châssis lame pouvant héberger 4 lames, ce qui mène à **4 nœuds
-rigoureusement identiques** (`cp1-4`, 10.67.2.11-14).
+rigoureusement identiques** (`cp1`/`node1-3`, 10.0.0.11-14).
 
 Pourquoi exactement 4 ?
 
@@ -51,7 +51,7 @@ Deux décisions de bootstrap rendent ce choix réversible plus tard sans tout
 casser :
 
 - `kubeadm init --control-plane-endpoint cluster-api:6443 --upload-certs` est
-  posé **dès le bootstrap initial**, et l'entrée `cluster-api → 10.67.2.11` est
+  posé **dès le bootstrap initial**, et l'entrée `cluster-api → 10.0.0.11` est
   propagée dans `/etc/hosts` des 4 nœuds. Les workers joignent donc déjà un
   **nom DNS stable**, pas une IP : passer à 3 control planes un jour n'imposera
   **pas** de réinstaller les workers.

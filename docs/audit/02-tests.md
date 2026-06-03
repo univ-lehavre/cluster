@@ -117,8 +117,8 @@ unitaire Ansible (`molecule`).
 
 - **Fichier** : `test/multi-node/Vagrantfile:11-17,111-119`,
   `test/RESULTS.md:9-13`
-- **Constat** : en-têtes décrivant encore `10.67.2.x` / `/dev/sd*` contredits
-  par le code (`192.168.67.x`, VirtIO `vd*`) ; un TODO résolu peut induire un
+- **Constat** : en-têtes décrivant encore `10.0.0.x` / `/dev/sd*` contredits par
+  le code (`192.168.67.x`, VirtIO `vd*`) ; un TODO résolu peut induire un
   opérateur à surcharger `CEPH_MIN_HDD=0` à tort.
 - **Recommandation** : aligner les commentaires sur la conf réelle.
 

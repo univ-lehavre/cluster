@@ -15,7 +15,7 @@ tracé :
 
 Le modèle de menace est rappelé par
 [ADR 0003](0003-pas-de-chiffrement-ceph-tailscale.md) : cluster **mono-tenant**
-de recherche, **réseau privé isolé** `10.67.2.0/22`, **mono-admin**, pas de
+de recherche, **réseau privé isolé** `10.0.0.0/22`, **mono-admin**, pas de
 données réglementées. L'ADR 0003 délègue explicitement la sécurité du transport
 au contrôle d'accès au réseau et **écarte le chiffrement Ceph** (in-transit
 msgr2 et at-rest LUKS) pour son coût CPU et la gestion de clés (KMS/Vault) qu'il
