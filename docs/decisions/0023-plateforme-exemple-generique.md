@@ -74,9 +74,27 @@ Quatre catégories sont concernées :
 2. **Noms de nœuds / hôtes** → génériques (`cp1`, `node1`…`node4`,
    `site-distant`).
 3. **Noms d'organisation / de sites** → « l'organisation » / `example-org`.
-4. **Marques de services tiers** (sources de données, backends, fournisseurs
-   matériel) → catégories génériques (« source de données ouverte », « backend
-   d'authentification », « serveur lame »).
+4. **Cas d'usage métier propres à un projet** : sources de données, services
+   applicatifs spécifiques, fournisseurs matériel d'une instance → catégories
+   génériques (« source de données ouverte », « backend d'authentification », «
+   serveur lame »).
+
+### 1bis. Distinction décisive : brique d'infra (à GARDER) vs identité (à génériser)
+
+Un **nom de logiciel ou de base de données qui _porte_ une décision technique se
+garde** — c'est une brique réutilisable que le dépôt **propose**, et l'occulter
+viderait la décision de sa substance. On garde donc les composants
+d'**infrastructure / plateforme** nommés : Ceph, Rook, MySQL, PostgreSQL,
+containerd, Cilium, cert-manager, Argo CD, etc. (« Rook-Ceph _plutôt que_
+Longhorn » n'a aucun sens si on masque Ceph et Longhorn).
+
+On **générise** en revanche ce qui relève de l'**identité d'une instance** ou du
+**cas d'usage métier d'un projet** : noms de PVC/buckets, hostnames, IP, nom de
+l'organisation **et** les sources de données / services applicatifs propres à un
+projet (un contributeur réutilise la _plateforme de stockage Ceph_, mais il
+n'ingère pas _votre_ source de données particulière). Règle mnémonique :
+**garder ce que le dépôt propose comme brique ; génériser ce qui n'a de sens que
+pour une instance.**
 
 ### 2. Prose : valeur d'exemple **cohérente**, pas formulation vague
 

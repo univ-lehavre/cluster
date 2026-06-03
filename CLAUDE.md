@@ -13,10 +13,18 @@ déploiement** (qui vivent dans une config locale non versionnée).
 À génériser, dans tout nouveau contenu :
 
 - **IP / plages réseau** prod → valeur d'exemple (réseau privé `10.0.0.0/22`).
-- **Noms de nœuds / hôtes** → `cp1`, `node1`…`node4`, `site-distant`.
+- **Noms de nœuds / hôtes / PVC / buckets** → `cp1`, `node1`…`node4`,
+  `site-distant`.
 - **Noms d'organisation / sites** → « l'organisation », `example-org`.
-- **Marques de services tiers** (sources de données, backends, fournisseurs
-  matériel) → catégories génériques.
+- **Cas d'usage métier propres à un projet** (sources de données / services
+  applicatifs spécifiques, fournisseur matériel d'une instance) → générique («
+  source de données ouverte », « backend d'auth », « serveur lame »).
+
+**À GARDER (ne PAS génériser)** : les logiciels/bases qui _portent_ une décision
+technique — briques d'infra/plateforme que le dépôt propose : Ceph, Rook, MySQL,
+PostgreSQL, containerd, Cilium, cert-manager, Argo CD… Mnémonique : **garder ce
+que le dépôt propose comme brique ; génériser ce qui n'a de sens que pour une
+instance** (ADR 0023).
 
 Précisions :
 
