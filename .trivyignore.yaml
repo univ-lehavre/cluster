@@ -60,3 +60,23 @@ misconfigurations:
     # {mutating,validating}webhookconfigurations — sa raison d'être.
     paths:
       - 'platform/cert-manager/cert-manager.yaml'
+
+  # ── Argo CD vendored (bundle officiel v3.4.3) — RBAC inhérent au GitOps ────
+  # Manifeste amont appliqué tel quel (épinglé par digest, ADR 0022). Le RBAC
+  # large EST la fonction d'Argo CD : réconcilier des manifestes arbitraires.
+  - id: KSV-0041 # « manage secrets » : applicationset/repo-server gèrent les
+    # creds de dépôts et les Secrets des apps réconciliées.
+    paths:
+      - 'platform/argocd/argocd.yaml'
+  - id: KSV-0044 # wildcard verb : l'application-controller applique tout type
+    # de ressource déclaré dans git (cœur du GitOps).
+    paths:
+      - 'platform/argocd/argocd.yaml'
+  - id: KSV-0046 # « manage all resources » : application-controller et server
+    # doivent piloter n'importe quelle ressource pour réconcilier l'état désiré.
+    paths:
+      - 'platform/argocd/argocd.yaml'
+  - id: KSV-0118 # securityContext par défaut sur les workloads du bundle amont
+    # (server/repo-server/dex/applicationset/controller) — non durci en amont.
+    paths:
+      - 'platform/argocd/argocd.yaml'

@@ -8,6 +8,7 @@ storage/ceph/toolbox.yaml
 
 # Vendored upstream cert-manager bundle (épinglé par digest, non reformaté)
 platform/cert-manager/cert-manager.yaml
+platform/argocd/argocd.yaml
 
 # Common
 node_modules/

@@ -27,3 +27,4 @@ ignore: |
   storage/ceph/cluster.yaml
   storage/ceph/toolbox.yaml
   platform/cert-manager/cert-manager.yaml
+  platform/argocd/argocd.yaml

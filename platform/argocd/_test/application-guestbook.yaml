@@ -1,0 +1,30 @@
+# Application de TEST (ADR 0022) — valide la réconciliation Healthy/Synced sur
+# le banc test/multi-node, PUIS À SUPPRIMER (ne pas laisser en prod).
+# Smoke-test zéro-dépendance : projet "default", repo public guestbook.
+#
+# Validation (humaine, sur banc) :
+#   kubectl -n argocd get application argocd-smoketest-guestbook \
+#     -o jsonpath='{.status.sync.status}/{.status.health.status}'
+#   attendu : Synced/Healthy
+# Nettoyage :
+#   kubectl -n argocd delete application argocd-smoketest-guestbook
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-smoketest-guestbook
+  namespace: argocd
+spec:
+  project: default # NE PAS rattacher le smoke-test au projet atlas
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd-smoketest
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -870,3 +870,36 @@ tolérant aux `exec` en échec). Re-joué sur le banc : la 2ᵉ exécution déte
 `True` et retire effectivement kube-proxy, sans régression DNS/ClusterIP. Le
 banc arm64 a par ailleurs confirmé que l'épinglage par **digest d'index
 multi-arch** (et non amd64) est correct (cf. #0e).
+
+## Run #11 (2026-06-03) — Argo CD GitOps (ADR 0022) sur banc
+
+Validation **réelle** d'Argo CD v3.4.3 sur le banc déjà en tout-Cilium (suite du
+Run #10). Images épinglées par digest, `server.insecure` posé.
+
+| Étape                                | Gate                                                       | Résultat                                  |
+| ------------------------------------ | ---------------------------------------------------------- | ----------------------------------------- |
+| `kubectl apply` du bundle            | CRDs + workloads créés                                     | ✅ (après fix #24 : `--server-side`)      |
+| Pull des 3 images (argocd/dex/redis) | pods Running                                               | ✅ (après fix #25 : digest redis = index) |
+| `server.insecure`                    | `argocd-server` logue `serving on port 8080 ... tls:false` | ✅                                        |
+| Application de test (guestbook)      | passe `Synced/Healthy`, pod `guestbook-ui` Running         | ✅                                        |
+
+### 🔴 #24 — `kubectl apply` client-side échoue sur la CRD `applicationsets`
+
+`The CustomResourceDefinition "applicationsets.argoproj.io" is invalid: metadata.annotations: Too long: may not be more than 262144 bytes`
+— la CRD ApplicationSet dépasse la limite de l'annotation
+`last-applied-configuration` de l'apply **client-side**. **Corrigé** : déployer
+avec `kubectl apply --server-side` (documenté dans le README de l'addon). Validé
+: bundle appliqué, 7 workloads créés.
+
+### 🔴 #25 — image `redis` épinglée sur un manifeste **amd64**, pas l'index multi-arch
+
+`exec /usr/local/bin/docker-entrypoint.sh: exec format error` sur le banc
+**arm64** → `CrashLoopBackOff` de `argocd-redis`. Cause : le digest résolu pour
+`public.ecr.aws/.../redis:8.2.3-alpine` était celui d'un **manifeste de
+plateforme unique** (`application/vnd.oci.image.manifest.v1+json`, amd64) et non
+celui de l'**index multi-arch** (`...image.index.v1+json`) — un fallback de
+résolution (`docker manifest inspect -v` → `Descriptor.digest`) avait renvoyé la
+mauvaise valeur. **Corrigé** : ré-épinglé sur le digest d'**index**
+(`sha256:08ad0b1d…`). Validé : redis Running sur arm64, app de test
+`Synced/Healthy`. Même piège que #0e — toujours vérifier `MediaType: …index…`
+avant d'épingler (les digests argocd et dex étaient bien des index).

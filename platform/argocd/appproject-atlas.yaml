@@ -1,0 +1,61 @@
+# AppProject "atlas" (ADR 0022) — cadre le périmètre GitOps APPLICATIF.
+#
+# Garde-fou multi-tenant : restreint, pour les Application rattachées, les
+# dépôts git source, les namespaces de destination, et les types de ressources
+# déployables. Ici on cadre STRICTEMENT l'applicatif : citation-* + dagster +
+# marquez, et le seul dépôt du cluster. Les addons d'INFRA restent gérés par
+# Ansible (frontière anti-bootstrap-circulaire, ADR 0022).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: atlas
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: >-
+    Périmètre GitOps applicatif Atlas : apps citation-* et composants stateful
+    de plateforme (Dagster, Marquez). Les addons d'infra restent gérés par
+    Ansible (ADR 0022 — pas de bootstrap circulaire).
+
+  # (a) Dépôts source autorisés : le dépôt git du cluster uniquement.
+  sourceRepos:
+    - https://github.com/univ-lehavre/cluster.git
+    # Si Argo CD enregistre le remote en SSH, ajouter aussi :
+    #   - git@github.com:univ-lehavre/cluster.git
+
+  # (b) Destinations : cluster local + les SEULS namespaces applicatifs.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: citation-ingest
+    - server: https://kubernetes.default.svc
+      namespace: citation-marts
+    - server: https://kubernetes.default.svc
+      namespace: citation-serving
+    - server: https://kubernetes.default.svc
+      namespace: citation-pwa
+    - server: https://kubernetes.default.svc
+      namespace: dagster
+    - server: https://kubernetes.default.svc
+      namespace: marquez
+
+  # (c1) Cluster-scoped : Namespace seul (les apps portent leur namespace.yaml).
+  # Pas de group:'*'/kind:'*' → pas de RBAC/CRD/ClusterRole déployables par les
+  # apps (l'infra et les CRDs = Ansible, ADR 0022).
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+  clusterResourceBlacklist:
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+
+  # (c2) Namespace-scoped : tout type namespacé (Deployment/Service/PVC/Secret/
+  # NetworkPolicy + CR applicatifs : Cluster CNPG, code-locations Dagster…).
+  # La frontière de sécurité est portée par destinations + clusterResource*.
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

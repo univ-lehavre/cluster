@@ -1,0 +1,20 @@
+# Bordure (Gateway/Envoy Cilium) -> argocd-server. Le datapath Gateway est
+# intégré à l'agent Cilium ; on ouvre le PORT DU POD (8080 ; le Service mappe
+# 80->8080) sans restreindre la source (idem allow-registry/allow-rstudio du
+# dépôt — resserrer la source est fragile avec la bordure Cilium).
+# NB : la NetworkPolicy cible le port du POD (8080), pas celui du Service (80).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-argocd-server
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080

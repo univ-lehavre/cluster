@@ -18,7 +18,8 @@
     "storage/ceph/cluster.yaml",
     "storage/ceph/dashboard.yaml",
     "storage/ceph/toolbox.yaml",
-    "platform/cert-manager/cert-manager.yaml"
+    "platform/cert-manager/cert-manager.yaml",
+    "platform/argocd/argocd.yaml"
   ],
   "absolute": false,
   "gitignore": true,

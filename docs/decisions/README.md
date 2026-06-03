@@ -36,3 +36,4 @@ Format léger inspiré de Michael Nygard :
 | 0019 | [Durcissement réseau Cilium (WireGuard + Hubble)](0019-durcissement-reseau-cilium.md)                | Accepted |
 | 0020 | [Exposition réseau tout-Cilium (LB-IPAM + L2 + Gateway API)](0020-exposition-reseau-tout-cilium.md)  | Accepted |
 | 0021 | [cert-manager + CA interne (TLS de bordure)](0021-cert-manager-ca-interne.md)                        | Accepted |
+| 0022 | [Argo CD (GitOps applicatif)](0022-argocd-gitops-applicatif.md)                                      | Accepted |

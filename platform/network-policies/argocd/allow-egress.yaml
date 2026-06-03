@@ -1,0 +1,51 @@
+# Egress sortants d'Argo CD sous default-deny.
+#  - repo-server -> git (SSH/HTTPS/git-daemon) + registry interne (ADR 0011) ;
+#  - tous les composants -> kube-apiserver:6443 (application-controller et
+#    server appliquent/observent les manifestes ; repo-server liste les CRDs).
+# Idiome du dépôt : ipBlock 0.0.0.0/0 restreint PAR PORTS (cf. allow-registry).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-reposerver-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443 # git over HTTPS
+        - protocol: TCP
+          port: 22 # git over SSH
+        - protocol: TCP
+          port: 80 # git HTTP clair + registry interne (Service :80)
+        - protocol: TCP
+          port: 9418 # protocole git natif (si utilisé)
+        - protocol: TCP
+          port: 5000 # registry interne (conteneur), si pull direct
+---
+# Controllers Argo CD -> kube-apiserver. podSelector {} : server,
+# application-controller, repo-server, applicationset peuvent appeler l'API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-egress
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 6443
