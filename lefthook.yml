@@ -79,6 +79,7 @@ pre-push:
           ':!:platform/loki/values.promtail.yaml' \
           ':!:platform/cloudnative-pg/operator.yaml' \
           ':!:platform/cloudnative-pg/plugin-barman-cloud.yaml' \
+          ':!:test/spikes/banc-lima-kubeadm/*.yaml' \
           ':!:test/*/inventory.yaml' \
           | xargs -0 -r kubeconform \
             -strict -ignore-missing-schemas \
