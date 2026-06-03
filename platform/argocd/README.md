@@ -54,11 +54,23 @@ en **`--insecure`** : le TLS vit uniquement en bordure (un double-TLS
 provoquerait une boucle de redirection). Le hostname `argocd.cluster.lan` est un
 **placeholder `.lan`** à fixer avec l'admin réseau.
 
-**CLI gRPC** : `argocd-server` multiplexe UI + API gRPC sur le même port. Pour
-le CLI derrière la bordure, utiliser
-**`argocd login argocd.cluster.lan --grpc-web`** (un seul `HTTPRoute` suffit
-alors pour l'UI et le CLI). Pour du gRPC natif, une `GRPCRoute` est possible
-(Gateway API v1.4.1) — non requis ici.
+**CLI gRPC — limitation connue (validée banc, finding #26).** L'**UI et l'API
+REST** passent par le `HTTPRoute` sans souci (HTTPS via le Gateway, cert CA
+interne). En revanche **`argocd login --grpc-web` NE passe PAS** par le Gateway
+Cilium : l'Envoy du Gateway dé-encapsule le gRPC-Web en gRPC natif (h2c) que le
+backend `argocd-server:80` (HTTP/1.1) ne reçoit pas → `404`. Faire marcher le
+CLI via le Gateway exige un montage `GRPCRoute` +
+`appProtocol: kubernetes.io/h2c` sur un **hostname dédié** + le flag opérateur
+`gatewayAPI.enableAppProtocol=true` (GEP-1911, opt-in, absent de `cni.sh`) — non
+mis en place, à instruire.
+
+**Repli CLI (fiable, court-circuite le Gateway)** :
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:80
+PW=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
+argocd login localhost:8080 --username admin --password "$PW" --plaintext
+```
 
 ## Faire confiance au cert
 
@@ -86,6 +98,6 @@ kubectl -n argocd delete application argocd-smoketest-guestbook  # nettoyage
 - **Argo CD ≠ self-managed**, ne gère pas l'infra (frontière 0022).
 - **AppProject restreint** : destinations citation-\*/dagster/marquez seulement.
 - **Images à mirrorer** (cluster sans Internet, 0011).
-- **gRPC via Gateway** : `--grpc-web` recommandé (à valider banc), repli
-  port-forward si besoin.
+- **gRPC via Gateway** : ne fonctionne PAS en l'état (finding #26) — l'UI/REST
+  passent, le CLI gRPC-Web non. Repli validé : port-forward (ci-dessus).
 - **Validation banc obligatoire avant prod** (Synced/Healthy, UI HTTPS, gRPC).
