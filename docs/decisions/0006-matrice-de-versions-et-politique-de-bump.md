@@ -30,6 +30,46 @@ par Cilium 1.19 et Rook 1.19, tous deux testés jusqu'à K8s 1.34).
 Plafond commun K8s = **1.34** (limite de Cilium 1.19 et Rook 1.19 testés). Ceph
 Squid v19 sort d'EOL en septembre 2026 → Tentacle pour une install neuve.
 
+### Observabilité & DataOps (ajout juin 2026)
+
+Composants ajoutés avec l'observabilité (ADR 0016 palier 2) et le socle DataOps
+(CloudNativePG). Toutes les images sont épinglées par **digest d'index
+multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
+
+| Composant             | Version cible                                  | Fichier piloté                                                                                                |
+| --------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| kube-prometheus-stack | chart **86.1.0** (operator v0.91.0)            | [`platform/kube-prometheus-stack/`](../../platform/kube-prometheus-stack/) (helm template figé)               |
+| Loki                  | chart **7.0.0** (app 3.6.7)                    | [`platform/loki/loki.yaml`](../../platform/loki/loki.yaml)                                                    |
+| Promtail              | chart **6.17.1** (app 3.5.1, déprécié → Alloy) | [`platform/loki/promtail.yaml`](../../platform/loki/promtail.yaml)                                            |
+| Mailpit               | **v1.30.1**                                    | [`platform/mailpit/mailpit.yaml`](../../platform/mailpit/mailpit.yaml)                                        |
+| CloudNativePG         | operator **1.29.1**                            | [`platform/cloudnative-pg/operator.yaml`](../../platform/cloudnative-pg/operator.yaml)                        |
+| Barman Cloud Plugin   | **v0.12.0**                                    | [`platform/cloudnative-pg/plugin-barman-cloud.yaml`](../../platform/cloudnative-pg/plugin-barman-cloud.yaml)  |
+| PostgreSQL (operand)  | **18** (`18-minimal-trixie`)                   | [`platform/cloudnative-pg/cluster.yaml`](../../platform/cloudnative-pg/cluster.yaml)                          |
+| pgvector              | **0.8.2** (`0.8.2-18-trixie`)                  | [`platform/cloudnative-pg/cluster.yaml`](../../platform/cloudnative-pg/cluster.yaml) (image volume extension) |
+| SeaweedFS             | **4.31**                                       | banc léger uniquement (objectstore S3 de test)                                                                |
+| aws-cli               | **2.31.21**                                    | Jobs d'init de buckets S3 (`init-buckets.yaml`)                                                               |
+
+> **CloudNativePG 1.29 + Image Volume Extensions** (la voie pgvector sans image
+> custom) reposent sur la feature Kubernetes **`ImageVolume`** : alpha en K8s
+> 1.31 (désactivée), beta/activée par défaut **dès 1.33** → fonctionne
+> nativement en **1.34**. Cohérence de version impérative : un banc qui dérive
+> sous 1.33 ne peut pas valider pgvector.
+
+### Outillage des bancs de test
+
+Les bancs doivent cibler la **même version Kubernetes (1.34)** que le bootstrap
+— sinon dérive silencieuse (cf. encadré ImageVolume ci-dessus).
+
+| Banc                           | Installeur K8s                                      | Version  |
+| ------------------------------ | --------------------------------------------------- | -------- |
+| `test/multi-node` (Vagrant)    | kubeadm via `bootstrap/` (`pkgs.k8s.io/v1.34`)      | **1.34** |
+| banc léger (conteneurs Docker) | kubeadm dans conteneurs privilégiés (remplace kind) | **1.34** |
+
+> **kind est abandonné** : son image de node figeait K8s en 1.31 (divergent de
+> la matrice), ce qui a bloqué pgvector. Le banc léger est rebâti sur
+> **conteneurs Docker privilégiés + vrai kubeadm v1.34** (même chemin que le
+> bootstrap).
+
 ### Politique de bump
 
 1. **Pas de bump silencieux**. Toute montée de version se fait dans une branche
@@ -41,14 +81,15 @@ Squid v19 sort d'EOL en septembre 2026 → Tentacle pour une install neuve.
 3. **Pinner partout** : tags d'image avec version explicite (jamais `:latest` ni
    `:N` flottant ; idéalement avec digest pour les composants critiques).
 4. **Valider sur le banc multi-nœuds**
-   ([`test/multi-node/`](../../test/multi-node/)) avant la prod : déployer la
-   nouvelle version, vérifier `state.sh` toutes couches vertes, jouer un cycle
-   bootstrap → rollback → re-bootstrap.
+   ([`test/multi-node/`](../../test/multi-node/)) avant tout déploiement sur une
+   topologie cible : déployer la nouvelle version, vérifier `state.sh` toutes
+   couches vertes, jouer un cycle bootstrap → rollback → re-bootstrap.
 5. **Mettre à jour cette ADR** (avec la nouvelle matrice + date).
 
 ## Statut
 
-Accepted (2026-05-28).
+Accepted (2026-05-28). **Matrice étendue le 2026-06-03** : observabilité,
+DataOps et outillage des bancs (abandon de kind).
 
 ## Conséquences
 

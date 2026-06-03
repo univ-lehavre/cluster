@@ -43,3 +43,4 @@ Format léger inspiré de Michael Nygard :
 | 0021 | [cert-manager + CA interne (TLS de bordure)](0021-cert-manager-ca-interne.md)                           | Accepted |
 | 0022 | [Argo CD (GitOps applicatif)](0022-argocd-gitops-applicatif.md)                                         | Accepted |
 | 0023 | [Dépôt multi-topologies (plusieurs infra déclarées, une activée)](0023-plateforme-exemple-generique.md) | Accepted |
+| 0024 | [PostgreSQL managé via CloudNativePG (+ pgvector)](0024-postgres-manage-cloudnative-pg.md)              | Accepted |
