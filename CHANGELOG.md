@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.3](https://github.com/univ-lehavre/cluster/compare/v2.17.2...v2.17.3) (2026-06-03)
+
+
+### Refactor
+
+* **bootstrap:** défauts génériques pour hostnames et CIDR (ADR 0023) ([#114](https://github.com/univ-lehavre/cluster/issues/114)) ([824d5c9](https://github.com/univ-lehavre/cluster/commit/824d5c99e7bdc23a87577048bf354b0288024875))
+
 ## [2.17.2](https://github.com/univ-lehavre/cluster/compare/v2.17.1...v2.17.2) (2026-06-03)
 
 
