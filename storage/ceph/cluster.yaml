@@ -83,11 +83,14 @@ spec:
   # enable prometheus alerting for cluster
   monitoring:
     # requires Prometheus to be pre-installed
-    # Reste à `false` volontairement (audit P5 #17 / ADR 0016) : l'activer sans
-    # opérateur Prometheus ferait créer des PrometheusRule/ServiceMonitor dont
-    # les CRDs sont absents → erreurs. À passer `true` au palier 2 (déploiement
-    # kube-prometheus). L'exporter Ceph est déjà actif (metricsDisabled: false).
-    enabled: false
+    # Activé au PALIER 2 (ADR 0016) : les CRDs monitoring.coreos.com sont
+    # désormais posées par platform/kube-prometheus-stack. Rook crée alors
+    # automatiquement le ServiceMonitor du mgr + les PrometheusRule Ceph (OSD
+    # down, near-full, perte de quorum mon), scrapés par Prometheus
+    # (serviceMonitorSelector vide). ⚠️ Déployer kube-prometheus-stack AVANT de
+    # passer ce flag à true (sinon ServiceMonitor/PrometheusRule orphelins).
+    # L'exporter Ceph est déjà actif (metricsDisabled: false).
+    enabled: true
     # Whether to disable the metrics reported by Ceph. If false, the prometheus mgr module and Ceph exporter are enabled.
     # If true, the prometheus mgr module and Ceph exporter are both disabled. Default is false.
     metricsDisabled: false
