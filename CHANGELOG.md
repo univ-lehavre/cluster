@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.0](https://github.com/univ-lehavre/cluster/compare/v2.16.2...v2.17.0) (2026-06-03)
+
+
+### Features
+
+* **docs:** acter la règle dépôt multi-topologies (ADR 0023) ([#107](https://github.com/univ-lehavre/cluster/issues/107)) ([91d9024](https://github.com/univ-lehavre/cluster/commit/91d902437d0ee08fcf14754771f4fcdd294737cd))
+
 ## [2.16.2](https://github.com/univ-lehavre/cluster/compare/v2.16.1...v2.16.2) (2026-06-03)
 
 
