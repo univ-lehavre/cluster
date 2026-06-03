@@ -903,3 +903,23 @@ mauvaise valeur. **Corrigé** : ré-épinglé sur le digest d'**index**
 (`sha256:08ad0b1d…`). Validé : redis Running sur arm64, app de test
 `Synced/Healthy`. Même piège que #0e — toujours vérifier `MediaType: …index…`
 avant d'épingler (les digests argocd et dex étaient bien des index).
+
+## Run #12 (2026-06-03) — cert-manager + CA interne (ADR 0021) sur banc
+
+Validation de la chaîne TLS de bordure sur le banc déjà en tout-Cilium (suite
+des Runs #10/#11). cert-manager v1.20.2, chaîne CA interne, gateway-shim.
+**Campagne propre : aucun finding** (les digests cert-manager étaient bien des
+index multi-arch, contrairement à redis #25).
+
+| Étape                              | Gate                                                                                                                                                                        | Résultat |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Déploiement cert-manager           | 3 pods Running sur **arm64** (controller/webhook/cainjector)                                                                                                                | ✅       |
+| Chaîne CA interne (`issuers.yaml`) | `selfsigned-bootstrap` + `internal-ca` `Ready=True` ; `root-ca` émise → `root-ca-secret` (kubernetes.io/tls)                                                                | ✅       |
+| gateway-shim (Gateway annoté)      | un Gateway annoté `cert-manager.io/cluster-issuer: internal-ca` fait créer **automatiquement** le `Certificate` + remplir le Secret TLS (aucun Certificate écrit à la main) | ✅       |
+| Cert émis : émetteur + SAN         | `issuer=CN=cluster-dataops Internal Root CA` ; `SAN DNS:shimtest.cluster.lan` (hostname du listener propagé)                                                                | ✅       |
+| Listener HTTPS du Gateway          | `PROGRAMMED=True`, IP `192.168.67.241` du pool LB-IPAM                                                                                                                      | ✅       |
+
+Conclusion : la chaîne complète de l'ADR 0021 (selfSigned → root CA → issuer CA
+→ gateway-shim → cert de bordure) fonctionne de bout en bout. cert-manager est
+laissé déployé sur le banc (chaîne CA intacte) pour la suite (exposition Argo CD
+via Gateway + cert, gRPC).
