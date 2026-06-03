@@ -32,11 +32,12 @@
   tags:
     - configuration
   block:
-    # Réseau du cluster : tout l'inter-nœuds y est autorisé. Défaut = plage
-    # de prod 10.67.2.0/22 (cf. platform/hardware.md).
+    # Réseau du cluster : tout l'inter-nœuds y est autorisé. Défaut d'EXEMPLE
+    # 10.0.0.0/22 (ADR 0023) ; la plage réelle d'un déploiement passe par la
+    # variable d'environnement CLUSTER_CIDR (config locale non versionnée).
     - name: Définir la plage du réseau cluster
       ansible.builtin.set_fact:
-        network_ufw_cluster_cidr: "{{ lookup('ansible.builtin.env', 'CLUSTER_CIDR') | default('10.67.2.0/22', true) }}"
+        network_ufw_cluster_cidr: "{{ lookup('ansible.builtin.env', 'CLUSTER_CIDR') | default('10.0.0.0/22', true) }}"
 
     # Source autorisée pour SSH. Défaut = réseau cluster (pas d'Internet,
     # cf. ADR 0003). Surchargeable via SSH_ADMIN_CIDR (ex. Tailscale 100.64.0.0/10).
