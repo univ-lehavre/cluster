@@ -923,3 +923,34 @@ Conclusion : la chaîne complète de l'ADR 0021 (selfSigned → root CA → issu
 → gateway-shim → cert de bordure) fonctionne de bout en bout. cert-manager est
 laissé déployé sur le banc (chaîne CA intacte) pour la suite (exposition Argo CD
 via Gateway + cert, gRPC).
+
+## Run #13 (2026-06-03) — exposition Argo CD via Gateway + cert (ADR 0020/0021/0022)
+
+Exposition de l'UI Argo CD via le Gateway Cilium + cert-manager sur le banc
+(suite des Runs #10-#12). UI/REST validés ; gRPC-Web du CLI = finding ouvert.
+
+| Étape                                  | Gate                                                                                                                            | Résultat       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| Gateway + HTTPRoute Argo CD            | Gateway `argocd` `PROGRAMMED=True` (IP `192.168.67.241`), HTTPRoute `Accepted=True`                                             | ✅             |
+| Cert de bordure (gateway-shim)         | `argocd-server-tls` émis automatiquement par `internal-ca`                                                                      | ✅             |
+| **UI Argo CD en HTTPS via le Gateway** | depuis l'hôte : `curl https://argocd.cluster.lan/` → **HTTP 200**, **TLS vérifié contre la CA interne** (`ssl_verify_result=0`) | ✅             |
+| API REST via le Gateway                | `GET /api/version` → `{"Version":"v3.4.3"}` (HTTP 200)                                                                          | ✅             |
+| CLI `argocd login --grpc-web`          | échoue : 404 sur `/session.SessionService/Create`                                                                               | ❌ finding #26 |
+
+### 🟠 #26 — gRPC-Web du CLI Argo CD ne passe pas le HTTPRoute Cilium (UI/REST OK)
+
+L'UI et l'API REST passent parfaitement par le Gateway (HTTP 200, TLS valide CA
+interne). Mais `argocd login --grpc-web` reçoit un **404** sur le path gRPC
+(`POST /session.SessionService/Create`) — comportement identique à un path
+inexistant, donc Envoy/argocd-server ne route pas le gRPC-Web via le `HTTPRoute`
+simple (PathPrefix `/` → argocd-server:80). Diagnostic : un `HTTPRoute` ne
+suffit pas pour le gRPC ; la CRD `GRPCRoute` est présente (piste de correctif),
+et/ou il faut indiquer au backend de parler HTTP/2 (`appProtocol`). **Conforme à
+ce que l'ADR 0022 signalait** (« gRPC via le Gateway à valider »). Correctif en
+cours d'instruction ; **repli fiable** documenté :
+`kubectl port-forward svc/argocd-server` +
+`argocd login localhost --plaintext --grpc-web`.
+
+> **Bilan exposition** : la chaîne d'infrastructure (eBPF → LB-IPAM → L2 →
+> Gateway → TLS de bordure) est validée de bout en bout, et l'**UI Argo CD est
+> pleinement accessible en HTTPS**. Seul le **CLI gRPC-Web** reste à finaliser.
