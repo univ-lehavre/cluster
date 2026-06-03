@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.5](https://github.com/univ-lehavre/cluster/compare/v2.17.4...v2.17.5) (2026-06-03)
+
+
+### Documentation
+
+* **adr:** génériser IP/hostnames et sources métier dans les décisions (ADR 0023) ([#116](https://github.com/univ-lehavre/cluster/issues/116)) ([9eca68a](https://github.com/univ-lehavre/cluster/commit/9eca68a4481812c6b5832e1dda8d3b7044efe9c9))
+
 ## [2.17.4](https://github.com/univ-lehavre/cluster/compare/v2.17.3...v2.17.4) (2026-06-03)
 
 
