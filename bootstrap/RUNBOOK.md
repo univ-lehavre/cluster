@@ -338,8 +338,17 @@ par le rôle Ansible `k8s-pre-install` du présent dépôt (`checks.yaml`).
 
 ### CNI
 
-Modifiez le fichier `hosts.yaml` pour y indiquer les adresses IP des machines du
-cluster. Par exemple :
+L'inventaire réel (`bootstrap/hosts.yaml`) n'est **pas versionné** : c'est une
+spécificité de déploiement
+([ADR 0023](../docs/decisions/0023-plateforme-exemple-generique.md)). Copiez le
+modèle générique versionné puis renseignez vos nœuds :
+
+```bash
+cp bootstrap/hosts.example.yaml bootstrap/hosts.yaml
+# puis éditer bootstrap/hosts.yaml avec les noms/IP réels
+```
+
+Le modèle ([`hosts.example.yaml`](hosts.example.yaml)) a la forme :
 
 ```yaml
 cloud:
@@ -349,12 +358,12 @@ cloud:
 
 control:
   hosts:
-    control1:
+    cp1:
 
 workers:
   hosts:
-    worker1:
-    worker2:
+    node1:
+    node2:
 ```
 
 Ensuite, exécutez les playbooks Ansible pour installer Kubernetes.

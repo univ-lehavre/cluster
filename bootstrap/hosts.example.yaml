@@ -1,0 +1,37 @@
+# code: language=ansible
+#
+# Inventaire Ansible — MODÈLE d'exemple générique (ADR 0023).
+#
+# Copier en `hosts.yaml` (non versionné) et remplacer par les noms/IP réels :
+#   cp bootstrap/hosts.example.yaml bootstrap/hosts.yaml
+#
+# `hosts.yaml` est gitignoré : il porte les spécificités d'un déploiement
+# particulier. Ce `.example` reste versionné avec des valeurs GÉNÉRIQUES.
+#
+# Les noms ci-dessous (cp1, node1…) sont des exemples ; `ansible_host` est
+# optionnel (utile quand le nom n'est pas résolvable). Sur le banc multi-node,
+# c'est `test/multi-node/inventory.yaml` (gitignoré) qui fait foi.
+
+cloud:
+  children:
+    control:
+    workers:
+
+# Astuce : ajouter `ansible_host: <ip>` sous un nœud si son nom n'est pas
+# résolvable (ex. cp1 → 10.0.0.11, node1 → 10.0.0.12, etc.).
+
+control:
+  hosts:
+    cp1:
+
+workers:
+  hosts:
+    node1:
+    node2:
+    node3:
+
+# Nœud(s) sur un site distant (exemple) — décommenter au besoin :
+# vm:
+#   hosts:
+#     site-distant:
+#       ansible_host: 10.1.0.10

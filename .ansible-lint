@@ -26,8 +26,10 @@ mock_roles:
   - audit-log
 
 # Ansible playbooks live under bootstrap/ — these files are not Ansible content.
+# `hosts.yaml` (réel, gitignoré) et `hosts.example.yaml` (modèle générique,
+# ADR 0023) sont des inventaires, pas des playbooks.
 kinds:
-  - inventory: 'bootstrap/hosts.yaml'
+  - inventory: 'bootstrap/hosts*.yaml'
   - playbook: 'bootstrap/*.yaml'
   - tasks: 'bootstrap/roles/*/tasks/*.yaml'
   - handlers: 'bootstrap/roles/*/handlers/*.yaml'

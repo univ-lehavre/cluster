@@ -20,6 +20,11 @@ node_modules/
 !.env.example
 secrets/
 
+# Config locale d'un déploiement réel — NON versionnée (ADR 0023 : le dépôt
+# décrit une plateforme d'EXEMPLE ; les spécificités vivent ici). Les modèles
+# génériques `*.example.yaml` restent versionnés.
+bootstrap/hosts.yaml
+
 # Snapshots etcd rapatriés hors-nœud (etcd-fetch.yaml) — contiennent TOUS les
 # Secrets du cluster, ne JAMAIS versionner.
 etcd-snapshots/

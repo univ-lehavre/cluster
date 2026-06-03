@@ -9,6 +9,30 @@ Outillage géré par [Lefthook](https://lefthook.dev/) (hooks git),
 suivent la convention
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## Règle fondatrice — dépôt multi-topologies, valeurs génériques
+
+Ce dépôt est un **catalogue de topologies d'infrastructure** (mono-nœud,
+multi-nœuds, bare-metal hyperconvergé…) : **plusieurs infra déclarées, une seule
+activée** par déploiement — à la manière de Pulumi/Terraform — pas
+l'infrastructure réelle d'un contributeur
+([ADR 0023](docs/decisions/0023-plateforme-exemple-generique.md)). **Tout ce qui
+est versionné — code, manifestes, scripts ET prose (docs, ADR, RUNBOOK) —
+emploie des valeurs d'exemple génériques**, jamais les valeurs réelles d'un
+déploiement (qui vivent dans une config locale non versionnée).
+
+- **À génériser** : IP / plages réseau (→ p. ex. `10.0.0.0/22`), noms de nœuds /
+  hôtes (→ `cp1`, `node1`…), noms d'organisation / sites (→ « l'organisation »),
+  marques de services tiers (→ « source de données ouverte », « backend d'auth
+  »…).
+- **Valeur d'exemple _concrète_**, pas tournure vague (un `/22` ≠ un `/24`) ; le
+  contexte chiffré qui fonde une décision est conservé.
+- **Spécificités réelles** = fichier de config **local non versionné**
+  (gitignoré) surchargeant un **`*.example` versionné** — voir la convention
+  `.env` / `.env.example` et les inventaires de banc.
+- **Exceptions** : le banc Vagrant (`192.168.67.0/24`) reste tel quel (exemple
+  fonctionnel public) ; l'historique de validation banc (`test/RESULTS.md`)
+  n'est **pas** réécrit (honnêteté des Runs).
+
 ## Installation des outils
 
 ```bash
