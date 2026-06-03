@@ -1,0 +1,143 @@
+# Values de rendu — kube-prometheus-stack 86.1.0 (palier 2, ADR 0016).
+#
+# Ce fichier sert à REGÉNÉRER kube-prometheus-stack.yaml de façon reproductible :
+#   helm template kube-prometheus-stack \
+#     prometheus-community/kube-prometheus-stack --version 86.1.0 \
+#     --namespace monitoring --include-crds -f values.bench.yaml > kube-prometheus-stack.yaml
+# (puis séparer les CRDs dans crds.yaml et injecter les digests d'index — cf. README).
+#
+# Adaptations vs défaut du chart (toutes justifiées) :
+#  - empreinte BORNÉE (requests/limits) : cluster hyperconvergé (ADR 0009) ;
+#  - PVC sur rook-ceph-block-replicated (×3, ADR 0001) ;
+#  - webhook operator via cert-manager (ADR 0021) → PAS de job certgen
+#    (l'image ghcr.io/jkroepke/kube-webhook-certgen est inaccessible + cohérence) ;
+#  - serviceMonitorSelector vide → scrape TOUS les ServiceMonitor (dont Ceph) ;
+#  - Alertmanager → Mailpit (puits SMTP banc) ; smarthost paramétrable (prod = Mailgun) ;
+#  - rétention Prometheus 15 j ; Grafana datasources Prometheus + Loki.
+
+# ── Operator : webhook via cert-manager (pas de certgen) ─────────────────────
+prometheusOperator:
+  admissionWebhooks:
+    certManager:
+      enabled: true # utilise cert-manager (ADR 0021) au lieu du job certgen
+    patch:
+      enabled: false # désactive le job jkroepke/kube-webhook-certgen (ghcr inaccessible)
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# ── Prometheus : rétention bornée + PVC RBD + scrape large ───────────────────
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: '9GB' # marge sous le PVC 10Gi
+    # Scrape TOUS les ServiceMonitor/PrometheusRule, y compris ceux créés par Rook
+    # (sinon le ServiceMonitor mgr Ceph serait ignoré — invariant LabelSelector).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: rook-ceph-block-replicated
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+
+# ── Alertmanager : route vers Mailpit (banc) / Mailgun (prod, surcharge) ─────
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: rook-ceph-block-replicated
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+  config:
+    global:
+      # Smarthost PARAMÉTRABLE. Défaut générique = Mailpit (puits banc).
+      # Prod : surcharger par un service type Mailgun (smtp.mailgun.org:587 + auth
+      # via Secret), config locale non versionnée (ADR 0023). Jamais de creds en dur.
+      smtp_smarthost: 'mailpit.mail.svc.cluster.local:1025'
+      smtp_from: 'alertmanager@example.org'
+      smtp_require_tls: false # Mailpit n'exige pas TLS ; Mailgun l'activera en prod
+    route:
+      group_by:
+        - alertname
+        - namespace
+      receiver: 'mail'
+      routes:
+        - matchers:
+            - 'severity=~"warning|critical"'
+          receiver: 'mail'
+    receivers:
+      - name: 'mail'
+        email_configs:
+          - to: 'alerts@example.org' # destinataire générique (ADR 0023)
+            send_resolved: true
+
+# ── Grafana : PVC RBD + datasource Loki ajoutée ──────────────────────────────
+grafana:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  persistence:
+    enabled: true
+    storageClassName: rook-ceph-block-replicated
+    size: 2Gi
+  # Service en HTTP clair port 80 → TLS terminé au Gateway (gateway.yaml).
+  service:
+    port: 80
+    targetPort: 3000
+  # Datasource Loki (en plus de Prometheus, auto-injectée par le chart).
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc.cluster.local:3100
+      access: proxy
+
+# ── Exporters : node-exporter (system-critical, pas de limits) ───────────────
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# ── kubelet TLS : toléré comme metrics-server sur le banc (ADR 0003) ─────────
+kubelet:
+  serviceMonitor:
+    https: true
+    insecureSkipVerify: true

@@ -1,0 +1,12 @@
+# Values de rendu — Promtail 6.17.1 (agent de collecte de logs → Loki).
+# Régénérer promtail.yaml : helm template promtail grafana/promtail --version 6.17.1 \
+#   --namespace monitoring -f values.promtail.yaml > promtail.yaml (puis digests).
+config:
+  clients:
+    - url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

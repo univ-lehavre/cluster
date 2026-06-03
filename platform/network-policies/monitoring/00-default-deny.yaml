@@ -1,0 +1,19 @@
+# Nie tout le trafic (ingress + egress) pour TOUS les pods du namespace
+# `monitoring`. Les flux légitimes sont ré-ouverts par les policies `allow-*`
+# (ADR 0019 default-deny). NetworkPolicy est additif : sans ce socle, les `allow`
+# n'ont aucun effet.
+#
+# ATTENTION monitoring : Prometheus scrape les /metrics dans de NOMBREUX
+# namespaces (egress large, cf. allow-egress) ; les cibles qui ont elles-mêmes un
+# default-deny doivent autoriser l'ingress depuis Prometheus (rook-ceph n'en a pas
+# aujourd'hui → scrape Ceph OK).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

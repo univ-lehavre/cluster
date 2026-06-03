@@ -10,6 +10,12 @@ storage/ceph/toolbox.yaml
 platform/cert-manager/cert-manager.yaml
 platform/argocd/argocd.yaml
 
+# Vendored upstream monitoring (helm template figé, épinglé par digest — palier 2)
+platform/kube-prometheus-stack/crds.yaml
+platform/kube-prometheus-stack/kube-prometheus-stack.yaml
+platform/loki/loki.yaml
+platform/loki/promtail.yaml
+
 # Common
 node_modules/
 package-lock.json

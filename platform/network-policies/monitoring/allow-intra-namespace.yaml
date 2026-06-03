@@ -1,0 +1,24 @@
+# Trafic INTRA-namespace monitoring : l'operator joint l'API de Prometheus/
+# Alertmanager (reload, statut) ; Prometheus scrape les composants du stack ;
+# le webhook operator est joignable. On autorise l'ingress et l'egress entre pods
+# du même namespace `monitoring` (flux est-ouest interne au stack).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring

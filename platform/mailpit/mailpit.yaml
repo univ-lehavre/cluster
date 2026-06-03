@@ -1,0 +1,88 @@
+# Mailpit — puits SMTP + UI web, destination mail de TEST de la plateforme.
+#
+# Rôle : capturer les mails d'alerte (Alertmanager du monitoring, et à terme la
+# couche hardening hôte) pour VALIDER la chaîne d'alerting de bout en bout sur le
+# banc, sans relais externe. En prod, le smarthost est surchargé vers un service
+# type Mailgun (config locale non versionnée — ADR 0023). Mailpit ne relaie PAS.
+#
+# Addon AUTONOME (namespace `mail`) — transverse : sert le monitoring ET, plus
+# tard, le hardening hôte (destination mail unifiée).
+# Image épinglée par digest d'index multi-arch (ADR 0006), arm64 vérifié.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mail
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+  namespace: mail
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mailpit
+  template:
+    metadata:
+      labels:
+        app: mailpit
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mailpit
+          image: docker.io/axllent/mailpit:v1.30.1@sha256:3bd7c2f2696deb35a4780d152b404dceec99cb041b942c0877b3b22384714f85
+          ports:
+            - name: smtp
+              containerPort: 1025
+            - name: http
+              containerPort: 8025
+          env:
+            # Base en /tmp (emptyDir) ; puits de test jetable, pas de persistance.
+            - name: MP_SMTP_AUTH_ALLOW_INSECURE
+              value: 'true'
+            - name: MP_DATABASE
+              value: '/tmp/mailpit.db'
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # rootfs RO ; /tmp writable via emptyDir
+            capabilities:
+              drop:
+                - 'ALL'
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+  namespace: mail
+spec:
+  selector:
+    app: mailpit
+  ports:
+    - name: smtp
+      port: 1025
+      targetPort: 1025
+    - name: http
+      port: 80
+      targetPort: 8025 # UI 8025 → Service 80 (HTTP clair, TLS au Gateway)

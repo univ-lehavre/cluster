@@ -19,7 +19,11 @@
     "storage/ceph/dashboard.yaml",
     "storage/ceph/toolbox.yaml",
     "platform/cert-manager/cert-manager.yaml",
-    "platform/argocd/argocd.yaml"
+    "platform/argocd/argocd.yaml",
+    "platform/kube-prometheus-stack/crds.yaml",
+    "platform/kube-prometheus-stack/kube-prometheus-stack.yaml",
+    "platform/loki/loki.yaml",
+    "platform/loki/promtail.yaml"
   ],
   "absolute": false,
   "gitignore": true,

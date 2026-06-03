@@ -80,3 +80,44 @@ misconfigurations:
     # (server/repo-server/dex/applicationset/controller) — non durci en amont.
     paths:
       - 'platform/argocd/argocd.yaml'
+
+  # ── kube-prometheus-stack vendored (chart 86.1.0) — posture inhérente ─────
+  # Helm template figé (épinglé par digest, ADR 0006/0016 palier 2). Ces findings
+  # sont la FONCTION même des composants de monitoring système, pas un oubli.
+  - id: KSV-0009 # hostNetwork : node-exporter expose les métriques de l'hôte —
+    # il DOIT voir le réseau du nœud (interfaces, conntrack). Sa raison d'être.
+    paths:
+      - 'platform/kube-prometheus-stack/kube-prometheus-stack.yaml'
+  - id: KSV-0010 # hostPID : node-exporter lit /proc de l'hôte (processus, charge)
+    # — accès au PID namespace du nœud requis pour les métriques système.
+    paths:
+      - 'platform/kube-prometheus-stack/kube-prometheus-stack.yaml'
+  - id: KSV-0014 # rootfs read-only : node-exporter/operator du bundle amont non
+    # durcis en amont ; durcir casserait le montage des collecteurs hôte.
+    paths:
+      - 'platform/kube-prometheus-stack/kube-prometheus-stack.yaml'
+  - id: KSV-0041 # « manage secrets » : l'operator gère les Secrets de config
+    # générés (alertmanager, web-config, tls-assets) — cœur du Prometheus Operator.
+    paths:
+      - 'platform/kube-prometheus-stack/kube-prometheus-stack.yaml'
+  - id: KSV-0045 # wildcard verb : RBAC de l'operator pour réconcilier les CRs
+    # monitoring.coreos.com (Prometheus/Alertmanager/ServiceMonitor/Rules).
+    paths:
+      - 'platform/kube-prometheus-stack/kube-prometheus-stack.yaml'
+  - id: KSV-0056 # RBAC networking : l'operator gère endpoints/services pour le
+    # service discovery des cibles de scrape.
+    paths:
+      - 'platform/kube-prometheus-stack/kube-prometheus-stack.yaml'
+  - id: KSV-0121 # volumes hostPath : node-exporter monte /proc, /sys, / (root)
+    # de l'hôte en lecture seule pour collecter les métriques système.
+    paths:
+      - 'platform/kube-prometheus-stack/kube-prometheus-stack.yaml'
+
+  # ── Loki / Promtail vendored (charts 7.0.0 / 6.17.1) ──────────────────────
+  - id: KSV-0041 # « manage secrets » : Loki lit le Secret de config (creds S3).
+    paths:
+      - 'platform/loki/loki.yaml'
+  - id: KSV-0047 # privilege escalation depuis le node : Promtail (DaemonSet) lit
+    # les logs des conteneurs sur chaque nœud (/var/log/pods) — fonction de l'agent.
+    paths:
+      - 'platform/loki/promtail.yaml'

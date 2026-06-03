@@ -1,0 +1,46 @@
+# Egress de Prometheus : il doit joindre l'API server (6443) ET scraper les
+# /metrics des cibles dans TOUS les namespaces (kube-system, rook-ceph, etc.).
+# Le monitoring est par nature transverse — un egress restreint casserait le
+# scrape. On autorise donc l'egress de Prometheus vers le cluster privé, plus
+# l'egress d'Alertmanager vers le smarthost mail (ns `mail`).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes:
+    - Egress
+  egress:
+    # Scrape : tous les pods/nœuds du cluster (cibles /metrics inter-namespaces).
+    - to:
+        - namespaceSelector: {} # tous les namespaces (cibles de scrape)
+    # API server (découverte de targets) — egress hors-cluster vers l'IP du CP.
+    - ports:
+        - protocol: TCP
+          port: 6443
+---
+# Egress d'Alertmanager vers le puits SMTP (Mailpit, ns `mail` ; en prod le
+# smarthost externe Mailgun sort du cluster).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alertmanager-smtp-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mail
+      ports:
+        - protocol: TCP
+          port: 1025

@@ -1,0 +1,72 @@
+# Values de rendu — Loki 7.0.0 SingleBinary, backend S3 (ADR 0016 palier 2).
+#
+# Régénérer loki.yaml :
+#   helm template loki grafana/loki --version 7.0.0 --namespace monitoring \
+#     -f values.bench.yaml > loki.yaml  (puis injecter les digests, cf. README)
+#
+# Backend S3 PARAMÉTRABLE : défaut = SeaweedFS (banc léger,
+# seaweedfs.s3.svc.cluster.local:8333). En prod : RGW Ceph (objectstore datalake)
+# via config locale non versionnée (endpoint + creds dans un Secret). ADR 0023.
+deploymentMode: SingleBinary
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: s3
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+      admin: loki-admin
+    s3:
+      endpoint: 'http://seaweedfs.s3.svc.cluster.local:8333'
+      region: 'us-east-1'
+      accessKeyId: 'seaweedadmin'
+      secretAccessKey: 'seaweedadmin-secret'
+      s3ForcePathStyle: true
+      insecure: true
+  schemaConfig:
+    configs:
+      - from: '2024-04-01'
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  limits_config:
+    retention_period: 168h # 7 jours
+  compactor:
+    retention_enabled: true
+    delete_request_store: s3
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  persistence:
+    enabled: true
+    storageClass: standard # local-path banc ; rook-ceph-block-replicated en prod
+    size: 5Gi
+# Modes distribués désactivés (SingleBinary)
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+gateway:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+minio:
+  enabled: false

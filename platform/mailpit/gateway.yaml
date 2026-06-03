@@ -1,0 +1,47 @@
+# Exposition de l'UI Mailpit via le Gateway Cilium + TLS interne (ADR 0020/0021).
+# Permet de consulter les mails capturés (alertes) depuis un navigateur. Même
+# patron que platform/argocd/gateway.yaml. Secret TLS créé par cert-manager.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mailpit
+  namespace: mail
+  annotations:
+    cert-manager.io/cluster-issuer: internal-ca
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: websecure
+      protocol: HTTPS
+      port: 443
+      hostname: mailpit.cluster.lan # TODO admin réseau (placeholder .lan)
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: mailpit-server-tls # créé/renouvelé par cert-manager
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mailpit
+  namespace: mail
+spec:
+  parentRefs:
+    - name: mailpit
+      namespace: mail
+      sectionName: websecure
+  hostnames:
+    - mailpit.cluster.lan # TODO admin réseau (placeholder .lan)
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: mailpit
+          port: 80 # Service mailpit:80 → UI 8025 (HTTP clair, TLS en bordure)
