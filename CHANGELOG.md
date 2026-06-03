@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.16.0](https://github.com/univ-lehavre/cluster/compare/v2.15.2...v2.16.0) (2026-06-03)
+
+
+### Features
+
+* **platform:** argo cd gitops applicatif (ADR 0022), validé banc ([#101](https://github.com/univ-lehavre/cluster/issues/101)) ([dc704c4](https://github.com/univ-lehavre/cluster/commit/dc704c44b8becb8fc3b24aad0a83885a505236d8))
+
 ## [2.15.2](https://github.com/univ-lehavre/cluster/compare/v2.15.1...v2.15.2) (2026-06-02)
 
 
