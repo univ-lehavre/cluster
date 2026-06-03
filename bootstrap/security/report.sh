@@ -6,7 +6,7 @@
 #
 # Usage :
 #   bootstrap/security/report.sh                    # tous les hôtes
-#   bootstrap/security/report.sh dirqual1 dirqual2  # subset
+#   bootstrap/security/report.sh cp1 node1          # subset
 #   SSH_OPTS='-p 2222 -i ~/key' report.sh 127.0.0.1 # banc/dev
 #
 # Variables d'env :
@@ -23,7 +23,8 @@ SSH_OPTS=${SSH_OPTS:-}
 
 hosts=("$@")
 if [ ${#hosts[@]} -eq 0 ]; then
-    hosts=(dirqual1 dirqual2 dirqual3 dirqual4)
+    # Défaut d'EXEMPLE (ADR 0023) ; surcharger via les arguments (vrais hôtes).
+    hosts=(cp1 node1 node2 node3)
 fi
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then

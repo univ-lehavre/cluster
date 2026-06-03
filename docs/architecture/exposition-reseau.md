@@ -12,8 +12,8 @@ Les termes en gras sont définis dans le
 [glossaire](../glossaire.md#exposition-réseau-comment-on-atteint-un-service-depuis-lextérieur-du-cluster).
 
 > **Périmètre.** Le cluster de production **n'est pas exposé à Internet**
-> (réseau privé `10.67.2.0/22`). « Bordure » = entrée du **réseau local**, pas
-> du Web.
+> (réseau privé `10.0.0.0/22`). « Bordure » = entrée du **réseau local**, pas du
+> Web.
 
 ## Le choix structurant : tout-Cilium
 

@@ -14,6 +14,34 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.5](https://github.com/univ-lehavre/cluster/compare/v2.17.4...v2.17.5) (2026-06-03)
+
+
+### Documentation
+
+* **adr:** génériser IP/hostnames et sources métier dans les décisions (ADR 0023) ([#116](https://github.com/univ-lehavre/cluster/issues/116)) ([9eca68a](https://github.com/univ-lehavre/cluster/commit/9eca68a4481812c6b5832e1dda8d3b7044efe9c9))
+
+## [2.17.4](https://github.com/univ-lehavre/cluster/compare/v2.17.3...v2.17.4) (2026-06-03)
+
+
+### Documentation
+
+* génériser IP et hostnames dans la prose infra (ADR 0023) ([#115](https://github.com/univ-lehavre/cluster/issues/115)) ([2dd8744](https://github.com/univ-lehavre/cluster/commit/2dd8744cbe8164408941c4d2617f68cb2425d641))
+
+## [2.17.3](https://github.com/univ-lehavre/cluster/compare/v2.17.2...v2.17.3) (2026-06-03)
+
+
+### Refactor
+
+* **bootstrap:** défauts génériques pour hostnames et CIDR (ADR 0023) ([#114](https://github.com/univ-lehavre/cluster/issues/114)) ([824d5c9](https://github.com/univ-lehavre/cluster/commit/824d5c99e7bdc23a87577048bf354b0288024875))
+
+## [2.17.2](https://github.com/univ-lehavre/cluster/compare/v2.17.1...v2.17.2) (2026-06-03)
+
+
+### Documentation
+
+* **architecture:** vues thématiques au-dessus des ADR (5 domaines) ([#111](https://github.com/univ-lehavre/cluster/issues/111)) ([36561b3](https://github.com/univ-lehavre/cluster/commit/36561b3ea4b949c8e6847095da1050fe99269d24))
+
 ## [2.17.1](https://github.com/univ-lehavre/cluster/compare/v2.17.0...v2.17.1) (2026-06-03)
 
 

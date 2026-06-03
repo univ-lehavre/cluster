@@ -86,7 +86,7 @@ depuis Debian 12.4.
 #### Procédure réseau en mode expert (IP statique sur Broadcom BCM57416)
 
 Le BIOS énumère 4 ports 10 GbE — seul **`ens10f0np0`** est câblé sur le réseau
-cluster `10.67.2.0/22`. Il n’y a **pas de serveur DHCP** sur ce réseau, donc
+cluster `10.0.0.0/22`. Il n’y a **pas de serveur DHCP** sur ce réseau, donc
 toute autoconfiguration échoue : il faut configurer l’IP **manuellement**.
 
 1. **Charger les composants d’installation** (étape « Load installer components
@@ -114,11 +114,11 @@ toute autoconfiguration échoue : il faut configurer l’IP **manuellement**.
    timeout) — c’est attendu. Annuler dès qu’il propose un menu.
 6. Au menu suivant, choisir **« Configurer le réseau manuellement »**, puis
    saisir :
-   - Adresse IP : `10.67.2.11` (puis `.12`, `.13`, `.14` pour les workers)
+   - Adresse IP : `10.0.0.11` (puis `.12`, `.13`, `.14` pour les workers)
    - Masque : `255.255.252.0` (= `/22`)
    - Passerelle : la passerelle réelle du `/22`
    - DNS : ton résolveur
-   - Nom de machine : `dirqual1` (puis 2/3/4)
+   - Nom de machine : `cp1`, puis `node1`/`node2`/`node3`
    - Domaine : **vide**
 
 > Si l’écran « manuel » n’apparaît jamais : soit le DHCP a abouti sur un autre
@@ -135,7 +135,7 @@ toute autoconfiguration échoue : il faut configurer l’IP **manuellement**.
 
 Le défaut d’usine (`/home` = 404 G, `/var` = 9 G) étouffe `/var`, qui héberge
 `containerd`, les logs, `/var/lib/rook` et `/var/lib/etcd`. On repartitionne
-donc le disque de boot ainsi (control plane `dirqual1`) :
+donc le disque de boot ainsi (control plane `cp1`) :
 
 | Partition / LV | Taille   | Montage         | FS    | Rôle                                                                |
 | -------------- | -------- | --------------- | ----- | ------------------------------------------------------------------- |
@@ -161,7 +161,7 @@ Procédure dans l’installateur Debian (partitionnement **manuel**) :
 5. Créer une partition occupant **tout l’espace restant**, usage « volume
    physique pour LVM ».
 6. Entrer dans « Configurer le gestionnaire de volumes logiques (LVM) » :
-   - créer le groupe de volumes **`dirqual1-vg`** sur ce volume physique ;
+   - créer le groupe de volumes **`cp1-vg`** sur ce volume physique ;
    - y créer les volumes logiques : **`root` 40 Go**, **`var` 360 Go**, **`etcd`
      10 Go** ; **laisser ~30 Go non alloués** dans le VG.
 7. De retour dans le partitionnement, formater et monter chaque LV :
@@ -175,29 +175,29 @@ Procédure dans l’installateur Debian (partitionnement **manuel**) :
 `/tmp` est déjà monté en **tmpfs** par défaut sur Debian 13 (systemd ≥ 256
 active `tmp.mount` d’office) — rien à faire en post-installation.
 
-> **Workers `dirqual2-4`** : layout identique, sauf que `lv_etcd` est inutile
-> (pas de control plane) → réaffecter ses 10 Go à `var`, ou conserver la même
-> recette pour l’uniformité (la LV reste alors simplement inutilisée).
+> **Workers `node1-3`** : layout identique, sauf que `lv_etcd` est inutile (pas
+> de control plane) → réaffecter ses 10 Go à `var`, ou conserver la même recette
+> pour l’uniformité (la LV reste alors simplement inutilisée).
 
 ### Configuration réseau
 
 Chaque nœud reçoit une **IP statique** sur le port 10 GbE actif `ens10f0np0`
-(réseau `10.67.2.0/22`). Le plus simple est le défaut Debian (ifupdown), le
+(réseau `10.0.0.0/22`). Le plus simple est le défaut Debian (ifupdown), le
 fichier `/etc/network/interfaces` (sans extension) :
 
-| Nœud     | IP            |
-| -------- | ------------- |
-| dirqual1 | 10.67.2.11/22 |
-| dirqual2 | 10.67.2.12/22 |
-| dirqual3 | 10.67.2.13/22 |
-| dirqual4 | 10.67.2.14/22 |
+| Nœud  | IP           |
+| ----- | ------------ |
+| cp1   | 10.0.0.11/22 |
+| node1 | 10.0.0.12/22 |
+| node2 | 10.0.0.13/22 |
+| node3 | 10.0.0.14/22 |
 
-Exemple pour `dirqual1` :
+Exemple pour `cp1` :
 
 ```text
 auto ens10f0np0
 iface ens10f0np0 inet static
-    address 10.67.2.11/22
+    address 10.0.0.11/22
     gateway 10.67.0.1          # à adapter : passerelle réelle du /22
     dns-nameservers 10.67.0.1  # à adapter : résolveur(s) DNS
 ```
@@ -206,9 +206,9 @@ Appliquer avec `sudo systemctl restart networking` (ou au redémarrage).
 
 Cette configuration peut être saisie directement à l'étape « Configurer le
 réseau » de l'installateur en choisissant **Configuration manuelle** ; y
-renseigner aussi le **nom de machine** (`dirqual1`…`dirqual4`) et laisser le
-**domaine** vide. Vérifier la passerelle et le DNS réels du `/22` (non
-documentés dans le dépôt).
+renseigner aussi le **nom de machine** (`cp1`, `node1`, `node2`, `node3`) et
+laisser le **domaine** vide. Vérifier la passerelle et le DNS réels du `/22`
+(non documentés dans le dépôt).
 
 > Alternatives selon le gestionnaire réseau : `systemd-networkd`
 > (`/etc/systemd/network/*.network`) ou NetworkManager
@@ -235,14 +235,14 @@ Pré-requis : disposer d'une clé SSH locale.
 
 ```bash
 ssh-keygen -t ed25519               # si absent
-bash bootstrap/first-access.sh      # cibles par défaut : dirqual1..dirqual4
+bash bootstrap/first-access.sh      # cibles par défaut : cp1 node1 node2 node3
 ```
 
 Variantes :
 
 ```bash
 # Sélectionner les nœuds explicitement
-bash bootstrap/first-access.sh dirqual1 dirqual2
+bash bootstrap/first-access.sh cp1 node1
 
 # Changer le mot de passe debian dans la foulée
 NEW_DEBIAN_PASSWORD='choisir-un-mot-de-passe-robuste' \
@@ -309,7 +309,7 @@ ansible-playbook -i ../hosts.yaml secure.yml --tags os,alert,audit,detection
 
 ```bash
 bash bootstrap/security/report.sh                    # tous les hôtes
-bash bootstrap/security/report.sh dirqual1           # un hôte
+bash bootstrap/security/report.sh cp1           # un hôte
 ```
 
 Le rapport affiche les preuves observables : services actifs/inactifs/absents,
@@ -320,11 +320,10 @@ seule, ne modifie rien.
 > ⚠️ **UFW × Kubernetes** : le rôle `network/ufw.yml` durcit le pare-feu avec un
 > jeu de règles complet K8s/Cilium/Ceph (audit P6 #24). Plutôt qu'énumérer les
 > ~30 ports inter-nœuds, il **autorise tout le trafic entre nœuds du cluster**
-> (plage `CLUSTER_CIDR`, défaut `10.67.2.0/22`) — ce qui couvre API server,
-> etcd, kubelet, VXLAN Cilium et mon/osd Ceph sans risque d'oubli — puis
-> restreint les accès externes : **SSH limité** à `SSH_ADMIN_CIDR` (défaut =
-> réseau cluster) et plage **NodePort** `30000-32767/tcp` ouverte pour les
-> services exposés.
+> (plage `CLUSTER_CIDR`, défaut `10.0.0.0/22`) — ce qui couvre API server, etcd,
+> kubelet, VXLAN Cilium et mon/osd Ceph sans risque d'oubli — puis restreint les
+> accès externes : **SSH limité** à `SSH_ADMIN_CIDR` (défaut = réseau cluster)
+> et plage **NodePort** `30000-32767/tcp` ouverte pour les services exposés.
 >
 > **À n'activer qu'APRÈS le bootstrap K8s** (`secure.yml --tags ufw`) : activer
 > UFW avant que le cluster existe couperait l'init. L'état d'UFW est surveillé
@@ -490,7 +489,7 @@ poste de contrôle (`$USER@hostname`), nom du compte SSH côté serveur (`debian
 Lecture :
 
 ```bash
-ssh debian@dirqual1 'sudo tail -n 20 /var/log/cluster-bootstrap.log'
+ssh debian@cp1 'sudo tail -n 20 /var/log/cluster-bootstrap.log'
 ```
 
 [`bootstrap/state.sh`](state.sh) **couche 0** lit ce journal et affiche par nœud
@@ -525,7 +524,7 @@ joué :
 ```bash
 # Sur le banc (exige confirmation explicite)
 ansible-playbook -i ../test/multi-node/inventory.yaml rollback.yaml \
-  -e confirm=yes --limit dirqual1
+  -e confirm=yes --limit cp1
 ```
 
 Ce que le rollback fait :
@@ -600,11 +599,10 @@ Détails et compromis :
 
 ### Sauvegarde etcd (SPOF assumé)
 
-Le cluster fonctionne avec **1 seul control plane** (`dirqual1`) — décision
-assumée (cf.
-[ADR 0002](../docs/decisions/0002-control-plane-unique-avec-endpoint.md)). C'est
-un **SPOF** : la perte du nœud control plane → cluster inutilisable jusqu'à
-restauration. Mitigations :
+Le cluster fonctionne avec **1 seul control plane** (`cp1`) — décision assumée
+(cf. [ADR 0002](../docs/decisions/0002-control-plane-unique-avec-endpoint.md)).
+C'est un **SPOF** : la perte du nœud control plane → cluster inutilisable
+jusqu'à restauration. Mitigations :
 
 1. **`--control-plane-endpoint cluster-api:6443` posé dès `kubeadm init`** (rôle
    `k8s-initialization`) : l'API est référencée par un nom DNS stable, donc un
@@ -626,9 +624,9 @@ restauration. Mitigations :
    ```
 
 3. **Copie hors-nœud** via [`etcd-fetch.yaml`](etcd-fetch.yaml) (audit P1 #3) :
-   les snapshots du point 2 restent **sur le control plane** → perdus si
-   `dirqual1` meurt. Ce playbook rapatrie le snapshot le plus récent vers le
-   **poste de contrôle** (dossier `etcd-snapshots/`, gitignoré) :
+   les snapshots du point 2 restent **sur le control plane** → perdus si `cp1`
+   meurt. Ce playbook rapatrie le snapshot le plus récent vers le **poste de
+   contrôle** (dossier `etcd-snapshots/`, gitignoré) :
 
    ```bash
    ansible-playbook -i ./hosts.yaml ./etcd-fetch.yaml

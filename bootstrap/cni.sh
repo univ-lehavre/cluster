@@ -31,7 +31,7 @@ fi
 # existante via `cilium status` et on bascule sur `upgrade`.
 #
 # CNI — pin Cilium and use a pod CIDR disjoint from the node network
-# (nodes are on 10.67.2.0/22, inside the default cluster-pool 10.0.0.0/8).
+# (nodes are on 10.0.0.0/22, inside the default cluster-pool 10.0.0.0/8).
 #
 # Durcissement réseau (ADR 0019). Les `--set` sont appliqués à l'install ET à
 # l'upgrade → un banc/cluster existant converge en rejouant ce script.

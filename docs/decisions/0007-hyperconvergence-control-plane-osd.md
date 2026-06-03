@@ -16,19 +16,19 @@ plane héberge aussi des OSDs et des pods utilisateurs.
 
 ## Décision
 
-**Hyperconvergence assumée** : `dirqual1` porte le control plane, 12 OSDs, et
-est **détainté** pour accepter les pods (rôle
+**Hyperconvergence assumée** : `cp1` porte le control plane, 12 OSDs, et est
+**détainté** pour accepter les pods (rôle
 [`k8s-initialization`](../../bootstrap/roles/k8s-initialization/) :
 `kubectl taint nodes --all node-role.kubernetes.io/control-plane-`).
 
-Tous les nœuds (`dirqual1-4`) font tourner :
+Tous les nœuds (`cp1`/`node1-3`) font tourner :
 
 - `kubelet` + `containerd` ;
 - les OSDs Ceph (12 HDD par nœud + block.db sur NVMe) ;
 - les pods Cilium ;
 - les charges applicatives (registry, RStudio, datalake gateways…).
 
-Seul `dirqual1` ajoute en plus : `kube-apiserver`, `kube-scheduler`,
+Seul `cp1` ajoute en plus : `kube-apiserver`, `kube-scheduler`,
 `kube-controller-manager`, `etcd`.
 
 ## Statut
@@ -48,11 +48,11 @@ Accepted (2026-05-28).
 
 **Coûts assumés.**
 
-- **Contention CPU/RAM** sur `dirqual1` : le control plane (etcd surtout,
-  sensible aux latences disque) cohabite avec 12 OSDs et des pods applicatifs.
-  Mitigation : `/var/lib/etcd` sur LV dédié (10 GiB, isole les I/O), 251 GiB RAM
-  laisse de la marge.
-- **Maintenance de `dirqual1` plus délicate** : le drain le retire de la pool de
+- **Contention CPU/RAM** sur `cp1` : le control plane (etcd surtout, sensible
+  aux latences disque) cohabite avec 12 OSDs et des pods applicatifs. Mitigation
+  : `/var/lib/etcd` sur LV dédié (10 GiB, isole les I/O), 251 GiB RAM laisse de
+  la marge.
+- **Maintenance de `cp1` plus délicate** : le drain le retire de la pool de
   calcul (OK) mais aussi de l'API (impact API jusqu'au reboot). Voir
   [ADR 0002](0002-control-plane-unique-avec-endpoint.md).
 - **etcd I/O sensible** au comportement des autres charges : si une app sature

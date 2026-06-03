@@ -15,12 +15,12 @@ contre un endpoint partagé).
 
 ## Décision
 
-- **1 seul control plane** (`dirqual1`) — **SPOF assumé**.
+- **1 seul control plane** (`cp1`) — **SPOF assumé**.
 - `kubeadm init --control-plane-endpoint cluster-api:6443 --upload-certs` posé
   dès le bootstrap initial (rôle
   [`k8s-initialization`](../../bootstrap/roles/k8s-initialization/) + variables
   [`group_vars/all.yaml`](../../bootstrap/group_vars/all.yaml)).
-- L'entrée `cluster-api → 10.67.2.11` est propagée dans `/etc/hosts` sur les 4
+- L'entrée `cluster-api → 10.0.0.11` est propagée dans `/etc/hosts` sur les 4
   nœuds (rôle `k8s-install`).
 - **Sauvegarde etcd horaire**
   ([rôle `etcd-backup`](../../bootstrap/roles/etcd-backup/))
@@ -42,12 +42,12 @@ Accepted (2026-05-28).
 
 **Coûts assumés.**
 
-- **SPOF API + etcd** : la perte de `dirqual1` rend le cluster inutilisable
-  jusqu'à restauration. Mitigation : sauvegarde etcd horaire + procédure de
-  restore testée sur le banc multi-nœuds.
-- **Pas de HA workloads pendant la maintenance de dirqual1** : si on reboot
-  dirqual1, l'API est inaccessible quelques minutes. Workloads applicatifs
-  continuent (kubelet local) mais aucun nouvel ordonnancement.
+- **SPOF API + etcd** : la perte de `cp1` rend le cluster inutilisable jusqu'à
+  restauration. Mitigation : sauvegarde etcd horaire + procédure de restore
+  testée sur le banc multi-nœuds.
+- **Pas de HA workloads pendant la maintenance de cp1** : si on reboot cp1,
+  l'API est inaccessible quelques minutes. Workloads applicatifs continuent
+  (kubelet local) mais aucun nouvel ordonnancement.
 
 **Garde-fous opérationnels.**
 

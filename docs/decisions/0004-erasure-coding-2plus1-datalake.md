@@ -2,9 +2,9 @@
 
 ## Contexte
 
-Le datalake stocke des sources de données ré-ingestibles (GDELT, OpenAlex,
-Reddit, Stormglass, Twitter) sur Ceph RGW. Volumes attendus : plusieurs dizaines
-de TiB cumulés à terme. Les caractéristiques métier :
+Le datalake stocke des sources de données **ré-ingestibles** (p. ex. corpus
+ouverts, API publiques, exports périodiques) sur Ceph RGW. Volumes attendus :
+plusieurs dizaines de TiB cumulés à terme. Les caractéristiques métier :
 
 - **Données ré-ingestibles** depuis les sources upstream (en cas de perte, on
   re-télécharge ; coût = temps de ré-ingestion, pas perte d'information unique).

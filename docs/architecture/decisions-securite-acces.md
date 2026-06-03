@@ -14,7 +14,7 @@ ensuite à chaque arbitrage :
 
 - cluster **mono-tenant** (laboratoire de recherche) ;
 - **mono-administrateur** (un seul opérateur) ;
-- **réseau privé isolé** `10.67.2.0/22` (lien 10 GbE inter-nœuds, pas de routage
+- **réseau privé isolé** `10.0.0.0/22` (lien 10 GbE inter-nœuds, pas de routage
   Internet), CIDR pods Cilium `10.244.0.0/16` ;
 - **pas de données réglementées** : données de recherche (article public,
   observation géoclimatique…), pas de données personnelles, pas de classifié.
@@ -203,7 +203,7 @@ Plusieurs compromis sont **assumés** dans le modèle de menace et le redevienne
 problématiques si ce modèle change :
 
 - **Sniffing du trafic Ceph.** Un attaquant passé sur le réseau cluster
-  (`10.67.2.0/22`) peut sniffer le trafic Ceph et les credentials S3 : la
+  (`10.0.0.0/22`) peut sniffer le trafic Ceph et les credentials S3 : la
   sécurité périmétrique du réseau privé est le seul rempart
   ([ADR 0003](../decisions/0003-pas-de-chiffrement-ceph-tailscale.md)).
   WireGuard Cilium ([ADR 0019](../decisions/0019-durcissement-reseau-cilium.md))

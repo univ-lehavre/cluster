@@ -14,7 +14,7 @@ Le cadrage périmètre, déjà posé en 0020, est déterminant : **« bordure »
 bordure du réseau privé, pas Internet.** Le cluster bare-metal kubeadm **4 nœuds
 non-HA** (ADR
 [0002](0002-control-plane-unique-avec-endpoint.md)/[0009](0009-pourquoi-4-noeuds.md))
-est confiné au réseau isolé `10.67.2.0/22` (banc Vagrant `192.168.67.0/24`) et
+est confiné au réseau isolé `10.0.0.0/22` (banc Vagrant `192.168.67.0/24`) et
 **n'est pas joignable depuis l'extérieur**. Les IP du pool LB-IPAM sont
 annoncées sur le **LAN interne** (L2) ; le Gateway sert des **clients internes**
 (LAN/VPN), jamais Internet. Conséquence directe et déjà annoncée en 0020 :
@@ -156,7 +156,7 @@ Accepted (2026-06-02).
 
 **ACME / Let's Encrypt (`ClusterIssuer` ACME).** Chemin par défaut pour des
 certificats reconnus publiquement, sans CA à gérer. **Écarté de fait** par le
-périmètre (ADR 0020) : le cluster `10.67.2.0/22` est **isolé, non joignable
+périmètre (ADR 0020) : le cluster `10.0.0.0/22` est **isolé, non joignable
 depuis Internet**, sans domaine public délégué — **HTTP-01** (autorité publique
 → Gateway) comme **DNS-01** (enregistrement dans une zone publique) sont
 **injoignables/inapplicables**. ACME reste la porte de sortie si le cluster

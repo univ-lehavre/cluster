@@ -10,7 +10,7 @@ non-HA** (control-plane unique = SPOF assumé, cf.
 ([`bootstrap/cni.sh`](../../bootstrap/cni.sh)), durci avec chiffrement WireGuard
 pod-to-pod + Hubble relay/CLI ([ADR 0019](0019-durcissement-reseau-cilium.md)).
 Stockage Rook-Ceph ([ADR 0018](0018-rook-ceph-vs-longhorn.md)). Réseau prod
-`10.67.2.0/22` (isolé) ; banc Vagrant `192.168.67.0/24`.
+`10.0.0.0/22` (isolé) ; banc Vagrant `192.168.67.0/24`.
 
 Sur bare-metal, un `Service type=LoadBalancer` n'a pas de provider cloud : il
 faut (a) **allouer** des IP virtuelles depuis un pool et (b) **annoncer** ces IP
@@ -19,7 +19,7 @@ HTTP(S) en bordure (routage par host/path, terminaison TLS).
 
 > **« Bordure » = bordure du réseau privé, pas Internet.** Le cluster de
 > production **n'est pas accessible depuis l'extérieur** (cohérent ADR 0003 :
-> réseau `10.67.2.0/22` isolé). Les IP du pool sont annoncées sur le **LAN
+> réseau `10.0.0.0/22` isolé). Les IP du pool sont annoncées sur le **LAN
 > interne** ; le Gateway est le point d'entrée des **clients internes** (LAN /
 > VPN), jamais d'Internet. Conséquence directe pour le TLS de bordure (étape
 > cert-manager suivante) : **ACME/Let's Encrypt est exclu** (challenge
@@ -72,7 +72,7 @@ kube-proxy et on purge ses règles iptables résiduelles par nœud. Durabilité 
 `CiliumLoadBalancerIPPool` (`cilium.io/v2`, **promu** en 1.19 — `v2alpha1`
 déprécié) versionné sous `platform/cilium-expo/`. LB-IPAM est actif **dès qu'un
 pool existe** (pas de flag d'activation). **Banc** : pool `192.168.67.240-250`.
-**Prod (`10.67.2.0/22`)** : **TODO documenté**, plage à fixer **avec l'admin
+**Prod (`10.0.0.0/22`)** : **TODO documenté**, plage à fixer **avec l'admin
 réseau** — aucune IP prod attribuée à l'aveugle (collision sur un /22 partagé
 hors de notre maîtrise).
 
@@ -155,7 +155,7 @@ Accepted (2026-06-02).
   `/etc/hosts` du nœud (rôle `k8s-install`) ; les pods `cilium-agent` étant en
   `hostNetwork`, ils utilisent ce resolver — vérifier sur banc avant de retirer
   kube-proxy. Repli sûr documenté : IP du control-plane en dur, ou `auto`.
-- **IP prod non attribuée à l'aveugle** : la plage LB-IPAM dans `10.67.2.0/22`
+- **IP prod non attribuée à l'aveugle** : la plage LB-IPAM dans `10.0.0.0/22`
   reste **TODO** explicite jusqu'à arbitrage avec l'admin réseau.
 - **Exception drift tracée** : `bootstrap/state.sh` « Couche 7b — Exposition
   réseau » (audit P6 #25) flagge tout `Service type=LoadBalancer` comme DRIFT
