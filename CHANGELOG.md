@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.18.0](https://github.com/univ-lehavre/cluster/compare/v2.17.6...v2.18.0) (2026-06-03)
+
+
+### Features
+
+* **platform:** kube-prometheus-stack + loki + monitoring ceph (palier 2) ([#123](https://github.com/univ-lehavre/cluster/issues/123)) ([0d04fdd](https://github.com/univ-lehavre/cluster/commit/0d04fdd53d0644c4394a315215739c2e2cee4663))
+
 ## [2.17.6](https://github.com/univ-lehavre/cluster/compare/v2.17.5...v2.17.6) (2026-06-03)
 
 
