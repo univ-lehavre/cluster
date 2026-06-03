@@ -1,0 +1,46 @@
+# Banc léger Lima — nœud control-plane (spike kubeadm v1.34).
+#
+# VM Linux légère (vrai noyau, vrais cgroups, swap contrôlable) sur laquelle le
+# VRAI bootstrap Ansible (bootstrap/) déploie Kubernetes — comme sur une VM
+# Vagrant, mais sans VirtualBox ni overlayfs imbriqué (échec du DinD).
+# Lima fournit SSH nativement → Ansible s'y connecte comme à un nœud.
+#
+# Debian 13 (Trixie) — cohérent avec les images operand (CNPG en *-trixie).
+# Remplace le banc kind (abandonné, figeait K8s en 1.31). Cible : K8s v1.34 (ADR 0006).
+minimumLimaVersion: 2.0.0
+
+base:
+  - template:_images/debian-13
+
+# Ressources (banc d'un nœud control-plane ; large sur un Mac 48 GiB).
+cpus: 2
+memory: 4GiB
+disk: 20GiB
+
+# Pas de montage du home Mac (banc isolé, jetable).
+mounts: []
+
+# Swap désactivé : exigence kubeadm (le kubelet refuse swap on). Sur une VRAIE VM
+# Lima on PEUT le faire (contrairement au conteneur DinD).
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      swapoff -a
+      sed -i '/ swap / s/^/#/' /etc/fstab || true
+      # Modules + sysctl réseau K8s (préalables au bootstrap Ansible).
+      modprobe br_netfilter overlay
+      cat > /etc/modules-load.d/k8s.conf <<EOF
+      overlay
+      br_netfilter
+      EOF
+      cat > /etc/sysctl.d/k8s.conf <<EOF
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+      EOF
+      sysctl --system
+
+# Lima expose déjà SSH ; on s'assure que le user par défaut a sudo NOPASSWD
+# (comme le compte debian du bootstrap).
