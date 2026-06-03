@@ -1,0 +1,12 @@
+# Cluster « site-b » (cluster.id=2) — spike Cilium Cluster Mesh sous latence.
+# CIDR DISJOINTS de site-a (kind-c1.yaml) : 10.245/10.97 vs 10.244/10.96.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: c2
+networking:
+  disableDefaultCNI: true
+  kubeProxyMode: none
+  podSubnet: '10.245.0.0/16'
+  serviceSubnet: '10.97.0.0/16'
+nodes:
+  - role: control-plane
