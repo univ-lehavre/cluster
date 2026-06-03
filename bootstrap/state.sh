@@ -641,6 +641,101 @@ else
     fi
 fi
 
+# ─── Observabilité (kube-prometheus-stack + Loki — ADR 0016 palier 2) ──────
+# Monitoring runtime : Prometheus/Alertmanager/Grafana + Loki (logs). Skip propre
+# tant que l'addon n'est pas déployé.
+section "Observabilité (monitoring — ADR 0016 palier 2)"
+if ! kubectl_ready; then
+    mark skip "kubectl indisponible"
+elif ! kubectl_q get ns monitoring >/dev/null 2>&1; then
+    mark skip "monitoring : namespace absent (kubectl apply -f platform/kube-prometheus-stack/)"
+else
+    mon_not_ready=$(kubectl_q -n monitoring get pods --no-headers 2>/dev/null \
+        | awk '$3 != "Running" && $3 != "Completed" {print $1}' | tr '\n' ' ')
+    mon_total=$(kubectl_q -n monitoring get pods --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$mon_total" = "0" ]; then
+        mark skip "monitoring : aucun pod (kubectl apply -f platform/kube-prometheus-stack/)"
+    elif [ -z "$mon_not_ready" ]; then
+        mark ok "monitoring : ${mon_total} pods Running (Prometheus/Grafana/Alertmanager + exporters)"
+    else
+        mark fail "monitoring : pods non Running : $mon_not_ready" \
+                  "kubectl -n monitoring get pods"
+    fi
+
+    # Prometheus CR Healthy (operator)
+    if kubectl_q -n monitoring get prometheus >/dev/null 2>&1; then
+        prom_av=$(kubectl_q -n monitoring get prometheus -o jsonpath='{.items[0].status.availableReplicas}' 2>/dev/null)
+        if [ -n "$prom_av" ] && [ "$prom_av" -ge 1 ] 2>/dev/null; then
+            mark ok "monitoring : Prometheus disponible (${prom_av} replica)"
+        else
+            mark fail "monitoring : Prometheus CR non disponible" "kubectl -n monitoring get prometheus"
+        fi
+    fi
+
+    # Loki (logs) — StatefulSet
+    if kubectl_q -n monitoring get statefulset loki >/dev/null 2>&1; then
+        loki_rd=$(kubectl_q -n monitoring get statefulset loki -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        if [ "${loki_rd:-0}" -ge 1 ] 2>/dev/null; then
+            mark ok "monitoring : Loki Ready (agrégation des logs)"
+        else
+            mark fail "monitoring : Loki non Ready" "kubectl -n monitoring get statefulset loki"
+        fi
+    else
+        mark skip "monitoring : Loki absent (kubectl apply -f platform/loki/)"
+    fi
+fi
+
+# ─── PostgreSQL managé (CloudNativePG + pgvector — ADR 0024) ────────────────
+# Postgres HA managé par CNPG, deux bases (event log Dagster + index pgvector),
+# sauvegardes vers S3 (plugin Barman). Skip propre tant que l'addon est absent.
+section "PostgreSQL managé (CloudNativePG — ADR 0024)"
+if ! kubectl_ready; then
+    mark skip "kubectl indisponible"
+elif ! kubectl_q get ns cnpg-system >/dev/null 2>&1; then
+    mark skip "CNPG : operator absent (kubectl apply --server-side -f platform/cloudnative-pg/operator.yaml)"
+else
+    # Operator Ready
+    op_rd=$(kubectl_q -n cnpg-system get deploy cnpg-controller-manager -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+    if [ "${op_rd:-0}" -ge 1 ] 2>/dev/null; then
+        mark ok "CNPG : operator Ready"
+    else
+        mark fail "CNPG : operator non Ready" "kubectl -n cnpg-system get deploy cnpg-controller-manager"
+    fi
+
+    # Cluster pg Healthy
+    if kubectl_q -n postgres get cluster pg >/dev/null 2>&1; then
+        cl_ready=$(kubectl_q -n postgres get cluster pg -o jsonpath='{.status.readyInstances}' 2>/dev/null)
+        cl_inst=$(kubectl_q -n postgres get cluster pg -o jsonpath='{.spec.instances}' 2>/dev/null)
+        cl_phase=$(kubectl_q -n postgres get cluster pg -o jsonpath='{.status.phase}' 2>/dev/null)
+        if [ "${cl_ready:-0}" = "${cl_inst:-X}" ] && [ -n "$cl_ready" ]; then
+            mark ok "CNPG : Cluster pg Healthy (${cl_ready}/${cl_inst} instances)"
+        else
+            mark fail "CNPG : Cluster pg non Healthy (${cl_ready:-0}/${cl_inst:-?} — ${cl_phase:-?})" \
+                      "kubectl -n postgres get cluster pg"
+        fi
+
+        # Archivage continu vers S3 (sauvegardes)
+        arch=$(kubectl_q -n postgres get cluster pg \
+            -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}' 2>/dev/null)
+        if [ "$arch" = "True" ]; then
+            mark ok "CNPG : archivage continu (WAL) vers S3 actif"
+        else
+            mark skip "CNPG : archivage continu non actif (sauvegardes S3 non configurées ?)"
+        fi
+
+        # Extension pgvector sur la base d'index
+        pgv=$(kubectl_q -n postgres get database pgvector \
+            -o jsonpath='{.status.extensions[?(@.name=="vector")].applied}' 2>/dev/null)
+        if [ "$pgv" = "true" ]; then
+            mark ok "CNPG : extension pgvector (vector) appliquée"
+        else
+            mark skip "CNPG : extension pgvector non appliquée (feature gate ImageVolume requis — ADR 0006)"
+        fi
+    else
+        mark skip "CNPG : Cluster pg absent (kubectl apply -f platform/cloudnative-pg/cluster.yaml)"
+    fi
+fi
+
 # ─── Couche 7b — Exposition réseau (audit P6 #25 / #06) ────────────────────
 # Tous les Services applicatifs ont été passés en ClusterIP (#25). Un Service
 # de type NodePort ou LoadBalancer expose un port au-delà du cluster → ici,

@@ -1,0 +1,20 @@
+# Sauvegarde planifiée du Cluster CNPG via le plugin Barman Cloud (étape 1.6).
+#
+# Sauvegarde quotidienne vers l'ObjectStore S3 (objectstore.yaml). Le WAL est
+# archivé en continu (Cluster.plugins[].isWALArchiver: true) ; ce ScheduledBackup
+# déclenche les sauvegardes de base (data).
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pg-daily
+  namespace: postgres
+spec:
+  # Tous les jours à 02:00 (format Go cron à 6 champs : sec min h …).
+  schedule: '0 0 2 * * *'
+  backupOwnerReference: self
+  cluster:
+    name: pg
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

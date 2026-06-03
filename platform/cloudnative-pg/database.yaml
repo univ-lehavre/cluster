@@ -1,0 +1,35 @@
+# Bases logiques du Cluster CNPG (étape 1.6, ADR 0024).
+#
+# Deux bases sur le même Cluster, une par usage — isolation (sauvegardes,
+# rétentions, contention) sans doubler l'infrastructure stateful.
+#   - dagster  : event log de l'orchestrateur Dagster (1.7)
+#   - pgvector : index de recherche sémantique (extension vector, chargé par atlas)
+#
+# L'operator exécute CREATE DATABASE puis, pour pgvector, CREATE EXTENSION vector.
+# ⚠️ Le nom SQL de l'extension est `vector` (PAS `pgvector`).
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: dagster
+  namespace: postgres
+spec:
+  name: dagster
+  owner: dagster
+  cluster:
+    name: pg
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: pgvector
+  namespace: postgres
+spec:
+  name: pgvector
+  owner: pgvector
+  cluster:
+    name: pg
+  # CREATE EXTENSION vector (fourni par le volume d'image pgvector du Cluster).
+  extensions:
+    - name: vector
+      version: '0.8.2'

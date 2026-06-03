@@ -1,0 +1,26 @@
+# Ingress vers Postgres (port 5432) depuis les CONSOMMATEURS déclarés uniquement :
+#   - `dagster` (event log de l'orchestrateur, 1.7)
+#   - `citation-serving` (consommateur de l'index pgvector, dépôt atlas)
+# Tout autre namespace est bloqué par le default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-ingress
+  namespace: postgres
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: pg
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dagster
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: citation-serving
+      ports:
+        - protocol: TCP
+          port: 5432

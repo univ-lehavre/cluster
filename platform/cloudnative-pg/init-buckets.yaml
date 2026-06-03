@@ -1,0 +1,63 @@
+# Job d'initialisation du bucket S3 des sauvegardes CNPG.
+#
+# Le plugin Barman n'auto-crée pas le bucket (NoSuchBucket sinon). Ce Job le crée
+# (idempotent). À lancer AVANT que le WAL archiver pousse (donc avant/avec le Cluster).
+#
+# Endpoint/creds PARAMÉTRABLES : défaut SeaweedFS (banc) ; sur la topologie bare-metal, surcharger vers
+# le RGW Ceph (config locale non versionnée, ADR 0023). Image aws-cli épinglée par
+# digest d'index multi-arch (ADR 0006). Calqué sur platform/loki/init-buckets.yaml.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cnpg-init-buckets
+  namespace: postgres
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: cnpg-init-buckets
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mb
+          image: docker.io/amazon/aws-cli:2.31.21@sha256:ae7057ee66673816887b5964ea5e34663ec1c22d5179b234a4118dbc57dd8911
+          env:
+            # PARAMÉTRABLE (banc = SeaweedFS ; topologie bare-metal = RGW Ceph via Secret non versionné).
+            - name: AWS_ACCESS_KEY_ID
+              value: 'seaweedadmin'
+            - name: AWS_SECRET_ACCESS_KEY
+              value: 'seaweedadmin-secret'
+            - name: S3_ENDPOINT
+              value: 'http://seaweedfs.s3.svc.cluster.local:8333'
+            - name: HOME
+              value: /tmp # aws-cli écrit ~/.aws/cli/cache → /tmp (rootfs RO)
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              aws --endpoint-url "$S3_ENDPOINT" s3 mb s3://cnpg-backups 2>&1 | tee /dev/stderr | grep -qE "make_bucket|BucketAlreadyOwnedByYou|already" || true
+              echo "bucket de sauvegarde CNPG prêt"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # aws-cli n'écrit pas hors /tmp (emptyDir)
+            capabilities:
+              drop:
+                - 'ALL'
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

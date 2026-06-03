@@ -16,6 +16,10 @@ platform/kube-prometheus-stack/kube-prometheus-stack.yaml
 platform/loki/loki.yaml
 platform/loki/promtail.yaml
 
+# Vendored upstream CloudNativePG (operator + barman plugin, épinglés par digest)
+platform/cloudnative-pg/operator.yaml
+platform/cloudnative-pg/plugin-barman-cloud.yaml
+
 # Common
 node_modules/
 package-lock.json

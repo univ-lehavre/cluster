@@ -1,0 +1,22 @@
+# DNS (CoreDNS / kube-system) pour tous les pods du namespace `postgres`.
+# INDISPENSABLE sous default-deny egress — sinon les instances CNPG ne résolvent
+# plus les services (réplication, plugin, S3 de sauvegarde).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: postgres
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

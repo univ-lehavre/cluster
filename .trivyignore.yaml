@@ -121,3 +121,25 @@ misconfigurations:
     # les logs des conteneurs sur chaque nœud (/var/log/pods) — fonction de l'agent.
     paths:
       - 'platform/loki/promtail.yaml'
+
+  # ── CloudNativePG vendored (operator 1.29.1 + plugin Barman) — RBAC inhérent ─
+  # Manifestes amont appliqués tels quels (épinglés par digest, ADR 0006/0024).
+  # Le RBAC large EST la fonction de l'operator : gérer le cycle de vie Postgres.
+  - id: KSV-0041 # « manage secrets » : l'operator génère/gère les Secrets de
+    # connexion, TLS et credentials des Clusters Postgres ; le plugin gère les
+    # creds S3 des sauvegardes.
+    paths:
+      - 'platform/cloudnative-pg/operator.yaml'
+      - 'platform/cloudnative-pg/plugin-barman-cloud.yaml'
+  - id: KSV-0053 # « exec into pods » : l'operator exécute des commandes dans les
+    # instances Postgres (switchover, backup, fencing) — cœur du contrôleur.
+    paths:
+      - 'platform/cloudnative-pg/operator.yaml'
+  - id: KSV-0056 # RBAC networking : l'operator gère services/endpoints pour les
+    # services -rw/-ro/-r (routage primary/replica).
+    paths:
+      - 'platform/cloudnative-pg/operator.yaml'
+  - id: KSV-0114 # « manage webhookconfigurations » : l'operator pose ses
+    # {mutating,validating}webhookconfigurations (validation des CR Postgres).
+    paths:
+      - 'platform/cloudnative-pg/operator.yaml'

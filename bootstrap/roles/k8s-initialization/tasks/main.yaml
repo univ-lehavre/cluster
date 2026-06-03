@@ -77,9 +77,11 @@
       args:
         creates: /etc/kubernetes/admin.conf
 
-    - name: Create the .kube directory for the debian user
+    # L'utilisateur cible vient de l'inventaire (`ansible_user`) : `debian` sur les
+    # nœuds réels / le banc Vagrant, `lima` sur le banc Lima — pas de nom codé en dur.
+    - name: Create the .kube directory for the connecting user
       ansible.builtin.file:
-        path: /home/debian/.kube
+        path: /home/{{ ansible_user }}/.kube
         state: directory
         mode: '0755'
 
@@ -89,8 +91,8 @@
       ansible.builtin.copy:
         src: /etc/kubernetes/admin.conf
         remote_src: true
-        dest: /home/debian/.kube/config
-        owner: debian
+        dest: /home/{{ ansible_user }}/.kube/config
+        owner: '{{ ansible_user }}'
         mode: '0600'
 
     - name: Control plane accepts pods (remove the control-plane taint)
@@ -98,7 +100,7 @@
         kubectl taint nodes --all node-role.kubernetes.io/control-plane-
         >> taint-setup.log
       args:
-        chdir: /home/debian
+        chdir: /home/{{ ansible_user }}
         creates: taint-setup.log
 
     - name: Exclude the control plane from external load balancers
@@ -107,5 +109,5 @@
         node.kubernetes.io/exclude-from-external-load-balancers-
         >> lb-setup.log
       args:
-        chdir: /home/debian
+        chdir: /home/{{ ansible_user }}
         creates: lb-setup.log

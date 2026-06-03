@@ -1,0 +1,22 @@
+# Egress des instances CNPG vers l'objet S3 des sauvegardes (plugin Barman) :
+#   - Banc léger : SeaweedFS (ns `s3`, port 8333).
+#   - Topologie bare-metal : RGW Ceph (ns rook-ceph, port 80) — surcharger.
+# Indispensable sous default-deny pour que le WAL archiving et les sauvegardes
+# atteignent le bucket.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-s3-egress
+  namespace: postgres
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: s3
+      ports:
+        - protocol: TCP
+          port: 8333
