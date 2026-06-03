@@ -16,8 +16,8 @@
 #   4. (optionnel, $NEW_DEBIAN_PASSWORD) change le mot de passe `debian`.
 #
 # Usage :
-#   bootstrap/first-access.sh                  # cible dirqual1..dirqual4
-#   bootstrap/first-access.sh dirqual1 dirqual2
+#   bootstrap/first-access.sh                  # cible cp1, node1..node3
+#   bootstrap/first-access.sh cp1 node1
 #
 # Variables d'environnement :
 #   SSH_PUBKEY            clé publique à déposer (défaut: ~/.ssh/id_ed25519.pub)
@@ -34,7 +34,9 @@ SSH_PUBKEY=${SSH_PUBKEY:-$HOME/.ssh/id_ed25519.pub}
 
 hosts=("$@")
 if [ ${#hosts[@]} -eq 0 ]; then
-    hosts=(dirqual1 dirqual2 dirqual3 dirqual4)
+    # Défaut d'EXEMPLE (ADR 0023) : 1 control plane + 3 workers. Surcharger en
+    # passant les vrais hôtes en arguments (ex. `first-access.sh cp1 node1 …`).
+    hosts=(cp1 node1 node2 node3)
 fi
 
 if [ ! -f "$SSH_PUBKEY" ]; then

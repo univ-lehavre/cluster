@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Scénario 04 — Perte du control plane (SPOF assumé) : halt dirqual1,
+# Scénario 04 — Perte du control plane (SPOF assumé) : halt cp1,
 # observer ce qui continue (workloads, Cilium, Ceph mons sur workers)
 # et ce qui s'arrête (API K8s, kubectl), puis restore et vérifier que
 # la sauvegarde etcd horaire a bien produit un snapshot pendant la
@@ -9,10 +9,10 @@
 # Cible : prouver le comportement « SPOF assumé + sauvegarde etcd »
 # (cf. ADR 0002 + RUNBOOK section restauration etcd).
 #
-# Variables : CONTROL=dirqual1, DOWNTIME_S=60, VAGRANT_DIR
+# Variables : CONTROL=cp1, DOWNTIME_S=60, VAGRANT_DIR
 set -euo pipefail
 
-CONTROL=${CONTROL:-dirqual1}
+CONTROL=${CONTROL:-cp1} # défaut d'exemple (ADR 0023) ; surcharger via $CONTROL
 DOWNTIME_S=${DOWNTIME_S:-60}
 VAGRANT_DIR=${VAGRANT_DIR:-test/multi-node}
 
@@ -36,7 +36,7 @@ log "Pendant l'arrêt — API K8s injoignable (attendu) :"
 timeout 5 kubectl get nodes 2>&1 | head -3 || log "OK: kubectl HS comme attendu"
 
 log "Cilium reste opérationnel ? (test via SSH worker)"
-ssh debian@dirqual2 'cilium status --wait --wait-duration 30s 2>&1 | head -5' || \
+ssh debian@node1 'cilium status --wait --wait-duration 30s 2>&1 | head -5' || \
     log "WARN Cilium peut être indisponible"
 
 log "Attendre $DOWNTIME_S s pendant l'arrêt"

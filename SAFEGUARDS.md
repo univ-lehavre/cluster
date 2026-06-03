@@ -155,7 +155,7 @@ multi-VM et les disques Ceph sont exercés.
 > **La plage IP du banc DOIT être disjointe de toute plage de production
 > accessible depuis le poste de contrôle.**
 
-Si le banc et la prod partagent une plage IP (cas vécu : `10.67.2.0/24` des deux
+Si le banc et la prod partagent une plage IP (cas vécu : `10.0.0.0/22` des deux
 côtés), VirtualBox crée une interface host-only sur cette plage et **capture
 toutes les routes locales** vers les vrais serveurs → on perd l'accès SSH à la
 prod tant que le banc tourne. Cf.
@@ -163,12 +163,12 @@ prod tant que le banc tourne. Cf.
 
 Garde-fous en place :
 
-- **Plage banc** : `192.168.67.0/24` (disjointe de prod `10.67.2.0/22`).
+- **Plage banc** : `192.168.67.0/24` (disjointe de prod `10.0.0.0/22`).
 - **Pre-flight Vagrantfile**
   ([test/multi-node/Vagrantfile](test/multi-node/Vagrantfile)) : refuse
   `vagrant up` si VBox a déjà une interface host-only sur la plage prod (signe
   d'un ancien banc non nettoyé).
-- À vérifier manuellement avant un cycle : `netstat -rn | grep 10.67.2` +
+- À vérifier manuellement avant un cycle : `netstat -rn | grep 10.0.0` +
   `VBoxManage list hostonlyifs | grep IPAddress`.
 
 ## Vérifications en place sur les nœuds
@@ -236,8 +236,8 @@ auth, dashboard cluster-admin, RStudio sans login). Voir
 
 ## Phasage gated banc → prod
 
-L'ordre de déploiement (canari `dirqual1` → workers → stockage cluster-wide) et
-les gates par étape sont décrits dans
+L'ordre de déploiement (canari `cp1` → workers → stockage cluster-wide) et les
+gates par étape sont décrits dans
 [`bootstrap/RUNBOOK.md` § Ordre de déploiement](bootstrap/RUNBOOK.md) ; **tout
 changement de cette nature doit passer par le banc ([`test/`](test/)) avant la
 prod**. Le _pourquoi_ de chaque choix structurant est tracé dans les

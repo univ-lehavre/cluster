@@ -60,7 +60,7 @@
       # VM a deux interfaces (NAT eth0 + privée eth1) : sans ça, kubelet
       # prend le NAT, et Cilium agent ne peut pas joindre l'API depuis
       # les workers. En prod, on laisse vide → kubelet détecte l'IP de
-      # l'interface cluster (10.67.2.X).
+      # l'interface cluster (10.0.0.X).
       ansible.builtin.copy:
         dest: /etc/default/kubelet
         owner: root
@@ -82,7 +82,7 @@
     - name: Map the control-plane endpoint to the primary control-plane node
       # `control_plane_ip` (optionnel) surcharge l'IP utilisée pour
       # joindre le control plane. Utile sur le banc multi-node où le
-      # réseau privé inter-VM (10.67.2.x) doit être préféré au NAT par
+      # réseau privé inter-VM (10.0.0.x) doit être préféré au NAT par
       # défaut détecté par Ansible (10.0.2.x). En prod, on laisse la
       # variable vide et on tombe sur `ansible_default_ipv4.address`.
       ansible.builtin.lineinfile:

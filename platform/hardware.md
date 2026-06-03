@@ -1,16 +1,20 @@
-# Configuration matérielle — plateforme `dirqual`
+# Configuration matérielle — profil d'exemple (4 nœuds hyperconvergés)
 
-> Relevé effectué le 2026-05-27 par connexion SSH sur les 4 nœuds. Les nœuds
-> sont **rigoureusement identiques** (modèle, BIOS, CPU, RAM, stockage, réseau).
+> **Profil matériel d'exemple** pour la topologie bare-metal 4 nœuds (ADR 0023).
+> Le matériel décrit ci-dessous (modèles, CPU, disques) est un exemple **concret
+> et crédible** de dimensionnement ; les **identités** (hostnames, IP) sont
+> génériques — le relevé réel d'un déploiement vit dans la config locale non
+> versionnée. Les 4 nœuds sont supposés **identiques** (modèle, BIOS, CPU, RAM,
+> stockage, réseau).
 
 ## Vue d'ensemble
 
-| Nœud       | IP         | Rôle Kubernetes             |
-| ---------- | ---------- | --------------------------- |
-| `dirqual1` | 10.67.2.11 | control plane (+ Tailscale) |
-| `dirqual2` | 10.67.2.12 | worker                      |
-| `dirqual3` | 10.67.2.13 | worker                      |
-| `dirqual4` | 10.67.2.14 | worker                      |
+| Nœud    | IP        | Rôle Kubernetes             |
+| ------- | --------- | --------------------------- |
+| `cp1`   | 10.0.0.11 | control plane (+ Tailscale) |
+| `node1` | 10.0.0.12 | worker                      |
+| `node2` | 10.0.0.13 | worker                      |
+| `node3` | 10.0.0.14 | worker                      |
 
 Rôles définis dans l'inventaire Ansible (modèle :
 [`bootstrap/hosts.example.yaml`](../bootstrap/hosts.example.yaml) ; le
@@ -36,7 +40,7 @@ Rôles définis dans l'inventaire Ansible (modèle :
 - 2× contrôleurs **Broadcom BCM57416 NetXtreme-E Dual-Media 10G RDMA**, soit **4
   ports 10 GbE** au total.
 - Interfaces : `ens10f0np0`, `ens10f1np1`, `ens2f0np0`, `ens2f1np1`.
-- Port actif : **`ens10f0np0` @ 10 Gb/s** (réseau cluster 10.67.2.0/22).
+- Port actif : **`ens10f0np0` @ 10 Gb/s** (réseau cluster 10.0.0.0/22).
 
 ## Stockage (par nœud)
 
@@ -44,7 +48,8 @@ Rôles définis dans l'inventaire Ansible (modèle :
 
 - Contrôleur **HPE NS204i-p Gen10+ Boot Controller** (NVMe miroir matériel),
   capacité utile **447 GiB**.
-- Partitionnement LVM (`dirqual<n>-vg`) :
+- Partitionnement LVM (groupe de volumes par nœud, p. ex. `cp1-vg`, `node1-vg`)
+  :
 
   | Volume                  | Taille | Point de montage |
   | ----------------------- | ------ | ---------------- |
@@ -83,7 +88,7 @@ collecte n'existe plus depuis que `bootstrap/first-access.sh` pose
 `sudo NOPASSWD` sur le compte `debian`. À actualiser en lançant :
 
 ```bash
-for h in dirqual1 dirqual2 dirqual3 dirqual4; do
+for h in cp1 node1 node2 node3; do
     echo "=== $h ==="
     ssh debian@$h 'sudo dmidecode -t memory' | grep -E 'Locator|Size|Speed|Manufacturer|Part Number' | head -40
 done
