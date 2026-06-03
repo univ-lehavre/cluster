@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.16.1](https://github.com/univ-lehavre/cluster/compare/v2.16.0...v2.16.1) (2026-06-03)
+
+
+### Documentation
+
+* glossaire exposition + pages architecture (chaîne réseau, validation banc) ([#103](https://github.com/univ-lehavre/cluster/issues/103)) ([94c4621](https://github.com/univ-lehavre/cluster/commit/94c4621bf3d2ce5107529da02ca4a80f2ad4be66))
+* **test:** valider cert-manager + CA interne sur banc (Run [#12](https://github.com/univ-lehavre/cluster/issues/12), ADR 0021) ([#104](https://github.com/univ-lehavre/cluster/issues/104)) ([cfe0125](https://github.com/univ-lehavre/cluster/commit/cfe012504a3f1957a12243a7b9336d8525b1a980))
+
 ## [2.16.0](https://github.com/univ-lehavre/cluster/compare/v2.15.2...v2.16.0) (2026-06-03)
 
 
