@@ -1,13 +1,13 @@
 # Banc multi-nœuds (Phase 1-5 + Ceph)
 
 3 VMs Debian 13 arm64 reproduisant la topologie de prod à l'échelle : 1 control
-plane (`dirqual1`) + 2 workers (`dirqual2-3`), réseau privé `192.168.67.0/24`,
-chaque VM dotée de **3 HDD virtuels + 1 NVMe virtuel** pour exercer Rook-Ceph
-(OSDs, block.db, quorum mon). Le contrôleur de la box est **VirtioSCSI**, donc
-les disques apparaissent en `/dev/sd*` (sda = OS, sdb-sde = disques Ceph) — même
+plane (`cp1`) + 2 workers (`node1-2`), réseau privé `192.168.67.0/24`, chaque VM
+dotée de **3 HDD virtuels + 1 NVMe virtuel** pour exercer Rook-Ceph (OSDs,
+block.db, quorum mon). Le contrôleur de la box est **VirtioSCSI**, donc les
+disques apparaissent en `/dev/sd*` (sda = OS, sdb-sde = disques Ceph) — même
 nommage que la prod, cf. [drift 0b](../RESULTS.md).
 
-> ⚠️ **Plage IP volontairement disjointe de la prod (10.67.2.0/22)** : le banc
+> ⚠️ **Plage IP volontairement disjointe de la prod (10.0.0.0/22)** : le banc
 > utilise `192.168.67.0/24` pour éviter qu'une interface VBox host-only capture
 > les routes locales vers les vrais serveurs (cf.
 > [drift #6 dans RESULTS.md](../RESULTS.md)). Un pre-flight dans le Vagrantfile
@@ -47,7 +47,7 @@ Réserves :
 
 **Pas de configuration `/etc/vbox/networks.conf` requise** : la plage
 `192.168.67.0/24` est dans `192.168.0.0/16`, autorisée par défaut par VirtualBox
-sur macOS. (Ce n'était pas le cas de l'ancienne plage `10.67.2.0/24` — cf. drift
+sur macOS. (Ce n'était pas le cas de l'ancienne plage `10.0.0.0/22` — cf. drift
 n° 6.)
 
 ## RAM consommée
@@ -94,8 +94,8 @@ Les disques persistent à travers `vagrant halt/up`, mais sont supprimés par
 
 > ⚠️ **Différences avec la prod sur ce banc** :
 >
-> - IPs : `192.168.67.X` (banc) vs `10.67.2.X` (prod) — pour éviter le conflit
->   de routage (drift #6).
+> - IPs : `192.168.67.X` (banc) vs `10.0.0.X` (prod) — pour éviter le conflit de
+>   routage (drift #6).
 > - Disques : HDD `/dev/sd[b-d]` + block.db `/dev/sde` (banc, VirtioSCSI) vs HDD
 >   `/dev/sd*` + `/dev/nvme1n1` (prod, NVMe matériel). Seul le block.db diffère
 >   ; le nommage HDD `sd*` est identique à la prod.
@@ -127,12 +127,12 @@ cloud:
 
 control:
   hosts:
-    dirqual1: { ansible_host: 192.168.67.11 }
+    cp1: { ansible_host: 192.168.67.11 }
 
 workers:
   hosts:
-    dirqual2: { ansible_host: 192.168.67.12 }
-    dirqual3: { ansible_host: 192.168.67.13 }
+    node1: { ansible_host: 192.168.67.12 }
+    node2: { ansible_host: 192.168.67.13 }
 ```
 
 (Gitignoré par sécurité — on peut le générer à la demande.)
@@ -175,9 +175,9 @@ CEPH_HDD_GLOB='/sys/block/sd[b-z]' CEPH_BLOCK_DEVICE=sde CEPH_MIN_HDD=3 \
 La couche 3b doit afficher :
 
 ```text
-✓ dirqual1 : 3/3 HDD bruts (≥ 3 requis)
-✓ dirqual1 : /dev/sde présent et brut (block.db)
-✓ dirqual1 : /var/lib/rook absent ou vide
+✓ cp1 : 3/3 HDD bruts (≥ 3 requis)
+✓ cp1 : /dev/sde présent et brut (block.db)
+✓ cp1 : /var/lib/rook absent ou vide
 ```
 
 Puis :
@@ -210,7 +210,7 @@ Voir [`test/README.md`](../README.md#nettoyage) pour les options (`--force`,
 
 | Symptôme                                     | Cause                                                       | Remède                                                                                                |
 | -------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `Cannot create host-only network 10.67.2.x`  | VBox refuse la plage                                        | Éditer `/etc/vbox/networks.conf` (voir Pré-requis hôte)                                               |
+| `Cannot create host-only network 10.0.0.x`   | VBox refuse la plage                                        | Éditer `/etc/vbox/networks.conf` (voir Pré-requis hôte)                                               |
 | `Controller already exists: NVMe` au 2ᵉ `up` | Le flag `.flag` a été supprimé sans nettoyer la conf VM     | `vagrant destroy && rm -rf .vagrant/ceph-disks/`                                                      |
 | Workers ne joignent pas                      | Endpoint cluster-api non résolvable depuis 192.168.67.12/13 | Ajouter à `/etc/hosts` des workers : `192.168.67.11 cluster-api` (devrait l'être par le rôle kubeadm) |
 | OSDs `Pending`                               | Disques pas bruts (déjà utilisés par un cycle précédent)    | Sur chaque worker : `sudo bash storage/ceph/cleanup.sh` puis recréer le `CephCluster`                 |

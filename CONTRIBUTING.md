@@ -97,7 +97,7 @@ avant de toucher les serveurs :
 - [`test/single-node/`](test/single-node/) — Phase 1-2 mono-VM (~5 min, sans
   Ceph).
 - [`test/multi-node/`](test/multi-node/) — Phase 1-5 multi-VM avec disques +
-  réseau privé `10.67.2.0/24` (~15 min, exerce Rook-Ceph).
+  réseau privé `10.0.0.0/22` (~15 min, exerce Rook-Ceph).
 
 Résultats du dernier banc : [`test/RESULTS.md`](test/RESULTS.md).
 

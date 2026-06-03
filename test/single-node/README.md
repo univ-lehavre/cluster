@@ -73,7 +73,7 @@ cloud:
 
 control:
   hosts:
-    dirqual1:
+    cp1:
       ansible_host: 127.0.0.1
       ansible_port: $port
 
@@ -136,15 +136,15 @@ Attendu :
 /¯¯\__/¯¯\    Envoy DaemonSet:    OK
 …
 NAME       STATUS   ROLES           AGE   VERSION
-dirqual1   Ready    control-plane   …     v1.34.8
+cp1   Ready    control-plane   …     v1.34.8
 ```
 
 Vérifier le pod CIDR (issu de `10.244.0.0/16`, **disjoint** du réseau
-`10.67.2.0/22` de la prod) :
+`10.0.0.0/22` de la prod) :
 
 ```bash
 ssh -p "$port" -i "$KEY" $SSH_ARGS debian@127.0.0.1 \
-    'kubectl get ciliumnode dirqual1 -o jsonpath="{.spec.ipam.podCIDRs}"; echo'
+    'kubectl get ciliumnode cp1 -o jsonpath="{.spec.ipam.podCIDRs}"; echo'
 # → ["10.244.0.0/24"]
 ```
 
