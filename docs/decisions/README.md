@@ -4,6 +4,11 @@ Trace **pourquoi** chaque choix de conception du cluster — pas le _comment_
 (couvert par les README/RUNBOOK), mais le contexte, l'alternative écartée et les
 conséquences assumées.
 
+> 🗺️ **Lecture par thème.** Cet index est **chronologique** (un ADR = une
+> décision datée, immuable). Pour une lecture **par domaine** (stockage, réseau,
+> sécurité, plan de contrôle, plateforme/GitOps, conventions), voir les
+> [vues d'architecture](../architecture/) qui agrègent et relient les ADR.
+
 Format léger inspiré de Michael Nygard :
 
 - **Contexte** — ce qui a forcé une décision.
