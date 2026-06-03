@@ -28,6 +28,11 @@ kind: ClusterConfiguration
 controlPlaneEndpoint: {{ control_plane_endpoint }}:{{ control_plane_port }}
 apiServer:
   extraArgs:
+    # Feature gate ImageVolume : requis pour les « image volume extensions »
+    # (CloudNativePG ≥ 1.29, voie pgvector sans image custom — cf. ADR 0006/0024).
+    # Beta en K8s 1.33+ mais NON activée par défaut → on l'active explicitement.
+    - name: feature-gates
+      value: ImageVolume=true
     # Chiffrement at-rest des Secrets dans etcd (provider secretbox).
     - name: encryption-provider-config
       value: {{ k8s_enc_dir }}/encryption-config.yaml
@@ -60,3 +65,10 @@ apiServer:
       mountPath: {{ k8s_audit_log_dir }}
       readOnly: false
       pathType: DirectoryOrCreate
+---
+# Le kubelet doit AUSSI activer ImageVolume pour monter les volumes d'image
+# (le feature gate apiServer seul ne suffit pas — c'est le kubelet qui monte).
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+featureGates:
+  ImageVolume: true
