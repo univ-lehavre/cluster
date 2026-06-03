@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.19.0](https://github.com/univ-lehavre/cluster/compare/v2.18.0...v2.19.0) (2026-06-03)
+
+
+### Features
+
+* **platform:** cloudnative-pg (postgresql managé + pgvector + sauvegardes s3) ([#125](https://github.com/univ-lehavre/cluster/issues/125)) ([3314de3](https://github.com/univ-lehavre/cluster/commit/3314de37b8697ed1d6f59904e711fe5f97ba291f))
+
 ## [2.18.0](https://github.com/univ-lehavre/cluster/compare/v2.17.6...v2.18.0) (2026-06-03)
 
 
