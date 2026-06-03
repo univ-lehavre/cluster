@@ -7,7 +7,7 @@ Rook-Ceph et le CNI Cilium se comportent comme attendu en nominal et en panne.
 ## Pré-requis
 
 - Banc multi-node up (`test/multi-node/`) ou cluster prod opérationnel.
-- `kubectl` configuré côté poste de contrôle (ou ssh sur dirqual1).
+- `kubectl` configuré côté poste de contrôle (ou ssh sur cp1).
 - Phase 1-3 du PLAN appliquées (cluster K8s + Rook-Ceph HEALTH_OK).
 
 ## Conventions
@@ -224,7 +224,7 @@ Oui, par les scénarios 10-13 :
 - **Hôte (13)** — a besoin de l'**accès SSH** aux nœuds (pas de `kubectl`) :
 
   ```bash
-  HOSTS='dirqual1 dirqual2 dirqual3' bash test/scenarios/13-host-node-hardening.sh
+  HOSTS='cp1 node1 node2' bash test/scenarios/13-host-node-hardening.sh
   # banc (port forwardé Vagrant, un nœud à la fois) :
   HOSTS=127.0.0.1 SSH_OPTS='-p 2222 -i ~/.vagrant.d/insecure_private_keys/vagrant.key.rsa' \
     USER_REMOTE=debian bash test/scenarios/13-host-node-hardening.sh

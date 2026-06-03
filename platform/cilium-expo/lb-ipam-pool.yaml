@@ -9,7 +9,7 @@
 #
 # Le pool DOIT être dans le même sous-réseau L2 que les nœuds (l'annonce est de
 # l'ARP). Banc Vagrant : 192.168.67.0/24, IP .240-.250 hors plage DHCP host-only.
-# PROD (10.67.2.0/22) : TODO — plage à réserver AVEC l'admin réseau (aucune IP
+# PROD (10.0.0.0/22) : TODO — plage à réserver AVEC l'admin réseau (aucune IP
 # prod attribuée à l'aveugle : collision possible sur un /22 partagé). Ajouter
 # alors un second block (ou un pool dédié) une fois la réservation confirmée.
 apiVersion: cilium.io/v2
@@ -18,7 +18,7 @@ metadata:
   name: banc-vagrant-pool
 spec:
   # TODO prod (ADR 0020) — ajouter un second block après arbitrage admin réseau
-  # (plage libre de 10.67.2.0/22), p. ex. { start: "10.67.2.X", stop: "10.67.2.Y" }.
+  # (plage libre de 10.0.0.0/22), p. ex. { start: "10.0.0.X", stop: "10.0.0.Y" }.
   # Aucune IP prod réservée à l'aveugle : collision possible sur un /22 partagé.
   blocks:
     # Plage explicite .240-.250 (un /29 ne couvrirait que .240-.247).

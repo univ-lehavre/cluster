@@ -11,7 +11,7 @@
 #   test/scenarios/run-all.sh                  # tous les scénarios (kubectl)
 #   SKIP='03 04' test/scenarios/run-all.sh     # exclure des scénarios (par n°)
 #   ONLY='01 02 07' test/scenarios/run-all.sh  # n'exécuter que ceux-là
-#   HOSTS='dirqual1 dirqual2' test/scenarios/run-all.sh  # inclut le 13 (host)
+#   HOSTS='cp1 node1' test/scenarios/run-all.sh  # inclut le 13 (host)
 #
 # ⚠️ Sur le banc Vagrant, la phase « restore » des scénarios 03/04 ne se valide
 # pas (artefacts arm64 sans valeur prod — cf. test/scenarios/README.md). Les
@@ -65,7 +65,7 @@ for script in [0-9][0-9]-*.sh; do
     fi
     # Skip auto des scénarios SSH si aucun HOSTS fourni et pas demandé via ONLY.
     if needs_ssh "$num" && [ -z "${HOSTS:-}" ] && ! grep -qw "$num" <<<"$ONLY"; then
-        results+=("SKIP  $script (host hardening — fournir HOSTS='dirqual1 …' ou ONLY='$num')")
+        results+=("SKIP  $script (host hardening — fournir HOSTS='cp1 …' ou ONLY='$num')")
         continue
     fi
 

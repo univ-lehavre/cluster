@@ -66,14 +66,14 @@ ansible-playbook -i ../hosts.yaml secure.yml --tags ufw
 Limiter à un nœud (utile pour expérimenter) :
 
 ```bash
-ansible-playbook -i ../hosts.yaml secure.yml --tags os --limit dirqual1
+ansible-playbook -i ../hosts.yaml secure.yml --tags os --limit cp1
 ```
 
 Tableau de bord :
 
 ```bash
 bash bootstrap/security/report.sh                # tous les hôtes
-bash bootstrap/security/report.sh dirqual1       # un hôte
+bash bootstrap/security/report.sh cp1            # un hôte
 ```
 
 ---
@@ -368,7 +368,7 @@ sans avoir à exécuter chaque commande à la main :
 
 ```bash
 bash bootstrap/security/report.sh                # tous les hôtes
-bash bootstrap/security/report.sh dirqual1       # un hôte
+bash bootstrap/security/report.sh cp1            # un hôte
 ```
 
 Le rapport remonte, par nœud, **les preuves observables** : services actifs,

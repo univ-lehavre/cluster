@@ -29,7 +29,7 @@ test-unit:
 
 # ─── État du cluster ────────────────────────────────────────────────────────
 
-# Drift par couche sur tous les nœuds (ou un sous-ensemble : `just state dirqual1`).
+# Drift par couche sur tous les nœuds (ou un sous-ensemble : `just state cp1`).
 state *hosts:
     bootstrap/state.sh {{ hosts }}
 

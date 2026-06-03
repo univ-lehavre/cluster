@@ -22,7 +22,7 @@
 #
 # Pré-requis : accès SSH aux nœuds (mêmes pré-requis que state.sh).
 # Variables :
-#   HOSTS='dirqual1 …'   liste des nœuds (défaut: laisse state.sh décider)
+#   HOSTS='cp1 …'   liste des nœuds (défaut: laisse state.sh décider)
 #   SSH_OPTS, USER_REMOTE passés tels quels à state.sh (cf. son en-tête)
 #   STRICT_OPTIN=1       fait AUSSI échouer si AUCUNE couche OS n'est active
 #                        (utile en prod où le durcissement est censé être posé)

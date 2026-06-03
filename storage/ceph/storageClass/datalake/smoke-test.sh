@@ -18,7 +18,7 @@
 # Usage :
 #   bash storage/ceph/storageClass/datalake/smoke-test.sh                # run + cleanup
 #   KEEP=1 bash storage/ceph/storageClass/datalake/smoke-test.sh         # ne nettoie pas
-#   ENDPOINT=http://10.67.2.11:30080 bash ...smoke-test.sh               # override endpoint
+#   ENDPOINT=http://10.0.0.11:30080 bash ...smoke-test.sh               # override endpoint
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)

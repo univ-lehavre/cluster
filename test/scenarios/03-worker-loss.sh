@@ -6,7 +6,7 @@
 # puis restore le worker et vérifier la convergence HEALTH_OK.
 #
 # Variables :
-#   VICTIM       — nom du worker à perdre (défaut: dirqual3)
+#   VICTIM       — nom du worker à perdre (défaut: node2)
 #   VAGRANT_DIR  — dossier du Vagrantfile pour halt/up (défaut: test/multi-node)
 #   DOWNTIME_S   — durée du downtime (défaut: 60)
 #   KEEP=1       — pas de cleanup
@@ -14,7 +14,7 @@
 # Sortie : `0` si HEALTH revient à OK après restore.
 set -euo pipefail
 
-VICTIM=${VICTIM:-dirqual3}
+VICTIM=${VICTIM:-node2}
 VAGRANT_DIR=${VAGRANT_DIR:-test/multi-node}
 DOWNTIME_S=${DOWNTIME_S:-60}
 KEEP=${KEEP:-0}
