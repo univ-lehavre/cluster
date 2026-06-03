@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.16.2](https://github.com/univ-lehavre/cluster/compare/v2.16.1...v2.16.2) (2026-06-03)
+
+
+### Documentation
+
+* **test:** exposition Argo CD via Gateway sur banc (Run [#13](https://github.com/univ-lehavre/cluster/issues/13)) + finding gRPC ([#106](https://github.com/univ-lehavre/cluster/issues/106)) ([94d659b](https://github.com/univ-lehavre/cluster/commit/94d659b4637cf3e0bc5ce766502d45b14d679b79))
+
 ## [2.16.1](https://github.com/univ-lehavre/cluster/compare/v2.16.0...v2.16.1) (2026-06-03)
 
 
