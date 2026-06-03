@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.17.6](https://github.com/univ-lehavre/cluster/compare/v2.17.5...v2.17.6) (2026-06-03)
+
+
+### Documentation
+
+* génériser identités dans les fichiers restants (ADR 0023, PR 4/4) ([#118](https://github.com/univ-lehavre/cluster/issues/118)) ([5ff998b](https://github.com/univ-lehavre/cluster/commit/5ff998bf66d3d115e404dbf28c0140bebaf40e95))
+
 ## [2.17.5](https://github.com/univ-lehavre/cluster/compare/v2.17.4...v2.17.5) (2026-06-03)
 
 
