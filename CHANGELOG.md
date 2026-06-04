@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.21.0](https://github.com/univ-lehavre/cluster/compare/v2.20.0...v2.21.0) (2026-06-04)
+
+
+### Features
+
+* **test:** banc léger Lima multi-VM + Rook/Ceph ([#127](https://github.com/univ-lehavre/cluster/issues/127)) ([#143](https://github.com/univ-lehavre/cluster/issues/143)) ([91a6834](https://github.com/univ-lehavre/cluster/commit/91a68348bb0a0a9e6460a480cd707f2af7be123f))
+
 ## [2.20.0](https://github.com/univ-lehavre/cluster/compare/v2.19.0...v2.20.0) (2026-06-04)
 
 
