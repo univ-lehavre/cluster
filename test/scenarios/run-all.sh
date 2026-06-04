@@ -12,13 +12,24 @@
 #   SKIP='03 04' test/scenarios/run-all.sh     # exclure des scénarios (par n°)
 #   ONLY='01 02 07' test/scenarios/run-all.sh  # n'exécuter que ceux-là
 #   HOSTS='cp1 node1' test/scenarios/run-all.sh  # inclut le 13 (host)
+#   TARGET_IP=192.168.67.11 ONLY='16' …        # joue un scénario SSH ciblé
 #
 # ⚠️ Sur le banc Vagrant, la phase « restore » des scénarios 03/04 ne se valide
 # pas (artefacts arm64 sans valeur prod — cf. test/scenarios/README.md). Les
 # exclure avec SKIP='03 04' sur le banc.
 #
-# ℹ️ Le scénario 13 (durcissement hôte) interroge les nœuds par SSH (pas
-# kubectl) : sauté par défaut, joué si HOSTS est défini ou via ONLY='13'.
+# ℹ️ Scénarios SSH (interrogent/attaquent les nœuds, pas kubectl) : sautés par
+# défaut, joués si l'accès est fourni (HOSTS pour 13 ; TARGET_IP/NODE_IP pour
+# 16/19/22) ou via ONLY :
+#   - 13      durcissement hôte (lecture seule via state.sh) ;
+#   - 16/19/22 sécurité ACTIVE offensive/chaos (ADR 0025).
+#
+# 🚨 SÉCURITÉ ACTIVE (16-22, ADR 0025) : scénarios OFFENSIFS (brute-force,
+# évasion, exfiltration) et CHAOS (perte réseau, kill, saturation). À LANCER
+# UNIQUEMENT SUR UN BANC JETABLE — jamais une topologie réelle/prod ni une cible
+# tierce. Chaque scénario porte une garde « banc-only » (refus hors plage de
+# banc, sauf BANC=1). 19/20/21 sont destructifs → attente HEALTH_OK après.
+# 16/22 dépendent de #131 pour le maillon Alerte (best-effort/skip sinon).
 #
 # Sortie : 0 si tous les scénarios joués passent, 1 sinon.
 set -uo pipefail
@@ -44,14 +55,18 @@ wait_health_ok() {
 }
 
 # Scénarios destructifs (changent l'état du cluster) → attente HEALTH_OK après.
-is_destructive() { case "$1" in 03|04|05) return 0 ;; *) return 1 ;; esac; }
+# 03/04/05 = résilience ; 19/20/21 = chaos (ADR 0025).
+is_destructive() { case "$1" in 03|04|05|19|20|21) return 0 ;; *) return 1 ;; esac; }
 
-# Le scénario 13 (durcissement hôte) interroge les nœuds par SSH (via state.sh),
-# pas par kubectl. Il a donc besoin de HOSTS/SSH_OPTS et n'a pas sa place dans un
-# run kubectl-only : on le saute par défaut, sauf si HOSTS est défini (signe que
-# l'opérateur a fourni l'accès SSH). Le forcer explicitement via ONLY le joue
-# quand même.
-needs_ssh() { case "$1" in 13) return 0 ;; *) return 1 ;; esac; }
+# Scénarios qui interrogent/attaquent les nœuds par SSH (pas kubectl) et n'ont
+# pas leur place dans un run kubectl-only :
+#   13 = durcissement hôte (via state.sh) ;
+#   16/19/22 = sécurité ACTIVE offensive/chaos côté HÔTE (ADR 0025) — DANGEREUX
+#   hors banc. On les saute par défaut, sauf si l'opérateur a fourni un accès SSH
+#   (HOSTS pour le 13 ; TARGET_IP/NODE_IP pour 16/19/22) OU les force via ONLY.
+# Ce skip par défaut évite de déclencher un brute-force/une partition par
+# inadvertance dans un run agrégé.
+needs_ssh() { case "$1" in 13|16|19|22) return 0 ;; *) return 1 ;; esac; }
 
 results=()
 rc_global=0
@@ -63,9 +78,12 @@ for script in [0-9][0-9]-*.sh; do
         results+=("SKIP  $script")
         continue
     fi
-    # Skip auto des scénarios SSH si aucun HOSTS fourni et pas demandé via ONLY.
-    if needs_ssh "$num" && [ -z "${HOSTS:-}" ] && ! grep -qw "$num" <<<"$ONLY"; then
-        results+=("SKIP  $script (host hardening — fournir HOSTS='cp1 …' ou ONLY='$num')")
+    # Skip auto des scénarios SSH si aucun accès fourni et pas demandé via ONLY.
+    # Signal d'accès : HOSTS (13) ou TARGET_IP/NODE_IP (16/19/22, sécurité active).
+    if needs_ssh "$num" \
+        && [ -z "${HOSTS:-}" ] && [ -z "${TARGET_IP:-}" ] && [ -z "${NODE_IP:-}" ] \
+        && ! grep -qw "$num" <<<"$ONLY"; then
+        results+=("SKIP  $script (SSH — fournir HOSTS/TARGET_IP/NODE_IP, ou ONLY='$num')")
         continue
     fi
 

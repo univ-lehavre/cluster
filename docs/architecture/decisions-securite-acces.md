@@ -197,6 +197,49 @@ sortie : activer l'auth (htpasswd/OIDC pour le registry, `PASSWORD` + comptes
 par chercheur pour RStudio, rôles scopés et `0010-bis` pour le dashboard),
 imposer le TLS, poser des `NetworkPolicy` strictes.
 
+## Valider la sécurité activement : chaos + attaques contrôlées
+
+Les décisions ci-dessus _posent_ des défenses ; encore faut-il prouver qu'elles
+**fonctionnent sous attaque** — et savoir si l'on est **alerté** quand elles se
+déclenchent. C'est l'objet de
+[ADR 0025](../decisions/0025-securite-active-chaos-attaques-controlees.md), qui
+acte une démarche de **sécurité active** structurée par le triptyque **Détection
+→ Alerte → Réaction (D/A/R)**.
+
+Le constat de départ : les scénarios de banc (10-15) vérifiaient la défense
+**passive** (la contrainte _est en place_), jamais son efficacité _sous
+attaque_. Et l'inventaire des détecteurs hôte
+([`bootstrap/security/`](../../bootstrap/security/)) révélait un trou : fail2ban
+et auditd **détectent** et **réagissent**, mais n'**alertent** quasi pas en
+temps réel. ADR 0025 répond par deux familles de scénarios
+([`test/scenarios/`](../../test/scenarios/) 16-22), **réservées à un banc
+jetable** par des garde-fous codés :
+
+- **attaques contrôlées** — brute-force SSH → **fail2ban bannit** (16), pod
+  d'évasion → **PSA rejette** (17, complète l'enforce `baseline` de
+  [ADR 0014](../decisions/0014-durcissement-kubeadm-init.md)), exfiltration →
+  **NetworkPolicy/Cilium coupe** (18, complète les WireGuard/Hubble de
+  [ADR 0019](../decisions/0019-durcissement-reseau-cilium.md)) ;
+- **chaos engineering** — perte/partition réseau (19), kill de pods (20),
+  saturation contenue par les `limits` (21) : le cluster **survit et
+  reconverge**.
+
+Deux choix de cadrage relient cette démarche au fil rouge du modèle de menace :
+
+- **le maillon _alerte_ dépend de l'issue #131** (brancher l'alerting hôte sur
+  Mailpit/Mailgun) ; tant qu'elle n'est pas livrée, il est best-effort/skip — le
+  trou est documenté, pas masqué ;
+- **la détection comportementale runtime est différée** : ni Falco ni Tetragon
+  pour l'instant (cf.
+  [note runtime/admission](../audit/note-runtime-admission.md)), un ADR dédié
+  tranchera. C'est cohérent avec la prudence opérationnelle d'un cluster
+  mono-admin non-HA — on n'ajoute pas un sous-système stateful sans décision
+  arbitrée.
+
+Comme tous les ADR de cette vue, 0025 **se soumet au modèle de menace de 0003**
+: les techniques offensives ne valent que sur un **banc isolé jetable**, jamais
+une topologie réelle ni une cible tierce.
+
 ## Encadré honnêteté — SPOF et risques résiduels assumés
 
 Plusieurs compromis sont **assumés** dans le modèle de menace et le redeviennent
