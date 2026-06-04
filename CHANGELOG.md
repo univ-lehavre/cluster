@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.23.0](https://github.com/univ-lehavre/cluster/compare/v2.22.0...v2.23.0) (2026-06-04)
+
+
+### Features
+
+* **test:** banc lima — stockage modulaire (local-path rapide, ceph optionnel) ([#151](https://github.com/univ-lehavre/cluster/issues/151)) ([24c4cad](https://github.com/univ-lehavre/cluster/commit/24c4cad215748f372ce790aed9331776cfca8fa8))
+* **test:** banc Lima — stockage modulaire (local-path rapide, Ceph optionnel) ([#151](https://github.com/univ-lehavre/cluster/issues/151)) ([#153](https://github.com/univ-lehavre/cluster/issues/153)) ([24c4cad](https://github.com/univ-lehavre/cluster/commit/24c4cad215748f372ce790aed9331776cfca8fa8))
+
 ## [2.22.0](https://github.com/univ-lehavre/cluster/compare/v2.21.0...v2.22.0) (2026-06-04)
 
 
