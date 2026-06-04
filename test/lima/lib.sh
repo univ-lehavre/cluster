@@ -269,8 +269,14 @@ run_cni() {
 # le portForward Lima (127.0.0.1:<api_port>), l'IP user-v2 n'étant pas routable
 # depuis le Mac. Le certificat de l'API porte le SAN `cluster-api` → on pose
 # `tls-server-name: cluster-api` pour que la validation TLS passe malgré l'adresse
-# 127.0.0.1. Renomme le contexte si $ctx est fourni. Gate `kubectl version`.
+# 127.0.0.1. Gate `kubectl version`.
 #   $api_port = port hôte du forward de l'API (cf. lima_render_node)
+#   $ctx (optionnel) = nom de contexte. Si fourni, on renomme AUSSI le cluster et
+#     l'utilisateur sur ce nom : sinon deux kubeconfigs de clusters kubeadm
+#     distincts partagent les noms par défaut (`kubernetes`/`kubernetes-admin`) et
+#     s'ÉCRASENT mutuellement une fois fusionnés (KUBECONFIG=a:b) — fatal pour le
+#     pilotage multi-cluster (ex. mesh : `cilium clustermesh connect` voyait deux
+#     fois le même cluster).
 fetch_kubeconfig_node() {
     local vm=$1 out=$2 api_port=$3 ctx="${4:-}"
     [ -n "${api_port}" ] || die "fetch_kubeconfig_node : api_port manquant"
@@ -278,19 +284,32 @@ fetch_kubeconfig_node() {
     vm_sh "${vm}" sudo cat /etc/kubernetes/admin.conf > "${out}" \
         || die "kubeconfig introuvable sur ${vm} (bootstrap fait ?)"
     # admin.conf pointe sur cluster-api:6443 (résolu DANS la VM) → réécrit sur le
-    # forward hôte ; le nom du cluster dans le kubeconfig sert de clé pour le
-    # tls-server-name.
+    # forward hôte.
     sed -i.bak -E "s#server: https://[^[:space:]]+#server: https://127.0.0.1:${api_port}#" "${out}"
     rm -f "${out}.bak"
-    local cluster_name
-    cluster_name=$(KUBECONFIG="${out}" kubectl config view -o jsonpath='{.clusters[0].name}')
-    KUBECONFIG="${out}" kubectl config set-cluster "${cluster_name}" \
-        --tls-server-name=cluster-api > /dev/null
+
     if [ -n "${ctx}" ]; then
-        local cur
-        cur=$(KUBECONFIG="${out}" kubectl config current-context)
-        KUBECONFIG="${out}" kubectl config rename-context "${cur}" "${ctx}" > /dev/null
+        # Renomme cluster + user + contexte sur des noms UNIQUES dérivés de $ctx.
+        # kubeadm pose toujours les noms par défaut `kubernetes` (cluster),
+        # `kubernetes-admin` (user) et `kubernetes-admin@kubernetes` (contexte) :
+        # on les remplace par des chaînes exactes (du plus long au plus court pour
+        # éviter les remplacements partiels). Édition directe : un seul
+        # cluster/user/contexte par kubeconfig de nœud.
+        sed -i.bak \
+            -e "s#kubernetes-admin@kubernetes#${ctx}#g" \
+            -e "s#kubernetes-admin#${ctx}-admin#g" \
+            -e "s#name: kubernetes\$#name: ${ctx}#g" \
+            -e "s#cluster: kubernetes\$#cluster: ${ctx}#g" \
+            "${out}"
+        rm -f "${out}.bak"
     fi
+
+    # tls-server-name : la validation TLS se fait contre le SAN cluster-api.
+    local cluster
+    cluster=$(KUBECONFIG="${out}" kubectl config view -o jsonpath='{.clusters[0].name}')
+    KUBECONFIG="${out}" kubectl config set-cluster "${cluster}" \
+        --tls-server-name=cluster-api > /dev/null
+
     chmod 600 "${out}"
     KUBECONFIG="${out}" kubectl version > /dev/null 2>&1 \
         || die "kubectl ne joint pas l'API via ${out} (forward 127.0.0.1:${api_port} actif ?)"

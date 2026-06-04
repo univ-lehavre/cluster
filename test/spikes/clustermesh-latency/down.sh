@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Détruit le spike : supprime les deux clusters kind (et donc leurs conteneurs,
-# réseaux, et toute règle netem qui vivait dedans). Jetable par construction.
+# Détruit le spike : supprime les deux VMs Lima (site-a, site-b) et leurs
+# artefacts de run (inventaires, kubeconfigs). Jetable par construction — le
+# netem vit dans les VMs, il disparaît avec elles.
 #
 # Usage : ./down.sh
 
@@ -10,16 +11,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=test/spikes/clustermesh-latency/lib.sh
 . "${HERE}/lib.sh"
 
-need kind
-require_docker
+require_lima
 
-for kname in "${C1_KIND}" "${C2_KIND}"; do
-    if kind get clusters 2> /dev/null | grep -qx "${kname}"; then
-        log "Suppression du cluster kind '${kname}'"
-        kind delete cluster --name "${kname}"
-        ok "'${kname}' supprimé"
-    else
-        ok "'${kname}' déjà absent"
-    fi
+for vm in "${A_VM}" "${B_VM}"; do
+    lima_delete_node "${vm}"
 done
-ok "spike démonté — rien ne subsiste (netem inclus, vivait dans les conteneurs)"
+rm -rf "${WORKDIR}"
+ok "spike démonté — rien ne subsiste (netem inclus, vivait dans les VMs)"

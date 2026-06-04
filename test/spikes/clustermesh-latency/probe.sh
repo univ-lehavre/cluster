@@ -22,17 +22,22 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "${HERE}/lib.sh"
 
 need kubectl
-require_docker
+
+# KUBECONFIG fusionné des deux sites (généré par up.sh). Permet le pilotage par
+# contexte (--context spike-site-a / spike-site-b) depuis l'hôte.
+[ -f "${A_KUBECONFIG}" ] && [ -f "${B_KUBECONFIG}" ] \
+    || die "kubeconfigs des sites absents — lancer ./up.sh d'abord"
+export KUBECONFIG="${A_KUBECONFIG}:${B_KUBECONFIG}"
 
 NS=mesh-spike
 SVC=echo-global
 CLIENT=mesh-client
 
-k1() { kubectl --context "${C1_CTX}" "$@"; }
-k2() { kubectl --context "${C2_CTX}" "$@"; }
+k1() { kubectl --context "${A_CTX}" "$@"; }
+k2() { kubectl --context "${B_CTX}" "$@"; }
 
 deploy() {
-    log "Déploiement de l'echo-server (service global) dans ${C2_NAME}"
+    log "Déploiement de l'echo-server (service global) dans ${B_NAME}"
     k2 create namespace "${NS}" --dry-run=client -o yaml | k2 apply -f -
     # echo-server : renvoie son hostname → on voit quel cluster a répondu.
     k2 -n "${NS}" apply -f - <<EOF
@@ -69,7 +74,7 @@ spec:
 EOF
     k2 -n "${NS}" rollout status deploy/"${SVC}" --timeout=120s
 
-    log "Déploiement du pod client dans ${C1_NAME}"
+    log "Déploiement du pod client dans ${A_NAME}"
     k1 create namespace "${NS}" --dry-run=client -o yaml | k1 apply -f -
     # Le Service global doit exister des DEUX côtés (même nom/namespace) pour que
     # Cilium fusionne les backends. Côté site-a : Service global SANS backend local.

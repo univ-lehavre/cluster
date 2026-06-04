@@ -2,7 +2,7 @@
 #
 # Injecte (ou retire) de la latence réseau entre les deux « sites » du mesh.
 # Les sites sont VIRTUELS : la « distance » inter-site est simulée par tc netem
-# posé dans les conteneurs de nœuds kind, sur l'interface eth0 (le réseau Docker
+# posé DANS chaque VM Lima, sur l'interface user-v2 (le réseau 192.168.104.0/24
 # que les deux clusters partagent et qui porte le trafic clustermesh).
 #
 # Usage :
@@ -12,63 +12,66 @@
 #   ./latency.sh status  # affiche les qdisc en place
 #
 # Premier (et seul) usage de tc/netem du dépôt — délibérément confiné au spike.
+# Sur Lima (vraie VM), tc s'applique à une vraie interface : plus réaliste que le
+# `docker exec` des conteneurs kind d'origine.
 
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=test/spikes/clustermesh-latency/lib.sh
 . "${HERE}/lib.sh"
 
-require_docker
-IFACE="${NETEM_IFACE:-eth0}" # interface du conteneur kind portant le réseau Docker
+require_lima
 
-# tc/netem ne sont pas garantis dans l'image kind ; on installe iproute2 au besoin
-# (une fois, idempotent). Le conteneur kind est Debian-like (apt).
+# tc/netem (iproute2) est présent sur l'image Debian 13 de Lima ; on l'installe
+# au besoin (idempotent).
 ensure_tc() {
-    local cname=$1
-    if docker exec "${cname}" sh -c 'command -v tc' > /dev/null 2>&1; then
+    local vm=$1
+    if vm_sh "${vm}" sh -c 'command -v tc' > /dev/null 2>&1; then
         return 0
     fi
-    warn "tc absent dans ${cname} — installation de iproute2"
-    docker exec "${cname}" sh -c 'apt-get update -qq && apt-get install -y -qq iproute2' \
-        > /dev/null 2>&1 || die "impossible d'installer iproute2 dans ${cname}"
+    warn "tc absent dans ${vm} — installation de iproute2"
+    vm_sh "${vm}" sudo sh -c 'apt-get update -qq && apt-get install -y -qq iproute2' \
+        > /dev/null 2>&1 || die "impossible d'installer iproute2 dans ${vm}"
 }
 
 apply_delay() {
-    local cname=$1 delay=$2 jitter=$3
-    ensure_tc "${cname}"
+    local vm=$1 delay=$2 jitter=$3 iface
+    ensure_tc "${vm}"
+    iface=$(vm_uservv2_iface "${vm}")
+    [ -n "${iface}" ] || die "${vm} : interface user-v2 introuvable"
     # replace = idempotent (add si absent, sinon remplace).
     if [ -n "${jitter}" ]; then
-        docker exec "${cname}" tc qdisc replace dev "${IFACE}" root netem delay "${delay}ms" "${jitter}ms"
+        vm_sh "${vm}" sudo tc qdisc replace dev "${iface}" root netem delay "${delay}ms" "${jitter}ms"
     else
-        docker exec "${cname}" tc qdisc replace dev "${IFACE}" root netem delay "${delay}ms"
+        vm_sh "${vm}" sudo tc qdisc replace dev "${iface}" root netem delay "${delay}ms"
     fi
 }
 
 clear_delay() {
-    local cname=$1
-    docker exec "${cname}" tc qdisc del dev "${IFACE}" root > /dev/null 2>&1 || true
+    local vm=$1 iface
+    iface=$(vm_uservv2_iface "${vm}") || return 0
+    [ -n "${iface}" ] || return 0
+    vm_sh "${vm}" sudo tc qdisc del dev "${iface}" root > /dev/null 2>&1 || true
 }
 
 show_status() {
-    local cname=$1
-    printf '  %s : ' "${cname}"
-    docker exec "${cname}" tc qdisc show dev "${IFACE}" 2> /dev/null | head -1 || echo "(injoignable)"
+    local vm=$1 iface
+    iface=$(vm_uservv2_iface "${vm}")
+    printf '  %s (%s) : ' "${vm}" "${iface}"
+    vm_sh "${vm}" sudo tc qdisc show dev "${iface}" 2> /dev/null | head -1 || echo "(injoignable)"
 }
-
-C1_NODE=$(node_container "${C1_KIND}")
-C2_NODE=$(node_container "${C2_KIND}")
 
 case "${1:-}" in
     clear)
         log "Retrait de la latence inter-site"
-        clear_delay "${C1_NODE}"
-        clear_delay "${C2_NODE}"
+        clear_delay "${A_VM}"
+        clear_delay "${B_VM}"
         ok "netem retiré (RTT nominal restauré)"
         ;;
     status)
         log "Règles netem en place"
-        show_status "${C1_NODE}"
-        show_status "${C2_NODE}"
+        show_status "${A_VM}"
+        show_status "${B_VM}"
         ;;
     "")
         die "usage : ./latency.sh <ms> [jitter_ms] | clear | status"
@@ -82,8 +85,8 @@ case "${1:-}" in
         # Délai posé des DEUX côtés → latence aller-retour ≈ 2 × delay (réaliste :
         # chaque sens du lien WAN a sa propre latence).
         log "Injection de ${delay} ms${jitter:+ ± ${jitter} ms} de chaque côté (RTT ≈ $((delay * 2)) ms)"
-        apply_delay "${C1_NODE}" "${delay}" "${jitter}"
-        apply_delay "${C2_NODE}" "${delay}" "${jitter}"
+        apply_delay "${A_VM}" "${delay}" "${jitter}"
+        apply_delay "${B_VM}" "${delay}" "${jitter}"
         ok "latence injectée — vérifie avec ./latency.sh status puis ./probe.sh"
         ;;
 esac
