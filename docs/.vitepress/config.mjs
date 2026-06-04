@@ -25,6 +25,7 @@ export default defineConfig({
     /\.(sh|pl|j2|tmpl|yaml|yml|toml|cff|conf)$/, // fichiers de code/config
     /\/Justfile$/,
     /\/Vagrantfile$/,
+    /\/Dockerfile$/,
     // Dossiers de code liés depuis la doc (VitePress les résout en /index) :
     /\/(roles|lib|templates|files|examples)\//,
     /\/test\/unit\//,
@@ -206,6 +207,21 @@ export default defineConfig({
           { text: '10 — Dispersion vs CLI', link: '/docs/audit/10-dispersion-cli' },
           { text: '11 — Logiciels open source', link: '/docs/audit/11-logiciels-oss' },
           { text: "12 — Plan d'action", link: '/docs/audit/12-plan-action' },
+        ],
+      },
+      {
+        text: 'Plans & audits de session',
+        collapsed: true,
+        items: [
+          { text: 'Index & convention', link: '/docs/plans/' },
+          {
+            text: 'Étape 1.7 — Dagster',
+            link: '/docs/plans/2026-06-04-etape-1.7-dagster',
+          },
+          {
+            text: 'Audit — réalignement Dagster ↔ main',
+            link: '/docs/plans/2026-06-04-audit-realignement-main-dagster',
+          },
         ],
       },
     ],

@@ -38,6 +38,35 @@ déploiement (qui vivent dans une config locale non versionnée).
   fonctionnel public) ; l'historique de validation banc (`test/RESULTS.md`)
   n'est **pas** réécrit (honnêteté des Runs).
 
+## Traçabilité : ADR, audits, plans
+
+Trois natures d'écrits, trois dossiers — chacun a son rôle ; aucun ne remplace
+un autre :
+
+| Trace                         | Dossier           | Nature                                                                                                                                          |
+| ----------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Décisions**                 | `docs/decisions/` | ADR (Nygard) — **la décision** structurante, numérotée, immuable.                                                                               |
+| **Audit du dépôt**            | `docs/audit/`     | État des lieux qualité daté, vérifié de façon adversariale.                                                                                     |
+| **Plans & audits de session** | `docs/plans/`     | **Comment** on met en œuvre une décision (plan d'étape) et **ce qui s'est passé** en route (audit de session : réalignement de branche, dette). |
+
+Règles :
+
+- Un **plan met en œuvre une décision**, il ne la remplace pas : tout plan
+  d'étape référence en en-tête l'**ADR qui le fonde**. Les décisions
+  structurantes vont dans un **ADR**, jamais en bullets d'un TODO ou enfouies
+  dans un plan.
+- **Frontière ADR 0023** : `docs/plans/` ne versionne que des **plans d'INFRA**
+  (socle générique). Un plan **métier / applicatif** (cas d'usage d'un projet,
+  pipelines de données spécifiques) vit dans le dépôt applicatif (`atlas`),
+  **pas ici** — même s'il a été rédigé pendant le travail sur ce dépôt.
+- **Nommage** : plan d'étape `AAAA-MM-JJ-<sujet>.md` ; audit de session
+  `AAAA-MM-JJ-audit-<sujet>.md`. Chaque plan porte une section « Journal
+  d'exécution » renvoyant aux audits de session liés.
+- **Numéro d'ADR = ressource partagée** entre branches parallèles : en cas de
+  collision (deux features réservant le même numéro), renuméroter au rebase et
+  corriger l'index + toutes les références.
+- Détail et index : [`docs/plans/README.md`](docs/plans/README.md).
+
 ## Installation des outils
 
 ```bash
