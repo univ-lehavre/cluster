@@ -1,11 +1,14 @@
-# Bancs de test locaux (VirtualBox)
+# Bancs de test locaux
 
-Deux bancs Vagrant à choisir selon la phase à valider :
+Bancs à choisir selon la phase à valider. Deux **hyperviseurs** : Vagrant +
+VirtualBox (`single-node/`, `multi-node/`) et **Lima** (`lima/`, remplaçant
+léger de Vagrant — vraie VM, SSH natif, sans VirtualBox).
 
-| Banc                           | Topologie       | Disques Ceph | Phases couvertes                  | Démarrage |
-| ------------------------------ | --------------- | ------------ | --------------------------------- | --------- |
-| [`single-node/`](single-node/) | 1 VM            | aucun        | 1 (OS/runtime), 2 (init + Cilium) | ~5 min    |
-| [`multi-node/`](multi-node/)   | 3 VMs + privnet | 3 HDD + NVMe | 1, 2 (avec join), 3 (Ceph), 4, 5  | ~15 min   |
+| Banc                           | Hyperviseur | Topologie       | Disques Ceph     | Phases couvertes                  | Démarrage |
+| ------------------------------ | ----------- | --------------- | ---------------- | --------------------------------- | --------- |
+| [`single-node/`](single-node/) | Vagrant     | 1 VM            | aucun            | 1 (OS/runtime), 2 (init + Cilium) | ~5 min    |
+| [`multi-node/`](multi-node/)   | Vagrant     | 3 VMs + privnet | 3 HDD + NVMe     | 1, 2 (avec join), 3 (Ceph), 4, 5  | ~15 min   |
+| [`lima/`](lima/)               | Lima        | 3 VMs + user-v2 | 3 HDD + block.db | 1, 2 (avec join), 3 (Ceph), 4     | ~15 min   |
 
 ## Quand utiliser lequel ?
 
@@ -15,12 +18,16 @@ Deux bancs Vagrant à choisir selon la phase à valider :
 - **`multi-node/`** : validation de bout en bout avant le déploiement serveurs —
   exerce `join-workers`, les pré-requis disques pour Ceph, le quorum mon (3
   nœuds), la mise en place des StorageClasses et des workloads applicatifs.
+- **`lima/`** : équivalent multi-VM **sans VirtualBox** (vraie VM Lima, SSH
+  natif, disques bruts virtio). Couvre jusqu'aux StorageClasses (Ceph inclus) ;
+  les workloads applicatifs et l'etcd-backup restent sur `multi-node/`. Plus
+  léger à installer (`brew install lima`), résiste mieux à la veille de l'hôte.
 
 Une fois validé sur `single-node/`, repasser **systématiquement** sur
-`multi-node/` avant de toucher la prod — c'est le seul endroit où l'on exerce le
-multi-VM et les disques Ceph.
+`multi-node/` (ou `lima/`) avant de toucher la prod — c'est le seul endroit où
+l'on exerce le multi-VM et les disques Ceph.
 
-## Réserves transversales (les deux bancs)
+## Réserves transversales (tous les bancs)
 
 - **Architecture arm64** (Apple Silicon) ≠ **x86_64** des serveurs HPE : on
   valide la _logique_ (rôles, manifestes, ordres, comportements), pas les
@@ -40,25 +47,26 @@ multi-VM et les disques Ceph.
 
 ## Pré-requis communs
 
-| Outil      | Version  | Installation                                          |
-| ---------- | -------- | ----------------------------------------------------- |
-| VirtualBox | ≥ 7.2.8  | `brew install --cask virtualbox`                      |
-| Vagrant    | ≥ 2.4.9  | `brew install --cask hashicorp/tap/hashicorp-vagrant` |
-| Ansible    | ≥ 2.20.5 | `brew install ansible`                                |
+| Outil      | Version  | Installation                                          | Bancs                         |
+| ---------- | -------- | ----------------------------------------------------- | ----------------------------- |
+| Ansible    | ≥ 2.20.5 | `brew install ansible`                                | tous                          |
+| VirtualBox | ≥ 7.2.8  | `brew install --cask virtualbox`                      | `single-node/`, `multi-node/` |
+| Vagrant    | ≥ 2.4.9  | `brew install --cask hashicorp/tap/hashicorp-vagrant` | `single-node/`, `multi-node/` |
+| Lima       | ≥ 2.0    | `brew install lima`                                   | `lima/`                       |
 
 Voir le README spécifique de chaque banc pour les détails (réseau host-only VBox
-à autoriser pour `multi-node/`, etc.).
+à autoriser pour `multi-node/`, réseau `user-v2` pour `lima/`, etc.).
 
 ## Nettoyage
 
 Pour basculer entre bancs, libérer du disque, ou repartir d'un état frais :
 
 ```bash
-./test/prune.sh           # détruit toutes les VMs dirqual*, libère les
-                          # disques VBox enregistrés (drift #0c), efface
-                          # les .vagrant/ et les logs VBoxHeadless
+./test/prune.sh           # détruit les VMs Vagrant dirqual* (+ disques VBox,
+                          # drift #0c) ET les VMs/disques du banc Lima
 ./test/prune.sh --help    # options et garde-fous
 ```
 
 Le script refuse de tourner si une VM `dirqual*` est en cours (`--force` pour
-passer outre).
+passer outre). Pour ne nettoyer que le banc Lima :
+`test/lima/run-phases.sh down`.

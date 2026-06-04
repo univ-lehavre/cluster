@@ -39,6 +39,9 @@ test/**/inventory.yaml
 test/**/*.vdi
 test/*.log
 
+# Lima test bench (per-run state : configs VM rendues, inventaire, kubeconfig)
+test/**/.work/
+
 # VitePress (generated output + cache)
 docs/.vitepress/cache/
 docs/.vitepress/dist/

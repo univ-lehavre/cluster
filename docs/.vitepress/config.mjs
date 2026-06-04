@@ -22,7 +22,7 @@ export default defineConfig({
   // légitimement — VitePress ne les sert pas (il ne rend que le Markdown), mais
   // ils sont valides sur GitHub. lychee (CI) couvre déjà ces liens fichiers.
   ignoreDeadLinks: [
-    /\.(sh|pl|j2|yaml|yml|toml|cff|conf)$/, // fichiers de code/config
+    /\.(sh|pl|j2|tmpl|yaml|yml|toml|cff|conf)$/, // fichiers de code/config
     /\/Justfile$/,
     /\/Vagrantfile$/,
     // Dossiers de code liés depuis la doc (VitePress les résout en /index) :

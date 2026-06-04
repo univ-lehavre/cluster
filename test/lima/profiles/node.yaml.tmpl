@@ -1,0 +1,63 @@
+# Banc léger Lima — template de nœud (rendu par test/lima/lib.sh : lima_render_node).
+#
+# VM Linux légère (vrai noyau, vrais cgroups, swap contrôlable) sur laquelle le
+# VRAI bootstrap Ansible (bootstrap/) déploie Kubernetes — comme sur une VM
+# Vagrant, mais sans VirtualBox ni overlayfs imbriqué (échec du DinD). Lima
+# fournit SSH nativement → Ansible s'y connecte comme à un nœud.
+#
+# Debian 13 (Trixie) — cohérent avec les images operand (CNPG en *-trixie).
+# Remplace le banc kind (abandonné, figeait K8s en 1.31). Cible : K8s v1.34 (ADR 0006).
+#
+# Les @@PLACEHOLDERS@@ sont substitués par lima_render_node ; le bloc
+# additionalDisks (disques bruts Ceph) est ajouté en fin de fichier pour les
+# nœuds de stockage. Ce fichier n'est PAS un manifeste K8s (exclu de kubeconform).
+minimumLimaVersion: 2.0.0
+
+base:
+  - template:_images/debian-13
+
+# Réseau user-v2 : VM↔VM sans socket_vmnet ni sudo hôte (192.168.104.0/24,
+# résolution lima-<nom>.internal). C'est ce lien qui porte le trafic inter-nœuds
+# (join workers, clustermesh). Pour les control-planes, lima_render_node ajoute
+# en fin de fichier un portForward DÉTERMINISTE de l'API (guest 6443 → host
+# 127.0.0.1:<port>) : l'IP user-v2 n'est pas routable depuis l'hôte macOS.
+networks:
+  - lima: user-v2
+
+# Ressources (substituées au rendu). 5 GiB car le check bootstrap k8s-pre-install
+# exige real.total >= 4096 MB (une VM 4 GiB rapporte souvent un peu MOINS de 4096
+# à cause de la mémoire réservée firmware).
+cpus: @@CPUS@@
+memory: @@MEMORY@@
+disk: @@DISK@@
+
+# Pas de montage du home Mac (banc isolé, jetable).
+mounts: []
+
+# Préalables noyau/réseau au bootstrap Ansible : swap off (exigé par kubelet),
+# modules + sysctl K8s. Et lvm2 : Rook/Ceph passe en mode LVM (pas raw) dès qu'un
+# metadataDevice (block.db) est défini → ceph-volume exige le binaire `lvm` sur
+# l'HÔTE du nœud. L'image _images/debian-13 de Lima ne l'embarque pas (≠ box
+# Vagrant) → sans lui les OSD-prepare crashent (« binary lvm does not exist »).
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      swapoff -a
+      sed -i '/ swap / s/^/#/' /etc/fstab || true
+      modprobe br_netfilter overlay
+      cat > /etc/modules-load.d/k8s.conf <<EOF
+      overlay
+      br_netfilter
+      EOF
+      cat > /etc/sysctl.d/k8s.conf <<EOF
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+      EOF
+      sysctl --system
+      # lvm2 pour les OSD Ceph (mode LVM via metadataDevice).
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y -qq lvm2
