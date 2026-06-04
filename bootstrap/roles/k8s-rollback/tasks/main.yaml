@@ -91,10 +91,12 @@
     - /etc/apt/sources.list.d/docker.list
     - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
     - /etc/apt/keyrings/docker.asc
-    - /home/debian/.kube
-    - /home/debian/cluster-setup.log
-    - /home/debian/taint-setup.log
-    - /home/debian/lb-setup.log
+    # Home de l'utilisateur connecté (≠ /home/debian codé en dur) : /home/debian
+    # sur les nœuds réels / Vagrant, /home/lima.guest sur le banc Lima.
+    - '{{ ansible_env.HOME }}/.kube'
+    - '{{ ansible_env.HOME }}/cluster-setup.log'
+    - '{{ ansible_env.HOME }}/taint-setup.log'
+    - '{{ ansible_env.HOME }}/lb-setup.log'
 
 - name: Décharger les modules noyau (best-effort, sans erreur si absents)
   become: true

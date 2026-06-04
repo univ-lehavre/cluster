@@ -16,5 +16,7 @@
     - name: Join the cluster
       ansible.builtin.shell: "{{ hostvars[groups['control'][0]].join_command }} >> node-joined.log"
       args:
-        chdir: /home/debian
+        # Home de l'utilisateur connecté (≠ /home/debian codé en dur) : existe sur
+        # les nœuds réels / Vagrant (debian) ET sur le banc Lima (/home/lima.guest).
+        chdir: '{{ ansible_env.HOME }}'
         creates: node-joined.log

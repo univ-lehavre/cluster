@@ -77,11 +77,14 @@
       args:
         creates: /etc/kubernetes/admin.conf
 
-    # L'utilisateur cible vient de l'inventaire (`ansible_user`) : `debian` sur les
-    # nœuds réels / le banc Vagrant, `lima` sur le banc Lima — pas de nom codé en dur.
+    # Home de l'utilisateur connecté via `ansible_env.HOME` (et NON
+    # `/home/{{ ansible_user }}`) : `debian` → /home/debian (nœuds réels / banc
+    # Vagrant), mais le banc Lima crée l'utilisateur `lima` avec un home
+    # /home/lima.guest (≠ /home/lima). `ansible_env.HOME` résout le vrai home
+    # dans les deux cas — pas de chemin codé en dur.
     - name: Create the .kube directory for the connecting user
       ansible.builtin.file:
-        path: /home/{{ ansible_user }}/.kube
+        path: '{{ ansible_env.HOME }}/.kube'
         state: directory
         mode: '0755'
 
@@ -91,17 +94,27 @@
       ansible.builtin.copy:
         src: /etc/kubernetes/admin.conf
         remote_src: true
-        dest: /home/{{ ansible_user }}/.kube/config
+        dest: '{{ ansible_env.HOME }}/.kube/config'
         owner: '{{ ansible_user }}'
         mode: '0600'
 
+    # But : le control-plane accepte les pods applicatifs (bancs mono-/few-nodes).
+    # `kubectl taint …-` échoue (rc=1, « taint not found ») quand le taint est
+    # DÉJÀ absent — ce qui est le cas voulu. Selon la version de kubeadm / le
+    # nombre de nœuds, le taint control-plane peut ne pas être posé du tout (banc
+    # Lima v1.34 : control-plane sans taint). La tâche est donc naturellement
+    # idempotente : succès si le taint a été retiré OU était déjà absent ; on
+    # n'échoue que sur une vraie erreur (≠ « not found »).
     - name: Control plane accepts pods (remove the control-plane taint)
-      ansible.builtin.shell: >-
+      ansible.builtin.command: >-
         kubectl taint nodes --all node-role.kubernetes.io/control-plane-
-        >> taint-setup.log
+      register: taint_result
+      changed_when: "'untainted' in taint_result.stdout"
+      failed_when:
+        - taint_result.rc != 0
+        - "'not found' not in taint_result.stderr"
       args:
-        chdir: /home/{{ ansible_user }}
-        creates: taint-setup.log
+        chdir: '{{ ansible_env.HOME }}'
 
     - name: Exclude the control plane from external load balancers
       ansible.builtin.shell: >-
@@ -109,5 +122,5 @@
         node.kubernetes.io/exclude-from-external-load-balancers-
         >> lb-setup.log
       args:
-        chdir: /home/{{ ansible_user }}
+        chdir: '{{ ansible_env.HOME }}'
         creates: lb-setup.log
