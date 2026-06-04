@@ -33,6 +33,17 @@ misconfigurations:
       - 'storage/ceph/operator.yaml'
       - 'storage/ceph/toolbox.yaml'
 
+  # ── local-path-provisioner (vendored upstream v0.0.36, banc Lima rapide) ──
+  # Manifeste amont non durci : le provisioner crée/supprime des dossiers sur le
+  # disque local des nœuds (helper pod) → securityContext par défaut et rootfs
+  # non read-only. Durcir divergerait de l'amont sans gain (banc jetable).
+  - id: KSV-0118 # securityContext par défaut (provisioner amont)
+    paths:
+      - 'storage/local-path/local-path-storage.yaml'
+  - id: KSV-0014 # rootfs non read-only (provisioner amont)
+    paths:
+      - 'storage/local-path/local-path-storage.yaml'
+
   # ── Workloads maison — durcissement partiel, résidu rootfs read-only ──────
   # wordpress (apache, port 80, démarre root) et rstudio (rstudio-server init en
   # root, PAM/sessions) NE PEUVENT PAS tourner en rootfs read-only sans casser.
