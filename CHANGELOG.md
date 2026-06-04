@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.22.0](https://github.com/univ-lehavre/cluster/compare/v2.21.0...v2.22.0) (2026-06-04)
+
+
+### Features
+
+* **platform:** orchestrateur Dagster (1.7) + traçabilité plans/audits ([#145](https://github.com/univ-lehavre/cluster/issues/145)) ([a0e49d6](https://github.com/univ-lehavre/cluster/commit/a0e49d64c82e8e2f8ac50aeb615af1c2dbb2dae3))
+
 ## [2.21.0](https://github.com/univ-lehavre/cluster/compare/v2.20.0...v2.21.0) (2026-06-04)
 
 
