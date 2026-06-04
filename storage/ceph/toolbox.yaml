@@ -22,7 +22,7 @@ spec:
           # Aligné sur la version du cluster (cluster.yaml) — éviter le skew de
           # version majeure entre la toolbox et les daemons Ceph. Tag explicite
           # (pas de :vN flottant), cf. ADR 0006.
-          image: quay.io/ceph/ceph:v20.2.1@sha256:716b9433f2a76d5985868017f97e7ba5969b689f045ef992608bb8331f6b5d75
+          image: quay.io/ceph/ceph:v20.2.1@sha256:0bae386bc859cd9a05b804d1ca16cca8853a64f90809044e2bf43095419dc337
           command:
             - /bin/bash
             - -c

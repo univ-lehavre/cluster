@@ -622,7 +622,7 @@ spec:
         - name: rook-ceph-operator
           # Épinglé par digest (audit P11 #11) : tag conservé pour lisibilité,
           # digest immuable pour la reproductibilité (ADR 0006). MAJ via renovate.
-          image: docker.io/rook/ceph:v1.19.6@sha256:d66be82cdda90c8792f92933470f9a7349568138960f27a57b93c532528c72c8
+          image: docker.io/rook/ceph:v1.19.6@sha256:eab4005612a6d10cac3d947f9846380ea13ecd2336c7397f519f0009578329c2
           args: ["ceph", "operator"]
           securityContext:
             runAsNonRoot: true
