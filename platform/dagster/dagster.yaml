@@ -1,0 +1,445 @@
+# Dagster — orchestrateur (chart dagster/dagster 1.13.7). VENDORED le 2026-06-04.
+# Helm template figé (cf. values.bench.yaml). Orchestrateur VIDE : webserver +
+# daemon + K8sRunLauncher, event log dans CloudNativePG (base dagster). Le code
+# métier vit dans atlas (Phase 2+).
+#
+# Images : l'image officielle dagster/dagster-celery-k8s est amd64-only → sur arm64
+# (banc Lima) on utilise l'image construite en interne (platform/dagster/image/),
+# publiée dans le registry interne (ADR 0011). Référence registry:80/...
+# postgres (init wait-for-db) épinglé par digest d'index multi-arch (ADR 0006).
+# Régénérer : voir README + values.bench.yaml.
+---
+---
+# Source: dagster/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dagster
+  labels: 
+    helm.sh/chart: dagster-1.13.7
+    app.kubernetes.io/name: dagster
+    app.kubernetes.io/instance: dagster
+    app.kubernetes.io/version: "1.13.7"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    {}
+automountServiceAccountToken: false
+---
+# Source: dagster/templates/configmap-env-daemon.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-daemon-env
+  labels:
+    app: dagster
+    chart: dagster-1.13.7
+    release: dagster
+    heritage: Helm
+data:
+  
+  DAGSTER_HOME: "/opt/dagster/dagster_home"
+  DAGSTER_K8S_PIPELINE_RUN_NAMESPACE: "dagster"
+  DAGSTER_K8S_PIPELINE_RUN_ENV_CONFIGMAP: "dagster-pipeline-env"
+  DAGSTER_K8S_PIPELINE_RUN_IMAGE: "docker.io/dagster/user-code-example:1.13.7"
+  DAGSTER_K8S_PIPELINE_RUN_IMAGE_PULL_POLICY: "Always"
+  # This is a list by default, but for backcompat it can be a map. If it's a list, the env is applied directly
+  # to the container.
+---
+# Source: dagster/templates/configmap-env-pipeline-run.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-pipeline-env
+  labels:
+    app: dagster
+    chart: dagster-1.13.7
+    release: dagster
+    heritage: Helm
+data:
+  
+  DAGSTER_HOME: "/opt/dagster/dagster_home"
+  DAGSTER_K8S_PIPELINE_RUN_NAMESPACE: "dagster"
+  DAGSTER_K8S_PIPELINE_RUN_ENV_CONFIGMAP: "dagster-pipeline-env"
+  DAGSTER_K8S_PIPELINE_RUN_IMAGE: "docker.io/dagster/user-code-example:1.13.7"
+  DAGSTER_K8S_PIPELINE_RUN_IMAGE_PULL_POLICY: "Always"
+
+---
+# Source: dagster/templates/configmap-env-webserver.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-webserver-env
+  labels:
+    app: dagster
+    chart: dagster-1.13.7
+    release: dagster
+    heritage: Helm
+data:
+  
+  DAGSTER_HOME: "/opt/dagster/dagster_home"
+  DAGSTER_K8S_PIPELINE_RUN_NAMESPACE: "dagster"
+  DAGSTER_K8S_PIPELINE_RUN_ENV_CONFIGMAP: "dagster-pipeline-env"
+  DAGSTER_K8S_PIPELINE_RUN_IMAGE: "docker.io/dagster/user-code-example:1.13.7"
+  DAGSTER_K8S_PIPELINE_RUN_IMAGE_PULL_POLICY: "Always"
+  # This is a list by default, but for backcompat it can be a map. If it's a list, the env is applied directly
+  # to the container.
+
+---
+# Source: dagster/templates/configmap-instance.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-instance
+  labels:
+    app: dagster
+    chart: dagster-1.13.7
+    release: dagster
+    heritage: Helm
+data:
+  dagster.yaml: |
+    scheduler:      
+      module: dagster._core.scheduler
+      class: DagsterDaemonScheduler
+
+    schedule_storage:
+      module: dagster_postgres.schedule_storage
+      class: PostgresScheduleStorage
+      config:        
+        postgres_db:
+          username: dagster
+          password:
+            env: DAGSTER_PG_PASSWORD
+          hostname: "pg-rw.postgres.svc.cluster.local"
+          db_name: dagster
+          port: 5432
+          params:
+            {}
+
+    run_launcher:      
+      module: dagster_k8s
+      class: K8sRunLauncher
+      config:
+        load_incluster_config: true
+        job_namespace: dagster
+        image_pull_policy: IfNotPresent
+        service_account_name: dagster
+        dagster_home: "/opt/dagster/dagster_home"
+        instance_config_map: "dagster-instance"
+        postgres_password_secret: "dagster-pg-auth"
+
+    run_storage:
+      module: dagster_postgres.run_storage
+      class: PostgresRunStorage
+      config:        
+        postgres_db:
+          username: dagster
+          password:
+            env: DAGSTER_PG_PASSWORD
+          hostname: "pg-rw.postgres.svc.cluster.local"
+          db_name: dagster
+          port: 5432
+          params:
+            {}
+
+    event_log_storage:
+      module: dagster_postgres.event_log
+      class: PostgresEventLogStorage
+      config:        
+        postgres_db:
+          username: dagster
+          password:
+            env: DAGSTER_PG_PASSWORD
+          hostname: "pg-rw.postgres.svc.cluster.local"
+          db_name: dagster
+          port: 5432
+          params:
+            {}
+    run_coordinator:      
+      module: dagster._core.run_coordinator
+      class: QueuedRunCoordinator
+      config:
+        
+        
+        max_concurrent_runs: -1
+      
+        
+        dequeue_use_threads: true
+        dequeue_num_workers: 4
+      
+        
+    compute_logs:      
+      module: dagster._core.storage.noop_compute_log_manager
+      class: NoOpComputeLogManager
+    run_monitoring:
+      enabled: true
+      start_timeout_seconds:  300
+      max_resume_run_attempts: 0
+      poll_interval_seconds: 120
+      free_slots_after_run_end_seconds: 0
+    run_retries:
+      enabled: true
+    sensors:
+      use_threads: true
+      num_workers: 4
+    schedules:
+      use_threads: true
+      num_workers: 4
+
+    telemetry:
+      enabled: true
+
+---
+# Source: dagster/templates/role.yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dagster-role
+  labels:
+    app: dagster
+    chart: dagster-1.13.7
+    release: "dagster"
+    heritage: "Helm"
+
+# Allow the Dagster service account to read and write Kubernetes jobs, deployments, pods, and events.
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs/status"]
+    verbs: ["get", "watch", "list"]
+  # The empty arg "" corresponds to the core API group
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/status"]
+    verbs: ["get", "watch", "list"]
+---
+# Source: dagster/templates/rolebinding.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dagster-rolebinding
+  labels:
+    app: dagster
+    chart: dagster-1.13.7
+    release: "dagster"
+    heritage: "Helm"
+subjects:
+- kind: ServiceAccount
+  name: dagster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dagster-role
+---
+# Source: dagster/templates/service-webserver.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dagster-dagster-webserver
+  labels:
+    helm.sh/chart: dagster-1.13.7
+    app.kubernetes.io/name: dagster
+    app.kubernetes.io/instance: dagster
+    app.kubernetes.io/version: "1.13.7"
+    app.kubernetes.io/managed-by: Helm
+    component: dagster-webserver
+  annotations:
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: dagster
+    app.kubernetes.io/instance: dagster
+    component: dagster-webserver
+
+
+---
+# Source: dagster/templates/deployment-daemon.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dagster-daemon
+  labels:
+    helm.sh/chart: dagster-1.13.7
+    app.kubernetes.io/name: dagster
+    app.kubernetes.io/instance: dagster
+    app.kubernetes.io/version: "1.13.7"
+    app.kubernetes.io/managed-by: Helm
+    component: dagster-daemon
+    deployment: daemon
+  annotations:
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dagster
+      app.kubernetes.io/instance: dagster
+      component: dagster-daemon
+      deployment: daemon
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dagster
+        app.kubernetes.io/instance: dagster
+        component: dagster-daemon
+        deployment: daemon
+      annotations:
+        checksum/dagster-instance: 5637fb8b2231ab53ec84a41d5f05359fa8c62f77d8eab97e659b045ca5536cbb
+    spec:
+      imagePullSecrets:
+        []
+      serviceAccountName: dagster
+      automountServiceAccountToken: true
+      securityContext:
+        {}
+      initContainers:
+        - name: check-db-ready
+          image: "docker.io/library/postgres:14.6@sha256:f565573d74aedc9b218e1d191b04ec75bdd50c33b2d44d91bcd3db5f2fcea647"
+          imagePullPolicy: "IfNotPresent"
+          command: ['sh', '-c', 'until pg_isready -h "pg-rw.postgres.svc.cluster.local" -p 5432 -U dagster; do echo waiting for database; sleep 2; done;']
+          securityContext:
+            {}
+          resources:
+            {}
+      containers:
+        - name: dagster
+          securityContext:
+            {}
+          imagePullPolicy: IfNotPresent
+          image: "registry:80/dagster-celery-k8s:1.13.7"
+          command: [
+            "/bin/bash",
+            "-c",
+            "dagster-daemon run"
+          ]
+          env:
+            - name: DAGSTER_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "dagster-pg-auth"
+                  key: postgresql-password
+            - name: DAGSTER_DAEMON_HEARTBEAT_TOLERANCE
+              value: "1800"
+            # This is a list by default, but for backcompat it can be a map. As a map it's written to the daemon-env
+            # configmap.
+          envFrom:
+            - configMapRef:
+                name: dagster-daemon-env
+          volumeMounts:
+            - name: dagster-instance
+              mountPath: "/opt/dagster/dagster_home/dagster.yaml"
+              subPath: dagster.yaml
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 256Mi
+      nodeSelector:
+        {}
+      volumes:
+        - name: dagster-instance
+          configMap:
+            name: dagster-instance
+      affinity:
+        {}
+      tolerations:
+        []
+---
+# Source: dagster/templates/deployment-webserver.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dagster-dagster-webserver
+  labels:
+    helm.sh/chart: dagster-1.13.7
+    app.kubernetes.io/name: dagster
+    app.kubernetes.io/instance: dagster
+    app.kubernetes.io/version: "1.13.7"
+    app.kubernetes.io/managed-by: Helm
+    component: dagster-webserver
+  annotations:
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dagster
+      app.kubernetes.io/instance: dagster
+      component: dagster-webserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dagster
+        app.kubernetes.io/instance: dagster
+        component: dagster-webserver
+      annotations:
+        checksum/dagster-instance: 5637fb8b2231ab53ec84a41d5f05359fa8c62f77d8eab97e659b045ca5536cbb
+    spec:
+      serviceAccountName: dagster
+      automountServiceAccountToken: true
+      securityContext:
+        {}
+      initContainers:
+        - name: check-db-ready
+          image: "docker.io/library/postgres:14.6@sha256:f565573d74aedc9b218e1d191b04ec75bdd50c33b2d44d91bcd3db5f2fcea647"
+          imagePullPolicy: IfNotPresent
+          command: ['sh', '-c', 'until pg_isready -h "pg-rw.postgres.svc.cluster.local" -p 5432 -U dagster; do echo waiting for database; sleep 2; done;']
+          securityContext:
+            {}
+      containers:
+        - name: dagster
+          securityContext:
+            {}
+          imagePullPolicy: IfNotPresent
+          image: "registry:80/dagster-celery-k8s:1.13.7"
+          command: [
+            "/bin/bash",
+            "-c",
+            "dagster-webserver -h 0.0.0.0 -p 80"
+          ]
+          env:
+            - name: DAGSTER_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "dagster-pg-auth"
+                  key: postgresql-password
+            # This is a list by default, but for backcompat it can be a map. As
+            # a map it's written to the webserver-env configmap.
+          envFrom:
+            - configMapRef:
+                name: dagster-webserver-env
+          volumeMounts:
+            - name: dagster-instance
+              mountPath: "/opt/dagster/dagster_home/dagster.yaml"
+              subPath: dagster.yaml
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /server_info
+              port: 80
+            periodSeconds: 20
+            successThreshold: 1
+            timeoutSeconds: 10
+
+      volumes:
+        - name: dagster-instance
+          configMap:
+            name: dagster-instance

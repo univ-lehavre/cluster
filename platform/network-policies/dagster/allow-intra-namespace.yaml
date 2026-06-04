@@ -1,0 +1,24 @@
+# Trafic INTRA-namespace dagster : flux est-ouest entre le webserver, le daemon et
+# les Jobs de run (K8sRunLauncher). Le daemon lance les runs, le webserver interroge
+# leur état, les run workers communiquent — sans ce flux, l'orchestration est cassée
+# sous default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: dagster
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dagster
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dagster

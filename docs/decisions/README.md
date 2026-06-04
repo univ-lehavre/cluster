@@ -45,3 +45,4 @@ Format léger inspiré de Michael Nygard :
 | 0023 | [Dépôt multi-topologies (plusieurs infra déclarées, une activée)](0023-plateforme-exemple-generique.md)    | Accepted |
 | 0024 | [PostgreSQL managé via CloudNativePG (+ pgvector)](0024-postgres-manage-cloudnative-pg.md)                 | Accepted |
 | 0025 | [Sécurité active : chaos + attaques contrôlées (D/A/R)](0025-securite-active-chaos-attaques-controlees.md) | Accepted |
+| 0026 | [Orchestration des pipelines via Dagster](0026-orchestration-dagster.md)                                   | Accepted |

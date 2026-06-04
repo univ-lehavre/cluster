@@ -1,0 +1,14 @@
+# Nie tout le trafic (ingress + egress) pour TOUS les pods du namespace `dagster`
+# (orchestrateur Dagster). Les flux légitimes sont ré-ouverts par les policies
+# `allow-*` (ADR 0019 default-deny). NetworkPolicy est additif : sans ce socle, les
+# `allow` n'ont aucun effet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: dagster
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

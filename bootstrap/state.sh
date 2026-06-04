@@ -746,6 +746,32 @@ else
     fi
 fi
 
+# ─── Orchestration (Dagster — ADR 0026) ────────────────────────────────────
+# Orchestrateur DataOps : webserver + daemon, event log dans CloudNativePG.
+# Skip propre tant que l'addon n'est pas déployé.
+section "Orchestration (Dagster — ADR 0026)"
+if ! kubectl_ready; then
+    mark skip "kubectl indisponible"
+elif ! kubectl_q get ns dagster >/dev/null 2>&1; then
+    mark skip "Dagster : namespace absent (kubectl apply -f platform/dagster/)"
+else
+    # Webserver Ready
+    web_rd=$(kubectl_q -n dagster get deploy dagster-dagster-webserver -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+    if [ "${web_rd:-0}" -ge 1 ] 2>/dev/null; then
+        mark ok "Dagster : webserver Ready"
+    else
+        mark fail "Dagster : webserver non Ready" "kubectl -n dagster get deploy dagster-dagster-webserver"
+    fi
+
+    # Daemon Ready
+    dmn_rd=$(kubectl_q -n dagster get deploy dagster-daemon -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+    if [ "${dmn_rd:-0}" -ge 1 ] 2>/dev/null; then
+        mark ok "Dagster : daemon Ready (schedules/sensors/run queue)"
+    else
+        mark fail "Dagster : daemon non Ready" "kubectl -n dagster get deploy dagster-daemon"
+    fi
+fi
+
 # ─── Couche 7b — Exposition réseau (audit P6 #25 / #06) ────────────────────
 # Tous les Services applicatifs ont été passés en ClusterIP (#25). Un Service
 # de type NodePort ou LoadBalancer expose un port au-delà du cluster → ici,

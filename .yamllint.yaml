@@ -34,3 +34,4 @@ ignore: |
   platform/loki/promtail.yaml
   platform/cloudnative-pg/operator.yaml
   platform/cloudnative-pg/plugin-barman-cloud.yaml
+  platform/dagster/dagster.yaml

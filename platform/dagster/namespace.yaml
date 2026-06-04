@@ -1,0 +1,8 @@
+# Namespace de l'orchestrateur Dagster (étape 1.7, ADR 0026).
+# Les addons portent leur propre namespace. Ce ns héberge le webserver, le daemon
+# et les Jobs de run (K8sRunLauncher). Le code métier (assets) y est déployé par
+# Argo CD depuis le dépôt atlas en Phase 2+ — l'orchestrateur, lui, est un addon.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dagster

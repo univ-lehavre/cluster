@@ -48,6 +48,16 @@ multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
 | pgvector              | **0.8.2** (`0.8.2-18-trixie`)                  | [`platform/cloudnative-pg/cluster.yaml`](../../platform/cloudnative-pg/cluster.yaml) (image volume extension) |
 | SeaweedFS             | **4.31**                                       | banc léger uniquement (objectstore S3 de test)                                                                |
 | aws-cli               | **2.31.21**                                    | Jobs d'init de buckets S3 (`init-buckets.yaml`)                                                               |
+| Dagster               | chart **1.13.7** (app 1.13.7)                  | [`platform/dagster/values.bench.yaml`](../../platform/dagster/values.bench.yaml) (helm template figé)         |
+
+> **Dagster amd64-only.** Les images officielles Dagster sont publiées **amd64
+> uniquement** (dagster-io/dagster#11841). Dagster étant du pur Python, on
+> **construit l'image arm64 en interne**
+> ([`platform/dagster/image/Dockerfile`](../../platform/dagster/image/Dockerfile),
+> 1er build maison du dépôt) pour le banc arm64 ; la topologie bare-metal x86
+> utilise l'image officielle. À reconstruire à chaque bump (cf. ADR 0026).
+
+<!-- séparateur entre deux encadrés -->
 
 > **CloudNativePG 1.29 + Image Volume Extensions** (la voie pgvector sans image
 > custom) reposent sur la feature Kubernetes **`ImageVolume`** : alpha en K8s

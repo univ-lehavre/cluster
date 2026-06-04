@@ -1,0 +1,82 @@
+# Values de rendu — chart dagster/dagster 1.13.7 (étape 1.7, ADR 0026).
+#
+# Régénérer dagster.yaml :
+#   helm repo add dagster https://dagster-io.github.io/helm
+#   helm template dagster dagster/dagster --version 1.13.7 --namespace dagster \
+#     -f values.bench.yaml > dagster.yaml   (puis injecter les digests, cf. README)
+#
+# Orchestrateur « VIDE » : webserver + daemon + K8sRunLauncher, AUCUNE code-location
+# (le code métier — assets, IO managers — vit dans le dépôt atlas, Phase 2+).
+# Event/run/schedule storage dans CloudNativePG (base dagster), pas SQLite.
+
+# ── Image : registry interne (ADR 0011) ─────────────────────────────────────
+# L'image officielle dagster/dagster-celery-k8s est amd64-only ; sur arm64 (banc
+# Lima) on utilise l'image construite en interne (platform/dagster/image/). Les
+# deux sont publiées dans le registry interne sous le même repo/tag, par arch.
+# Référence : registry:80/dagster-celery-k8s:1.13.7 (Service registry.registry:80).
+imageRepository: &imageRepo registry:80/dagster-celery-k8s
+imageTag: &imageTag '1.13.7'
+
+dagsterWebserver:
+  image:
+    repository: *imageRepo
+    tag: *imageTag
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+dagsterDaemon:
+  image:
+    repository: *imageRepo
+    tag: *imageTag
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# ── Storage Postgres EXTERNE = CloudNativePG (base dagster, étape 1.6) ───────
+postgresql:
+  enabled: false
+  postgresqlHost: pg-rw.postgres.svc.cluster.local
+  postgresqlUsername: dagster
+  postgresqlDatabase: dagster
+  service:
+    port: 5432
+# Le mot de passe vient d'un Secret DÉRIVÉ (clé postgresql-password), JAMAIS le
+# Secret CNPG brut pg-dagster (clés username/password). Cf. pg-secret.example.yaml.
+generatePostgresqlPasswordSecret: false
+global:
+  postgresqlSecretName: dagster-pg-auth
+
+# ── Run launcher : 1 run = 1 Job K8s ────────────────────────────────────────
+runLauncher:
+  type: K8sRunLauncher
+  config:
+    k8sRunLauncher:
+      jobNamespace: dagster
+      loadInclusterConfig: true
+      imagePullPolicy: IfNotPresent
+
+# ── Orchestrateur VIDE : pas de code-location (le code vit dans atlas) ───────
+dagster-user-deployments:
+  enabled: false
+  enableSubchart: false
+  deployments: []
+
+# ── Composants Celery/Flower désactivés (K8sRunLauncher suffit) ──────────────
+flower:
+  enabled: false
+rabbitmq:
+  enabled: false
+redis:
+  enabled: false

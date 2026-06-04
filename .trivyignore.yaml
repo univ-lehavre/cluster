@@ -143,3 +143,30 @@ misconfigurations:
     # {mutating,validating}webhookconfigurations (validation des CR Postgres).
     paths:
       - 'platform/cloudnative-pg/operator.yaml'
+
+  # ── Dagster vendored (chart 1.13.7, helm template figé) — posture amont ────
+  # Le chart Dagster ne durcit pas ses workloads en amont (orchestrateur de data
+  # pipelines, image officielle non distroless). Findings inhérents au rendu.
+  - id: KSV-0014 # rootfs read-only : le webserver/daemon Dagster écrivent leur
+    # état/logs locaux ; le chart amont ne pose pas readOnlyRootFilesystem.
+    paths:
+      - 'platform/dagster/dagster.yaml'
+  - id: KSV-0118 # securityContext par défaut sur les workloads du chart amont
+    # (webserver/daemon) — non durci en amont.
+    paths:
+      - 'platform/dagster/dagster.yaml'
+  - id: KSV-0109 # ConfigMap référençant des paramètres de connexion : la config
+    # Dagster (dagster.yaml interne) référence l'hôte/le nom de la base Postgres ;
+    # le mot de passe reste dans un Secret dédié (dagster-pg-auth), pas le ConfigMap.
+    paths:
+      - 'platform/dagster/dagster.yaml'
+
+  # ── Image Dagster maison (Dockerfile arm64) — fidélité à l'officielle ──────
+  # L'image officielle Dagster (amd64) tourne EN ROOT (pas de USER, pas distroless)
+  # et le chart ne pose pas de securityContext non-root (cf. KSV-0118 ci-dessus).
+  # Notre image arm64 est volontairement FIDÈLE à l'officielle (même base, mêmes
+  # packages) : y ajouter un USER non-root divergerait du comportement amont et
+  # risquerait de casser les écritures de Dagster ($DAGSTER_HOME). Posture assumée.
+  - id: DS-0002 # pas de USER non-root : aligné sur l'image officielle (root).
+    paths:
+      - 'platform/dagster/image/Dockerfile'

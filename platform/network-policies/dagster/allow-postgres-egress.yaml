@@ -1,0 +1,21 @@
+# Egress de Dagster vers le Postgres CloudNativePG (ns `postgres`, port 5432) :
+# event/run/schedule storage. La policy postgres/allow-postgres-ingress autorise
+# déjà l'ingress côté postgres depuis le ns dagster ; ici on ouvre l'EGRESS côté
+# dagster (les deux sont nécessaires sous default-deny des deux côtés).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-egress
+  namespace: dagster
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
