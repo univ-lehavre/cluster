@@ -233,6 +233,16 @@ for h in "${reachable[@]}"; do
         esac
         if ssh_ok "$h" "systemctl is-active --quiet $svc"; then
             mark ok "$h : $svc actif (couche $local_tag)"
+            # postfix actif SANS relayhost = couche alert PARTIELLE (#131) : les
+            # alertes restent en local delivery. Drift à corriger (rejouer alert).
+            if [ "$svc" = postfix ]; then
+                if ssh_ok "$h" "test -n \"\$(postconf -h relayhost 2>/dev/null)\""; then
+                    mark ok "$h : postfix relaie vers un smarthost (relayhost posé, #131)"
+                else
+                    mark fail "$h : postfix actif SANS relayhost — alertes non relayées (#131)" \
+                              "(définir MAIL_SMARTHOST puis : cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags alert --limit $h)"
+                fi
+            fi
         elif ssh_ok "$h" "systemctl list-unit-files --no-legend $svc.service | grep -q ."; then
             mark fail "$h : $svc installé mais inactif" \
                       "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags $local_tag --limit $h)"

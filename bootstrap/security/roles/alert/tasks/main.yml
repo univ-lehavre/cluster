@@ -19,3 +19,57 @@
         line: 'root: {{ settings_mail_root_redirect }}'
         state: present
       notify: newaliases
+
+# Relais SMTP (issue #131) — postfix doit RELAYER les mails (alertes
+# fail2ban/auditd/smartd, mail root) vers un smarthost, sinon ils restent en
+# local delivery et ne partent nulle part. On reste en SMTP standard
+# (RFC 5321 + AUTH/SASL RFC 4954) : VENDEUR-NEUTRE — le même mécanisme couvre
+# Mailpit (banc), Brevo, Mailgun, Amazon SES, Postmark… (zéro code spécifique).
+# Même destination que l'alerting K8s (Alertmanager, cf. values.bench.yaml).
+- name: Relais SMTP postfix vers le smarthost paramétrable
+  become: true
+  block:
+    - name: Configurer le relayhost postfix
+      # Format [hôte]:port (crochets = pas de lookup MX). La valeur vient de
+      # MAIL_SMARTHOST (config locale non versionnée, ADR 0023) ; jamais en dur.
+      ansible.builtin.command: 'postconf -e "relayhost = {{ settings_mail_smarthost }}"'
+      changed_when: true
+      notify: reload postfix
+
+    # ── Cas PROD : auth SMTP renseignée → SASL + TLS (Brevo/Mailgun/SES…) ──
+    - name: Authentification SMTP (SASL) — fournisseur prod
+      when: settings_mail_smarthost_user | length > 0
+      block:
+        - name: Écrire la table des identifiants SASL
+          ansible.builtin.copy:
+            # Le smarthost porte les crochets+port ; postfix les accepte comme clé.
+            content: "{{ settings_mail_smarthost }} {{ settings_mail_smarthost_user }}:{{ settings_mail_smarthost_password }}\n"
+            dest: /etc/postfix/sasl_passwd
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true # ne jamais journaliser le mot de passe
+          notify: postmap sasl_passwd
+
+        - name: Activer SASL + TLS côté client SMTP postfix
+          ansible.builtin.command: 'postconf -e "{{ item }}"'
+          loop:
+            - smtp_sasl_auth_enable = yes
+            - smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+            - smtp_sasl_security_options = noanonymous
+            - smtp_tls_security_level = encrypt
+            - smtp_use_tls = yes
+          changed_when: true
+          notify: reload postfix
+
+    # ── Cas BANC : pas d'auth (Mailpit, port 1025, sans TLS) ──
+    - name: Désactiver SASL + TLS (banc Mailpit, sans auth)
+      when: settings_mail_smarthost_user | length == 0
+      block:
+        - name: Pas d'auth ni de TLS imposé vers le smarthost
+          ansible.builtin.command: 'postconf -e "{{ item }}"'
+          loop:
+            - smtp_sasl_auth_enable = no
+            - smtp_tls_security_level = may
+          changed_when: true
+          notify: reload postfix

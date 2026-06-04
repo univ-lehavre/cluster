@@ -90,9 +90,11 @@ Accepted (2026-06-01). **Palier 2 livré le 2026-06-03.**
 
 ## À revoir
 
-- **Brancher la couche `alert`/postfix du durcissement hôte** sur le même
+- ~~**Brancher la couche `alert`/postfix du durcissement hôte** sur le même
   smarthost (Mailpit/Mailgun) que l'alerting K8s — destination mail unifiée
-  (étape dédiée).
+  (étape dédiée).~~ **Fait** (#131) : le postfix hôte relaie en SMTP
+  vendeur-neutre vers le même smarthost qu'Alertmanager (banc : Service
+  LoadBalancer `mailpit-smtp` ; prod : fournisseur externe `:587` + auth).
 - **Migrer Promtail → Grafana Alloy** (chart Promtail déprécié).
 - Évaluer une alternative légère à kube-prometheus-stack (VictoriaMetrics,
   Grafana Alloy) si l'empreinte devient contraignante.

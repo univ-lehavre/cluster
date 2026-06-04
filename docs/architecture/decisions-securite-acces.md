@@ -226,9 +226,10 @@ jetable** par des garde-fous codés :
 
 Deux choix de cadrage relient cette démarche au fil rouge du modèle de menace :
 
-- **le maillon _alerte_ dépend de l'issue #131** (brancher l'alerting hôte sur
-  Mailpit/Mailgun) ; tant qu'elle n'est pas livrée, il est best-effort/skip — le
-  trou est documenté, pas masqué ;
+- **le maillon _alerte_ est désormais branché** (#131) : le postfix des nœuds
+  relaie ses alertes (fail2ban/auditd/smartd, mail root) vers un smarthost SMTP,
+  le **même** que l'alerting K8s (Alertmanager). Le scénario 22 le valide de
+  bout en bout (mail capté par Mailpit) ;
 - **la détection comportementale runtime est différée** : ni Falco ni Tetragon
   pour l'instant (cf.
   [note runtime/admission](../audit/note-runtime-admission.md)), un ADR dédié
@@ -239,6 +240,25 @@ Deux choix de cadrage relient cette démarche au fil rouge du modèle de menace 
 Comme tous les ADR de cette vue, 0025 **se soumet au modèle de menace de 0003**
 : les techniques offensives ne valent que sur un **banc isolé jetable**, jamais
 une topologie réelle ni une cible tierce.
+
+### Alerting unifié et vendeur-neutre (SMTP)
+
+Le hardening hôte et le monitoring K8s **convergent sur une même destination
+mail**. Côté hôte, le rôle `alert`
+([`bootstrap/security/roles/alert/`](../../bootstrap/security/roles/alert/))
+configure le **relayhost postfix** (`MAIL_SMARTHOST`, config locale non
+versionnée — [ADR 0023](../decisions/0023-plateforme-exemple-generique.md)) ;
+côté cluster, Alertmanager pointe le même smarthost.
+
+Choix structurant : on relaie en **SMTP standard (RFC 5321 + AUTH/SASL)**,
+jamais via une API REST propriétaire. C'est ce qui rend l'alerting
+**vendeur-neutre** — Brevo, Mailgun, Amazon SES, Postmark, SendGrid, Scaleway
+TEM… exposent tous un relais SMTP `:587` + auth, qu'un seul `relayhost` +
+`smtp_sasl_password_maps` postfix couvre sans code spécifique. Les API REST, à
+l'inverse, auraient couplé le dépôt à un fournisseur. Sur le **banc**, le
+smarthost est Mailpit, exposé à l'hôte par un Service `LoadBalancer` SMTP
+(LB-IPAM, [ADR 0020](../decisions/0020-exposition-reseau-tout-cilium.md)) car le
+postfix hôte vit hors du réseau pods.
 
 ## Encadré honnêteté — SPOF et risques résiduels assumés
 

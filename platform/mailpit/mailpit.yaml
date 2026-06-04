@@ -86,3 +86,29 @@ spec:
     - name: http
       port: 80
       targetPort: 8025 # UI 8025 → Service 80 (HTTP clair, TLS au Gateway)
+---
+# Exposition SMTP pour les RELAIS HÔTE (issue #131). Le postfix des nœuds tourne
+# HORS du réseau pods : il ne peut joindre ni le Service ClusterIP ci-dessus ni
+# `*.svc.cluster.local`. On expose donc le SMTP par un Service type=LoadBalancer :
+# LB-IPAM (ADR 0020) lui attribue une IP du pool (banc : 192.168.67.240-250),
+# annoncée en ARP (L2, eth1) → JOIGNABLE depuis l'hôte sur le LAN. Le postfix
+# hôte pointe `MAIL_SMARTHOST=[<cette IP>]:1025`.
+#
+# BANC UNIQUEMENT : en prod, le smarthost est un fournisseur SMTP externe
+# (Brevo/Mailgun/SES… vendeur-neutre, :587 + auth) — pas de LoadBalancer SMTP.
+# L'IP exacte dépend de l'attribution LB-IPAM : `kubectl -n mail get svc
+# mailpit-smtp -o wide` après déploiement, puis la reporter dans MAIL_SMARTHOST.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit-smtp
+  namespace: mail
+spec:
+  type: LoadBalancer
+  selector:
+    app: mailpit
+  ports:
+    - name: smtp
+      port: 1025
+      targetPort: 1025
