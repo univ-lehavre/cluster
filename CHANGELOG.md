@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.23.1](https://github.com/univ-lehavre/cluster/compare/v2.23.0...v2.23.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* **images:** ré-épingle les digests single-arch sur leur index multi-arch ([#140](https://github.com/univ-lehavre/cluster/issues/140)) ([#155](https://github.com/univ-lehavre/cluster/issues/155)) ([e4cabc7](https://github.com/univ-lehavre/cluster/commit/e4cabc7af85b41a05c831b58e5eee40e7927b0de))
+
 ## [2.23.0](https://github.com/univ-lehavre/cluster/compare/v2.22.0...v2.23.0) (2026-06-04)
 
 
