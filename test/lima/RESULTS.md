@@ -25,18 +25,23 @@ bout en bout. Le banc Vagrant a son propre log :
 
 ## Chemin obligatoire testé
 
-| #   | Étape (phase)                     | Résultat                                                     |
-| --- | --------------------------------- | ------------------------------------------------------------ |
-| 0   | `up` — 3 VMs Lima + disques bruts | ✅ disques `vdb`-`vde` bruts détectés sur chaque nœud        |
-| 1   | `bootstrap` — checks/cri/kubeadm  | ✅ 3 nœuds, containerd + kubeadm/kubelet v1.34.8             |
-| 2   | `bootstrap` — control-planes/init | ✅ après fixes drifts L1/L2/L3 (`kubeadm init` OK)           |
-| 3   | `bootstrap` — cni.sh (Cilium)     | ✅ après fix drift L4, Cilium 1.19.4 + WireGuard (3/3 nodes) |
-| 4   | `bootstrap` — join-workers        | ✅ après fix drift L2bis, node1 + node2 joints               |
-| 5   | `bootstrap` — gate 3 nœuds Ready  | ✅ après fix drift L5 (kubeconfig hôte)                      |
-| 6   | `ceph` — operator + cluster       | ✅ images dé-épinglées arm64, operator Ready                 |
-| 7   | `ceph` — OSD + HEALTH_OK          | ✅ après fix drift L6 (lvm2), 9 OSD up/in, HEALTH_OK         |
-| 8   | `sc` — StorageClasses + PVC test  | ✅ PVC `rook-ceph-block-replicated` → **Bound**              |
-| 9   | `down` — destruction              | ✅ VMs + disques nommés supprimés, rien ne subsiste          |
+| #   | Étape (phase)                     | Résultat                                                         |
+| --- | --------------------------------- | ---------------------------------------------------------------- |
+| 0   | `up` — 3 VMs Lima + disques bruts | ✅ disques `vdb`-`vde` bruts détectés sur chaque nœud            |
+| 1   | `bootstrap` — checks/cri/kubeadm  | ✅ 3 nœuds, containerd + kubeadm/kubelet v1.34.8                 |
+| 2   | `bootstrap` — control-planes/init | ✅ après fixes drifts L1/L2/L3 (`kubeadm init` OK)               |
+| 3   | `bootstrap` — cni.sh (Cilium)     | ✅ après fix drift L4, Cilium 1.19.4 + WireGuard (3/3 nodes)     |
+| 4   | `bootstrap` — join-workers        | ✅ après fix drift L2bis, node1 + node2 joints                   |
+| 5   | `bootstrap` — gate 3 nœuds Ready  | ✅ après fix drift L5 (kubeconfig hôte)                          |
+| 6a  | `storage-simple` — local-path     | ✅ provisioner Ready, PVC `local-path` → **Bound** (mode rapide) |
+| 6b  | `ceph` — operator + cluster       | ✅ images dé-épinglées arm64, operator Ready                     |
+| 7   | `ceph` — OSD + HEALTH_OK          | ✅ après fix drift L6 (lvm2), 9 OSD up/in, HEALTH_OK             |
+| 8   | `sc` — StorageClasses + PVC test  | ✅ PVC `rook-ceph-block-replicated` → **Bound**                  |
+| 9   | `down` — destruction              | ✅ VMs + disques nommés supprimés, rien ne subsiste              |
+
+> **Stockage modulaire** (#151) : `all` par défaut = mode **rapide** (up →
+> bootstrap → `storage-simple`/local-path) ; `WITH_CEPH=1 … all` ajoute le
+> stockage réel (Ceph). Le banc complet ci-dessus = mode Ceph.
 
 ## Drifts détectés et correctifs
 
@@ -61,7 +66,12 @@ des écarts entre l'environnement Lima et les hypothèses du bootstrap/banc.
   fraîche — divergence assumée (cf. [`README.md`](README.md)).
 - **arm64** : images Ceph dé-épinglées (digests amd64 → `exec format error`)
   côté banc seulement ; le livrable garde ses digests.
-- **Pollution hôte possible** : un `local-path` StorageClass résiduel d'un
-  ancien spike peut rester marqué `default` et faire échouer le gate « 1 SC
-  default ». Le banc lui-même n'installe pas local-path ; nettoyer avec
-  `prune.sh`.
+- **StorageClass `default` unique** : le banc pose `is-default-class` sur UNE
+  seule SC à la fois (`set_default_sc`) — `local-path` en mode rapide,
+  `rook-ceph-block-replicated` en mode Ceph. La bascule local-path → Ceph a été
+  validée (le `default` passe proprement de l'un à l'autre). Une SC résiduelle
+  d'un autre outil ne fausse donc plus le gate.
+- **Gate Ceph sous charge** : sur un hôte chargé (peu de RAM libre), la montée
+  HEALTH_OK peut dépasser la fenêtre de 20 min du gate alors que Ceph converge
+  ensuite normalement — relancer `ceph` (idempotent) ou libérer de la RAM. Le
+  mode rapide (local-path) évite ce coût au quotidien.

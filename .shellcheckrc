@@ -1,0 +1,5 @@
+# Suit les directives `# shellcheck source=...` même quand le fichier sourcé
+# n'est pas passé en argument à shellcheck (cas du hook pre-commit lefthook, qui
+# n'analyse que les fichiers STAGED : un script peut être commité sans sa lib).
+# Sans ça, SC1091 (« Not following: … ») fait échouer le hook à tort.
+external-sources=true

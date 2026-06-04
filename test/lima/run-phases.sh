@@ -2,7 +2,7 @@
 #
 # Orchestrateur du banc léger Lima — équivalent fonctionnel du banc Vagrant
 # test/multi-node/, mais sur des VMs Lima (vrai noyau, SSH natif) au lieu de
-# VirtualBox. Couvre les phases up → bootstrap → ceph → storageClasses.
+# VirtualBox. Stockage MODULAIRE : local-path (rapide) par défaut, Ceph optionnel.
 #
 # Chaque phase a un GATE : le script s'arrête (exit ≠ 0) si le critère de succès
 # n'est pas atteint. Toutes les phases sont idempotentes (rejouables).
@@ -10,13 +10,15 @@
 # À lancer depuis le POSTE DE CONTRÔLE (Mac), pas dans une VM.
 #
 # Usage :
-#   test/lima/run-phases.sh up         # crée disques bruts + VMs + gate vd* présents
-#   test/lima/run-phases.sh bootstrap  # bootstrap Ansible + Cilium + gate 3 nœuds Ready
-#   test/lima/run-phases.sh ceph       # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
-#   test/lima/run-phases.sh sc         # StorageClasses + gate PVC Bound
-#   test/lima/run-phases.sh all        # up → bootstrap → ceph → sc, arrêt au 1er gate rouge
-#   test/lima/run-phases.sh kubeconfig # (ré)exporte le kubeconfig banc
-#   test/lima/run-phases.sh down       # détruit les VMs + disques nommés
+#   test/lima/run-phases.sh up             # crée disques bruts + VMs + gate vd* présents
+#   test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate 3 nœuds Ready
+#   test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
+#   test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
+#   test/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
+#   test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
+#   WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
+#   test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
+#   test/lima/run-phases.sh down           # détruit les VMs + disques nommés
 #
 # Pré-requis poste : limactl (Lima ≥ 2.0), ansible-playbook, kubectl, python3.
 #
@@ -106,6 +108,74 @@ preflight() {
     need python3
 }
 
+# ── Stockage : helpers partagés (storage-simple ET ceph) ─────────────────────
+# Marque UNE seule StorageClass `default` : pose l'annotation sur $1 et la retire
+# de toutes les autres. Évite le gate « exactement 1 SC default » rouge quand
+# plusieurs provisionneurs coexistent (ex. local-path + Ceph, ou un local-path
+# résiduel — cf. drift #128).
+set_default_sc() {
+    local want=$1 sc
+    for sc in $("${KUBECTL[@]}" get sc -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+        if [ "${sc}" = "${want}" ]; then
+            "${KUBECTL[@]}" patch sc "${sc}" -p \
+                '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}' > /dev/null
+        else
+            "${KUBECTL[@]}" patch sc "${sc}" -p \
+                '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}' > /dev/null
+        fi
+    done
+    local ndefault
+    ndefault=$("${KUBECTL[@]}" get sc -o json \
+        | python3 -c "import sys,json;print(sum(1 for i in json.load(sys.stdin)['items'] if i['metadata'].get('annotations',{}).get('storageclass.kubernetes.io/is-default-class')=='true'))")
+    [ "${ndefault}" = "1" ] || die "il faut exactement 1 SC default, trouvé : ${ndefault}"
+    ok "StorageClass default = ${want} (1 seule)"
+}
+
+# Gate commun : crée un PVC test sur la SC $1 (défaut si vide) et vérifie Bound.
+gate_test_pvc() {
+    local sc="${1:-}"
+    log "  PVC test (Bound ?)"
+    "${KUBECTL[@]}" apply -f - <<PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: run-phases-test-pvc
+  namespace: default
+spec:
+  accessModes: [ReadWriteOnce]
+$([ -n "${sc}" ] && printf '  storageClassName: %s\n' "${sc}")
+  resources:
+    requests:
+      storage: 1Gi
+PVC
+    # local-path est WaitForFirstConsumer → le PVC reste Pending sans consommateur.
+    # On crée un pod éphémère qui le monte pour forcer le binding, puis on nettoie.
+    "${KUBECTL[@]}" apply -f - <<'POD'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: run-phases-test-pod
+  namespace: default
+spec:
+  restartPolicy: Never
+  containers:
+    - name: pause
+      image: registry.k8s.io/pause:3.10
+      volumeMounts:
+        - name: vol
+          mountPath: /data
+  volumes:
+    - name: vol
+      persistentVolumeClaim:
+        claimName: run-phases-test-pvc
+POD
+    retry 120 5 pvc_bound \
+        || die "PVC test pas Bound : $("${KUBECTL[@]}" -n default describe pvc run-phases-test-pvc | tail -10)"
+    ok "PVC test Bound"
+    "${KUBECTL[@]}" -n default delete pod run-phases-test-pod --wait=false > /dev/null 2>&1 || true
+    "${KUBECTL[@]}" -n default delete pvc run-phases-test-pvc --wait=false > /dev/null 2>&1 || true
+}
+
 # ── Phase 0 — VMs Lima + disques bruts ───────────────────────────────────────
 phase_up() {
     preflight
@@ -176,6 +246,19 @@ phase_bootstrap() {
         || die "moins de 3 nœuds Ready : $("${KUBECTL[@]}" get nodes 2>&1)"
     ok "3 nœuds Ready"
     "${KUBECTL[@]}" get nodes -o wide
+}
+
+# ── Phase storage-simple — local-path-provisioner (mode rapide, sans Ceph) ───
+# Provisionneur de stockage simple (PVC sur disque local du nœud) pour itérer
+# vite sur la couche applicative/plateforme sans payer les ~15 min de Ceph.
+phase_storage_simple() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    log "Phase storage-simple — local-path-provisioner"
+    "${KUBECTL[@]}" apply -f "${REPO}/storage/local-path/local-path-storage.yaml"
+    "${KUBECTL[@]}" -n local-path-storage rollout status deploy/local-path-provisioner --timeout=120s
+    set_default_sc local-path
+    gate_test_pvc local-path
 }
 
 # ── Phase 3 — Rook-Ceph ──────────────────────────────────────────────────────
@@ -249,12 +332,8 @@ phase_sc() {
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/storageClass/filesystem/fs.yaml"
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/storageClass/filesystem/storageclass.yaml"
 
-    # GATE 1 : exactement une SC default.
-    local ndefault
-    ndefault=$("${KUBECTL[@]}" get sc -o json \
-        | python3 -c "import sys,json;print(sum(1 for i in json.load(sys.stdin)['items'] if i['metadata'].get('annotations',{}).get('storageclass.kubernetes.io/is-default-class')=='true'))")
-    [ "${ndefault}" = "1" ] || die "il faut exactement 1 SC default, trouvé : ${ndefault}"
-    ok "1 seule StorageClass default"
+    # GATE 1 : Ceph block-replicated devient la SC default (1 seule).
+    set_default_sc rook-ceph-block-replicated
 
     # PRÉ-CONDITION : la config CSI doit lister les monitors avant le PVC test
     # (sinon « empty monitor list » au premier run from-scratch).
@@ -267,24 +346,8 @@ phase_sc() {
     retry 180 5 csi_monitors_ready \
         || die "config CSI sans monitors après 3 min (mons en quorum ?)"
 
-    # GATE 2 : PVC test → Bound.
-    log "  PVC test (Bound ?)"
-    "${KUBECTL[@]}" apply -f - <<'PVC'
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: run-phases-test-pvc
-  namespace: default
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 1Gi
-PVC
-    retry 120 5 pvc_bound \
-        || die "PVC test pas Bound : $("${KUBECTL[@]}" -n default describe pvc run-phases-test-pvc | tail -10)"
-    ok "PVC test Bound"
-    "${KUBECTL[@]}" -n default delete pvc run-phases-test-pvc --wait=false
+    # GATE 2 : PVC test (Bound) sur la SC Ceph par défaut.
+    gate_test_pvc rook-ceph-block-replicated
 }
 
 # ── Down — détruit VMs + disques nommés ──────────────────────────────────────
@@ -307,15 +370,24 @@ phase_down() {
 case "${1:-}" in
     up) phase_up ;;
     bootstrap) phase_bootstrap ;;
+    storage-simple) phase_storage_simple ;;
     ceph) phase_ceph ;;
     sc) phase_sc ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" ;;
     all)
+        # Mode RAPIDE par défaut : stockage simple (local-path), sans Ceph.
+        # WITH_CEPH=1 ajoute le stockage réel (Rook/Ceph + StorageClasses, ~15 min).
         phase_up
         phase_bootstrap
-        phase_ceph
-        phase_sc
-        log "🎉 Banc Lima validé : up → bootstrap → ceph → storageClasses."
+        if [ "${WITH_CEPH:-0}" = 1 ]; then
+            phase_ceph
+            phase_sc
+            log "🎉 Banc Lima validé (mode Ceph) : up → bootstrap → ceph → storageClasses."
+        else
+            phase_storage_simple
+            log "🎉 Banc Lima validé (mode rapide) : up → bootstrap → storage-simple."
+            log "ℹ️  Pour le stockage réel : WITH_CEPH=1 $0 all  (ou : $0 ceph && $0 sc)"
+        fi
         ;;
     down) phase_down ;;
     *)

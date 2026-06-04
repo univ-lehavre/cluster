@@ -48,16 +48,31 @@ Pourquoi Lima
 `k8s-pre-install` exige `real.total ≥ 4096 MB`, qu'une VM 4 GiB ne garantit
 pas).
 
+## Modes de stockage
+
+Le stockage est **modulaire** — Ceph (~15 min) n'est monté que si on en a besoin
+:
+
+| Mode             | StorageClass par défaut      | Pour quoi                                            | Coût       |
+| ---------------- | ---------------------------- | ---------------------------------------------------- | ---------- |
+| **simple** (déf) | `local-path`                 | itérer vite sur la couche applicative/plateforme     | ~30 s      |
+| **Ceph**         | `rook-ceph-block-replicated` | valider le stockage bloc/objet réel (RBD/CephFS/RGW) | ~10-15 min |
+
+Beaucoup de briques (Argo CD, monitoring, Dagster, Mailpit…) n'ont besoin que
+d'un `StorageClass` fournissant des PVC : le mode simple (`local-path`) suffit.
+
 ## Orchestrateur
 
 ```bash
-test/lima/run-phases.sh up         # crée disques bruts + VMs, gate vd* présents
-test/lima/run-phases.sh bootstrap  # bootstrap Ansible + Cilium, gate 3 nœuds Ready
-test/lima/run-phases.sh ceph       # Rook-Ceph (metadataDevice=vde), gate HEALTH_OK
-test/lima/run-phases.sh sc         # StorageClasses, gate PVC test Bound
-test/lima/run-phases.sh all        # tout, dans l'ordre, arrêt au 1er gate rouge
-test/lima/run-phases.sh kubeconfig # (ré)exporte le kubeconfig banc
-test/lima/run-phases.sh down       # détruit VMs + disques nommés
+test/lima/run-phases.sh up             # crée disques bruts + VMs, gate vd* présents
+test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium, gate 3 nœuds Ready
+test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide), gate PVC Bound
+test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde), gate HEALTH_OK
+test/lima/run-phases.sh sc             # StorageClasses Ceph, gate PVC Bound
+test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
+WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
+test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
+test/lima/run-phases.sh down           # détruit VMs + disques nommés
 ```
 
 Chaque phase est **gated** (s'arrête si le critère n'est pas atteint) et
@@ -80,9 +95,12 @@ KUBECONFIG=test/lima/.work/kubeconfig kubectl -n rook-ceph exec deploy/rook-ceph
 - **`os-upgrade` n'est PAS rejoué** (contrairement au banc Vagrant) : l'image
   `_images/debian-13` de Lima est fraîche. C'est une divergence **assumée** — ne
   pas la « corriger ».
-- **Couverture** : up → bootstrap → ceph → storageClasses. Les workloads
-  applicatifs (WordPress/datalake) et l'etcd-backup restent validés sur le banc
-  Vagrant [`multi-node/`](../multi-node/).
+- **Couverture** : up → bootstrap → stockage (simple par défaut, Ceph en
+  option). Les workloads applicatifs (WordPress/datalake) et l'etcd-backup
+  restent validés sur le banc Vagrant [`multi-node/`](../multi-node/).
+- **`local-path`** : stockage `WaitForFirstConsumer` sur disque local du nœud
+  (pas de réplication, pas de bascule) — suffisant pour des PVC simples, mais le
+  stockage **résilient** (réplication ×3, RWX, objet S3) se valide en mode Ceph.
 
 ## Nettoyage
 
