@@ -90,7 +90,12 @@ Les bancs doivent cibler la **même version Kubernetes (1.34)** que le bootstrap
    - Rook release notes → quel K8s + quel Ceph supportés ?
    - Ceph release notes → quelle version Rook minimale ?
 3. **Pinner partout** : tags d'image avec version explicite (jamais `:latest` ni
-   `:N` flottant ; idéalement avec digest pour les composants critiques).
+   `:N` flottant ; idéalement avec digest pour les composants critiques). Le
+   digest DOIT pointer l'**index multi-arch** (`image.index` / `manifest.list`),
+   JAMAIS un manifeste single-arch — sinon `exec format error` sur arm64 (#140).
+   Vérification :
+   [`scripts/audit-image-digests.sh`](../../scripts/audit-image-digests.sh)
+   (audite tous les digests épinglés du dépôt).
 4. **Valider sur le banc multi-nœuds**
    ([`test/multi-node/`](../../test/multi-node/)) avant tout déploiement sur une
    topologie cible : déployer la nouvelle version, vérifier `state.sh` toutes

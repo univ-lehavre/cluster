@@ -149,7 +149,7 @@ spec:
             # acceptable sur réseau privé (cf. ADR 0003).
             - --kubelet-insecure-tls
           # Image épinglée par digest (audit P11 #11 / ADR 0006).
-          image: registry.k8s.io/metrics-server/metrics-server:v0.8.0@sha256:5dd31abb8093690d9624a53277a00d2257e7e57e6766be3f9f54cf9f54cddbc1
+          image: registry.k8s.io/metrics-server/metrics-server:v0.8.0@sha256:89258156d0e9af60403eafd44da9676fd66f600c7934d468ccc17e42b199aee2
           imagePullPolicy: IfNotPresent
           livenessProbe:
             failureThreshold: 3

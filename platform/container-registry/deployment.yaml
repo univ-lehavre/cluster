@@ -24,9 +24,11 @@ spec:
         - name: registry
           # distribution v3 (CNCF) — successeur de docker/distribution v2.
           # API HTTP Registry V2 inchangée, supporte OCI 1.1.
-          # Épinglé par digest (audit P11 #11) : tag conservé pour lisibilité,
-          # digest immuable (ADR 0006). MAJ via renovate.
-          image: registry:3.1.1@sha256:6ad90ba0078c20cbdaa26b08aa2005a6ba409234f50f485d25eadd604704511e
+          # Épinglé par digest d'INDEX multi-arch (ADR 0006) : tag conservé pour
+          # lisibilité, digest immuable. MAJ via renovate. Le digest DOIT pointer
+          # l'index (image.index.v1+json), pas un manifeste single-arch — sinon
+          # `exec format error` sur arm64 (#140).
+          image: registry:3.1.1@sha256:85347ed2ecde64161c7a4788a4d7d3dcc9d6f86f7be95834022e3c6a423a945a
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
