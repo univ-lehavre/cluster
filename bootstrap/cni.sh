@@ -11,6 +11,16 @@ CILIUM_CLI_VERSION=v0.19.4
 CLI_ARCH=amd64
 if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
 
+# ── Surcharges multi-cluster (optionnelles) — ADR 0027 ─────────────────────
+# PROD / mono-cluster : variables vides → comportement INCHANGÉ (podCIDR
+# 10.244.0.0/16, aucune identité de cluster posée). Une topologie fédérée
+# (Cilium Cluster Mesh, spike test/spikes/clustermesh-latency) les renseigne
+# par site : cluster.id (1-255) + cluster.name UNIQUES et podCIDR DISJOINTS
+# entre clusters — exigences non-négociables du mesh.
+CILIUM_POD_CIDR="${CILIUM_POD_CIDR:-10.244.0.0/16}"
+CILIUM_CLUSTER_NAME="${CILIUM_CLUSTER_NAME:-}"
+CILIUM_CLUSTER_ID="${CILIUM_CLUSTER_ID:-}"
+
 # --- Installer le CLI cilium (idempotent) ---------------------------------
 if command -v cilium > /dev/null 2>&1; then
   echo "cilium CLI déjà présent ($(command -v cilium)) — skip download."
@@ -55,7 +65,7 @@ fi
 # → convergent en rejouant le script (même invariant que le durcissement 0019).
 CILIUM_ARGS=(
   --version "${CILIUM_VERSION}"
-  --set ipam.operator.clusterPoolIPv4PodCIDRList=10.244.0.0/16
+  --set ipam.operator.clusterPoolIPv4PodCIDRList="${CILIUM_POD_CIDR}"
   # Chiffrement transparent WireGuard (pod-to-pod) — ADR 0019.
   --set encryption.enabled=true
   --set encryption.type=wireguard
@@ -87,6 +97,14 @@ CILIUM_ARGS=(
   # ingressController.enabled (API Ingress historique, distincte).
   --set gatewayAPI.enabled=true
 )
+# Identité de cluster (mesh) : posée UNIQUEMENT si renseignée. cluster.name vide
+# laisse Cilium sur son défaut « default » et n'active aucune fonction mesh.
+if [ -n "${CILIUM_CLUSTER_NAME}" ]; then
+  CILIUM_ARGS+=(--set cluster.name="${CILIUM_CLUSTER_NAME}")
+fi
+if [ -n "${CILIUM_CLUSTER_ID}" ]; then
+  CILIUM_ARGS+=(--set cluster.id="${CILIUM_CLUSTER_ID}")
+fi
 if cilium status > /dev/null 2>&1; then
   echo "Cilium déjà installé — cilium upgrade (réconciliation des valeurs)."
   cilium upgrade "${CILIUM_ARGS[@]}"

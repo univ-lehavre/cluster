@@ -70,15 +70,16 @@ multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
 Les bancs doivent cibler la **même version Kubernetes (1.34)** que le bootstrap
 — sinon dérive silencieuse (cf. encadré ImageVolume ci-dessus).
 
-| Banc                           | Installeur K8s                                      | Version  |
-| ------------------------------ | --------------------------------------------------- | -------- |
-| `test/multi-node` (Vagrant)    | kubeadm via `bootstrap/` (`pkgs.k8s.io/v1.34`)      | **1.34** |
-| banc léger (conteneurs Docker) | kubeadm dans conteneurs privilégiés (remplace kind) | **1.34** |
+| Banc                        | Installeur K8s                                 | Version  |
+| --------------------------- | ---------------------------------------------- | -------- |
+| `test/multi-node` (Vagrant) | kubeadm via `bootstrap/` (`pkgs.k8s.io/v1.34`) | **1.34** |
+| `test/lima` (Lima)          | kubeadm via `bootstrap/` (VMs Lima)            | **1.34** |
 
 > **kind est abandonné** : son image de node figeait K8s en 1.31 (divergent de
-> la matrice), ce qui a bloqué pgvector. Le banc léger est rebâti sur
-> **conteneurs Docker privilégiés + vrai kubeadm v1.34** (même chemin que le
-> bootstrap).
+> la matrice), ce qui a bloqué pgvector. Le banc léger est rebâti sur des **VMs
+> Lima** (`test/lima/`) exécutant le **vrai bootstrap kubeadm v1.34** — même
+> chemin que la prod. (Une voie « conteneurs Docker privilégiés / DinD » a été
+> écartée : overlayfs imbriqué non fonctionnel ; la vraie VM Lima le résout.)
 
 ### Politique de bump
 
