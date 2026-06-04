@@ -13,6 +13,7 @@
 #   test/lima/run-phases.sh up             # crée disques bruts + VMs + gate vd* présents
 #   test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate 3 nœuds Ready
 #   test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
+#   test/lima/run-phases.sh platform-prereqs # CRDs Gateway API + containerd insecure-registry
 #   test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
 #   test/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
 #   test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
@@ -45,6 +46,9 @@ API_PORT=6443
 VM_CPUS=2
 VM_MEMORY=5GiB
 VM_DISK=20GiB
+
+# CRDs Gateway API (alignées sur Cilium 1.19.x — ADR 0006 ; cf. platform/cilium-expo).
+GWAPI_VERSION=1.4.1
 
 # Disques Ceph par nœud : 3 HDD (data) + 1 block.db. Tailles fonctionnelles
 # (pas perf), à l'image du banc Vagrant (3 × 10 GiB + 5 GiB).
@@ -261,6 +265,59 @@ phase_storage_simple() {
     gate_test_pvc local-path
 }
 
+# ── Phase platform-prereqs — pré-requis transverses de la couche plateforme ──
+# Pose ce dont les addons plateforme ont besoin et que le bootstrap nu n'installe
+# pas : (1) les CRDs Gateway API (cert-manager les exige car cni.sh active
+# gatewayAPI ; Cilium ne les embarque pas — ADR 0006/0020) ; (2) la config
+# containerd « insecure registry » sur chaque nœud pour le registry interne HTTP
+# (registry:80, ADR 0011) — sinon ImagePullBackOff « HTTP response to HTTPS
+# client » au pull des images applicatives.
+phase_platform_prereqs() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+
+    log "Phase platform-prereqs — CRDs Gateway API (v${GWAPI_VERSION})"
+    local base="https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v${GWAPI_VERSION}/config/crd/standard"
+    local crd
+    for crd in gatewayclasses gateways httproutes referencegrants grpcroutes; do
+        "${KUBECTL[@]}" apply -f "${base}/gateway.networking.k8s.io_${crd}.yaml" > /dev/null \
+            || die "échec apply CRD Gateway API ${crd} (réseau ?)"
+    done
+    ok "CRDs Gateway API posées"
+
+    log "Configuration containerd insecure-registry (registry:80 HTTP) sur chaque nœud"
+    configure_insecure_registry
+}
+
+# Configure containerd pour tirer le registry interne HTTP (registry:80) : nom
+# 'registry' résolu vers la ClusterIP (servie par Cilium eBPF) + hosts.toml HTTP.
+# Idempotent. Restart containerd pour que le CRI relise certs.d.
+configure_insecure_registry() {
+    local reg_ip vm
+    reg_ip=$("${KUBECTL[@]}" -n registry get svc registry -o jsonpath='{.spec.clusterIP}' 2> /dev/null)
+    if [ -z "${reg_ip}" ]; then
+        warn "Service registry/registry absent — déployer le registry interne d'abord (skip insecure-registry)"
+        return 0
+    fi
+    local entry
+    for entry in "${NODES[@]}"; do
+        vm="${entry%%:*}"
+        # shellcheck disable=SC2016 # ${REG_IP} s'expanse DANS la VM (posé par `env`), pas localement
+        vm_sh "${vm}" sudo env REG_IP="${reg_ip}" sh -c '
+            grep -q " registry$" /etc/hosts || echo "${REG_IP} registry" >> /etc/hosts
+            mkdir -p "/etc/containerd/certs.d/registry:80"
+            cat > "/etc/containerd/certs.d/registry:80/hosts.toml" <<EOF
+server = "http://registry:80"
+[host."http://registry:80"]
+  capabilities = ["pull", "resolve"]
+  skip_verify = true
+EOF
+            systemctl restart containerd
+        ' || die "${vm} : configuration insecure-registry échouée"
+        ok "${vm} : registry:80 HTTP insecure configuré"
+    done
+}
+
 # ── Phase 3 — Rook-Ceph ──────────────────────────────────────────────────────
 phase_ceph() {
     preflight
@@ -371,6 +428,7 @@ case "${1:-}" in
     up) phase_up ;;
     bootstrap) phase_bootstrap ;;
     storage-simple) phase_storage_simple ;;
+    platform-prereqs) phase_platform_prereqs ;;
     ceph) phase_ceph ;;
     sc) phase_sc ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" ;;

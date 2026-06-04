@@ -54,16 +54,26 @@ docker buildx build --platform linux/arm64 \
 3. **Registry interne** avec l'image Dagster de la bonne arch (cf. ci-dessus).
 4. cert-manager (pour le TLS du Gateway).
 
+> **Banc Lima.** Les pré-requis transverses (CRDs Gateway API exigées par
+> cert-manager, et containerd configuré pour tirer le registry HTTP
+> `registry:80`) sont posés par `test/lima/run-phases.sh platform-prereqs`.
+> Validé e2e sur arm64 (run `K8sRunLauncher` → Job K8s, storage dans Postgres) —
+> cf. [`test/lima/RESULTS.md`](../../test/lima/RESULTS.md) (#144).
+
 ## Déploiement — ordre
+
+Le `dagster.yaml` (helm template figé) ne porte PAS `metadata.namespace`
+(`--namespace` n'est qu'un contexte helm, pas inscrit dans le rendu) →
+**toujours `-n dagster`** sinon les ressources atterrissent dans `default`.
 
 ```bash
 kubectl apply -f platform/dagster/namespace.yaml
-kubectl apply -f platform/network-policies/dagster/
-kubectl apply -f platform/dagster/pg-secret.example.yaml   # ou le vrai Secret dérivé
-kubectl apply -f platform/dagster/dagster.yaml
+kubectl apply -n dagster -f platform/network-policies/dagster/
+kubectl apply -n dagster -f platform/dagster/pg-secret.example.yaml  # ou le vrai Secret dérivé
+kubectl apply -n dagster -f platform/dagster/dagster.yaml
 kubectl -n dagster rollout status deploy/dagster-dagster-webserver
 kubectl -n dagster rollout status deploy/dagster-daemon
-kubectl apply -f platform/dagster/gateway.yaml             # UI sur dagster.cluster.lan
+kubectl apply -n dagster -f platform/dagster/gateway.yaml            # UI sur dagster.cluster.lan
 ```
 
 ## Points de surcharge par topologie (jamais de valeur réelle versionnée — ADR 0023)

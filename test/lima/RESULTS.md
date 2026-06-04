@@ -60,6 +60,32 @@ des écarts entre l'environnement Lima et les hypothèses du bootstrap/banc.
 | L6    | OSD-prepare CrashLoopBackOff : `binary lvm does not exist`   | `metadataDevice` (block.db) → Rook en mode LVM → `ceph-volume` exige `lvm` ; absent de l'image Lima | installer `lvm2` dans le provision de la VM (`profiles/node.yaml.tmpl`)                       |
 | L7    | gate Ceph vert à 0 OSD                                       | `ceph health` = HEALTH_OK sur un cluster neuf SANS pool (rien à dégrader)                           | gate renforcé : HEALTH_OK **ET** OSD attendus up (nœuds × disques data)                       |
 
+## Validation e2e Dagster (#144, 2026-06-04)
+
+Chaîne DataOps **Dagster** validée de bout en bout sur le banc Lima arm64 (mode
+rapide local-path), débloquée par le fix des digests multi-arch (#140) :
+
+| Étape                                 | Résultat                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| cert-manager + CNPG operator          | ✅ après fix drift L8 (CRDs Gateway API)                                 |
+| CNPG cluster `pg` + base `dagster`    | ✅ Healthy 3/3 (PG18 + pgvector), base `dagster` créée                   |
+| registry interne (image `registry:3`) | ✅ pull arm64 OK (digest d'index, #140) après fix drift L10 (PVC SC)     |
+| image Dagster arm64 → `registry:80`   | ✅ buildée + poussée (via nerdctl sur un nœud), `architecture: arm64`    |
+| pods Dagster pull `registry:80`       | ✅ après fix drift L9 (containerd insecure) + drift L11 (namespace)      |
+| storage Dagster                       | ✅ **22 tables dans Postgres** (base `dagster`), **pas de SQLite**       |
+| run e2e via `K8sRunLauncher`          | ✅ **Job K8s `dagster-run-…` Complete**, run `SUCCESS`, 21 événements PG |
+
+Séquence d'événements du run (event log Postgres) :
+`PIPELINE_ENQUEUED → PIPELINE_STARTING → STEP_WORKER_STARTED → STEP_START → STEP_SUCCESS → PIPELINE_SUCCESS`.
+Exemple jetable retiré ensuite.
+
+| #   | Symptôme                                                             | Cause                                                                                     | Correctif                                                                       |
+| --- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| L8  | cert-manager controller CrashLoop : « Gateway API CRDs not present » | `cni.sh` active `gatewayAPI` ; Cilium n'embarque pas les CRDs ; le bootstrap nu non plus  | phase `platform-prereqs` : pose les CRDs Gateway API v1.4.1                     |
+| L9  | ImagePullBackOff : « HTTP response to HTTPS client » (`registry:80`) | containerd tente HTTPS sur le registry interne HTTP ; nom `registry` non résolu côté nœud | phase `platform-prereqs` : `/etc/hosts` + `certs.d/registry:80/hosts.toml` HTTP |
+| L10 | registry pod Pending : `unbound PersistentVolumeClaim`               | PVC du registry hardcodé `rook-ceph-block-replicated`, absent du banc (local-path)        | override banc : PVC sur `local-path` (à paramétrer comme CNPG `storageClass`)   |
+| L11 | `kubectl apply -f dagster.yaml` → ressources dans `default`          | le helm template figé ne porte pas `metadata.namespace`                                   | README : `kubectl apply -n dagster …` (corrigé)                                 |
+
 ## Réserves
 
 - **`os-upgrade` non rejoué** (contrairement au banc Vagrant) : image Lima
