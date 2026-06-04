@@ -63,9 +63,11 @@ manifeste référence `registry:80/dagster-celery-k8s:1.13.7`. L'image `postgres
 
 ## Statut
 
-Accepted (2026-06-04). Validé sur le banc léger Lima (K8s v1.34, image arm64
-maison) : webserver + daemon Ready, storage dans la base CNPG `dagster`, run de
-test via `K8sRunLauncher`.
+Accepted (2026-06-04). **Validation banc en suivi** (#144) : recréer le banc
+Lima (K8s v1.34, image arm64 maison) et prouver e2e webserver + daemon Ready,
+storage dans la base CNPG `dagster` (pas de SQLite), run via `K8sRunLauncher`.
+Un blocage `ImagePullBackOff` du registry interne reste à lever (cause racine
+candidate : digest mono-arch du registry, #140).
 
 ## Conséquences
 
