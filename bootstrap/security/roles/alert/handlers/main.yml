@@ -3,3 +3,16 @@
   ansible.builtin.command: newaliases
   listen: newaliases
   changed_when: false
+
+- name: Compiler la table SASL (sasl_passwd → sasl_passwd.db)
+  become: true
+  ansible.builtin.command: postmap hash:/etc/postfix/sasl_passwd
+  listen: postmap sasl_passwd
+  changed_when: false
+
+- name: Recharger postfix
+  become: true
+  ansible.builtin.service:
+    name: postfix
+    state: reloaded
+  listen: reload postfix

@@ -46,7 +46,14 @@ test/scenarios/
 ├── 12-securitycontext-runtime.sh     ← securityContext appliqué au runtime
 ├── 13-host-node-hardening.sh         ← durcissement hôte (réutilise state.sh)
 ├── 14-cilium-encryption-hubble.sh    ← WireGuard actif + Hubble (ADR 0019)
-└── 15-etcd-encryption-audit.sh       ← Secrets chiffrés etcd + audit + rotation (ADR 0014)
+├── 15-etcd-encryption-audit.sh       ← Secrets chiffrés etcd + audit + rotation (ADR 0014)
+├── 16-brute-force-ssh-fail2ban.sh    ← OFFENSIF : brute-force SSH → fail2ban bannit (ADR 0025)
+├── 17-pod-evasion-psa.sh             ← OFFENSIF : pod d'évasion hôte → PSA rejette (ADR 0025)
+├── 18-exfiltration-networkpolicy.sh  ← OFFENSIF : exfiltration → NetworkPolicy coupe (ADR 0025)
+├── 19-chaos-perte-paquets-partition.sh ← CHAOS : perte/partition réseau (netem) (ADR 0025)
+├── 20-chaos-kill-pods.sh             ← CHAOS : kill aléatoire de pods (ADR 0025)
+├── 21-chaos-saturation-cpu-mem.sh    ← CHAOS : saturation CPU/mémoire (ADR 0025)
+└── 22-alerte-detecteurs-mailpit.sh   ← ALERTE : détecteurs → Mailpit (ADR 0025, dépend #131)
 ```
 
 Chaque script :
@@ -60,23 +67,30 @@ Chaque script :
 
 ## Matrice des scénarios
 
-| #   | Scénario                   | Tests                                                                                | Durée         | Couverture                                         |
-| --- | -------------------------- | ------------------------------------------------------------------------------------ | ------------- | -------------------------------------------------- |
-| 01  | PVC RBD write/read         | StorageClass défaut, PVC Bound, écriture/lecture                                     | ~1 min        | Stockage bloc fonctionnel                          |
-| 02  | Reschedule pod             | Delete pod, re-création, **données persistantes**                                    | ~30s          | Découplage pod ↔ volume                            |
-| 03  | Worker loss                | Halt 1 worker, observation, restore                                                  | ~5 min        | Réplicat ×3 + recovery Ceph                        |
-| 04  | Control plane loss         | Halt control plane, observation API + workloads                                      | ~5 min        | SPOF assumé, etcd backup                           |
-| 05  | Replication bump           | Pool ×3 → ×5 (si 5+ hôtes), refill                                                   | ~5 min        | Évolution capacité (skip si < 5 hôtes)             |
-| 06  | Object store smoke         | datalake-ec + bucket + PUT/GET/DELETE                                                | ~3 min        | Stockage objet S3                                  |
-| 07  | Cilium connectivity        | `cilium connectivity test` standard + Hubble si activé                               | ~10 min       | Réseau Pod-to-Pod, E/W, NetworkPolicy              |
-| 08  | Resource limits audit      | Inspection des `requests`/`limits` actuels vs banc/prod                              | ~10s          | Cohérence dimensionnement                          |
-| 09  | Restauration etcd          | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient        | ~3 min        | **Backup etcd RESTAURABLE** (pas juste produit)    |
-| 10  | Pod Security admission     | Pod privileged/hostNetwork **rejeté** à l'admission ; pod conforme admis             | ~1 min        | Durcissement pod (PSA, ADR 0014)                   |
-| 11  | NetworkPolicy deny         | default-deny coupe l'egress ; allow-dns le rouvre **ciblé** (appliqué Cilium)        | ~2 min        | Durcissement réseau (NetworkPolicy + CNI)          |
-| 12  | securityContext runtime    | Pod durci démarre ; non-root + rootfs RO **vérifiés au runtime**                     | ~1 min        | Durcissement pod (runAsNonRoot/readOnlyRootFS)     |
-| 13  | Host/node hardening        | Réutilise `state.sh` → **PASS/FAIL** sur les couches hôte (sshd, auditd…)            | ~30s          | Durcissement hôte (secure.yml + first-access)      |
-| 14  | Cilium encryption + Hubble | WireGuard **actif** (`cilium_wg0`, peers) + `hubble observe` opérationnel            | ~30s          | Durcissement réseau (WireGuard + Hubble, ADR 0019) |
-| 15  | etcd encryption + audit    | Secret **chiffré** dans etcd (`k8s:enc:secretbox`) + audit-log ; rotation (ROTATE=1) | ~30s / ~2 min | Durcissement plan de contrôle (ADR 0014)           |
+| #   | Scénario                     | Tests                                                                                | Durée         | Couverture                                          |
+| --- | ---------------------------- | ------------------------------------------------------------------------------------ | ------------- | --------------------------------------------------- |
+| 01  | PVC RBD write/read           | StorageClass défaut, PVC Bound, écriture/lecture                                     | ~1 min        | Stockage bloc fonctionnel                           |
+| 02  | Reschedule pod               | Delete pod, re-création, **données persistantes**                                    | ~30s          | Découplage pod ↔ volume                             |
+| 03  | Worker loss                  | Halt 1 worker, observation, restore                                                  | ~5 min        | Réplicat ×3 + recovery Ceph                         |
+| 04  | Control plane loss           | Halt control plane, observation API + workloads                                      | ~5 min        | SPOF assumé, etcd backup                            |
+| 05  | Replication bump             | Pool ×3 → ×5 (si 5+ hôtes), refill                                                   | ~5 min        | Évolution capacité (skip si < 5 hôtes)              |
+| 06  | Object store smoke           | datalake-ec + bucket + PUT/GET/DELETE                                                | ~3 min        | Stockage objet S3                                   |
+| 07  | Cilium connectivity          | `cilium connectivity test` standard + Hubble si activé                               | ~10 min       | Réseau Pod-to-Pod, E/W, NetworkPolicy               |
+| 08  | Resource limits audit        | Inspection des `requests`/`limits` actuels vs banc/prod                              | ~10s          | Cohérence dimensionnement                           |
+| 09  | Restauration etcd            | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient        | ~3 min        | **Backup etcd RESTAURABLE** (pas juste produit)     |
+| 10  | Pod Security admission       | Pod privileged/hostNetwork **rejeté** à l'admission ; pod conforme admis             | ~1 min        | Durcissement pod (PSA, ADR 0014)                    |
+| 11  | NetworkPolicy deny           | default-deny coupe l'egress ; allow-dns le rouvre **ciblé** (appliqué Cilium)        | ~2 min        | Durcissement réseau (NetworkPolicy + CNI)           |
+| 12  | securityContext runtime      | Pod durci démarre ; non-root + rootfs RO **vérifiés au runtime**                     | ~1 min        | Durcissement pod (runAsNonRoot/readOnlyRootFS)      |
+| 13  | Host/node hardening          | Réutilise `state.sh` → **PASS/FAIL** sur les couches hôte (sshd, auditd…)            | ~30s          | Durcissement hôte (secure.yml + first-access)       |
+| 14  | Cilium encryption + Hubble   | WireGuard **actif** (`cilium_wg0`, peers) + `hubble observe` opérationnel            | ~30s          | Durcissement réseau (WireGuard + Hubble, ADR 0019)  |
+| 15  | etcd encryption + audit      | Secret **chiffré** dans etcd (`k8s:enc:secretbox`) + audit-log ; rotation (ROTATE=1) | ~30s / ~2 min | Durcissement plan de contrôle (ADR 0014)            |
+| 16  | Brute-force SSH → fail2ban   | Brute-force SSH (IP factice) → fail2ban **détecte + bannit** ; alerte si #131        | ~1 min        | **Sécurité active** offensif hôte (ADR 0025, D/A/R) |
+| 17  | Pod d'évasion → PSA          | `hostPath:/`, `hostPID`, `hostIPC` **rejetés** à l'admission ; pod conforme admis    | ~1 min        | **Sécurité active** offensif K8s (ADR 0025, D/R)    |
+| 18  | Exfiltration → NetworkPolicy | Canal d'exfiltration **coupé** par default-deny, DNS légitime préservé ; drop Hubble | ~2 min        | **Sécurité active** offensif réseau (ADR 0025, D/R) |
+| 19  | Chaos perte/partition réseau | `tc netem` (perte/partition) sur 1 nœud → cluster **survit + reconverge** HEALTH_OK  | ~7 min        | **Chaos** réseau (ADR 0025) — destructif            |
+| 20  | Chaos kill de pods           | Kill aléatoire répété → Kubernetes **recrée** les pods, santé Ceph préservée         | ~5 min        | **Chaos** reschedule (ADR 0025) — destructif        |
+| 21  | Chaos saturation CPU/mém     | Stresseur borné par `limits` → **OOMKilled**, le voisin **survit**, API réactive     | ~3 min        | **Chaos** isolation ressources (ADR 0025) — destr.  |
+| 22  | Alerte détecteurs → Mailpit  | Événement → **alerte arrive dans Mailpit** (skip tant que #131 absente)              | ~2 min        | **Sécurité active** maillon Alerte (ADR 0025)       |
 
 > 🔑 **09 — restauration etcd validée (2026-06-01).** Contrairement à 03/04, le
 > 09 **ne reboote aucune VM** : il exerce la procédure du RUNBOOK _sur_ le
@@ -131,6 +145,52 @@ Chaque script :
 > survit (réversible). Variables `CP_IP`/`CP_PORT`/`SSH_KEY` (comme le scénario
 > 09). Pré-requis : `kubeadm init --config` avec `EncryptionConfiguration`
 > appliqué.
+
+### Groupe sécurité active (16-22)
+
+> 🚨 **16-22 — sécurité ACTIVE (chaos + attaques contrôlées), cadrée par
+> [ADR 0025](../../docs/decisions/0025-securite-active-chaos-attaques-controlees.md).**
+> Contrairement aux 10-15 (défense **passive** : on vérifie qu'une contrainte
+> _est en place_), ce groupe **passe à l'acte** et asserte la chaîne **Détection
+> → Alerte → Réaction (D/A/R)**, ou dégrade l'infra pour vérifier qu'elle
+> **survit**.
+>
+> **À LANCER UNIQUEMENT SUR UN BANC JETABLE** — jamais une topologie réelle/prod
+> ni une cible tierce (garde-fous ADR 0025). Chaque scénario porte une **garde «
+> banc-only »** qui refuse de tourner si la cible n'est pas en plage de banc (IP
+> privée), sauf `BANC=1` explicite. Toute perturbation est **réversible**
+> (cleanup `trap EXIT`, `KEEP=1` pour inspecter).
+>
+> - **Offensifs.** **16** (brute-force SSH → **fail2ban bannit**) : côté HÔTE
+>   (SSH), simule le brute-force en injectant des échecs sshd pour une **IP
+>   factice** (RFC 5737, jamais routée → ni auto-ban de l'opérateur, ni cible
+>   tierce), puis vérifie le ban (`fail2ban-client status sshd`) et l'unban au
+>   cleanup. **17** (pod d'évasion → **PSA rejette**) : `kubectl`-only, complète
+>   le 10 sur `hostPath:/`, `hostPID`, `hostIPC`. **18** (exfiltration →
+>   **NetworkPolicy coupe**) : `kubectl`-only, prolonge le 11 ; la cible
+>   d'exfiltration est **interne et déterministe** (jamais l'Internet).
+> - **Chaos** (destructifs → `run-all.sh` attend `HEALTH_OK` après). **19**
+>   (perte/partition réseau, `tc netem` **via SSH** sur une vraie VM — réutilise
+>   le pattern du spike `clustermesh-latency`, aucun chemin Lima en dur ; cible
+>   **un seul** nœud). **20** (kill aléatoire de pods, `kubectl` ; **exclut le
+>   control plane** par défaut, `SAFE=1`). **21** (saturation CPU/mém, `kubectl`
+>   ; `resources.limits` **obligatoires** → le stresseur est OOMKilled, le
+>   voisin survit).
+> - **Alerte.** **22** ferme le maillon `[A]` de bout en bout (événement →
+>   **alerte dans Mailpit**). **Dépend de l'issue #131** (brancher l'alerting
+>   hôte sur Mailpit/Mailgun) : tant qu'elle n'est pas livrée, le 22 **skippe
+>   neutrement** et le maillon `[A]` des 16/18/17 est **best-effort / N/A**.
+>   `STRICT_ALERT=1` le fait échouer si la chaîne est absente (CI post-#131).
+>
+> **Détection runtime différée** : aucun Falco/Tetragon (cf.
+> [note runtime/admission](../../docs/audit/note-runtime-admission.md), ADR 0025
+> §4) — l'alerte sur un comportement adverse _dans_ un pod n'est pas couverte.
+>
+> Lancer (banc) : `KUBECONFIG=… bash test/scenarios/17-pod-evasion-psa.sh`
+> (kubectl-only) ;
+> `TARGET_IP=192.168.67.11 bash test/scenarios/16-brute-force-ssh-fail2ban.sh`
+> (SSH) ;
+> `NODE_IP=192.168.67.12 bash test/scenarios/19-chaos-perte-paquets-partition.sh`.
 
 ## Réponses aux questions opérationnelles
 
@@ -236,6 +296,41 @@ Oui, par les scénarios 10-13 :
   `secure.yml` n'est active (attendu en prod). Une couche opt-in non activée
   reste un `skip` neutre (cf.
   [IMPLICATIONS.md](../../bootstrap/security/IMPLICATIONS.md)).
+
+### Le cluster survit-il au chaos (perte réseau, kill, saturation) ?
+
+Oui, c'est ce que prouvent les scénarios **chaos 19-21**
+([ADR 0025](../../docs/decisions/0025-securite-active-chaos-attaques-controlees.md))
+— **sur banc jetable uniquement** :
+
+- **19 — perte/partition réseau** (`tc netem` sur 1 nœud) : pendant la
+  dégradation, l'API reste joignable et Ceph tient au pire en `HEALTH_WARN`
+  (réplica ×3, `min_size 2`, `failureDomain: host`) ; après retrait du netem, le
+  cluster **reconverge** vers `HEALTH_OK`.
+- **20 — kill aléatoire de pods** : Kubernetes **recrée** les pods (généralise
+  le 02) ; le control plane est **exclu** du tirage par défaut (`SAFE=1`).
+- **21 — saturation CPU/mémoire** : les `resources.limits` **contiennent**
+  l'impact (le stresseur est OOMKilled, lien scénario 08) ; le pod voisin reste
+  `Ready`. Sans limites, ce scénario ne tournerait pas (garde-fou).
+
+Tout est **réversible** (cleanup `trap EXIT`).
+
+### Les détecteurs alertent-ils vraiment ?
+
+C'est l'objet des scénarios **16** et **22**. La **détection** et la
+**réaction** sont prouvées : fail2ban **bannit** un brute-force (16), PSA
+**rejette** une évasion (17), Cilium **coupe** une exfiltration (18). Le maillon
+**alerte**, lui, dépend de l'**issue #131** (brancher l'alerting hôte sur
+Mailpit/Mailgun) :
+
+- tant que #131 n'est pas livrée, le **22 skippe neutrement** et le maillon
+  `[A]` des scénarios offensifs est **best-effort** (WARN) ou `N/A` ;
+- une fois #131 mergée, le **22** vérifie de bout en bout qu'un événement de
+  sécurité **produit un mail** dans Mailpit (`STRICT_ALERT=1` en CI).
+
+La **détection comportementale runtime** (shell dans un pod, exec inattendu)
+n'est **pas** couverte : le choix Falco/Tetragon est **différé** (ADR 0025 §4,
+cf. [note runtime/admission](../../docs/audit/note-runtime-admission.md)).
 
 ## Exécution
 

@@ -8,6 +8,12 @@
         settings_host_user: "{{ lookup('ansible.builtin.env', 'HOST_USER') }}"
         settings_password_expiration: "{{ lookup('ansible.builtin.env', 'PASSWORD_EXPIRATION') }}"
         settings_ssh_key: "{{ lookup('ansible.builtin.env', 'PUBLIC_SSH_KEY') }}"
+        # Smarthost SMTP du relais postfix (issue #131). Format postfix [hôte]:port.
+        # USER/PASSWORD facultatifs : vides = banc Mailpit (sans auth) ; renseignés
+        # = fournisseur prod (Brevo/Mailgun/SES… via SMTP AUTH, vendeur-neutre).
+        settings_mail_smarthost: "{{ lookup('ansible.builtin.env', 'MAIL_SMARTHOST') }}"
+        settings_mail_smarthost_user: "{{ lookup('ansible.builtin.env', 'MAIL_SMARTHOST_USER') }}"
+        settings_mail_smarthost_password: "{{ lookup('ansible.builtin.env', 'MAIL_SMARTHOST_PASSWORD') }}"
 
 - name: Vérification de l’import des variables d’environnement
   tags:
@@ -24,6 +30,10 @@
           - settings_password_expiration | length > 0
           - settings_ssh_key is defined
           - settings_ssh_key | length > 0
+          # MAIL_SMARTHOST obligatoire (cœur de #131) ; USER/PASSWORD facultatifs
+          # (vides = banc Mailpit sans auth), donc PAS vérifiés ici.
+          - settings_mail_smarthost is defined
+          - settings_mail_smarthost | length > 0
         fail_msg: "Les variables d'environnement ne sont pas définies ou sont vides."
   always:
     - name: Créer une variable ansible
@@ -33,6 +43,12 @@
           settings_host_user: '{{ settings_host_user }}'
           settings_password_expiration: '{{ settings_password_expiration }}'
           settings_ssh_key: '{{ settings_ssh_key }}'
+          settings_mail_smarthost: '{{ settings_mail_smarthost }}'
+          # Auth présente ? (on affiche le user, JAMAIS le mot de passe).
+          settings_mail_smarthost_auth: >-
+            {{ 'oui (' ~ settings_mail_smarthost_user ~ ')'
+               if settings_mail_smarthost_user | length > 0
+               else 'non (banc/Mailpit)' }}
 
     - name: Afficher les variables importées
       ansible.builtin.debug:

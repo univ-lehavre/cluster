@@ -14,6 +14,16 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.20.0](https://github.com/univ-lehavre/cluster/compare/v2.19.0...v2.20.0) (2026-06-04)
+
+
+### Features
+
+* **security:** relais smtp du hardening hôte vers un smarthost (mailpit/vendeur-neutre) ([3b37d51](https://github.com/univ-lehavre/cluster/commit/3b37d5187fc6414cafa7905293f66454830c645a))
+* **security:** relais SMTP du hardening hôte vers un smarthost (Mailpit/vendeur-neutre) ([#141](https://github.com/univ-lehavre/cluster/issues/141)) ([3b37d51](https://github.com/univ-lehavre/cluster/commit/3b37d5187fc6414cafa7905293f66454830c645a))
+* **test:** sécurité active — chaos + attaques contrôlées + adr 0025 ([e4bbc74](https://github.com/univ-lehavre/cluster/commit/e4bbc741121dbd53283a51cb942ba336406c6d74))
+* **test:** sécurité active — chaos + attaques contrôlées + ADR 0025 ([#137](https://github.com/univ-lehavre/cluster/issues/137)) ([e4bbc74](https://github.com/univ-lehavre/cluster/commit/e4bbc741121dbd53283a51cb942ba336406c6d74))
+
 ## [2.19.0](https://github.com/univ-lehavre/cluster/compare/v2.18.0...v2.19.0) (2026-06-03)
 
 
