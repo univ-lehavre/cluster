@@ -67,30 +67,31 @@ Chaque script :
 
 ## Matrice des scénarios
 
-| #   | Scénario                     | Tests                                                                                | Durée         | Couverture                                          |
-| --- | ---------------------------- | ------------------------------------------------------------------------------------ | ------------- | --------------------------------------------------- |
-| 01  | PVC RBD write/read           | StorageClass défaut, PVC Bound, écriture/lecture                                     | ~1 min        | Stockage bloc fonctionnel                           |
-| 02  | Reschedule pod               | Delete pod, re-création, **données persistantes**                                    | ~30s          | Découplage pod ↔ volume                             |
-| 03  | Worker loss                  | Halt 1 worker, observation, restore                                                  | ~5 min        | Réplicat ×3 + recovery Ceph                         |
-| 04  | Control plane loss           | Halt control plane, observation API + workloads                                      | ~5 min        | SPOF assumé, etcd backup                            |
-| 05  | Replication bump             | Pool ×3 → ×5 (si 5+ hôtes), refill                                                   | ~5 min        | Évolution capacité (skip si < 5 hôtes)              |
-| 06  | Object store smoke           | datalake-ec + bucket + PUT/GET/DELETE                                                | ~3 min        | Stockage objet S3                                   |
-| 07  | Cilium connectivity          | `cilium connectivity test` standard + Hubble si activé                               | ~10 min       | Réseau Pod-to-Pod, E/W, NetworkPolicy               |
-| 08  | Resource limits audit        | Inspection des `requests`/`limits` actuels vs banc/prod                              | ~10s          | Cohérence dimensionnement                           |
-| 09  | Restauration etcd            | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient        | ~3 min        | **Backup etcd RESTAURABLE** (pas juste produit)     |
-| 10  | Pod Security admission       | Pod privileged/hostNetwork **rejeté** à l'admission ; pod conforme admis             | ~1 min        | Durcissement pod (PSA, ADR 0014)                    |
-| 11  | NetworkPolicy deny           | default-deny coupe l'egress ; allow-dns le rouvre **ciblé** (appliqué Cilium)        | ~2 min        | Durcissement réseau (NetworkPolicy + CNI)           |
-| 12  | securityContext runtime      | Pod durci démarre ; non-root + rootfs RO **vérifiés au runtime**                     | ~1 min        | Durcissement pod (runAsNonRoot/readOnlyRootFS)      |
-| 13  | Host/node hardening          | Réutilise `state.sh` → **PASS/FAIL** sur les couches hôte (sshd, auditd…)            | ~30s          | Durcissement hôte (secure.yml + first-access)       |
-| 14  | Cilium encryption + Hubble   | WireGuard **actif** (`cilium_wg0`, peers) + `hubble observe` opérationnel            | ~30s          | Durcissement réseau (WireGuard + Hubble, ADR 0019)  |
-| 15  | etcd encryption + audit      | Secret **chiffré** dans etcd (`k8s:enc:secretbox`) + audit-log ; rotation (ROTATE=1) | ~30s / ~2 min | Durcissement plan de contrôle (ADR 0014)            |
-| 16  | Brute-force SSH → fail2ban   | Brute-force SSH (IP factice) → fail2ban **détecte + bannit** ; alerte si #131        | ~1 min        | **Sécurité active** offensif hôte (ADR 0025, D/A/R) |
-| 17  | Pod d'évasion → PSA          | `hostPath:/`, `hostPID`, `hostIPC` **rejetés** à l'admission ; pod conforme admis    | ~1 min        | **Sécurité active** offensif K8s (ADR 0025, D/R)    |
-| 18  | Exfiltration → NetworkPolicy | Canal d'exfiltration **coupé** par default-deny, DNS légitime préservé ; drop Hubble | ~2 min        | **Sécurité active** offensif réseau (ADR 0025, D/R) |
-| 19  | Chaos perte/partition réseau | `tc netem` (perte/partition) sur 1 nœud → cluster **survit + reconverge** HEALTH_OK  | ~7 min        | **Chaos** réseau (ADR 0025) — destructif            |
-| 20  | Chaos kill de pods           | Kill aléatoire répété → Kubernetes **recrée** les pods, santé Ceph préservée         | ~5 min        | **Chaos** reschedule (ADR 0025) — destructif        |
-| 21  | Chaos saturation CPU/mém     | Stresseur borné par `limits` → **OOMKilled**, le voisin **survit**, API réactive     | ~3 min        | **Chaos** isolation ressources (ADR 0025) — destr.  |
-| 22  | Alerte détecteurs → Mailpit  | Événement → **alerte arrive dans Mailpit** (skip tant que #131 absente)              | ~2 min        | **Sécurité active** maillon Alerte (ADR 0025)       |
+| #   | Scénario                     | Tests                                                                                     | Durée         | Couverture                                               |
+| --- | ---------------------------- | ----------------------------------------------------------------------------------------- | ------------- | -------------------------------------------------------- |
+| 01  | PVC RBD write/read           | StorageClass défaut, PVC Bound, écriture/lecture                                          | ~1 min        | Stockage bloc fonctionnel                                |
+| 02  | Reschedule pod               | Delete pod, re-création, **données persistantes**                                         | ~30s          | Découplage pod ↔ volume                                  |
+| 03  | Worker loss                  | Halt 1 worker, observation, restore                                                       | ~5 min        | Réplicat ×3 + recovery Ceph                              |
+| 04  | Control plane loss           | Halt control plane, observation API + workloads                                           | ~5 min        | SPOF assumé, etcd backup                                 |
+| 05  | Replication bump             | Pool ×3 → ×5 (si 5+ hôtes), refill                                                        | ~5 min        | Évolution capacité (skip si < 5 hôtes)                   |
+| 06  | Object store smoke           | datalake-ec + bucket + PUT/GET/DELETE                                                     | ~3 min        | Stockage objet S3                                        |
+| 07  | Cilium connectivity          | `cilium connectivity test` standard + Hubble si activé                                    | ~10 min       | Réseau Pod-to-Pod, E/W, NetworkPolicy                    |
+| 08  | Resource limits audit        | Inspection des `requests`/`limits` actuels vs banc/prod                                   | ~10s          | Cohérence dimensionnement                                |
+| 09  | Restauration etcd            | Témoin → snapshot → suppression → `etcdctl snapshot restore` → témoin revient             | ~3 min        | **Backup etcd RESTAURABLE** (pas juste produit)          |
+| 10  | Pod Security admission       | Pod privileged/hostNetwork **rejeté** à l'admission ; pod conforme admis                  | ~1 min        | Durcissement pod (PSA, ADR 0014)                         |
+| 11  | NetworkPolicy deny           | default-deny coupe l'egress ; allow-dns le rouvre **ciblé** (appliqué Cilium)             | ~2 min        | Durcissement réseau (NetworkPolicy + CNI)                |
+| 12  | securityContext runtime      | Pod durci démarre ; non-root + rootfs RO **vérifiés au runtime**                          | ~1 min        | Durcissement pod (runAsNonRoot/readOnlyRootFS)           |
+| 13  | Host/node hardening          | Réutilise `state.sh` → **PASS/FAIL** sur les couches hôte (sshd, auditd…)                 | ~30s          | Durcissement hôte (secure.yml + first-access)            |
+| 14  | Cilium encryption + Hubble   | WireGuard **actif** (`cilium_wg0`, peers) + `hubble observe` opérationnel                 | ~30s          | Durcissement réseau (WireGuard + Hubble, ADR 0019)       |
+| 15  | etcd encryption + audit      | Secret **chiffré** dans etcd (`k8s:enc:secretbox`) + audit-log ; rotation (ROTATE=1)      | ~30s / ~2 min | Durcissement plan de contrôle (ADR 0014)                 |
+| 16  | Brute-force SSH → fail2ban   | Brute-force SSH (IP factice) → fail2ban **détecte + bannit** ; alerte si #131             | ~1 min        | **Sécurité active** offensif hôte (ADR 0025, D/A/R)      |
+| 17  | Pod d'évasion → PSA          | `hostPath:/`, `hostPID`, `hostIPC` **rejetés** à l'admission ; pod conforme admis         | ~1 min        | **Sécurité active** offensif K8s (ADR 0025, D/R)         |
+| 18  | Exfiltration → NetworkPolicy | Canal d'exfiltration **coupé** par default-deny, DNS légitime préservé ; drop Hubble      | ~2 min        | **Sécurité active** offensif réseau (ADR 0025, D/R)      |
+| 19  | Chaos perte/partition réseau | `tc netem` (perte/partition) sur 1 nœud → cluster **survit + reconverge** HEALTH_OK       | ~7 min        | **Chaos** réseau (ADR 0025) — destructif                 |
+| 20  | Chaos kill de pods           | Kill aléatoire répété → Kubernetes **recrée** les pods, santé Ceph préservée              | ~5 min        | **Chaos** reschedule (ADR 0025) — destructif             |
+| 21  | Chaos saturation CPU/mém     | Stresseur borné par `limits` → **OOMKilled**, le voisin **survit**, API réactive          | ~3 min        | **Chaos** isolation ressources (ADR 0025) — destr.       |
+| 22  | Alerte détecteurs → Mailpit  | Événement → **alerte arrive dans Mailpit** (skip tant que #131 absente)                   | ~2 min        | **Sécurité active** maillon Alerte (ADR 0025)            |
+| 23  | Marquez ← OpenLineage        | Lineage d'un **run Dagster réel** ingéré et visible dans Marquez (skip si chaîne absente) | ~1 min        | **Intégration DataOps** maillon lineage (ADR 0028, #148) |
 
 > 🔑 **09 — restauration etcd validée (2026-06-01).** Contrairement à 03/04, le
 > 09 **ne reboote aucune VM** : il exerce la procédure du RUNBOOK _sur_ le

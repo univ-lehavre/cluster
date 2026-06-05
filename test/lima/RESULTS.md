@@ -101,3 +101,33 @@ Exemple jetable retiré ensuite.
   HEALTH_OK peut dépasser la fenêtre de 20 min du gate alors que Ceph converge
   ensuite normalement — relancer `ceph` (idempotent) ou libérer de la RAM. Le
   mode rapide (local-path) évite ce coût au quotidien.
+
+## Chaîne DataOps assemblée — phase `dataops-chain` (#148, étape 1.8)
+
+> **Statut : harnais livré, run banc EN SUIVI** (honnêteté des Runs, ADR 0023).
+> Le harnais `test/lima/run-phases.sh dataops-chain` et le scénario
+> `test/scenarios/23-marquez-openlineage.sh` sont écrits, lint-clean et leurs
+> fonctions d'assertion pures couvertes par bats
+> (`test/unit/dataops-assert.bats`). Le **run banc de bout en bout reste à
+> exécuter** : il sera consigné ici (chaîne montée, lineage d'un run Dagster
+> réel visible dans Marquez) avant de fermer #148. Ne PAS considérer ce maillon
+> comme validé tant que ce bloc ne porte pas un déroulé réel daté.
+
+Pré-requis du run (à pousser au registry interne arm64 avant `dataops-chain`) :
+
+- `registry:80/marquez:0.51.1` et `registry:80/marquez-web:0.51.1` (cf.
+  [`platform/marquez/README.md`](../../platform/marquez/README.md)) ;
+- `registry:80/dagster-celery-k8s:1.13.7` (déjà documentée, étape 1.7) ;
+- `registry:80/dagster-openlineage-emit:dev` — **émetteur jetable** : image
+  user-code Dagster embarquant `openlineage-dagster` + un module `toy_assets`
+  (un asset trivial). Construire fidèlement à l'image Dagster maison + le sensor
+  OpenLineage ; build/push à documenter ici au premier run.
+
+Drifts anticipés (à confirmer/infirmer au run réel) :
+
+| #   | Point de vigilance                                                 | Attendu                                                                 |
+| --- | ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| D1  | Flyway au démarrage de l'API Marquez sur la base `marquez`         | init wait-for-db + `MIGRATE_ON_STARTUP=true` → tables créées, API Ready |
+| D2  | Image émetteur jetable (`dagster-openlineage-emit:dev`) à builder  | sans elle, le maillon `[5/5]` échoue explicitement (pas de faux vert)   |
+| D3  | Sensor OpenLineage → API Marquez (`OPENLINEAGE_URL` interne)       | jobs visibles dans `GET /api/v1/namespaces/dagster/jobs` (delta > 0)    |
+| D4  | NetworkPolicy `allow-openlineage-ingress` (dagster → marquez:5000) | l'émetteur (ns dagster) joint l'API Marquez sous default-deny           |

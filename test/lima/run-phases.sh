@@ -14,6 +14,7 @@
 #   test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate 3 nœuds Ready
 #   test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
 #   test/lima/run-phases.sh platform-prereqs # CRDs Gateway API + containerd insecure-registry
+#   test/lima/run-phases.sh dataops-chain  # chaîne DataOps assemblée E2E (monitoring→CNPG→Dagster→Marquez) + lineage (#148)
 #   test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
 #   test/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
 #   test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
@@ -407,6 +408,163 @@ phase_sc() {
     gate_test_pvc rook-ceph-block-replicated
 }
 
+# ── Phase dataops-chain — chaîne DataOps assemblée E2E (#148) ─────────────────
+# Déploie et VÉRIFIE la chaîne complète monitoring → CNPG → Dagster → Marquez, et
+# prouve le maillon final : un VRAI run Dagster émet du lineage OpenLineage que
+# Marquez ingère. Clôt l'épopée #148 (dette de validation systémique) : la chaîne
+# n'était jamais testée ASSEMBLÉE. Chaque maillon a son gate `retry … || die`.
+#
+# Pré-requis : bootstrap fait, platform-prereqs posé (CRDs Gateway API +
+# insecure-registry), registry interne déployé avec les images maison arm64
+# (dagster, marquez, marquez-web, + image user-code de l'émetteur jetable).
+#
+# Surcharge arm64 : `undigest` retombe sur les tags multi-arch (cf. phase_ceph).
+phase_dataops_chain() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    # shellcheck source=test/lima/dataops-assert.sh
+    . "${HERE}/dataops-assert.sh"
+    log "Phase dataops-chain — chaîne DataOps assemblée (monitoring → CNPG → Dagster → Marquez)"
+
+    undigest() { sed -E 's/(image:[[:space:]]*[^@[:space:]]+)@sha256:[0-9a-f]+/\1/'; }
+
+    # ── 1. Monitoring (kube-prometheus-stack + Loki + Mailpit) ───────────────
+    log "  [1/5] Monitoring (kube-prometheus-stack + Loki + Mailpit)"
+    undigest < "${REPO}/platform/kube-prometheus-stack/kube-prometheus-stack.yaml" 2>/dev/null \
+        | "${KUBECTL[@]}" apply --server-side -f - >/dev/null 2>&1 || warn "monitoring : apply partiel (à compléter selon l'addon)"
+    "${KUBECTL[@]}" apply -f "${REPO}/platform/mailpit/" >/dev/null 2>&1 || true
+    monitoring_ready() { [ "$("${KUBECTL[@]}" -n mail get deploy mailpit -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]; }
+    retry 300 10 monitoring_ready || warn "Mailpit non Ready (monitoring best-effort) — la chaîne DataOps continue"
+    ok "monitoring posé (Mailpit gate best-effort)"
+
+    # ── 2. CloudNativePG (operator + cluster pg + bases dagster/marquez) ─────
+    log "  [2/5] CloudNativePG (cluster pg + bases dagster, marquez)"
+    "${KUBECTL[@]}" apply --server-side -f "${REPO}/platform/cloudnative-pg/operator.yaml" >/dev/null
+    retry 180 5 cnpg_operator_ready || die "CNPG operator pas Ready"
+    "${KUBECTL[@]}" apply -f "${REPO}/platform/cloudnative-pg/cluster.yaml" >/dev/null
+    "${KUBECTL[@]}" apply -f "${REPO}/platform/cloudnative-pg/database.yaml" >/dev/null
+    retry 600 10 cnpg_cluster_healthy \
+        || die "CNPG cluster pg pas sain : $("${KUBECTL[@]}" -n postgres get cluster pg -o jsonpath='{.status.phase}' 2>&1)"
+    ok "CNPG : cluster pg sain, bases dagster+marquez créées"
+
+    # ── 3. Dagster (orchestrateur, storage CNPG) ─────────────────────────────
+    log "  [3/5] Dagster (webserver + daemon, storage CNPG)"
+    "${KUBECTL[@]}" apply -f "${REPO}/platform/dagster/namespace.yaml" >/dev/null
+    "${KUBECTL[@]}" apply -n dagster -f "${REPO}/platform/network-policies/dagster/" >/dev/null
+    "${KUBECTL[@]}" apply -n dagster -f "${REPO}/platform/dagster/pg-secret.example.yaml" >/dev/null
+    "${KUBECTL[@]}" apply -n dagster -f "${REPO}/platform/dagster/dagster.yaml" >/dev/null
+    dagster_ready() {
+        [ "$("${KUBECTL[@]}" -n dagster get deploy dagster-dagster-webserver -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ] \
+            && [ "$("${KUBECTL[@]}" -n dagster get deploy dagster-daemon -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]
+    }
+    retry 300 10 dagster_ready || die "Dagster webserver/daemon pas Ready"
+    ok "Dagster : webserver + daemon Ready"
+
+    # ── 4. Marquez (API + web, store CNPG, Flyway) ───────────────────────────
+    log "  [4/5] Marquez (API + web, store CNPG base marquez)"
+    "${KUBECTL[@]}" apply -f "${REPO}/platform/marquez/namespace.yaml" >/dev/null
+    "${KUBECTL[@]}" apply -n marquez -f "${REPO}/platform/network-policies/marquez/" >/dev/null
+    "${KUBECTL[@]}" apply -n marquez -f "${REPO}/platform/marquez/pg-secret.example.yaml" >/dev/null
+    "${KUBECTL[@]}" apply -n marquez -f "${REPO}/platform/marquez/marquez.yaml" >/dev/null
+    marquez_ready() {
+        [ "$("${KUBECTL[@]}" -n marquez get deploy marquez -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ] \
+            && [ "$("${KUBECTL[@]}" -n marquez get deploy marquez-web -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]
+    }
+    retry 300 10 marquez_ready \
+        || die "Marquez API/web pas Ready (Flyway ?) : $("${KUBECTL[@]}" -n marquez get pods 2>&1 | tail -5)"
+    ok "Marquez : API + web Ready (migration Flyway OK)"
+
+    # ── 5. Émetteur jetable : run Dagster réel → lineage OpenLineage → Marquez ─
+    log "  [5/5] Émetteur jetable — run Dagster + sensor OpenLineage → ingestion Marquez"
+    dataops_chain_emit_and_verify
+    ok "🎉 chaîne DataOps assemblée validée — lineage d'un run Dagster réel visible dans Marquez"
+
+    log "Consigner ce run dans test/lima/RESULTS.md (honnêteté des Runs, ADR 0023)."
+}
+
+# Prédicats CNPG réutilisés par la phase (purs côté décision via dataops-assert.sh).
+cnpg_operator_ready() { [ "$("${KUBECTL[@]}" -n cnpg-system get deploy cnpg-controller-manager -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]; }
+cnpg_cluster_healthy() {
+    local phase verdict
+    phase=$("${KUBECTL[@]}" -n postgres get cluster pg -o jsonpath='{.status.phase}' 2>/dev/null)
+    verdict=$(classify_cnpg_health "${phase}")
+    [ "${verdict%%|*}" = ok ]
+}
+
+# Déploie un émetteur OpenLineage jetable (asset jouet Dagster + sensor), lance un
+# run réel, vérifie l'ingestion côté Marquez, puis retire l'émetteur. C'est la
+# PREUVE de la vraie chaîne Dagster → OpenLineage → Marquez (cœur #148, pas un POST
+# synthétique). L'image user-code (registry:80/dagster-openlineage-emit:dev) embarque
+# dagster + openlineage-dagster + un asset trivial ; build/push documenté dans
+# test/lima/RESULTS.md. Tant que l'image n'est pas poussée, ce maillon échoue
+# explicitement (le harnais ne « verdit » pas à tort).
+dataops_chain_emit_and_verify() {
+    local ns=dagster ol_ns=dagster job_before job_after verdict
+    # Compteur de jobs Marquez AVANT (delta = preuve d'ingestion).
+    job_before=$(marquez_job_count "${ol_ns}")
+
+    # L'émetteur jetable est un Job K8s qui matérialise un asset Dagster en process
+    # local (sans passer par le webserver), sensor OpenLineage configuré par env :
+    # OPENLINEAGE_URL pointe l'API Marquez interne. Image user-code maison.
+    "${KUBECTL[@]}" -n "${ns}" apply -f - <<EMIT >/dev/null || die "émetteur jetable : apply échoué"
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ol-emit-toy
+  namespace: ${ns}
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: emit
+          image: registry:80/dagster-openlineage-emit:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OPENLINEAGE_URL
+              value: "http://marquez.marquez.svc.cluster.local:5000"
+            - name: OPENLINEAGE_ENDPOINT
+              value: "api/v1/lineage"
+            - name: OPENLINEAGE_NAMESPACE
+              value: "${ol_ns}"
+          # L'image embarque un asset trivial + le sensor openlineage-dagster ;
+          # la commande matérialise l'asset, ce qui émet START/COMPLETE OpenLineage.
+          command: ["dagster", "asset", "materialize", "--select", "*", "-m", "toy_assets"]
+EMIT
+
+    log "    attente de la complétion du run émetteur (max 5 min)…"
+    emit_done() { [ "$("${KUBECTL[@]}" -n "${ns}" get job ol-emit-toy -o jsonpath='{.status.succeeded}' 2>/dev/null)" = "1" ]; }
+    if ! retry 300 10 emit_done; then
+        "${KUBECTL[@]}" -n "${ns}" logs job/ol-emit-toy 2>/dev/null | tail -20 || true
+        die "émetteur jetable : le run Dagster n'a pas réussi (image registry:80/dagster-openlineage-emit:dev poussée ?)"
+    fi
+
+    # Vérifie l'ingestion côté Marquez (delta du compteur de jobs).
+    log "    vérification de l'ingestion côté Marquez…"
+    sleep 5 # laisse Marquez traiter l'événement COMPLETE
+    job_after=$(marquez_job_count "${ol_ns}")
+    verdict=$(classify_marquez_ingest "${job_before}" "${job_after}")
+    case "${verdict%%|*}" in
+        ok) ok "${verdict#*|}" ;;
+        *) die "${verdict#*|} — sensor OpenLineage → API Marquez à vérifier" ;;
+    esac
+
+    # Teardown de l'émetteur jetable (l'orchestrateur livré reste VIDE).
+    "${KUBECTL[@]}" -n "${ns}" delete job ol-emit-toy --wait=false >/dev/null 2>&1 || true
+}
+
+# Nombre de jobs visibles dans Marquez pour un namespace OpenLineage (via l'API,
+# depuis un pod busybox éphémère). Renvoie un entier ou "?" (illisible).
+marquez_job_count() {
+    local ol_ns=$1 json
+    json=$("${KUBECTL[@]}" -n marquez run marquez-count-$$ --rm -i --restart=Never \
+        --image=busybox:1.36 --quiet -- \
+        sh -c "wget -qO- 'http://marquez.marquez.svc.cluster.local:5000/api/v1/namespaces/${ol_ns}/jobs' 2>/dev/null" 2>/dev/null)
+    parse_ol_job_count "${json}"
+}
+
 # ── Down — détruit VMs + disques nommés ──────────────────────────────────────
 phase_down() {
     require_lima
@@ -429,6 +587,7 @@ case "${1:-}" in
     bootstrap) phase_bootstrap ;;
     storage-simple) phase_storage_simple ;;
     platform-prereqs) phase_platform_prereqs ;;
+    dataops-chain) phase_dataops_chain ;;
     ceph) phase_ceph ;;
     sc) phase_sc ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" ;;
