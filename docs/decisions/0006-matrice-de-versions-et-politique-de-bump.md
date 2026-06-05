@@ -49,6 +49,7 @@ multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
 | SeaweedFS             | **4.31**                                       | banc léger uniquement (objectstore S3 de test)                                                                |
 | aws-cli               | **2.31.21**                                    | Jobs d'init de buckets S3 (`init-buckets.yaml`)                                                               |
 | Dagster               | chart **1.13.7** (app 1.13.7)                  | [`platform/dagster/values.bench.yaml`](../../platform/dagster/values.bench.yaml) (helm template figé)         |
+| Marquez               | chart **0.51.1** (API + web)                   | [`platform/marquez/values.bench.yaml`](../../platform/marquez/values.bench.yaml) (helm template figé)         |
 
 > **Dagster amd64-only.** Les images officielles Dagster sont publiées **amd64
 > uniquement** (dagster-io/dagster#11841). Dagster étant du pur Python, on
@@ -56,6 +57,17 @@ multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
 > ([`platform/dagster/image/Dockerfile`](../../platform/dagster/image/Dockerfile),
 > 1er build maison du dépôt) pour le banc arm64 ; la topologie bare-metal x86
 > utilise l'image officielle. À reconstruire à chaque bump (cf. ADR 0026).
+
+<!-- séparateur entre deux encadrés -->
+
+> **Marquez amd64-only.** Les images officielles Marquez **API et web** sont
+> publiées **amd64 uniquement** (Docker Hub, 0.51.1). Bases multi-arch
+> (`eclipse-temurin:17`, `node:18-alpine`) → on **construit les deux images
+> arm64 en interne**
+> ([`platform/marquez/image/`](../../platform/marquez/image/Dockerfile),
+> [`image-web/`](../../platform/marquez/image-web/Dockerfile), copies fidèles
+> des Dockerfiles upstream) pour le banc arm64 ; bare-metal x86 utilise les
+> images officielles. À reconstruire à chaque bump (cf. ADR 0028).
 
 <!-- séparateur entre deux encadrés -->
 

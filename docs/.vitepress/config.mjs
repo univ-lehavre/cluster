@@ -100,6 +100,7 @@ export default defineConfig({
         items: [
           { text: 'Container Registry', link: '/platform/container-registry/' },
           { text: 'Dashboard Kubernetes', link: '/platform/k8s-dashboard/' },
+          { text: 'Chaîne DataOps (accès & vérifs)', link: '/docs/architecture/chaine-dataops' },
         ],
       },
       {

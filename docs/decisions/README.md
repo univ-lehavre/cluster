@@ -47,3 +47,4 @@ Format léger inspiré de Michael Nygard :
 | 0025 | [Sécurité active : chaos + attaques contrôlées (D/A/R)](0025-securite-active-chaos-attaques-controlees.md) | Accepted |
 | 0026 | [Orchestration des pipelines via Dagster](0026-orchestration-dagster.md)                                   | Accepted |
 | 0027 | [Bootstrap paramétré multi-cluster (Cilium Cluster Mesh)](0027-bootstrap-parametre-multi-cluster.md)       | Accepted |
+| 0028 | [Store de lineage OpenLineage via Marquez](0028-orchestration-openlineage-marquez.md)                      | Accepted |
