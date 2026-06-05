@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.24.0](https://github.com/univ-lehavre/cluster/compare/v2.23.1...v2.24.0) (2026-06-05)
+
+
+### Features
+
+* **marquez:** étape 1.8 — store de lineage OpenLineage + harnais E2E DataOps ([#165](https://github.com/univ-lehavre/cluster/issues/165)) ([befe86f](https://github.com/univ-lehavre/cluster/commit/befe86f35fab1d57569bbee2e917023d5885ecfe))
+
 ## [2.23.1](https://github.com/univ-lehavre/cluster/compare/v2.23.0...v2.23.1) (2026-06-04)
 
 
