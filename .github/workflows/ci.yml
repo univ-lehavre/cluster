@@ -190,3 +190,27 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Validate PR commits
         run: pnpm exec commitlint --from=${{ github.event.pull_request.base.sha }} --to=${{ github.event.pull_request.head.sha }} --verbose
+      # Le dépôt merge en SQUASH (squash_title=PR_TITLE) : le titre de PR DEVIENT
+      # le commit sur main. On le valide donc comme un Conventional Commit, sinon
+      # un titre non conforme casserait commitlint/release-please sur main.
+      #
+      # ⚠️ On NE peut PAS réutiliser `commitlint` seul ici : sa config `ignores:`
+      # saute tout message qui n'a PAS déjà la forme `type(scope): …` (pour
+      # tolérer l'historique pré-CC du fork). Un titre non conforme serait donc
+      # *ignoré* (0 problème) → garde-fou inopérant. On vérifie DONC d'abord le
+      # pattern Conventional à la main (échec si absent), PUIS commitlint pour les
+      # règles fines (subject-case, longueurs…). Le titre passe par une variable
+      # d'env (jamais en interpolation directe) pour éviter toute injection shell.
+      - name: Validate PR title (squash → commit sur main)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf 'Titre de PR : %s\n' "$PR_TITLE"
+          # Même pattern que le `ignores:` de commitlint.config.js (type(scope?)!?: …).
+          if ! printf '%s' "$PR_TITLE" | grep -qiE '^[a-z]+(\([^)]*\))?!?: .+'; then
+            echo "::error::Le titre de PR n'est pas un Conventional Commit (ex. 'feat(marquez): …')." \
+                 "Sous squash, ce titre devient le commit sur main." >&2
+            exit 1
+          fi
+          # Règles fines (subject-case minuscule, longueurs, etc.).
+          printf '%s\n' "$PR_TITLE" | pnpm exec commitlint --verbose
