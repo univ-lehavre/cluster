@@ -38,7 +38,7 @@ spec:
     # Topologie bare-metal : surcharger par rook-ceph-block-replicated (RBD ×3, ADR 0001 — JAMAIS
     # EC 2+1 pour ce stateful) via config locale non versionnée (ADR 0023).
     storageClass: standard
-  # Rôles propriétaires des deux bases logiques (cf. database.yaml). CNPG ne crée
+  # Rôles propriétaires des trois bases logiques (cf. database.yaml). CNPG ne crée
   # pas l'owner automatiquement → on les déclare ici (login, sans superuser).
   # Mots de passe gérés par l'operator (Secrets dédiés) ; pas de creds en dur.
   managed:
@@ -47,6 +47,9 @@ spec:
         login: true
         ensure: present
       - name: pgvector
+        login: true
+        ensure: present
+      - name: marquez
         login: true
         ensure: present
   # Sauvegardes/WAL archivés via le plugin Barman Cloud (TLS plugin<->operator par
