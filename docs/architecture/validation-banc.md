@@ -83,7 +83,7 @@ Ceux qui illustrent le mieux la valeur du banc — invisibles au lint :
 
 > **Aucun de ces composants n'est en production.** Le banc valide la logique ;
 > le déploiement réel reste une action humaine, tracée étape par étape.
-
+>
 > **Chaîne DataOps assemblée.** Le harnais
 > `test/lima/run-phases.sh dataops-chain` déploie et vérifie
 > `monitoring → CNPG → Dagster → Marquez` de bout en bout (#148). Pour la carte
