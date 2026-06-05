@@ -100,6 +100,31 @@ pnpm release:dry    # aperçu de la prochaine release sans rien modifier
 - Ne pas pousser directement sur `main` — le hook `no-direct-push-to-main`
   l'interdit ; passer par une PR.
 
+### Merge & traçabilité (squash)
+
+Le dépôt merge **en squash uniquement** (`squash and merge`). Conséquence : la
+PR entière devient **un seul commit** sur `main`, dont le **message = le titre
+de la PR** (et le corps = la liste des commits de la branche). Le `main` reste
+linéaire et lisible (1 PR = 1 commit), mais cela impose une discipline :
+
+- **Le titre de PR EST le commit de `main`** → il doit être un Conventional
+  Commit valide (`feat(scope): …`, minuscule, sans `(#issue)`). Un job CI le
+  valide (`commitlint` sur le titre) : le squash le propage tel quel à `main`,
+  donc à release-please et au `CHANGELOG`.
+- **1 PR = 1 type/scope cohérent** = **1 ligne de `CHANGELOG`**. Le squash
+  n'expose qu'**un** préfixe au changelog ; mélanger deux features distinctes
+  dans une PR en cache une. Les `docs:`/`test:` qui _servent_ la feature peuvent
+  l'accompagner ; deux capacités indépendantes → deux PR.
+- **Lier les issues via `Closes #N` dans la _description_ de PR**, pas dans le
+  corps des commits (le squash les enfouit ; GitHub n'auto-fermerait pas). C'est
+  ce qui ferme l'issue au merge et garde le lien commit↔issue durable.
+- **Pas de `(#issue)` dans le titre** : le squash ajoute déjà `(#PR)`. En mettre
+  un produit un double numéro parasite (`… (#157) (#144)`).
+- Les commits _internes_ à la branche peuvent rester atomiques (utile à la
+  revue) — ils sont aplatis au merge, donc leur granularité ne survit pas sur
+  `main`. Si cette granularité doit survivre (revert/bisect fins), **scinder en
+  plusieurs PR** plutôt que compter sur le squash.
+
 ## Validation locale complète
 
 ```bash
