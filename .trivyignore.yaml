@@ -181,3 +181,41 @@ misconfigurations:
   - id: DS-0002 # pas de USER non-root : aligné sur l'image officielle (root).
     paths:
       - 'platform/dagster/image/Dockerfile'
+
+  # ── Marquez vendored (chart 0.51.1, helm template figé) — posture amont ────
+  # Le chart Marquez ne durcit pas ses workloads en amont (API Java + UI React,
+  # images officielles non distroless). Findings inhérents au rendu.
+  - id: KSV-0014 # rootfs read-only : l'API Marquez et l'UI web écrivent leur état
+    # local (config rendue, build assets) ; le chart amont ne pose pas
+    # readOnlyRootFilesystem (ni sur l'init wait-for-db).
+    paths:
+      - 'platform/marquez/marquez.yaml'
+  - id: KSV-0118 # securityContext par défaut sur les workloads du chart amont
+    # (API + web) — non durci en amont.
+    paths:
+      - 'platform/marquez/marquez.yaml'
+  - id: KSV-0109 # ConfigMap référençant des paramètres de connexion : la config
+    # Marquez (config.yml) interpole ${POSTGRES_PASSWORD} — une RÉFÉRENCE à la
+    # variable d'env, alimentée par le Secret dédié marquez-pg-auth, PAS un mot de
+    # passe en clair dans le ConfigMap.
+    paths:
+      - 'platform/marquez/marquez.yaml'
+
+  # ── Images Marquez maison (Dockerfiles arm64) — fidélité à l'officielle ────
+  # Les images officielles Marquez (API/web, amd64) tournent EN ROOT (pas de USER).
+  # Nos images arm64 sont volontairement FIDÈLES à l'officielle (mêmes Dockerfiles
+  # upstream 0.51.1) : y ajouter un USER non-root divergerait du comportement amont
+  # (entrypoints écrivant sous /usr/src/app). Posture assumée.
+  - id: DS-0002 # pas de USER non-root : aligné sur les images officielles (root).
+    paths:
+      - 'platform/marquez/image/Dockerfile'
+      - 'platform/marquez/image-web/Dockerfile'
+  - id: DS-0029 # apt-get sans --no-install-recommends : reproduit À L'IDENTIQUE le
+    # Dockerfile API upstream 0.51.1 (postgresql-client/bash/coreutils). Ajouter le
+    # flag divergerait du build amont vérifié — posture assumée (image de banc).
+    paths:
+      - 'platform/marquez/image/Dockerfile'
+  - id: DS-0025 # apk add sans --no-cache : reproduit À L'IDENTIQUE le Dockerfile web
+    # upstream 0.51.1 (node:18-alpine). Fidélité amont — posture assumée.
+    paths:
+      - 'platform/marquez/image-web/Dockerfile'

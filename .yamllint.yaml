@@ -36,3 +36,4 @@ ignore: |
   platform/cloudnative-pg/operator.yaml
   platform/cloudnative-pg/plugin-barman-cloud.yaml
   platform/dagster/dagster.yaml
+  platform/marquez/marquez.yaml

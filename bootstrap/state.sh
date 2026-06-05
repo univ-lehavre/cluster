@@ -772,6 +772,32 @@ else
     fi
 fi
 
+# ─── Orchestration OpenLineage (Marquez — ADR 0028) ────────────────────────
+# Store de lineage : API Marquez + UI web, store dans CloudNativePG (base marquez,
+# migrations Flyway). Skip propre tant que l'addon n'est pas déployé.
+section "Orchestration OpenLineage (Marquez — ADR 0028)"
+if ! kubectl_ready; then
+    mark skip "kubectl indisponible"
+elif ! kubectl_q get ns marquez >/dev/null 2>&1; then
+    mark skip "Marquez : namespace absent (kubectl apply -f platform/marquez/)"
+else
+    # API Ready
+    api_rd=$(kubectl_q -n marquez get deploy marquez -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+    if [ "${api_rd:-0}" -ge 1 ] 2>/dev/null; then
+        mark ok "Marquez : API Ready (lineage OpenLineage, store CNPG)"
+    else
+        mark fail "Marquez : API non Ready" "kubectl -n marquez get deploy marquez"
+    fi
+
+    # UI web Ready
+    web_rd=$(kubectl_q -n marquez get deploy marquez-web -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+    if [ "${web_rd:-0}" -ge 1 ] 2>/dev/null; then
+        mark ok "Marquez : UI web Ready"
+    else
+        mark fail "Marquez : UI web non Ready" "kubectl -n marquez get deploy marquez-web"
+    fi
+fi
+
 # ─── Couche 7b — Exposition réseau (audit P6 #25 / #06) ────────────────────
 # Tous les Services applicatifs ont été passés en ClusterIP (#25). Un Service
 # de type NodePort ou LoadBalancer expose un port au-delà du cluster → ici,

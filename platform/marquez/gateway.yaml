@@ -1,0 +1,56 @@
+# Exposition de l'UI Marquez (web) via le Gateway Cilium + TLS interne
+# (ADR 0020/0021). Même patron que platform/dagster/gateway.yaml.
+#
+# SEULE l'UI web (marquez-web:3000) est exposée. L'API (marquez:5000) reste
+# INTERNE : les émetteurs OpenLineage (sensor Dagster, code atlas) la joignent par
+# le Service ClusterIP `marquez.marquez.svc:5000` depuis le cluster — pas besoin de
+# la publier en bordure. L'UI web appelle l'API en intra-cluster (MARQUEZ_HOST).
+#
+# SANS auth : Marquez n'a pas d'auth native ; le cluster est sur un réseau privé de
+# confiance (mono-admin, ADR 0003), comme Dagster, le registry et le dashboard. Une
+# auth en bordure (oauth2-proxy) pourra être ajoutée ultérieurement. Secret TLS créé
+# par cert-manager (gateway-shim via l'annotation cluster-issuer).
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: marquez
+  namespace: marquez
+  annotations:
+    cert-manager.io/cluster-issuer: internal-ca
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: websecure
+      protocol: HTTPS
+      port: 443
+      hostname: marquez.cluster.lan # TODO admin réseau (placeholder .lan)
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: marquez-server-tls # créé/renouvelé par cert-manager
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: marquez
+  namespace: marquez
+spec:
+  parentRefs:
+    - name: marquez
+      namespace: marquez
+      sectionName: websecure
+  hostnames:
+    - marquez.cluster.lan # TODO admin réseau (placeholder .lan)
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: marquez-web
+          port: 3000

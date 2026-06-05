@@ -1,0 +1,75 @@
+# Values de rendu — chart marquezproject/marquez 0.51.1 (étape 1.8, ADR 0028).
+#
+# Régénérer marquez.yaml (le chart vit dans le dépôt source, pas un repo Helm) :
+#   git clone --depth 1 --branch 0.51.1 --filter=blob:none --sparse \
+#     https://github.com/MarquezProject/marquez.git && cd marquez && \
+#     git sparse-checkout set chart && helm dependency build chart
+#   helm template marquez ./chart --version 0.51.1 --namespace marquez \
+#     -f values.bench.yaml > marquez.yaml   (puis injecter le digest postgres init,
+#                                            ajouter l'initContainer wait-for-db, cf. README)
+#
+# Store de lineage OpenLineage : API (marquez) + UI (marquez-web). Le store persiste
+# dans la base `marquez` de CloudNativePG (migrations Flyway → base dédiée, jamais
+# le subchart bitnami/postgresql).
+
+# ── Images : registry interne (ADR 0011) ────────────────────────────────────
+# Les images officielles marquezproject/marquez et marquez-web sont amd64-only ;
+# sur arm64 (banc Lima) on utilise les images construites en interne
+# (platform/marquez/image/ et image-web/). Topologie bare-metal x86 = images
+# officielles. Les deux sont publiées dans le registry interne sous le même tag.
+marquez:
+  image:
+    registry: registry:80
+    repository: marquez
+    tag: '0.51.1'
+    pullPolicy: IfNotPresent
+  serviceAccount: default
+  replicaCount: 1
+  # Storage Postgres EXTERNE = CloudNativePG (base marquez, étape 1.6).
+  db:
+    host: pg-rw.postgres.svc.cluster.local
+    port: 5432
+    name: marquez
+    user: marquez
+    # `password` est ignoré : existingSecretName prend précédence (voir ci-dessous).
+    # Présent uniquement pour satisfaire le rendu du template (clé requise).
+    password: placeholder-overridden-by-existing-secret
+  # Le mot de passe vient d'un Secret DÉRIVÉ (clé `marquez-db-password`), JAMAIS le
+  # Secret CNPG brut pg-marquez (clés username/password). Cf. pg-secret.example.yaml.
+  existingSecretName: marquez-pg-auth
+  # Flyway migre le schéma au démarrage du pod API (d'où la base dédiée).
+  migrateOnStartup: true
+  port: 5000
+  adminPort: 5001
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+
+# ── UI web : pointe l'API en intra-cluster (Service marquez:5000) ────────────
+web:
+  enabled: true
+  replicaCount: 1
+  image:
+    registry: registry:80
+    repository: marquez-web
+    tag: '0.51.1'
+    pullPolicy: IfNotPresent
+  port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# ── Service ClusterIP (exposition par Gateway Cilium, pas LoadBalancer) ──────
+service:
+  type: ClusterIP
+  port: 5000
+
+# ── Subchart PostgreSQL bitnami DÉSACTIVÉ (store = CloudNativePG externe) ────
+postgresql:
+  enabled: false

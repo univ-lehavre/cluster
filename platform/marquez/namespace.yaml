@@ -1,0 +1,8 @@
+# Namespace du store de lineage Marquez (étape 1.8, ADR 0028).
+# Les addons portent leur propre namespace. Ce ns héberge l'API Marquez et l'UI
+# web. Le store persiste dans la base `marquez` de CloudNativePG (ns postgres).
+# Le lineage OpenLineage est émis par Dagster (et, en Phase 2+, par le code atlas).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marquez

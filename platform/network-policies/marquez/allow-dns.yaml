@@ -1,0 +1,22 @@
+# DNS (CoreDNS / kube-system) pour tous les pods du namespace `marquez`.
+# INDISPENSABLE sous default-deny egress — sinon Marquez ne résout plus le Postgres
+# CNPG (pg-rw.postgres.svc) ni les services internes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: marquez
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

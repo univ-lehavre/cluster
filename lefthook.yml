@@ -81,6 +81,8 @@ pre-push:
           ':!:platform/cloudnative-pg/plugin-barman-cloud.yaml' \
           ':!:platform/dagster/dagster.yaml' \
           ':!:platform/dagster/values.bench.yaml' \
+          ':!:platform/marquez/marquez.yaml' \
+          ':!:platform/marquez/values.bench.yaml' \
           ':!:test/*/inventory.yaml' \
           | xargs -0 -r kubeconform \
             -strict -ignore-missing-schemas \

@@ -1,0 +1,23 @@
+# Trafic INTRA-namespace marquez : flux est-ouest entre l'UI web et l'API. L'UI web
+# (marquez-web) appelle l'API Marquez (marquez:5000) en intra-cluster (MARQUEZ_HOST).
+# Sans ce flux, l'UI ne peut pas interroger l'API sous default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: marquez
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: marquez
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: marquez

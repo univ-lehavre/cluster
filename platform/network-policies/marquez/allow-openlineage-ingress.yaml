@@ -1,0 +1,25 @@
+# Ingress vers l'API Marquez (port pod 5000) depuis les ÉMETTEURS OpenLineage
+# déclarés. Le sensor OpenLineage de Dagster (et, en Phase 2+, le code atlas) POST
+# les événements de lineage sur marquez:5000/api/v1/lineage depuis leur namespace.
+#   - `dagster` : sensor openlineage-dagster (event log → OpenLineage → Marquez)
+# Tout autre namespace est bloqué par le default-deny. L'UI web (intra-ns) passe par
+# allow-intra-namespace ; l'API n'est PAS exposée en bordure (cf. gateway.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-openlineage-ingress
+  namespace: marquez
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: marquez
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dagster
+      ports:
+        - protocol: TCP
+          port: 5000

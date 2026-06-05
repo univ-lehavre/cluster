@@ -30,4 +30,6 @@ CHANGELOG.md
 
 # Vendored upstream Dagster (helm template figé, épinglé par digest)
 platform/dagster/dagster.yaml
+# Vendored upstream Marquez (helm template figé, épinglé par digest)
+platform/marquez/marquez.yaml
 storage/local-path/local-path-storage.yaml

@@ -1,0 +1,21 @@
+# Egress de Marquez (API) vers le Postgres CloudNativePG (ns `postgres`, port 5432) :
+# store de lineage + migrations Flyway. La policy postgres/allow-postgres-ingress
+# autorise l'ingress côté postgres depuis le ns marquez ; ici on ouvre l'EGRESS côté
+# marquez (les deux sont nécessaires sous default-deny des deux côtés).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-egress
+  namespace: marquez
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
