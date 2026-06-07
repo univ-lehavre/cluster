@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.28.0](https://github.com/univ-lehavre/cluster/compare/v2.27.0...v2.28.0) (2026-06-07)
+
+
+### Features
+
+* **platform:** porte Dagster + Marquez en rôles Ansible — clôt le portage DataOps ([#173](https://github.com/univ-lehavre/cluster/issues/173)) ([#191](https://github.com/univ-lehavre/cluster/issues/191)) ([e82215e](https://github.com/univ-lehavre/cluster/commit/e82215e89cdda00b7d4f51b687f4e1ef7579179e))
+
 ## [2.27.0](https://github.com/univ-lehavre/cluster/compare/v2.26.0...v2.27.0) (2026-06-07)
 
 
