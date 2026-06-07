@@ -18,9 +18,10 @@ lecture** par thème, qui pointent vers eux.
 
 ## Transverse
 
-| Page                                       | Contenu                                                   |
-| ------------------------------------------ | --------------------------------------------------------- |
-| [`validation-banc.md`](validation-banc.md) | Historique et évolution des campagnes de test sur le banc |
+| Page                                           | Contenu                                                                      |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| [`validation-banc.md`](validation-banc.md)     | Historique et évolution des campagnes de test sur le banc                    |
+| [`matrice-catalogue.md`](matrice-catalogue.md) | Axes du catalogue, couverture des scénarios et des builds (matrice ADR 0023) |
 
 Les **définitions** des termes sont dans le [glossaire](../glossaire.md) ; les
 **décisions** détaillées et datées dans les [ADR](../decisions/).
