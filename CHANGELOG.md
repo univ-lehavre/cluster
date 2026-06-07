@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.29.0](https://github.com/univ-lehavre/cluster/compare/v2.28.1...v2.29.0) (2026-06-07)
+
+
+### Features
+
+* **platform:** rôles ansible monitoring + loki + seaweedfs paramétrables ([#158](https://github.com/univ-lehavre/cluster/issues/158), [#186](https://github.com/univ-lehavre/cluster/issues/186)) ([#197](https://github.com/univ-lehavre/cluster/issues/197)) ([3526189](https://github.com/univ-lehavre/cluster/commit/3526189eceecaaf0c395f28a37e1a5ac46bba536))
+
 ## [2.28.1](https://github.com/univ-lehavre/cluster/compare/v2.28.0...v2.28.1) (2026-06-07)
 
 
