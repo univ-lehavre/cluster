@@ -53,6 +53,25 @@ terrain cloud**.
   (`.terraform.lock.hcl` committé + version dans la matrice
   [ADR 0006](0006-matrice-de-versions-et-politique-de-bump.md)).
 
+## Hors périmètre — le provisioning local reste Lima/Vagrant
+
+OpenTofu **ne remplace pas** Vagrant ni Lima pour les bancs **locaux**
+(`test/single-node/`, `test/multi-node/`, `test/lima/`). Raisons :
+
+- Lima et Vagrant **sont déjà déclaratifs** (`Vagrantfile`, template Lima) et
+  jetables (`vagrant destroy`, `limactl delete`) : les emballer dans du HCL
+  ajoute une indirection sans gagner ni idempotence ni `destroy`.
+- Le **`tfstate` n'a aucun sens en local** — il réconcilie un état distant
+  coûteux, absent ici. On hériterait du coût (état à gérer) sans le bénéfice.
+- **Aucun provider OpenTofu natif** pour Lima/Vagrant → on tomberait sur du
+  `local-exec` (anti-pattern) appelant `limactl`/`vagrant`.
+- Porter ces bancs **validés** (runs consignés) en HCL = risque de régression
+  pour zéro gain ([ADR 0017](0017-langage-des-scripts.md) : pas de réécriture
+  opportuniste).
+
+Frontière nette : **OpenTofu là où il y a une API et un coût (le cloud) ; les
+outils natifs pour le local.**
+
 ## Statut
 
 Accepted (cadrage). Aucun `.tf` n'est encore versionné ; cet ADR autorise et
