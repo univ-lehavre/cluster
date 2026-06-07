@@ -6,6 +6,38 @@
 - name: Deploy cert-manager
   run_once: true
   block:
+    # CRDs Gateway API AVANT cert-manager : il tourne avec --enable-gateway-api
+    # et crashe au boot si elles manquent (drift L37). Téléchargées via get_url
+    # (CA via SSL_CERT_FILE, cf. L23) puis appliquées en local. Idempotent.
+    - name: Ensure the Gateway API CRD download directory exists
+      ansible.builtin.file:
+        path: '{{ gateway_api_crd_tmp }}'
+        state: directory
+        mode: '0755'
+
+    - name: Download Gateway API CRDs ({{ gateway_api_version }})
+      ansible.builtin.get_url:
+        url: '{{ gateway_api_crd_base }}/gateway.networking.k8s.io_{{ item }}.yaml'
+        dest: '{{ gateway_api_crd_tmp }}/gateway.networking.k8s.io_{{ item }}.yaml'
+        mode: '0644'
+      loop:
+        - gatewayclasses
+        - gateways
+        - httproutes
+        - referencegrants
+        - grpcroutes
+
+    - name: Apply Gateway API CRDs ({{ gateway_api_version }})
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ gateway_api_crd_tmp }}/gateway.networking.k8s.io_{{ item }}.yaml'
+      loop:
+        - gatewayclasses
+        - gateways
+        - httproutes
+        - referencegrants
+        - grpcroutes
+
     # CRDs volumineuses → server-side apply (comme operator CNPG / le RUNBOOK).
     - name: Apply cert-manager (server-side)
       kubernetes.core.k8s:

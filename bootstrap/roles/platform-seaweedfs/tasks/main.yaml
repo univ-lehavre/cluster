@@ -1,0 +1,24 @@
+# code: language=ansible
+# Rôle platform-seaweedfs (ADR 0036) — backing S3 léger du banc rapide. Déployé
+# seulement en banc léger (les briques S3 testent leur chemin s3 réel sans Ceph) ;
+# une topologie réelle utilise le RGW Ceph. Appliqué depuis l'hôte qui pilote l'API.
+
+- name: Deploy SeaweedFS (light S3 backing)
+  run_once: true
+  block:
+    - name: Apply SeaweedFS manifest
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/seaweedfs/seaweedfs.yaml'
+
+    - name: Wait for SeaweedFS to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: seaweedfs
+        namespace: '{{ seaweedfs_namespace }}'
+      register: seaweedfs_deploy
+      until: >-
+        seaweedfs_deploy.resources | length > 0
+        and (seaweedfs_deploy.resources[0].status.readyReplicas | default(0)) >= 1
+      retries: '{{ seaweedfs_ready_retries }}'
+      delay: '{{ seaweedfs_ready_delay }}'

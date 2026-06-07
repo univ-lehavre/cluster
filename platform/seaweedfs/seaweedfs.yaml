@@ -1,0 +1,129 @@
+# SeaweedFS — backing S3 LÉGER du banc rapide (ADR 0036).
+#
+# Fournit une API S3 (`seaweedfs.s3.svc.cluster.local:8333`) sans Ceph, pour que
+# les briques S3 (Loki, CNPG/Barman) testent leur chemin **s3 réel** (même code
+# que la prod) en banc local-path. En prod / banc Ceph, le backing S3 est le RGW
+# Ceph (endpoint surchargé). Image épinglée (ADR 0006 : SeaweedFS 4.31).
+#
+# Mono-instance, stockage sur PVC (storageClass paramétrable) : suffisant pour un
+# banc fonctionnel (pas de HA, pas de perf). Creds S3 statiques de TEST
+# (seaweedadmin / seaweedadmin-secret) — valeurs génériques banc (ADR 0023) ;
+# une topologie réelle n'utilise pas SeaweedFS (elle a le RGW).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: s3
+---
+# Config S3 : un identity `seaweedadmin` avec accès admin sur tous les buckets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seaweedfs-s3-config
+  namespace: s3
+data:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "seaweedadmin",
+          "credentials": [
+            { "accessKey": "seaweedadmin", "secretKey": "seaweedadmin-secret" }
+          ],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seaweedfs-data
+  namespace: s3
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+  namespace: s3
+  labels:
+    app: seaweedfs
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: seaweedfs
+          image: docker.io/chrislusf/seaweedfs:4.31
+          args:
+            - server
+            - -dir=/data
+            - -s3
+            - -s3.config=/etc/seaweedfs/s3.json
+            - -s3.port=8333
+            - -ip.bind=0.0.0.0
+          ports:
+            - name: s3
+              containerPort: 8333
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/seaweedfs
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: seaweedfs-data
+        - name: config
+          configMap:
+            name: seaweedfs-s3-config
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+  namespace: s3
+spec:
+  type: ClusterIP
+  selector:
+    app: seaweedfs
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: 8333
+      protocol: TCP

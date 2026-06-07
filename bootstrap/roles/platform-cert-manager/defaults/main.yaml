@@ -8,6 +8,14 @@ platform_repo_dir: '{{ playbook_dir }}/..'
 
 cert_manager_namespace: cert-manager
 
+# CRDs Gateway API : cert-manager du dépôt tourne avec --enable-gateway-api
+# (gateway-shim, ADR 0020/0021) → il CRASHE au démarrage si les CRDs Gateway API
+# sont absentes (drift L37). Ce rôle les garantit donc lui-même (idempotent ;
+# registry les pose aussi côté dataops, sans conflit). Version figée (ADR 0006).
+gateway_api_version: '1.4.1'
+gateway_api_crd_base: >-
+  https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v{{ gateway_api_version }}/config/crd/standard
+gateway_api_crd_tmp: /tmp/gateway-api-crds
 # Gate : attente que le webhook cert-manager soit Ready avant d'appliquer les
 # Issuers (un apply trop tôt échoue sur le webhook d'admission).
 cert_manager_ready_retries: 30

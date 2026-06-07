@@ -18,6 +18,7 @@
 #   test/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
 #   test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman) + gate Ready
 #   test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage (#173/#148)
+#   test/lima/run-phases.sh monitoring     # observabilité (Prometheus + Grafana + Loki), profil selon WITH_CEPH
 #   test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
 #   WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
 #   test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
@@ -514,6 +515,44 @@ phase_dataops() {
     log "Consigner ce run dans test/lima/RESULTS.md (honnêteté des Runs, ADR 0023)."
 }
 
+# ── Phase monitoring — observabilité (Prometheus + Grafana + Loki) ───────────
+# Déploie kube-prometheus-stack + Loki via bootstrap/monitoring.yaml (ADR
+# 0016/0036). Profil de stockage choisi selon le mode du banc :
+#   - mode Ceph (WITH_CEPH=1) : storageClass rook-ceph, Loki en profil s3 → RGW.
+#   - mode léger (défaut)      : storageClass local-path, Loki en profil filesystem.
+# Le profil léger NE requiert PAS Ceph (testable en banc rapide, ADR 0035).
+phase_monitoring() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
+    log "Phase monitoring — Prometheus + Grafana + Loki (via Ansible)"
+
+    # Profil par topologie (ADR 0035/0036) : Loki est TOUJOURS en S3 (même code
+    # que prod) ; seul le backing change — SeaweedFS en banc léger (S3 sans Ceph),
+    # RGW Ceph en mode Ceph.
+    local sc backing endpoint
+    if [ "${WITH_CEPH:-0}" = 1 ]; then
+        sc=rook-ceph-block-replicated
+        backing=rgw
+        endpoint=http://rook-ceph-rgw-datalake.rook-ceph:80
+    else
+        sc=local-path
+        backing=seaweedfs
+        endpoint=http://seaweedfs.s3.svc.cluster.local:8333
+    fi
+    log "  storageClass=${sc}, backing S3 Loki=${backing} (${endpoint})"
+
+    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
+        "${REPO}/bootstrap/monitoring.yaml" \
+        -e dataops_k8s_host=localhost \
+        -e "monitoring_storage_class=${sc}" \
+        -e "loki_storage_class=${sc}" \
+        -e "loki_s3_backing=${backing}" \
+        -e "loki_s3_endpoint=${endpoint}" \
+        || die "monitoring.yaml : échec du déploiement de l'observabilité"
+    ok "🎉 observabilité déployée — Prometheus + Grafana + Loki (S3/${backing}) Ready"
+}
+
 # Prédicats CNPG réutilisés par la phase (purs côté décision via dataops-assert.sh).
 cnpg_operator_ready() { [ "$("${KUBECTL[@]}" -n cnpg-system get deploy cnpg-controller-manager -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]; }
 cnpg_cluster_healthy() {
@@ -622,6 +661,7 @@ case "${1:-}" in
     platform-prereqs) time_phase platform-prereqs phase_platform_prereqs ;;
     datalake) time_phase datalake phase_datalake ;;
     dataops) time_phase dataops phase_dataops ;;
+    monitoring) time_phase monitoring phase_monitoring ;;
     ceph) time_phase ceph phase_ceph ;;
     sc) time_phase sc phase_sc ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" ;;

@@ -55,3 +55,4 @@ Format léger inspiré de Michael Nygard :
 | 0033 | [Orchestration Ansible des addons plateforme DataOps](0033-orchestration-ansible-platform-dataops.md)      | Accepted |
 | 0034 | [La validation = un run e2e from-scratch (pas le lint)](0034-validation-e2e-from-scratch.md)               | Accepted |
 | 0035 | [Stratégie de bancs : fidélité vs vitesse](0035-strategie-bancs-fidelite-vitesse.md)                       | Accepted |
+| 0036 | [Backing S3 par topologie : SeaweedFS (léger) / RGW (prod)](0036-backing-s3-unique-rgw.md)                 | Accepted |

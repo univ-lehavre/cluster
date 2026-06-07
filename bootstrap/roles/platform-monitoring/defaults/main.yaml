@@ -1,0 +1,17 @@
+---
+# Valeurs par défaut du rôle platform-monitoring (ADR 0033/0016/0036).
+# kube-prometheus-stack (Prometheus + Alertmanager + Grafana). N'utilise QUE des
+# PVC (pas de S3) : le storageClass est paramétrable par topologie (#158).
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+monitoring_namespace: monitoring
+
+# storageClass des PVC (Prometheus, Alertmanager, Grafana). Défaut = PROD
+# (ADR 0023) ; banc léger surcharge en 'local-path' (n'importe quel provisioner
+# RWO suffit — monitoring n'a aucun besoin de stockage objet ni résilient).
+monitoring_storage_class: rook-ceph-block-replicated
+
+# Gate : operator Ready (300s/10s).
+monitoring_ready_retries: 30
+monitoring_ready_delay: 10

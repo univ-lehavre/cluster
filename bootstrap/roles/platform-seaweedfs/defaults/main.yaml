@@ -1,0 +1,8 @@
+---
+# Valeurs par défaut du rôle platform-seaweedfs (ADR 0036).
+# Backing S3 LÉGER du banc rapide (S3 sans Ceph). Déployé UNIQUEMENT en banc
+# léger ; une topologie réelle utilise le RGW Ceph.
+platform_repo_dir: '{{ playbook_dir }}/..'
+seaweedfs_namespace: s3
+seaweedfs_ready_retries: 30
+seaweedfs_ready_delay: 5

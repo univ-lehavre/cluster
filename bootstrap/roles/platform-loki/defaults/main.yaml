@@ -1,0 +1,46 @@
+---
+# Valeurs par défaut du rôle platform-loki (ADR 0033/0016/0036).
+# Loki (logs) en profil S3 — MÊME chemin de code partout ; seul le backing S3
+# change selon la topologie (ADR 0036) :
+#   - banc léger : SeaweedFS (creds de test statiques) ;
+#   - prod / banc Ceph : RGW Ceph via OBC (creds dérivés).
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+loki_namespace: monitoring
+
+# Backing S3 : 'seaweedfs' (banc léger) ou 'rgw' (prod / banc Ceph).
+loki_s3_backing: rgw
+
+# Endpoint S3 selon le backing (surchargeable). Défaut = RGW (prod).
+loki_s3_endpoint: http://rook-ceph-rgw-datalake.rook-ceph:80
+
+# Creds S3 : pour 'seaweedfs', creds de test statiques (le déploiement SeaweedFS
+# les pose) ; pour 'rgw', dérivés de l'OBC (résolus à l'exécution).
+loki_s3_access_key: seaweedadmin
+loki_s3_secret_key: seaweedadmin-secret
+
+# OBC RGW (backing 'rgw' uniquement) : provisionne les buckets + creds.
+loki_obc_name: loki-buckets
+loki_obc_namespace: rook-ceph
+loki_obc_storage_class: rook-ceph-datalake
+
+# storageClass du PVC Loki (WAL/cache local). Défaut prod ; banc léger local-path.
+loki_storage_class: rook-ceph-block-replicated
+
+# Buckets S3 de Loki. SeaweedFS (banc léger) : buckets nommés, créés par le Job
+# init-buckets (creds admin). RGW (prod) : l'OBC Rook n'expose qu'UN bucket
+# auto-nommé et des creds restreints à ce bucket — pas d'init-buckets possible ;
+# le rôle résout ce nom unique et l'emploie pour chunks ET ruler (drift L38).
+loki_buckets:
+  - loki-chunks
+  - loki-ruler
+  - loki-admin
+# Noms de buckets injectés dans la config Loki (défaut SeaweedFS = nommés ;
+# backing rgw les écrase par le bucket unique de l'OBC, résolu à l'exécution).
+loki_bucket_chunks: loki-chunks
+loki_bucket_ruler: loki-ruler
+
+# Gate : Loki StatefulSet Ready (300s/10s).
+loki_ready_retries: 30
+loki_ready_delay: 10

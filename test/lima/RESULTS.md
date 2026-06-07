@@ -253,3 +253,54 @@ L21-L24), **isolation/ressources du banc** (L27-L30) et **harnais de test**
 (L31-L32). Aucun n'est un défaut du livrable — ils sont corrigés une fois et
 deviennent des invariants du run. Barman archive désormais vers le **RGW Ceph**
 (L14 éliminé à la racine), au prix d'un banc en **mode Ceph** (8 GiB/VM).
+
+## Observabilité paramétrable — phase `monitoring` (#158/#186) — 2026-06-07
+
+> **✅ Validé e2e sur banc Lima arm64 (2026-06-07), sur les DEUX profils S3.**
+> Portage en rôles Ansible de `kube-prometheus-stack` (Prometheus + Alertmanager
+>
+> - Grafana), `loki` et `seaweedfs`
+>   ([ADR 0036](../../docs/decisions/0036-backing-s3-unique-rgw.md)), avec
+>   **storageClass paramétrable** (#158) et **backing S3 par topologie** (#186).
+>   Deux runs from-scratch du namespace : profil **léger** (local-path +
+>   SeaweedFS) **puis** profil **Ceph** (rook-ceph + RGW via OBC).
+>
+> ⚠️ **Honnêteté du Run.** 6 correctifs intermédiaires (drifts **L34–L39**),
+> **tous de code/universels**. Fait notable validant la stratégie deux-bancs : 2
+> drifts (**L38/L39**) **n'apparaissent qu'en RGW** — le profil léger (creds
+> admin SeaweedFS) les masquait. C'est la preuve concrète qu'un chemin de code
+> partagé doit être validé **sur chaque backing réellement employé** (cf.
+> [Leçons des Runs](../../docs/architecture/lecons-des-runs.md), cat. 7).
+
+| Profil         | storageClass PVC             | Backing S3 Loki                         | Verdict                                      | Temps `monitoring` |
+| -------------- | ---------------------------- | --------------------------------------- | -------------------------------------------- | ------------------ |
+| Léger (rapide) | `local-path`                 | **SeaweedFS** (`s3` ns, buckets nommés) | ✅ Prometheus/AM/Grafana/Loki Ready, S3 réel | **3m05s**          |
+| Ceph (fidèle)  | `rook-ceph-block-replicated` | **RGW** via OBC (bucket unique)         | ✅ idem, Loki `started` sur le bucket OBC    | **2m53s**          |
+
+> **Preuve #158** : tous les storageClass codés en dur sont désormais paramétrés
+> (registry, CNPG, monitoring, Loki) — PVC Bound en `local-path` **et** en
+> `rook-ceph-block-replicated` selon la topologie, sans modifier le code.
+> **Preuve #186** : Loki tourne en **profil S3 réel** (jamais `filesystem`) sur
+> SeaweedFS **et** sur RGW — même chemin de code, endpoint et bucket résolus par
+> variable.
+
+### Drifts rencontrés et correctifs (L34–L39)
+
+| #   | Symptôme                                             | Cause                                                                                           | Correctif                                                                                  | Profil  |
+| --- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------- |
+| L34 | CRDs monitoring rejetées par le module `k8s`         | enum `- =` non quoté → PyYAML SafeLoader rejette (tag `value`)                                  | appliquer les CRDs via `kubectl apply --server-side` (Go), pas le module                   | les 2   |
+| L35 | « no matches for cert-manager.io/v1.Certificate »    | le manifeste monitoring contient des `Certificate`/`Issuer`                                     | `platform-cert-manager` appliqué **avant** monitoring (dans `monitoring.yaml`)             | les 2   |
+| L37 | cert-manager **CrashLoop** au démarrage              | tourne avec `--enable-gateway-api` mais les CRDs Gateway API sont absentes                      | le rôle `platform-cert-manager` pose lui-même les CRDs Gateway API (1.4.1)                 | les 2   |
+| L36 | `PrometheusRule` rejetés en masse (HTTP 500 webhook) | appliqués avant que l'operator (porteur du webhook) soit Ready                                  | **deux passes** : stack sauf PrometheusRule → attente operator → PrometheusRule            | les 2   |
+| L38 | Loki **CrashLoop** `NoSuchBucket` (compactor)        | l'OBC Rook n'expose qu'**un bucket auto-nommé** + creds restreints → buckets nommés impossibles | en RGW : résoudre le bucket OBC, l'employer pour chunks **et** ruler ; init-buckets skippé | **RGW** |
+| L39 | init-buckets « prêt » alors que rien n'est créé      | gate faux : `grep make_bucket` matchait aussi `make_bucket **failed**`                          | script réécrit (`set -eu`) : échec franc si le bucket n'est ni créé ni déjà présent        | **RGW** |
+
+### Enseignement
+
+Le paramétrage **tient** : un seul code, deux topologies (#158/#186). La leçon
+forte est la **portée des drifts** : L34–L37 cassaient les deux profils (ordre
+CRD/webhook/contrôleur — invariants d'admission), mais **L38/L39 ne se révèlent
+qu'en RGW**. Le banc léger, avec ses creds admin SeaweedFS, validait une version
+**plus permissive** que la prod. D'où la règle inscrite en
+[ADR 0036](../../docs/decisions/0036-backing-s3-unique-rgw.md) : un changement
+S3 validé en léger **doit** être revalidé en Ceph avant prod.

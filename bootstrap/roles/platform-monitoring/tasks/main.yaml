@@ -1,0 +1,86 @@
+# code: language=ansible
+# Rôle platform-monitoring (ADR 0033/0016) — kube-prometheus-stack (Prometheus +
+# Alertmanager + Grafana). Appliqué depuis l'hôte qui pilote l'API. Pas de S3 :
+# seulement des PVC, dont le storageClass est paramétrable (#158/ADR 0036) →
+# monte aussi bien en banc léger (local-path) qu'en prod (rook-ceph).
+
+- name: Deploy kube-prometheus-stack
+  run_once: true
+  block:
+    # Namespace créé EN PREMIER : ni les CRDs ni le manifeste figé ne le
+    # déclarent (les objets le supposent présent — sinon « namespaces monitoring
+    # not found », cf. drift L25). Loki (même ns) en dépend aussi.
+    - name: Ensure the monitoring namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: '{{ monitoring_namespace }}'
+
+    # CRDs volumineuses → server-side apply. Appliquées via `kubectl` (et non le
+    # module k8s) : les CRDs upstream contiennent des enum `- =` non quotés que le
+    # parser PyYAML du module rejette (tag yaml `value`), alors que kubectl (Go)
+    # les charge sans souci (drift L34). KUBECONFIG vient de l'env de l'exécuteur.
+    - name: Apply monitoring CRDs (server-side, via kubectl)
+      ansible.builtin.command:
+        cmd: >-
+          kubectl apply --server-side
+          -f {{ platform_repo_dir }}/platform/kube-prometheus-stack/crds.yaml
+      changed_when: true
+
+    # Attendre que les CRDs soient Established avant d'appliquer les CR (sinon
+    # « no matches for kind … » au premier apply — race CRD/CR).
+    - name: Wait for monitoring CRDs to be Established
+      ansible.builtin.command:
+        cmd: >-
+          kubectl wait --for condition=Established --timeout=120s
+          crd/prometheusrules.monitoring.coreos.com
+          crd/alertmanagers.monitoring.coreos.com
+          crd/prometheuses.monitoring.coreos.com
+          crd/servicemonitors.monitoring.coreos.com
+      changed_when: false
+
+    # Manifeste figé chargé puis storageClass substitué par la variable de
+    # topologie (toutes les occurrences de la valeur prod SONT des storageClass —
+    # vérifié ; pas de .j2 du rendu helm, ADR 0033).
+    - name: Load the monitoring manifest with the topology storageClass
+      ansible.builtin.set_fact:
+        monitoring_defs: >-
+          {{ lookup('file', platform_repo_dir ~ '/platform/kube-prometheus-stack/kube-prometheus-stack.yaml')
+             | replace('rook-ceph-block-replicated', monitoring_storage_class)
+             | from_yaml_all | list }}
+
+    # Deux passes (drift L36) : les PrometheusRule passent par le webhook
+    # d'admission de l'operator → il doit être Ready AVANT. On applique donc
+    # d'abord tout SAUF les PrometheusRule (dont l'operator + ses Certificate),
+    # on attend l'operator Ready, puis les PrometheusRule.
+    - name: Apply monitoring stack (sauf PrometheusRule)
+      kubernetes.core.k8s:
+        state: present
+        definition: '{{ item }}'
+      loop: "{{ monitoring_defs | select | rejectattr('kind', 'eq', 'PrometheusRule') | list }}"
+      loop_control:
+        label: "{{ item.kind | default('?') }}/{{ item.metadata.name | default('?') }}"
+
+    - name: Wait for the monitoring operator to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: kube-prometheus-stack-operator
+        namespace: '{{ monitoring_namespace }}'
+      register: monitoring_operator
+      until: >-
+        monitoring_operator.resources | length > 0
+        and (monitoring_operator.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ monitoring_ready_retries }}'
+      delay: '{{ monitoring_ready_delay }}'
+
+    # Webhook de l'operator opérationnel → on peut poser les PrometheusRule.
+    - name: Apply PrometheusRule objects (operator webhook ready)
+      kubernetes.core.k8s:
+        state: present
+        definition: '{{ item }}'
+      loop: "{{ monitoring_defs | select | selectattr('kind', 'eq', 'PrometheusRule') | list }}"
+      loop_control:
+        label: "{{ item.metadata.name | default('?') }}"
