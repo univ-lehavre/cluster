@@ -123,10 +123,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint:dup
 
-  # Lint + format des scripts Python (ruff via uv ; ADR 0017 amendé / 0006).
-  # uv lit pyproject.toml + uv.lock (env reproductible) ; on appelle ruff
-  # directement (pas `pnpm lint:python`) pour éviter d'installer Node ici.
-  ruff:
+  # Python : lint + format (ruff), tests unittest et garde-fou Markdown
+  # atteignable (ADR 0029). uv lit pyproject.toml + uv.lock (env reproductible) ;
+  # on appelle les outils directement (pas via pnpm) pour ne pas installer Node.
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,8 +134,14 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - name: ruff check + format
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: tests unittest
+        run: uv run python -m unittest discover -s tests
+      - name: garde-fou Markdown atteignable (ADR 0029)
+        run: uv run python scripts/check_md_orphans.py
 
   # Tests unitaires des fonctions pures de state.sh (bats — audit P9 #12).
   bats:
