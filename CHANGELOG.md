@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.28.1](https://github.com/univ-lehavre/cluster/compare/v2.28.0...v2.28.1) (2026-06-07)
+
+
+### Documentation
+
+* suites de la validation [#173](https://github.com/univ-lehavre/cluster/issues/173) — mise en valeur du processus + stratégie de bancs ([14cebf7](https://github.com/univ-lehavre/cluster/commit/14cebf71d7b3157dab71dac0563367832ed98724))
+* suites validation [#173](https://github.com/univ-lehavre/cluster/issues/173) — processus mis en valeur + stratégie de bancs (ADR 0034/0035) ([#195](https://github.com/univ-lehavre/cluster/issues/195)) ([14cebf7](https://github.com/univ-lehavre/cluster/commit/14cebf71d7b3157dab71dac0563367832ed98724))
+
 ## [2.28.0](https://github.com/univ-lehavre/cluster/compare/v2.27.0...v2.28.0) (2026-06-07)
 
 
