@@ -69,11 +69,45 @@ test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium, gate 3 nœu
 test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide), gate PVC Bound
 test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde), gate HEALTH_OK
 test/lima/run-phases.sh sc             # StorageClasses Ceph, gate PVC Bound
+test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman), gate Ready
+test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage
 test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
 WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
 test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
 test/lima/run-phases.sh down           # détruit VMs + disques nommés
 ```
+
+## Run DataOps complet (validation #173)
+
+Valide la chaîne DataOps **portée en Ansible** (`bootstrap/dataops.yaml`,
+ADR 0033) de bout en bout, sur le banc en **mode Ceph** (le RGW est la cible S3
+des backups Barman). Séquence :
+
+```bash
+WITH_CEPH=1 test/lima/run-phases.sh all   # up → bootstrap → ceph → sc
+test/lima/run-phases.sh datalake          # RGW datalake (CephObjectStore)
+test/lima/run-phases.sh dataops           # registry → cert-manager → CNPG →
+                                          # build images → Dagster → Marquez + lineage
+```
+
+Le playbook pilote l'API **depuis l'hôte** (`dataops_k8s_host=localhost`, via le
+kubeconfig banc) et installe la lib Python `kubernetes` en pré-tâche.
+
+**Critères de succès** (chaque phase est gated — `die` sinon) :
+
+| Étape        | Gate                                                            |
+| ------------ | --------------------------------------------------------------- |
+| `datalake`   | Deployment `rook-ceph-rgw-datalake-a` Ready                     |
+| registry     | Deployment `registry` Ready ; containerd `use_local_image_pull` |
+| cert-manager | Deployment `cert-manager-webhook` Ready                         |
+| CNPG         | Cluster `pg` phase « Cluster in healthy state » (≤ 600 s)       |
+| build images | 3 images poussées sur `registry:80` (skip si déjà présentes)    |
+| Dagster      | `dagster-dagster-webserver` ET `dagster-daemon` Ready           |
+| Marquez      | `marquez` ET `marquez-web` Ready (migration Flyway)             |
+| **lineage**  | un run Dagster réel → événement OpenLineage ingéré par Marquez  |
+
+> Consigner le run dans [`RESULTS.md`](RESULTS.md) (honnêteté des Runs,
+> ADR 0023) — succès **et** drifts éventuels.
 
 Chaque phase est **gated** (s'arrête si le critère n'est pas atteint) et
 **idempotente** (rejouable). Le kubeconfig est exporté sous `.work/kubeconfig`

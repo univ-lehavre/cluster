@@ -74,14 +74,15 @@
   become_method: ansible.builtin.sudo
   block:
     # ClusterIP du Service registry, récupérée à l'exécution (jamais hardcodée).
-    # delegate_to control-plane car la requête k8s part de là (KUBECONFIG admin).
+    # delegate_to l'hôte qui pilote l'API (kubeconfig + lib kubernetes) — le même
+    # que les plays cluster de dataops.yaml (banc : localhost ; prod : un CP).
     - name: Get registry Service ClusterIP
       kubernetes.core.k8s_info:
         kind: Service
         name: registry
         namespace: '{{ registry_namespace }}'
       register: registry_svc
-      delegate_to: "{{ groups['control'][0] }}"
+      delegate_to: "{{ dataops_k8s_host | default('localhost') }}"
       run_once: true
       become: false
 

@@ -1,18 +1,24 @@
 # code: language=ansible
 # Orchestrateur de la couche plateforme DataOps (ADR 0033), à lancer APRÈS le
 # bootstrap Kubernetes. Trois plays, dans l'ordre des dépendances inter-briques :
-#   Play 1 (cluster) : registry + cert-manager + CNPG (manifestes figés
-#     platform/ appliqués depuis le control-plane via kubernetes.core).
-#   Play 2 (nœuds)   : config containerd registry interne + build des images.
-#   Play 3 (cluster) : Dagster + Marquez (pull des images buildées au play 2).
+#   Play 1 (k8s) : registry + cert-manager + CNPG (manifestes figés platform/
+#     appliqués via kubernetes.core).
+#   Play 2 (nœuds) : config containerd registry interne + build des images.
+#   Play 3 (k8s) : Dagster + Marquez (pull des images buildées au play 2).
 #
 # Ordre inter-briques : registry → cert-manager → CNPG → (build) → Dagster/Marquez.
+#
+# HÔTE D'EXÉCUTION k8s (`dataops_k8s_host`, défaut localhost) : les tâches
+# kubernetes.core ciblent l'API via le KUBECONFIG de l'exécuteur. Banc Lima :
+# localhost (kubeconfig rapatrié via port-forward). Prod : surcharger par un
+# control-plane si l'on pilote depuis le nœud. Les libs Python `kubernetes` sont
+# installées en pré-tâche sur cet hôte.
 #
 # Surcharges par topologie : group_vars d'inventaire non versionné
 # (cf. bootstrap/group_vars/dataops.example.yaml). Défauts de rôle = prod.
 
 - name: Plateforme DataOps — étape cluster (manifestes figés)
-  hosts: control[0]
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
   gather_facts: false
   pre_tasks:
     - name: Audit-log — record playbook execution
@@ -20,6 +26,11 @@
         name: audit-log
       vars:
         audit_log_playbook: dataops.yaml
+    # kubernetes.core exige la lib Python `kubernetes` sur l'exécuteur.
+    - name: Ensure the Python kubernetes client is present
+      ansible.builtin.pip:
+        name: kubernetes
+        state: present
   tasks:
     - name: Registry interne + CRDs Gateway API
       ansible.builtin.import_role:
@@ -56,7 +67,7 @@
       tags: build-images
 
 - name: Plateforme DataOps — étape applicative (Dagster + Marquez)
-  hosts: control[0]
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
   gather_facts: false
   tasks:
     # Dagster (orchestrateur vide) + Marquez (lineage) : pull des images

@@ -14,9 +14,10 @@
 #   test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate 3 nœuds Ready
 #   test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
 #   test/lima/run-phases.sh platform-prereqs # CRDs Gateway API + containerd insecure-registry
-#   test/lima/run-phases.sh dataops-chain  # chaîne DataOps assemblée E2E (monitoring→CNPG→Dagster→Marquez) + lineage (#148)
 #   test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
 #   test/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
+#   test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman) + gate Ready
+#   test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage (#173/#148)
 #   test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
 #   WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
 #   test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
@@ -408,92 +409,56 @@ phase_sc() {
     gate_test_pvc rook-ceph-block-replicated
 }
 
-# ── Phase dataops-chain — chaîne DataOps assemblée E2E (#148) ─────────────────
-# Déploie et VÉRIFIE la chaîne complète monitoring → CNPG → Dagster → Marquez, et
-# prouve le maillon final : un VRAI run Dagster émet du lineage OpenLineage que
-# Marquez ingère. Clôt l'épopée #148 (dette de validation systémique) : la chaîne
-# n'était jamais testée ASSEMBLÉE. Chaque maillon a son gate `retry … || die`.
-#
-# Pré-requis : bootstrap fait, platform-prereqs posé (CRDs Gateway API +
-# insecure-registry), registry interne déployé avec les images maison arm64
-# (dagster, marquez, marquez-web, + image user-code de l'émetteur jetable).
-#
-# Surcharge arm64 : `undigest` retombe sur les tags multi-arch (cf. phase_ceph).
-phase_dataops_chain() {
+# ── Phase datalake — CephObjectStore RGW (cible S3 des backups Barman) ────────
+# Monte le store objet S3 du datalake (RGW Ceph) : prérequis du plugin Barman de
+# CloudNativePG (l'OBC `cnpg-backups` du rôle platform-cnpg s'y branche). Mode
+# Ceph uniquement. À lancer après `sc`, avant `dataops`.
+phase_datalake() {
     preflight
     [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    log "Phase datalake — CephObjectStore RGW + storageClass datalake"
+    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/storageClass/datalake/datalake-ec.yaml"
+    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/storageClass/datalake/storage-class.yaml"
+
+    # GATE : le RGW datalake répond (Deployment du gateway Ready).
+    log "  Attente du RGW datalake Ready (max 5 min)"
+    rgw_ready() {
+        [ "$("${KUBECTL[@]}" -n rook-ceph get deploy rook-ceph-rgw-datalake-a -o jsonpath='{.status.readyReplicas}' 2> /dev/null)" = "1" ]
+    }
+    retry 300 10 rgw_ready \
+        || die "RGW datalake pas Ready : $("${KUBECTL[@]}" -n rook-ceph get pods -l app=rook-ceph-rgw 2>&1 | tail -5)"
+    ok "RGW datalake Ready (cible S3 des backups Barman)"
+}
+
+# ── Phase dataops — chaîne DataOps assemblée via Ansible (#173) ───────────────
+# Déploie la chaîne (registry → cert-manager → CNPG+Barman → build → Dagster →
+# Marquez) avec le playbook Ansible idempotent bootstrap/dataops.yaml (ADR 0033),
+# puis PROUVE le maillon final : un vrai run Dagster émet du lineage OpenLineage
+# que Marquez ingère (cœur #148, étape conservée du harnais jetable).
+#
+# Pré-requis : bootstrap + ceph + sc + datalake (RGW). Le playbook pilote l'API
+# depuis l'hôte (dataops_k8s_host=localhost) via le kubeconfig banc.
+phase_dataops() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
     # shellcheck source=test/lima/dataops-assert.sh
     . "${HERE}/dataops-assert.sh"
-    log "Phase dataops-chain — chaîne DataOps assemblée (monitoring → CNPG → Dagster → Marquez)"
+    log "Phase dataops — chaîne DataOps via Ansible (registry → CNPG → Dagster → Marquez)"
 
-    undigest() { sed -E 's/(image:[[:space:]]*[^@[:space:]]+)@sha256:[0-9a-f]+/\1/'; }
+    # Le playbook tourne depuis l'hôte : kubernetes.core lit ce KUBECONFIG ;
+    # storageClass banc = rook-ceph-block-replicated (défaut prod, mode Ceph).
+    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
+        "${REPO}/bootstrap/dataops.yaml" \
+        -e dataops_k8s_host=localhost \
+        || die "dataops.yaml : échec du déploiement de la chaîne"
+    ok "chaîne DataOps déployée (Ansible) — CNPG sain, Dagster + Marquez Ready"
 
-    # ── 1. Monitoring (kube-prometheus-stack + Loki + Mailpit) ───────────────
-    log "  [1/5] Monitoring (kube-prometheus-stack + Loki + Mailpit)"
-    undigest < "${REPO}/platform/kube-prometheus-stack/kube-prometheus-stack.yaml" 2>/dev/null \
-        | "${KUBECTL[@]}" apply --server-side -f - >/dev/null 2>&1 || warn "monitoring : apply partiel (à compléter selon l'addon)"
-    "${KUBECTL[@]}" apply -f "${REPO}/platform/mailpit/" >/dev/null 2>&1 || true
-    monitoring_ready() { [ "$("${KUBECTL[@]}" -n mail get deploy mailpit -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]; }
-    retry 300 10 monitoring_ready || warn "Mailpit non Ready (monitoring best-effort) — la chaîne DataOps continue"
-    ok "monitoring posé (Mailpit gate best-effort)"
-
-    # ── 2. CloudNativePG (operator + cluster pg + bases dagster/marquez) ─────
-    log "  [2/5] CloudNativePG (cluster pg + bases dagster, marquez)"
-    "${KUBECTL[@]}" apply --server-side -f "${REPO}/platform/cloudnative-pg/operator.yaml" >/dev/null
-    retry 180 5 cnpg_operator_ready || die "CNPG operator pas Ready"
-    # Secrets de mot de passe des rôles managés (dagster/pgvector/marquez) : SANS
-    # eux, CNPG crée les rôles sans mot de passe et les applis ne peuvent pas se
-    # connecter (#167). Banc = valeurs de test du patron .example.
-    "${KUBECTL[@]}" apply -f "${REPO}/platform/cloudnative-pg/role-secrets.example.yaml" >/dev/null
-    # SURCHARGES BANC du Cluster CNPG (le livrable reste intact — ADR 0023) :
-    #  1. Retirer le bloc `plugins:` (Barman Cloud) : le livrable archive les WAL
-    #     vers S3 via Barman + un ObjectStore ; ici on valide la chaîne LINEAGE,
-    #     pas les sauvegardes → sans le plugin installé, le Cluster resterait
-    #     « unknown plugin being required » (aucun pod). L'awk coupe à partir de
-    #     `  plugins:` (dernier bloc du fichier).
-    #  2. storageClass `standard` → `local-path` : le banc rapide n'a que la SC
-    #     local-path (pas `standard`), sinon le PVC pgdata reste Pending
-    #     (« unbound immediate PersistentVolumeClaims »).
-    awk '/^  plugins:/{stop=1} stop{next} {print}' \
-        "${REPO}/platform/cloudnative-pg/cluster.yaml" \
-        | sed 's/storageClass: standard/storageClass: local-path/' \
-        | "${KUBECTL[@]}" apply -f -
-    "${KUBECTL[@]}" apply -f "${REPO}/platform/cloudnative-pg/database.yaml" >/dev/null
-    retry 600 10 cnpg_cluster_healthy \
-        || die "CNPG cluster pg pas sain : $("${KUBECTL[@]}" -n postgres get cluster pg -o jsonpath='{.status.phase}' 2>&1)"
-    ok "CNPG : cluster pg sain, bases dagster+marquez créées (banc sans Barman)"
-
-    # ── 3. Dagster (orchestrateur, storage CNPG) ─────────────────────────────
-    log "  [3/5] Dagster (webserver + daemon, storage CNPG)"
-    "${KUBECTL[@]}" apply -f "${REPO}/platform/dagster/namespace.yaml" >/dev/null
-    "${KUBECTL[@]}" apply -n dagster -f "${REPO}/platform/network-policies/dagster/" >/dev/null
-    "${KUBECTL[@]}" apply -n dagster -f "${REPO}/platform/dagster/pg-secret.example.yaml" >/dev/null
-    "${KUBECTL[@]}" apply -n dagster -f "${REPO}/platform/dagster/dagster.yaml" >/dev/null
-    dagster_ready() {
-        [ "$("${KUBECTL[@]}" -n dagster get deploy dagster-dagster-webserver -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ] \
-            && [ "$("${KUBECTL[@]}" -n dagster get deploy dagster-daemon -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]
-    }
-    retry 300 10 dagster_ready || die "Dagster webserver/daemon pas Ready"
-    ok "Dagster : webserver + daemon Ready"
-
-    # ── 4. Marquez (API + web, store CNPG, Flyway) ───────────────────────────
-    log "  [4/5] Marquez (API + web, store CNPG base marquez)"
-    "${KUBECTL[@]}" apply -f "${REPO}/platform/marquez/namespace.yaml" >/dev/null
-    "${KUBECTL[@]}" apply -n marquez -f "${REPO}/platform/network-policies/marquez/" >/dev/null
-    "${KUBECTL[@]}" apply -n marquez -f "${REPO}/platform/marquez/pg-secret.example.yaml" >/dev/null
-    "${KUBECTL[@]}" apply -n marquez -f "${REPO}/platform/marquez/marquez.yaml" >/dev/null
-    marquez_ready() {
-        [ "$("${KUBECTL[@]}" -n marquez get deploy marquez -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ] \
-            && [ "$("${KUBECTL[@]}" -n marquez get deploy marquez-web -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]
-    }
-    retry 300 10 marquez_ready \
-        || die "Marquez API/web pas Ready (Flyway ?) : $("${KUBECTL[@]}" -n marquez get pods 2>&1 | tail -5)"
-    ok "Marquez : API + web Ready (migration Flyway OK)"
-
-    # ── 5. Émetteur jetable : run Dagster réel → lineage OpenLineage → Marquez ─
-    log "  [5/5] Émetteur jetable — run Dagster + sensor OpenLineage → ingestion Marquez"
+    # Preuve finale : run Dagster réel → lineage OpenLineage → ingestion Marquez.
+    # L'émetteur jetable reste un harnais de test (PAS porté en rôle, ADR 0022).
+    log "  Émetteur jetable — run Dagster + sensor OpenLineage → ingestion Marquez"
     dataops_chain_emit_and_verify
-    ok "🎉 chaîne DataOps assemblée validée — lineage d'un run Dagster réel visible dans Marquez"
+    ok "🎉 chaîne DataOps validée — lineage d'un run Dagster réel visible dans Marquez"
 
     log "Consigner ce run dans test/lima/RESULTS.md (honnêteté des Runs, ADR 0023)."
 }
@@ -603,7 +568,8 @@ case "${1:-}" in
     bootstrap) phase_bootstrap ;;
     storage-simple) phase_storage_simple ;;
     platform-prereqs) phase_platform_prereqs ;;
-    dataops-chain) phase_dataops_chain ;;
+    datalake) phase_datalake ;;
+    dataops) phase_dataops ;;
     ceph) phase_ceph ;;
     sc) phase_sc ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" ;;
