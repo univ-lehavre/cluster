@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.27.0](https://github.com/univ-lehavre/cluster/compare/v2.26.0...v2.27.0) (2026-06-07)
+
+
+### Features
+
+* **platform:** porte le build des images DataOps en rôle Ansible ([#173](https://github.com/univ-lehavre/cluster/issues/173)) ([#189](https://github.com/univ-lehavre/cluster/issues/189)) ([7e6314a](https://github.com/univ-lehavre/cluster/commit/7e6314adc17fe3b8783d534189834ae52feb1403))
+
 ## [2.26.0](https://github.com/univ-lehavre/cluster/compare/v2.25.0...v2.26.0) (2026-06-07)
 
 
