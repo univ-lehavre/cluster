@@ -1,0 +1,48 @@
+# code: language=ansible
+# Rôle platform-build-images (ADR 0033) — fournit les images maison de la chaîne
+# DataOps dans le registry interne. S'exécute sur UN nœud builder (run_once).
+#   - arm64 (banc) : build interne via nerdctl + buildkit (images officielles
+#     publiées amd64-only, ADR 0026/0028).
+#   - x86 (bare-metal) : pas de build, re-tag des images officielles amd64.
+# Idempotent : on saute une image déjà présente dans le registry.
+
+- name: Build or retag DataOps images into the internal registry
+  run_once: true
+  become: true
+  become_method: ansible.builtin.sudo
+  block:
+    # ── Prépa build (drift L18 : git absent, buildkit disabled) ──────────────
+    - name: Install build prerequisites (git)
+      ansible.builtin.apt:
+        name: git
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_architecture == 'aarch64'
+
+    - name: Enable and start buildkit
+      ansible.builtin.systemd_service:
+        name: buildkit
+        enabled: true
+        state: started
+      when: ansible_architecture == 'aarch64'
+
+    # ── Clone du source Marquez (contexte des builds API + web), arm64 ───────
+    - name: Clone Marquez source at the pinned tag
+      ansible.builtin.git:
+        repo: '{{ marquez_git_repo }}'
+        dest: /tmp/marquez-src
+        version: '{{ marquez_version }}'
+        depth: 1
+        single_branch: true
+      when:
+        - ansible_architecture == 'aarch64'
+        - build_images | selectattr('source', 'eq', 'marquez-clone') | list | length > 0
+
+    # ── Build (arm64) ou re-tag (x86) image par image ────────────────────────
+    - name: Provision each DataOps image
+      ansible.builtin.include_tasks: image.yaml
+      loop: '{{ build_images }}'
+      loop_control:
+        loop_var: img
+        label: '{{ img.name }}:{{ img.tag }}'

@@ -1,0 +1,49 @@
+# code: language=ansible
+# Provisionne UNE image (var `img`) dans le registry interne. Idempotent :
+# saute si le tag existe déjà ; sinon build (arm64) ou re-tag officiel (x86).
+
+- name: 'Check if image already present in the registry — {{ img.name }}'
+  ansible.builtin.command: >-
+    nerdctl manifest inspect {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
+  register: img_present
+  changed_when: false
+  failed_when: false
+
+- name: 'Build (arm64) or retag (x86) image — {{ img.name }}'
+  when: img_present.rc != 0
+  block:
+    # arm64 : build interne via nerdctl/buildkit. Contexte selon la source
+    # (local pour Dagster ; clone Marquez + sous-dossier éventuel pour Marquez).
+    - name: 'Build arm64 image — {{ img.name }}'
+      ansible.builtin.command:
+        argv:
+          - nerdctl
+          - build
+          - --platform
+          - linux/arm64
+          - -t
+          - '{{ build_registry_host }}/{{ img.name }}:{{ img.tag }}'
+          - -f
+          - '{{ img.dockerfile }}'
+          - "{{ (img.source == 'local') | ternary(img.context, '/tmp/marquez-src/' ~ img.clone_subdir) }}"
+      changed_when: true
+      when: ansible_architecture == 'aarch64'
+
+    # x86 : pas de build — pull de l'image officielle amd64 + re-tag vers le
+    # registry interne (mêmes références que les manifestes).
+    - name: 'Pull official amd64 image on x86 — {{ img.name }}'
+      ansible.builtin.command: 'nerdctl pull --platform linux/amd64 {{ img.official_image }}'
+      changed_when: true
+      when: ansible_architecture == 'x86_64'
+
+    - name: 'Retag official image to internal registry on x86 — {{ img.name }}'
+      ansible.builtin.command: >-
+        nerdctl tag {{ img.official_image }} {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
+      changed_when: true
+      when: ansible_architecture == 'x86_64'
+
+    # Push vers le registry interne (les deux arch).
+    - name: 'Push to the internal registry — {{ img.name }}'
+      ansible.builtin.command: >-
+        nerdctl push {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
+      changed_when: true

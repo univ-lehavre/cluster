@@ -40,11 +40,18 @@
         name: platform-cnpg
       tags: cnpg
 
-- name: Plateforme DataOps — étape nœuds (containerd insecure-registry)
+- name: Plateforme DataOps — étape nœuds (containerd + build d'images)
   hosts: cloud
-  gather_facts: false
   tasks:
     - name: Configuration containerd pour le registry interne
       ansible.builtin.import_role:
         name: platform-registry
       tags: registry-node
+
+    # Build (arm64) / re-tag (x86) des images maison vers registry:80, APRÈS la
+    # config containerd (push) et AVANT Dagster/Marquez (pull). gather_facts
+    # requis : le rôle teste ansible_architecture.
+    - name: Build des images maison de la chaîne DataOps
+      ansible.builtin.import_role:
+        name: platform-build-images
+      tags: build-images
