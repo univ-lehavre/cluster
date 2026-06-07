@@ -160,6 +160,16 @@ tâches idempotentes plutôt que les redécouvrir à chaque run.
 > a été monté de bout en bout **par le playbook** (plus de shell impératif) et
 > le **lineage d'un run Dagster réel est ingéré dans Marquez**.
 
+> ⚠️ **Honnêteté du Run (ADR 0023).** Ce résultat vert a été atteint **après 12
+> correctifs intermédiaires** (drifts L21–L32) : la phase `dataops` a échoué et
+> été relancée 9 fois avant de passer. Le socle (`all`) et `datalake` sont, eux,
+> passés du premier coup. **Aucun run unique parti de zéro n'a encore traversé
+> toute la chaîne sans intervention.** Plusieurs drifts venaient de la session
+> elle-même (L28 RAM, L29 reboot Cilium, L30 restart containerd) et sont
+> corrigés dans le code — un banc neuf ne devrait plus les rencontrer. La
+> **preuve d'un run propre from-scratch d'une traite** est consignée ci-dessous
+> quand elle est obtenue.
+
 Log brut **générisé** (preuve, ADR 0023) :
 [`runs/2026-06-07-dataops-ansible.log`](runs/2026-06-07-dataops-ansible.log).
 Séquence : `WITH_CEPH=1 all → datalake → dataops`.
