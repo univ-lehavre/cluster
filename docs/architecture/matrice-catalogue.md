@@ -89,15 +89,16 @@ les briques validées et le terrain particulier exigé. Source :
 
 ## 3. Couverture build (combinaisons réellement montées sur banc)
 
-Quelles combinaisons d'axes ont effectivement tourné. Source de vérité :
-[`test/lima/RESULTS.md`](../../test/lima/RESULTS.md) et
+Quelles combinaisons d'axes ont effectivement tourné. Topologies nommées selon
+l'[ADR 0030](../decisions/0030-nomenclature-bancs-topologies.md). Source de
+vérité : [`test/lima/RESULTS.md`](../../test/lima/RESULTS.md) et
 [`test/RESULTS.md`](../../test/RESULTS.md).
 
-| Banc    | Mat.  | Topologie        | Terrain | Provisioning | Briques validées                                                  | Run      |
-| ------- | ----- | ---------------- | ------- | ------------ | ----------------------------------------------------------------- | -------- |
-| Lima    | arm64 | 3 nœuds (1 CP)   | local   | Lima         | k8s 1.34, Cilium+WireGuard, local-path, Rook-Ceph (HEALTH_OK), SC | 04/06    |
-| Lima    | arm64 | 3 nœuds (rapide) | local   | Lima         | + DataOps : CNPG/PG18, Dagster (SUCCESS), Marquez                 | 04→07/06 |
-| Vagrant | arm64 | 3 nœuds (1 CP)   | local   | Vagrant      | k8s 1.34, Cilium ; Rook-Ceph + SC + datalake                      | 28→31/05 |
+| Topologie      | Mat.  | Terrain | Provisioning | Briques validées                                                  | Run      |
+| -------------- | ----- | ------- | ------------ | ----------------------------------------------------------------- | -------- |
+| `multi-node-3` | arm64 | local   | Lima         | k8s 1.34, Cilium+WireGuard, local-path, Rook-Ceph (HEALTH_OK), SC | 04/06    |
+| `multi-node-3` | arm64 | local   | Lima         | + DataOps : CNPG/PG18, Dagster (SUCCESS), Marquez (mode rapide)   | 04→07/06 |
+| `multi-node-3` | arm64 | local   | Vagrant      | k8s 1.34, Cilium ; Rook-Ceph + SC + datalake                      | 28→31/05 |
 
 ### Trous de la matrice (jamais buildés)
 
