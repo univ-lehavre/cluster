@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.25.0](https://github.com/univ-lehavre/cluster/compare/v2.24.5...v2.25.0) (2026-06-07)
+
+
+### Features
+
+* **platform:** porte le registry interne DataOps en rôle Ansible (ADR 0033) ([#184](https://github.com/univ-lehavre/cluster/issues/184)) ([17c918b](https://github.com/univ-lehavre/cluster/commit/17c918b6fdba4787919310b8620c2687fd30747b)), closes [#173](https://github.com/univ-lehavre/cluster/issues/173)
+
 ## [2.24.5](https://github.com/univ-lehavre/cluster/compare/v2.24.4...v2.24.5) (2026-06-07)
 
 
