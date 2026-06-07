@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.24.4](https://github.com/univ-lehavre/cluster/compare/v2.24.3...v2.24.4) (2026-06-07)
+
+
+### Documentation
+
+* **decisions:** nomenclature des bancs et topologies (ADR 0030) ([#180](https://github.com/univ-lehavre/cluster/issues/180)) ([647411b](https://github.com/univ-lehavre/cluster/commit/647411b0afa94add43ee9c0971196b766d34ba72)), closes [#133](https://github.com/univ-lehavre/cluster/issues/133)
+
 ## [2.24.3](https://github.com/univ-lehavre/cluster/compare/v2.24.2...v2.24.3) (2026-06-07)
 
 
