@@ -42,7 +42,9 @@ Une configuration de banc = un point du produit **matériel × topologie × terr
 
 > kind/k3d figent la version de Kubernetes hors du chemin `kubeadm` de prod : le
 > banc retenu est **Lima** (vrai kubeadm 1.34), cf.
-> [ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md).
+> [ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md). Le
+> choix d'un banc selon **fidélité vs vitesse** (profils Ceph / local-path) est
+> cadré par [ADR 0035](../decisions/0035-strategie-bancs-fidelite-vitesse.md).
 
 ### 1.5 Briques déployées — le _comment_ : ce qu'on installe dessus
 

@@ -23,6 +23,29 @@ le nom est une étiquette logique.
 > site). Cf.
 > [ADR 0030](../docs/decisions/0030-nomenclature-bancs-topologies.md).
 
+## Quel banc pour quoi — fidélité vs vitesse (ADR 0035)
+
+Choisir selon **ce qu'on itère** et le **temps qu'on peut payer**. Tous les
+bancs tournent le **vrai `kubeadm` 1.34** (pas de distribution alternative type
+k3d/kind — ADR 0006) : la vitesse se gagne en retirant des couches (Ceph,
+build), jamais en changeant d'installeur. Temps mesurés sur M3 Max
+([tableau de bord](../docs/architecture/lecons-des-runs.md)).
+
+| Besoin (ce qu'on itère)                          | Banc / profil               | Temps   | Fidélité | Commande                                                 |
+| ------------------------------------------------ | --------------------------- | ------- | -------- | -------------------------------------------------------- |
+| Rôle bootstrap, changement de version            | `single-node`               | ~5 min  | ★★       | `single-node/` (Vagrant)                                 |
+| Manifeste / brique **sans stockage réel**        | `multi-node-3` (local-path) | ~11 min | ★★       | `run-phases.sh all` (mode rapide)                        |
+| **Intégration** : chaîne complète, Ceph, DataOps | `multi-node-3` (ceph)       | ~30 min | ★★★      | `WITH_CEPH=1 run-phases.sh all` → `datalake` → `dataops` |
+
+> **`(local-path)` = profil d'itération, PAS une preuve.** Même topologie et
+> même `kubeadm` que le Ceph, mais sans stockage réel : idéal pour itérer vite
+> sur des manifestes/NetworkPolicies/rôles. Il **ne monte pas** la chaîne
+> DataOps (CNPG + Barman exigent le RGW Ceph). Un changement validé en
+> local-path **doit** repasser sur le profil **`(ceph)`** avant d'être déclaré
+> validé ([ADR 0034](../docs/decisions/0034-validation-e2e-from-scratch.md) : la
+> preuve est un run e2e from-scratch). Le profil est un axe **orthogonal** à la
+> topologie (ADR 0030) — noté `(ceph)` / `(local-path)`.
+
 ## Quand utiliser lequel ?
 
 - **`single-node/`** : itération rapide sur les rôles Ansible (`checks`, `cri`,

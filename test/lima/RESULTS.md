@@ -9,6 +9,29 @@ _drifts_ (écarts banc, pas bugs du dépôt) rencontrés en montant le banc Lima
 bout en bout. Le banc Vagrant a son propre log :
 [`../RESULTS.md`](../RESULTS.md).
 
+## Le chemin — pourquoi ces drifts comptent
+
+Ce fichier n'est pas une liste d'erreurs : c'est la **trace du travail patient**
+qui rend le processus digne de confiance. Trois campagnes successives, **aucune
+n'a fonctionné e2e du premier coup** :
+
+- **L1–L11** (bootstrap K8s, #127) — porter kubeadm sur de vraies VM Lima.
+- **L12–L20** (chaîne DataOps en shell, #148) — assembler CNPG/Dagster/Marquez.
+- **L21–L33** (portage Ansible, #173) — refaire la chaîne en rôles idempotents,
+  validée e2e le 2026-06-07 (lineage réel ingéré dans Marquez).
+
+À chaque campagne, le même schéma : le code passe **tout le lint au vert**, puis
+le **run réel from-scratch** révèle des drifts que seul un vrai cluster expose —
+et on les verrouille un par un. C'est exactement pourquoi
+[ADR 0034](../../docs/decisions/0034-validation-e2e-from-scratch.md) pose que
+**la validation est un run e2e, pas le lint**. La synthèse par catégorie et le
+tableau de bord (matériel + temps) :
+[leçons des Runs](../../docs/architecture/lecons-des-runs.md).
+
+> La répétition n'est pas un échec — c'est la **courbe de fiabilisation**.
+> Chaque drift traversé devient un invariant durable et un savoir réutilisable
+> pour les terrains suivants (cloud, x86, HA).
+
 ## Topologie testée
 
 | VM    | Réseau user-v2 | Rôle          | Disques (virtio-blk)                            |
@@ -160,15 +183,16 @@ tâches idempotentes plutôt que les redécouvrir à chaque run.
 > a été monté de bout en bout **par le playbook** (plus de shell impératif) et
 > le **lineage d'un run Dagster réel est ingéré dans Marquez**.
 >
-> ⚠️ **Honnêteté du Run (ADR 0023).** Ce résultat vert a été atteint **après 12
-> correctifs intermédiaires** (drifts L21–L32) : la phase `dataops` a échoué et
-> été relancée 9 fois avant de passer. Le socle (`all`) et `datalake` sont, eux,
-> passés du premier coup. **Aucun run unique parti de zéro n'a encore traversé
-> toute la chaîne sans intervention.** Plusieurs drifts venaient de la session
-> elle-même (L28 RAM, L29 reboot Cilium, L30 restart containerd) et sont
-> corrigés dans le code — un banc neuf ne devrait plus les rencontrer. La
-> **preuve d'un run propre from-scratch d'une traite** est consignée ci-dessous
-> quand elle est obtenue.
+> ⚠️ **Honnêteté du Run (ADR 0023).** Le vert initial a été atteint **après 13
+> correctifs intermédiaires** (drifts L21–L33) : la chaîne a échoué et été
+> relancée de nombreuses fois avant de passer — fidèle au constat que rien ne
+> marche e2e du premier coup
+> ([ADR 0034](../../docs/decisions/0034-validation-e2e-from-scratch.md)). Un
+> **run propre from-scratch d'une traite** (banc détruit puis remonté) a
+> **ensuite confirmé** le résultat : `all` + `datalake` + `dataops` sans
+> intervention, vert (cf. encadré « Run from-scratch confirmé » plus bas). Le
+> dernier drift (L33, gate RGW) n'a d'ailleurs été révélé **que** par ce run
+> propre — preuve qu'il fallait le faire.
 
 Log brut **générisé** (preuve, ADR 0023) :
 [`runs/2026-06-07-dataops-ansible.log`](runs/2026-06-07-dataops-ansible.log).
@@ -197,20 +221,28 @@ Drifts du **portage Ansible** + de l'**exécution depuis l'hôte / mode Ceph**.
 Tous corrigés dans le dépôt ; aucun n'est un bug de conception — ce sont des
 écarts d'environnement que seul un run e2e révèle.
 
-| #   | Symptôme                                                 | Cause                                                                       | Correctif                                                                    |
-| --- | -------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| L21 | `ansible_user_id is undefined` (play cluster)            | `gather_facts: false` sur le play localhost, requis par `audit-log`         | retrait de l'audit-log du play cluster (cf. L22)                             |
-| L22 | `sudo: a password is required` (audit-log sur localhost) | `audit-log` écrit un log SYSTÈME (`become`) — n'a pas de sens sur le poste  | audit-log retiré de `dataops.yaml` (reste sur les playbooks de nœuds)        |
-| L23 | `SSL: CERTIFICATE_VERIFY_FAILED` (get_url/k8s)           | le Python d'Ansible (Homebrew) n'utilise pas le CA système                  | `SSL_CERT_FILE` via certifi, résolu en pré-tâche par le bon interpréteur     |
-| L24 | volet `node` du rôle registry tourne sur localhost       | `import_role` charge tout le rôle ; le tag ne filtre pas les blocs internes | rôle scindé `cluster.yaml`/`node.yaml`, importés via `tasks_from`            |
-| L25 | Secret dérivé : « namespaces postgres not found »        | secrets posés avant que `cluster.yaml` ne crée le namespace                 | namespace `postgres` créé en premier dans `platform-cnpg`                    |
-| L26 | build : `dict has no attribute 'clone_subdir'`           | ternary Jinja évalue les deux branches (image `local` sans `clone_subdir`)  | `default('')` sur les attributs optionnels                                   |
-| L27 | build : `Dockerfile no such file or directory` sur nœud  | banc Lima `mounts: []` → sources du dépôt absentes de la VM                 | copier contextes/Dockerfiles sur le nœud avant build                         |
-| L28 | build `marquez-web` **OOM-killed** (rc 137)              | webpack/npm sature la VM 5 GiB (déjà k8s+Ceph+CNPG)                         | `VM_MEMORY` 5 → **8 GiB**                                                    |
-| L29 | operator CNPG CrashLoop après reboot (RAM)               | reboot cp1 → Cilium pas reconvergé → ClusterIP plugin injoignable           | artefact de reboot (cf. réserve « restore non fidèle ») ; restart operator   |
-| L30 | pods Dagster `ImagePullBackOff registry:80` (HTTP/HTTPS) | containerd des workers pas rechargé après pose de la config insecure-reg.   | restart containerd sur les nœuds (handler à fiabiliser)                      |
-| L31 | preuve lineage : image émetteur absente du registry      | l'émetteur jetable n'était pas dans `build_images` (hors prod, ADR 0022)    | `build_emitter_image=true` au banc (câblé conditionnellement)                |
-| L32 | « aucun job ingéré (1 → 1) » alors que le lineage est là | le prédicat exigeait un **delta** ; le run est idempotent (namespace gardé) | `classify_marquez_ingest` teste la **présence** (`after >= 1`) + bats à jour |
+| #   | Symptôme                                                         | Cause                                                                                   | Correctif                                                                    |
+| --- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| L21 | `ansible_user_id is undefined` (play cluster)                    | `gather_facts: false` sur le play localhost, requis par `audit-log`                     | retrait de l'audit-log du play cluster (cf. L22)                             |
+| L22 | `sudo: a password is required` (audit-log sur localhost)         | `audit-log` écrit un log SYSTÈME (`become`) — n'a pas de sens sur le poste              | audit-log retiré de `dataops.yaml` (reste sur les playbooks de nœuds)        |
+| L23 | `SSL: CERTIFICATE_VERIFY_FAILED` (get_url/k8s)                   | le Python d'Ansible (Homebrew) n'utilise pas le CA système                              | `SSL_CERT_FILE` via certifi, résolu en pré-tâche par le bon interpréteur     |
+| L24 | volet `node` du rôle registry tourne sur localhost               | `import_role` charge tout le rôle ; le tag ne filtre pas les blocs internes             | rôle scindé `cluster.yaml`/`node.yaml`, importés via `tasks_from`            |
+| L25 | Secret dérivé : « namespaces postgres not found »                | secrets posés avant que `cluster.yaml` ne crée le namespace                             | namespace `postgres` créé en premier dans `platform-cnpg`                    |
+| L26 | build : `dict has no attribute 'clone_subdir'`                   | ternary Jinja évalue les deux branches (image `local` sans `clone_subdir`)              | `default('')` sur les attributs optionnels                                   |
+| L27 | build : `Dockerfile no such file or directory` sur nœud          | banc Lima `mounts: []` → sources du dépôt absentes de la VM                             | copier contextes/Dockerfiles sur le nœud avant build                         |
+| L28 | build `marquez-web` **OOM-killed** (rc 137)                      | webpack/npm sature la VM 5 GiB (déjà k8s+Ceph+CNPG)                                     | `VM_MEMORY` 5 → **8 GiB**                                                    |
+| L29 | operator CNPG CrashLoop après reboot (RAM)                       | reboot cp1 → Cilium pas reconvergé → ClusterIP plugin injoignable                       | artefact de reboot (cf. réserve « restore non fidèle ») ; restart operator   |
+| L30 | pods Dagster `ImagePullBackOff registry:80` (HTTP/HTTPS)         | containerd des workers pas rechargé après pose de la config insecure-reg.               | restart containerd sur les nœuds (handler à fiabiliser)                      |
+| L31 | preuve lineage : image émetteur absente du registry              | l'émetteur jetable n'était pas dans `build_images` (hors prod, ADR 0022)                | `build_emitter_image=true` au banc (câblé conditionnellement)                |
+| L32 | « aucun job ingéré (1 → 1) » alors que le lineage est là         | le prédicat exigeait un **delta** ; le run est idempotent (namespace gardé)             | `classify_marquez_ingest` teste la **présence** (`after >= 1`) + bats à jour |
+| L33 | `RGW datalake pas Ready` alors que les 3 pods sont `2/2 Running` | le gate `datalake` testait `readyReplicas == 1`, or le CephObjectStore a `instances: 3` | gate `>= 1` (au moins une instance up) — révélé par le run **from-scratch**  |
+
+> **Run from-scratch confirmé (2026-06-07).** Après correction de L33, le banc a
+> été **détruit puis remonté d'une traite** : `WITH_CEPH=1 all` est passé sans
+> intervention (socle + Ceph), et `dataops` a abouti **vert (0 échec)** —
+> `dataops` mesuré à **13m37s** (M3 Max, 8 GiB/VM), lineage `0 → 1` ingéré dans
+> Marquez. Total banc complet ≈ **30 min**. Métriques émises par `run-phases.sh`
+> (cf. [tableau de bord](../../docs/architecture/lecons-des-runs.md)).
 
 ### Enseignement
 

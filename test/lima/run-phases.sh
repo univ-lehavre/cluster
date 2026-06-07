@@ -78,6 +78,43 @@ INVENTORY="${WORKDIR}/inventory.yaml"
 KUBECONFIG_LOCAL="${WORKDIR}/kubeconfig"
 KUBECTL=(kubectl --kubeconfig "${KUBECONFIG_LOCAL}")
 
+# ── Métriques de run (matériel + temps par phase) ────────────────────────────
+# Consignées dans WORKDIR/metrics.txt à reporter en en-tête du log archivé
+# (test/lima/runs/, cf. RESULTS.md). Reproductible — pas de saisie manuelle.
+METRICS="${WORKDIR}/metrics.txt"
+
+# Émet l'en-tête matériel UNE fois par fichier de métriques (idempotent).
+metrics_header() {
+    mkdir -p "${WORKDIR}"
+    [ -s "${METRICS}" ] && return 0
+    {
+        printf '# Run banc Lima — matériel & temps (généré par run-phases.sh)\n'
+        printf 'host.model=%s\n' "$(sysctl -n hw.model 2> /dev/null || echo '?')"
+        printf 'host.cpu=%s\n' "$(sysctl -n machdep.cpu.brand_string 2> /dev/null || echo '?')"
+        printf 'host.cores=%s\n' "$(sysctl -n hw.ncpu 2> /dev/null || echo '?')"
+        printf 'host.ram=%s\n' "$(sysctl -n hw.memsize 2> /dev/null | awk '{printf "%.0f GiB", $1/1073741824}')"
+        printf 'host.os=macOS %s\n' "$(sw_vers -productVersion 2> /dev/null || echo '?')"
+        printf 'host.lima=%s\n' "$(limactl --version 2> /dev/null | awk '{print $3}')"
+        printf 'vm.cpus=%s vm.memory=%s\n' "${VM_CPUS}" "${VM_MEMORY}"
+        printf '# phase\tdurée\n'
+    } > "${METRICS}"
+}
+
+# Chronomètre une phase et journalise sa durée. Usage : time_phase <nom> <fn...>
+time_phase() {
+    local name=$1 start end dur rc
+    shift
+    metrics_header
+    start=$(date +%s)
+    "$@"
+    rc=$?
+    end=$(date +%s)
+    dur=$((end - start))
+    printf '%s\t%dm%02ds\n' "${name}" "$((dur / 60))" "$((dur % 60))" >> "${METRICS}"
+    log "⏱  phase ${name} : $((dur / 60))m$((dur % 60))s"
+    return "${rc}"
+}
+
 # Noms des disques nommés Lima d'un nœud (data hdd1..N + blockdb).
 node_disks() {
     local vm=$1 i
@@ -399,6 +436,7 @@ phase_sc() {
     # PRÉ-CONDITION : la config CSI doit lister les monitors avant le PVC test
     # (sinon « empty monitor list » au premier run from-scratch).
     log "  Attente de la config CSI (monitors peuplés)"
+    # shellcheck disable=SC2329  # invoquée indirectement par `retry`
     csi_monitors_ready() {
         "${KUBECTL[@]}" -n rook-ceph get cm rook-ceph-csi-config \
             -o jsonpath='{.data.csi-cluster-config-json}' 2> /dev/null \
@@ -424,8 +462,13 @@ phase_datalake() {
 
     # GATE : le RGW datalake répond (Deployment du gateway Ready).
     log "  Attente du RGW datalake Ready (max 5 min)"
+    # shellcheck disable=SC2329  # invoquée indirectement par `retry`
     rgw_ready() {
-        [ "$("${KUBECTL[@]}" -n rook-ceph get deploy rook-ceph-rgw-datalake-a -o jsonpath='{.status.readyReplicas}' 2> /dev/null)" = "1" ]
+        # Le CephObjectStore a `instances: 3` → Deployment à 3 replicas (drift
+        # L33 : tester == 1 échouait alors que le RGW est sain). On exige >= 1.
+        local rr
+        rr=$("${KUBECTL[@]}" -n rook-ceph get deploy rook-ceph-rgw-datalake-a -o jsonpath='{.status.readyReplicas}' 2> /dev/null)
+        [ -n "${rr}" ] && [ "${rr}" -ge 1 ]
     }
     retry 300 10 rgw_ready \
         || die "RGW datalake pas Ready : $("${KUBECTL[@]}" -n rook-ceph get pods -l app=rook-ceph-rgw 2>&1 | tail -5)"
@@ -524,6 +567,7 @@ spec:
 EMIT
 
     log "    attente de la complétion du run émetteur (max 5 min)…"
+    # shellcheck disable=SC2329  # invoquée indirectement par `retry`
     emit_done() { [ "$("${KUBECTL[@]}" -n "${ns}" get job ol-emit-toy -o jsonpath='{.status.succeeded}' 2>/dev/null)" = "1" ]; }
     if ! retry 300 10 emit_done; then
         "${KUBECTL[@]}" -n "${ns}" logs job/ol-emit-toy 2>/dev/null | tail -20 || true
@@ -572,26 +616,26 @@ phase_down() {
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 case "${1:-}" in
-    up) phase_up ;;
-    bootstrap) phase_bootstrap ;;
-    storage-simple) phase_storage_simple ;;
-    platform-prereqs) phase_platform_prereqs ;;
-    datalake) phase_datalake ;;
-    dataops) phase_dataops ;;
-    ceph) phase_ceph ;;
-    sc) phase_sc ;;
+    up) time_phase up phase_up ;;
+    bootstrap) time_phase bootstrap phase_bootstrap ;;
+    storage-simple) time_phase storage-simple phase_storage_simple ;;
+    platform-prereqs) time_phase platform-prereqs phase_platform_prereqs ;;
+    datalake) time_phase datalake phase_datalake ;;
+    dataops) time_phase dataops phase_dataops ;;
+    ceph) time_phase ceph phase_ceph ;;
+    sc) time_phase sc phase_sc ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" ;;
     all)
         # Mode RAPIDE par défaut : stockage simple (local-path), sans Ceph.
         # WITH_CEPH=1 ajoute le stockage réel (Rook/Ceph + StorageClasses, ~15 min).
-        phase_up
-        phase_bootstrap
+        time_phase up phase_up
+        time_phase bootstrap phase_bootstrap
         if [ "${WITH_CEPH:-0}" = 1 ]; then
-            phase_ceph
-            phase_sc
+            time_phase ceph phase_ceph
+            time_phase sc phase_sc
             log "🎉 Banc Lima validé (mode Ceph) : up → bootstrap → ceph → storageClasses."
         else
-            phase_storage_simple
+            time_phase storage-simple phase_storage_simple
             log "🎉 Banc Lima validé (mode rapide) : up → bootstrap → storage-simple."
             log "ℹ️  Pour le stockage réel : WITH_CEPH=1 $0 all  (ou : $0 ceph && $0 sc)"
         fi
