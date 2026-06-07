@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.24.1](https://github.com/univ-lehavre/cluster/compare/v2.24.0...v2.24.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* **platform:** valide e2e la chaîne DataOps et corrige 3 bugs (preuve [#148](https://github.com/univ-lehavre/cluster/issues/148)) ([#172](https://github.com/univ-lehavre/cluster/issues/172)) ([d1c317a](https://github.com/univ-lehavre/cluster/commit/d1c317af17ad4ddfe3f9ff091277c4027fb2adf8))
+
 ## [2.24.0](https://github.com/univ-lehavre/cluster/compare/v2.23.1...v2.24.0) (2026-06-05)
 
 
