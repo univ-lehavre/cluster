@@ -441,11 +441,27 @@ phase_dataops_chain() {
     log "  [2/5] CloudNativePG (cluster pg + bases dagster, marquez)"
     "${KUBECTL[@]}" apply --server-side -f "${REPO}/platform/cloudnative-pg/operator.yaml" >/dev/null
     retry 180 5 cnpg_operator_ready || die "CNPG operator pas Ready"
-    "${KUBECTL[@]}" apply -f "${REPO}/platform/cloudnative-pg/cluster.yaml" >/dev/null
+    # Secrets de mot de passe des rôles managés (dagster/pgvector/marquez) : SANS
+    # eux, CNPG crée les rôles sans mot de passe et les applis ne peuvent pas se
+    # connecter (#167). Banc = valeurs de test du patron .example.
+    "${KUBECTL[@]}" apply -f "${REPO}/platform/cloudnative-pg/role-secrets.example.yaml" >/dev/null
+    # SURCHARGES BANC du Cluster CNPG (le livrable reste intact — ADR 0023) :
+    #  1. Retirer le bloc `plugins:` (Barman Cloud) : le livrable archive les WAL
+    #     vers S3 via Barman + un ObjectStore ; ici on valide la chaîne LINEAGE,
+    #     pas les sauvegardes → sans le plugin installé, le Cluster resterait
+    #     « unknown plugin being required » (aucun pod). L'awk coupe à partir de
+    #     `  plugins:` (dernier bloc du fichier).
+    #  2. storageClass `standard` → `local-path` : le banc rapide n'a que la SC
+    #     local-path (pas `standard`), sinon le PVC pgdata reste Pending
+    #     (« unbound immediate PersistentVolumeClaims »).
+    awk '/^  plugins:/{stop=1} stop{next} {print}' \
+        "${REPO}/platform/cloudnative-pg/cluster.yaml" \
+        | sed 's/storageClass: standard/storageClass: local-path/' \
+        | "${KUBECTL[@]}" apply -f -
     "${KUBECTL[@]}" apply -f "${REPO}/platform/cloudnative-pg/database.yaml" >/dev/null
     retry 600 10 cnpg_cluster_healthy \
         || die "CNPG cluster pg pas sain : $("${KUBECTL[@]}" -n postgres get cluster pg -o jsonpath='{.status.phase}' 2>&1)"
-    ok "CNPG : cluster pg sain, bases dagster+marquez créées"
+    ok "CNPG : cluster pg sain, bases dagster+marquez créées (banc sans Barman)"
 
     # ── 3. Dagster (orchestrateur, storage CNPG) ─────────────────────────────
     log "  [3/5] Dagster (webserver + daemon, storage CNPG)"
