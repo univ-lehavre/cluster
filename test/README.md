@@ -4,11 +4,24 @@ Bancs à choisir selon la phase à valider. Deux **hyperviseurs** : Vagrant +
 VirtualBox (`single-node/`, `multi-node/`) et **Lima** (`lima/`, remplaçant
 léger de Vagrant — vraie VM, SSH natif, sans VirtualBox).
 
-| Banc                           | Hyperviseur | Topologie       | Disques Ceph     | Phases couvertes                  | Démarrage |
-| ------------------------------ | ----------- | --------------- | ---------------- | --------------------------------- | --------- |
-| [`single-node/`](single-node/) | Vagrant     | 1 VM            | aucun            | 1 (OS/runtime), 2 (init + Cilium) | ~5 min    |
-| [`multi-node/`](multi-node/)   | Vagrant     | 3 VMs + privnet | 3 HDD + NVMe     | 1, 2 (avec join), 3 (Ceph), 4, 5  | ~15 min   |
-| [`lima/`](lima/)               | Lima        | 3 VMs + user-v2 | 3 HDD + block.db | 1, 2 (avec join), 3 (Ceph), 4     | ~15 min   |
+**Nommage** : chaque banc valide une **topologie** au nom technique stable,
+indépendant de l'outil
+([ADR 0030](../docs/decisions/0030-nomenclature-bancs-topologies.md)). Une même
+topologie peut tourner sur deux outils — `multi-node-3` existe en Vagrant **et**
+en Lima (deux lignes, même nom). Les dossiers `test/*/` ne sont pas renommés :
+le nom est une étiquette logique.
+
+| Nom technique    | Dossier                                                      | Outil   | Topologie               | Disques Ceph     | Phases couvertes                    | Démarrage |
+| ---------------- | ------------------------------------------------------------ | ------- | ----------------------- | ---------------- | ----------------------------------- | --------- |
+| `single-node`    | [`single-node/`](single-node/)                               | Vagrant | 1 VM                    | aucun            | 1 (OS/runtime), 2 (init + Cilium)   | ~5 min    |
+| `multi-node-3`   | [`multi-node/`](multi-node/)                                 | Vagrant | 3 VMs + privnet         | 3 HDD + NVMe     | 1, 2 (avec join), 3 (Ceph), 4, 5    | ~15 min   |
+| `multi-node-3`   | [`lima/`](lima/)                                             | Lima    | 3 VMs + user-v2         | 3 HDD + block.db | 1, 2 (avec join), 3 (Ceph), 4       | ~15 min   |
+| `mesh-2clusters` | [`spikes/clustermesh-latency/`](spikes/clustermesh-latency/) | Lima    | 2 clusters + `tc netem` | n/a              | spike Cilium Cluster Mesh (jetable) | variable  |
+
+> Topologies **cibles** nommées mais pas encore montées sur banc : `ha-3cp` (3
+> control planes HA), `multisite` (plusieurs sites, 1 cluster autonome par
+> site). Cf.
+> [ADR 0030](../docs/decisions/0030-nomenclature-bancs-topologies.md).
 
 ## Quand utiliser lequel ?
 
@@ -29,7 +42,7 @@ l'on exerce le multi-VM et les disques Ceph.
 
 ## Réserves transversales (tous les bancs)
 
-- **Architecture arm64** (Apple Silicon) ≠ **x86_64** des serveurs HPE : on
+- **Architecture arm64** (Apple Silicon) ≠ **x86_64** des serveurs lames : on
   valide la _logique_ (rôles, manifestes, ordres, comportements), pas les
   artefacts binaires x86_64. Pour la fidélité x86_64, rejouer le même
   `Vagrantfile` sur un hôte Intel.
