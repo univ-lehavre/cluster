@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.24.2](https://github.com/univ-lehavre/cluster/compare/v2.24.1...v2.24.2) (2026-06-07)
+
+
+### Documentation
+
+* **architecture:** cartographie la matrice du catalogue (axes, scénarios, builds) ([#175](https://github.com/univ-lehavre/cluster/issues/175)) ([cdfdfb0](https://github.com/univ-lehavre/cluster/commit/cdfdfb0f54088579b8f1a35027ad09c4e2ff5d92)), closes [#171](https://github.com/univ-lehavre/cluster/issues/171)
+
 ## [2.24.1](https://github.com/univ-lehavre/cluster/compare/v2.24.0...v2.24.1) (2026-06-07)
 
 
