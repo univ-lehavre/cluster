@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.24.3](https://github.com/univ-lehavre/cluster/compare/v2.24.2...v2.24.3) (2026-06-07)
+
+
+### Documentation
+
+* **decisions:** markdown atteignable depuis la doc + garde-fou testé (ADR 0029) ([#178](https://github.com/univ-lehavre/cluster/issues/178)) ([bef349f](https://github.com/univ-lehavre/cluster/commit/bef349f8f7b3486d4ec47a8747e8ebc303c89a89))
+* **decisions:** rend tout markdown atteignable depuis la doc (ADR 0029) ([bef349f](https://github.com/univ-lehavre/cluster/commit/bef349f8f7b3486d4ec47a8747e8ebc303c89a89)), closes [#171](https://github.com/univ-lehavre/cluster/issues/171)
+
 ## [2.24.2](https://github.com/univ-lehavre/cluster/compare/v2.24.1...v2.24.2) (2026-06-07)
 
 
