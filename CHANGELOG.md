@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.24.5](https://github.com/univ-lehavre/cluster/compare/v2.24.4...v2.24.5) (2026-06-07)
+
+
+### Documentation
+
+* **decisions:** cadre le terrain cloud ARM + OpenTofu (ADR 0031, 0032) ([#182](https://github.com/univ-lehavre/cluster/issues/182)) ([48d057b](https://github.com/univ-lehavre/cluster/commit/48d057b0f6aa9d47533f2772b763b07a5494a965))
+
 ## [2.24.4](https://github.com/univ-lehavre/cluster/compare/v2.24.3...v2.24.4) (2026-06-07)
 
 
