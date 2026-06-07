@@ -181,6 +181,9 @@ misconfigurations:
   - id: DS-0002 # pas de USER non-root : aligné sur l'image officielle (root).
     paths:
       - 'platform/dagster/image/Dockerfile'
+      # Émetteur OpenLineage jetable (validation e2e #148) : même base/posture que
+      # l'image Dagster maison ci-dessus (root, fidèle à l'officielle).
+      - 'platform/dagster/image-openlineage/Dockerfile'
 
   # ── Marquez vendored (chart 0.51.1, helm template figé) — posture amont ────
   # Le chart Marquez ne durcit pas ses workloads en amont (API Java + UI React,

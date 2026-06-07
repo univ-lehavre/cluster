@@ -102,32 +102,52 @@ Exemple jetable retiré ensuite.
   ensuite normalement — relancer `ceph` (idempotent) ou libérer de la RAM. Le
   mode rapide (local-path) évite ce coût au quotidien.
 
-## Chaîne DataOps assemblée — phase `dataops-chain` (#148, étape 1.8)
+## Chaîne DataOps assemblée — phase `dataops-chain` (#148, étape 1.8) — 2026-06-05
 
-> **Statut : harnais livré, run banc EN SUIVI** (honnêteté des Runs, ADR 0023).
-> Le harnais `test/lima/run-phases.sh dataops-chain` et le scénario
-> `test/scenarios/23-marquez-openlineage.sh` sont écrits, lint-clean et leurs
-> fonctions d'assertion pures couvertes par bats
-> (`test/unit/dataops-assert.bats`). Le **run banc de bout en bout reste à
-> exécuter** : il sera consigné ici (chaîne montée, lineage d'un run Dagster
-> réel visible dans Marquez) avant de fermer #148. Ne PAS considérer ce maillon
-> comme validé tant que ce bloc ne porte pas un déroulé réel daté.
+> **✅ Validé e2e sur banc Lima arm64 (2026-06-05).** La chaîne
+> `monitoring → CNPG → Dagster → Marquez` a été déployée et vérifiée
+> **assemblée**, et le **lineage d'un run Dagster RÉEL est ingéré et visible
+> dans Marquez** — preuve attendue par l'épopée #148.
 
-Pré-requis du run (à pousser au registry interne arm64 avant `dataops-chain`) :
+Chaîne validée de bout en bout (run réel, mode rapide local-path) :
 
-- `registry:80/marquez:0.51.1` et `registry:80/marquez-web:0.51.1` (cf.
-  [`platform/marquez/README.md`](../../platform/marquez/README.md)) ;
-- `registry:80/dagster-celery-k8s:1.13.7` (déjà documentée, étape 1.7) ;
-- `registry:80/dagster-openlineage-emit:dev` — **émetteur jetable** : image
-  user-code Dagster embarquant `openlineage-dagster` + un module `toy_assets`
-  (un asset trivial). Construire fidèlement à l'image Dagster maison + le sensor
-  OpenLineage ; build/push à documenter ici au premier run.
+| Étape                                   | Résultat                                                                                                                                                                          |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| infra (up → bootstrap → storage-simple) | ✅ 3 nœuds Ready (K8s v1.34.8, Cilium 1.19.4 + WireGuard), PVC local-path Bound                                                                                                   |
+| registry interne + 4 images arm64       | ✅ buildées (nerdctl+buildkitd) + poussées : `marquez`, `marquez-web`, `dagster-celery-k8s`, `dagster-openlineage-emit`                                                           |
+| CNPG cluster `pg`                       | ✅ **Healthy 3/3**, bases `dagster`/`marquez`/`pgvector` créées                                                                                                                   |
+| Dagster webserver + daemon              | ✅ Ready, storage CNPG (connexion authentifiée OK)                                                                                                                                |
+| Marquez API + web                       | ✅ Ready, **migration Flyway OK** sur la base `marquez`                                                                                                                           |
+| **émetteur jetable → lineage**          | ✅ run Dagster `toy_dataset` **RUN_SUCCESS** ; **ingéré dans Marquez** : `GET /api/v1/namespaces/dagster/jobs` → `totalCount: 1`, job `toy_dataset`, `latestRun.state: COMPLETED` |
 
-Drifts anticipés (à confirmer/infirmer au run réel) :
+> **Preuve #148** : `totalCount` passé de **0 → 1** après le run. Le job
+> `toy_dataset` (namespace OpenLineage `dagster`) apparaît dans Marquez avec son
+> dernier run `COMPLETED`. La chaîne Dagster → sensor OpenLineage → API Marquez
+> → ingestion est prouvée assemblée, pas seulement verte-en-CI.
 
-| #   | Point de vigilance                                                 | Attendu                                                                 |
-| --- | ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| D1  | Flyway au démarrage de l'API Marquez sur la base `marquez`         | init wait-for-db + `MIGRATE_ON_STARTUP=true` → tables créées, API Ready |
-| D2  | Image émetteur jetable (`dagster-openlineage-emit:dev`) à builder  | sans elle, le maillon `[5/5]` échoue explicitement (pas de faux vert)   |
-| D3  | Sensor OpenLineage → API Marquez (`OPENLINEAGE_URL` interne)       | jobs visibles dans `GET /api/v1/namespaces/dagster/jobs` (delta > 0)    |
-| D4  | NetworkPolicy `allow-openlineage-ingress` (dagster → marquez:5000) | l'émetteur (ns dagster) joint l'API Marquez sous default-deny           |
+### Drifts rencontrés et correctifs (L12–L19)
+
+Préfixe **L** = banc **L**ima. Plusieurs sont de **vrais bugs du livrable** (pas
+des écarts banc) — corrigés dans le dépôt, pas seulement contournés.
+
+| #   | Symptôme                                                               | Cause                                                                                           | Correctif                                                                                      |
+| --- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| L12 | `bootstrap` exit 141 (SIGPIPE) — kubeconfig non récupéré               | un `cilium status \| grep` ferme le pipe avant `fetch_kubeconfig`                               | contournement : phase `kubeconfig` (le cluster était sain) ; à durcir dans le bootstrap        |
+| L13 | **Pull `registry:80` HTTP échoue** : « HTTP response to HTTPS client » | containerd v2.2 (Debian 13) route le pull via le **transfer service** qui IGNORE certs.d        | `use_local_image_pull = true` dans containerd config (les 3 nœuds) — **fix racine**            |
+| L14 | **CNPG bloqué** : « unknown plugin being required »                    | `cluster.yaml` exige le plugin Barman, non installé par `dataops-chain`                         | surcharge banc : retirer le bloc `plugins:` (backups hors périmètre lineage)                   |
+| L15 | PVC `pg` Pending : « unbound immediate PersistentVolumeClaims »        | `cluster.yaml` hardcode `storageClass: standard`, absent du banc (local-path)                   | surcharge banc : `standard → local-path` (cf. #158)                                            |
+| L16 | **Dagster « too many retries for DB connection »** (BUG LIVRABLE)      | `managed.roles` CNPG SANS `passwordSecret` → rôles créés sans mot de passe (`rolpassword` NULL) | **fix dépôt** : `passwordSecret` par rôle + `role-secrets.example.yaml`                        |
+| L17 | Secret dérivé appli ≠ pwd réel du rôle                                 | nécessitait une recopie manuelle                                                                | résolu par L16 : `.example` de rôle et dérivés alignés sur les mêmes valeurs de test           |
+| L18 | Build d'images impossible dans les VMs                                 | `git` absent + `buildkitd` (service présent mais `disabled`)                                    | `apt install git` + `systemctl enable --now buildkit` (à intégrer dans la prépa-build)         |
+| L19 | **Run émetteur timeout** sur le POST OpenLineage (BUG LIVRABLE)        | aucune NetworkPolicy egress `dagster → marquez:5000` (seul l'ingress côté marquez existait)     | **fix dépôt** : `platform/network-policies/dagster/allow-marquez-egress.yaml`                  |
+| L20 | webserver/daemon Dagster CrashLoop : « no [tool.dagster] block » (BUG) | l'orchestrateur vide est lancé sans workspace (`-w`)                                            | **fix dépôt** : ConfigMap `dagster-workspace` (`load_from: []`) monté + `-w` dans dagster.yaml |
+
+### Enseignement (→ refonte Ansible)
+
+Ces drifts en cascade viennent tous de la **couture shell/kubectl** de la couche
+plateforme (le bootstrap, lui — en Ansible — n'en a produit qu'un, cosmétique).
+Chacun (config containerd, secrets de rôles, attentes Ready, surcharges par
+topologie) est nativement géré par Ansible (`kubernetes.core`, `lineinfile`,
+gestion de secrets, templating). D'où la décision de **porter la couche
+plateforme DataOps en rôles Ansible** (issue dédiée) : transformer ces drifts en
+tâches idempotentes plutôt que les redécouvrir à chaque run.

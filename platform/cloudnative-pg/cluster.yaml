@@ -40,18 +40,29 @@ spec:
     storageClass: standard
   # Rôles propriétaires des trois bases logiques (cf. database.yaml). CNPG ne crée
   # pas l'owner automatiquement → on les déclare ici (login, sans superuser).
-  # Mots de passe gérés par l'operator (Secrets dédiés) ; pas de creds en dur.
+  #
+  # ⚠️ Chaque rôle DOIT porter un `passwordSecret` : sans lui, CNPG crée le rôle
+  # SANS mot de passe (rolpassword NULL) et l'appli ne peut pas s'authentifier
+  # (validé sur banc — un rôle managé sans passwordSecret = connexion impossible).
+  # Le Secret (clés `username`/`password`) est fourni hors dépôt (config locale
+  # non versionnée) ; un patron `.example` est versionné (role-secrets.example.yaml).
   managed:
     roles:
       - name: dagster
         login: true
         ensure: present
+        passwordSecret:
+          name: pg-role-dagster
       - name: pgvector
         login: true
         ensure: present
+        passwordSecret:
+          name: pg-role-pgvector
       - name: marquez
         login: true
         ensure: present
+        passwordSecret:
+          name: pg-role-marquez
   # Sauvegardes/WAL archivés via le plugin Barman Cloud (TLS plugin<->operator par
   # cert-manager). L'ObjectStore S3 est défini dans objectstore.yaml.
   plugins:

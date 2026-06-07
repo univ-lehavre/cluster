@@ -8,7 +8,21 @@
 # publiée dans le registry interne (ADR 0011). Référence registry:80/...
 # postgres (init wait-for-db) épinglé par digest d'index multi-arch (ADR 0006).
 # Régénérer : voir README + values.bench.yaml.
+#
+# RETOUCHE LOCALE (workspace orchestrateur vide) : un orchestrateur SANS
+# code-location doit quand même recevoir un workspace, sinon `dagster-webserver`
+# et `dagster-daemon` échouent (« No arguments given and no [tool.dagster] block »).
+# On monte un ConfigMap `dagster-workspace` (load_from: [] = zéro location) et on
+# passe `-w /workspace/workspace.yaml` aux deux commandes (validé sur banc, #167).
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-workspace
+  namespace: dagster
+data:
+  workspace.yaml: |
+    load_from: []
 ---
 # Source: dagster/templates/serviceaccount.yaml
 apiVersion: v1
@@ -318,7 +332,7 @@ spec:
           command: [
             "/bin/bash",
             "-c",
-            "dagster-daemon run"
+            "dagster-daemon run -w /workspace/workspace.yaml"
           ]
           env:
             - name: DAGSTER_PG_PASSWORD
@@ -337,6 +351,8 @@ spec:
             - name: dagster-instance
               mountPath: "/opt/dagster/dagster_home/dagster.yaml"
               subPath: dagster.yaml
+            - name: dagster-workspace
+              mountPath: /workspace
           resources:
             limits:
               memory: 512Mi
@@ -349,6 +365,9 @@ spec:
         - name: dagster-instance
           configMap:
             name: dagster-instance
+        - name: dagster-workspace
+          configMap:
+            name: dagster-workspace
       affinity:
         {}
       tolerations:
@@ -403,7 +422,7 @@ spec:
           command: [
             "/bin/bash",
             "-c",
-            "dagster-webserver -h 0.0.0.0 -p 80"
+            "dagster-webserver -h 0.0.0.0 -p 80 -w /workspace/workspace.yaml"
           ]
           env:
             - name: DAGSTER_PG_PASSWORD
@@ -420,6 +439,8 @@ spec:
             - name: dagster-instance
               mountPath: "/opt/dagster/dagster_home/dagster.yaml"
               subPath: dagster.yaml
+            - name: dagster-workspace
+              mountPath: /workspace
           ports:
             - name: http
               containerPort: 80
@@ -443,3 +464,6 @@ spec:
         - name: dagster-instance
           configMap:
             name: dagster-instance
+        - name: dagster-workspace
+          configMap:
+            name: dagster-workspace

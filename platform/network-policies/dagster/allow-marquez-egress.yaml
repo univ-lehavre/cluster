@@ -1,0 +1,23 @@
+# Egress de Dagster vers l'API Marquez (ns `marquez`, port 5000) : le sensor
+# OpenLineage (et le code atlas en Phase 2+) POST les événements de lineage sur
+# marquez:5000/api/v1/lineage. La policy marquez/allow-openlineage-ingress autorise
+# l'ingress côté Marquez depuis le ns dagster ; ici on ouvre l'EGRESS côté dagster
+# (les deux sont nécessaires sous default-deny des deux côtés). Sans ce flux, le run
+# Dagster qui émet du lineage timeout (validé sur banc, #167 / #148).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-marquez-egress
+  namespace: dagster
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: marquez
+      ports:
+        - protocol: TCP
+          port: 5000
