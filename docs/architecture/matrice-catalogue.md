@@ -103,8 +103,10 @@ vérité : [`test/lima/RESULTS.md`](../../test/lima/RESULTS.md) et
 ### Trous de la matrice (jamais buildés)
 
 - **Matériel** : x86_64 (tout l'existant est arm64).
-- **Topologie** : HA réelle (multi-CP), multi-sites.
-- **Terrain** : bare-metal (serveurs lames), cloud.
+- **Topologie** : HA réelle (multi-CP, `ha-3cp`), multi-sites (`multisite`).
+- **Terrain** : bare-metal (serveurs lames), cloud — terrain **cloud ARM** cadré
+  pour combler `ha-3cp`/`multisite`
+  ([ADR 0031](../decisions/0031-terrain-cloud-arm.md)).
 
 > Tout build à ce jour = **arm64 / local / mono-CP-3-nœuds**. C'est le seul coin
 > de la matrice couvert.

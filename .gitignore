@@ -53,3 +53,13 @@ docs/.vitepress/dist/
 
 # Ansible runtime cache
 .ansible/
+
+# OpenTofu / Terraform — provisioning cloud (ADR 0032). L'état contient des
+# identités réelles → JAMAIS versionné (ADR 0023) ; idem les *.tfvars réels
+# (le *.tfvars.example générique reste versionné). Le code *.tf et
+# .terraform.lock.hcl, eux, SONT versionnés.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

@@ -50,3 +50,5 @@ Format léger inspiré de Michael Nygard :
 | 0028 | [Store de lineage OpenLineage via Marquez](0028-orchestration-openlineage-marquez.md)                      | Accepted |
 | 0029 | [Toute page Markdown est atteignable depuis la doc](0029-markdown-atteignable-doc.md)                      | Accepted |
 | 0030 | [Nomenclature des bancs et topologies](0030-nomenclature-bancs-topologies.md)                              | Accepted |
+| 0031 | [Terrain d'exécution cloud ARM (cadrage)](0031-terrain-cloud-arm.md)                                       | Accepted |
+| 0032 | [OpenTofu pour le provisioning des VM cloud](0032-opentofu-provisioning-cloud.md)                          | Accepted |
