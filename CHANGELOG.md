@@ -14,6 +14,13 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.26.0](https://github.com/univ-lehavre/cluster/compare/v2.25.0...v2.26.0) (2026-06-07)
+
+
+### Features
+
+* **platform:** porte CloudNativePG + cert-manager en rôles Ansible ([#173](https://github.com/univ-lehavre/cluster/issues/173)) ([#187](https://github.com/univ-lehavre/cluster/issues/187)) ([ca042f7](https://github.com/univ-lehavre/cluster/commit/ca042f70096a51fd48a7aa1d444289642e21d007))
+
 ## [2.25.0](https://github.com/univ-lehavre/cluster/compare/v2.24.5...v2.25.0) (2026-06-07)
 
 
