@@ -180,3 +180,18 @@ changelog généré. Aucun bump manuel à faire.
 Le script `pnpm release` (commit-and-tag-version) reste disponible pour un bump
 manuel hors workflow GitHub, mais ce chemin doit rester exceptionnel — la source
 de vérité est release-please.
+
+## Code de conduite
+
+La participation au projet est régie par notre
+[code de conduite](CODE_OF_CONDUCT.md). En contribuant, vous vous engagez à le
+respecter.
+
+## Toute page Markdown est atteignable
+
+Tout fichier `*.md` versionné doit être **atteignable depuis la documentation**
+: présent dans le sidebar VitePress ou cible d'un lien depuis une page elle-même
+atteignable ([ADR 0029](docs/decisions/0029-markdown-atteignable-doc.md)). Le
+garde-fou `pnpm lint:docs-orphans`
+([`scripts/check_md_orphans.py`](scripts/check_md_orphans.py)) échoue sur tout
+orphelin — il tourne dans `pnpm lint` et en CI.

@@ -48,3 +48,4 @@ Format léger inspiré de Michael Nygard :
 | 0026 | [Orchestration des pipelines via Dagster](0026-orchestration-dagster.md)                                   | Accepted |
 | 0027 | [Bootstrap paramétré multi-cluster (Cilium Cluster Mesh)](0027-bootstrap-parametre-multi-cluster.md)       | Accepted |
 | 0028 | [Store de lineage OpenLineage via Marquez](0028-orchestration-openlineage-marquez.md)                      | Accepted |
+| 0029 | [Toute page Markdown est atteignable depuis la doc](0029-markdown-atteignable-doc.md)                      | Accepted |
