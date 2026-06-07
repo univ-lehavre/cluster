@@ -1,0 +1,139 @@
+# code: language=ansible
+# Rôle platform-cnpg (ADR 0033/0024) — store PostgreSQL HA managé par
+# CloudNativePG, avec sauvegardes Barman vers le RGW Ceph (mode Ceph).
+# Ordre fidèle au platform/cloudnative-pg/README.md. Appliqué depuis le
+# control-plane. Prérequis : cert-manager (rôle platform-cert-manager) + Ceph
+# (RGW datalake + storageClass RBD) + feature gate ImageVolume (bootstrap).
+
+- name: Deploy CloudNativePG with Barman backups
+  run_once: true
+  block:
+    # ── 1. operator (CRDs volumineuses → server-side) + plugin Barman ────────
+    - name: Apply CNPG operator (server-side)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/cloudnative-pg/operator.yaml'
+        server_side_apply:
+          field_manager: ansible-platform-cnpg
+
+    - name: Wait for CNPG controller manager to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: cnpg-controller-manager
+        namespace: '{{ cnpg_operator_namespace }}'
+      register: cnpg_operator
+      until: >-
+        cnpg_operator.resources | length > 0
+        and (cnpg_operator.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ cnpg_operator_ready_retries }}'
+      delay: '{{ cnpg_operator_ready_delay }}'
+
+    - name: Apply Barman Cloud plugin (server-side)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/cloudnative-pg/plugin-barman-cloud.yaml'
+        server_side_apply:
+          field_manager: ansible-platform-cnpg
+
+    # ── 2. backing S3 (RGW Ceph) : OBC → creds dérivés → bucket ──────────────
+    # L'OBC Rook provisionne le bucket et un Secret de creds (clés
+    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) dans son namespace.
+    - name: Claim the backup bucket from Ceph RGW (ObjectBucketClaim)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: objectbucket.io/v1alpha1
+          kind: ObjectBucketClaim
+          metadata:
+            name: '{{ cnpg_obc_name }}'
+            namespace: '{{ cnpg_obc_namespace }}'
+          spec:
+            bucketName: '{{ cnpg_s3_bucket }}'
+            storageClassName: '{{ cnpg_obc_storage_class }}'
+
+    - name: Wait for the OBC credentials Secret to be provisioned
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: '{{ cnpg_obc_name }}'
+        namespace: '{{ cnpg_obc_namespace }}'
+      register: obc_secret
+      until: >-
+        obc_secret.resources | length > 0
+        and obc_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined
+      retries: 30
+      delay: 5
+
+    # Recopie les creds OBC dans le Secret/format attendu par Barman
+    # (pg-backup-s3, clés ACCESS_KEY_ID / ACCESS_SECRET_KEY, ns postgres).
+    # Source de vérité unique : les creds générés par Rook.
+    - name: Derive the Barman S3 credentials Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: pg-backup-s3
+            namespace: '{{ cnpg_namespace }}'
+          type: Opaque
+          data:
+            ACCESS_KEY_ID: '{{ obc_secret.resources[0].data.AWS_ACCESS_KEY_ID }}'
+            ACCESS_SECRET_KEY: '{{ obc_secret.resources[0].data.AWS_SECRET_ACCESS_KEY }}'
+
+    # ── 3. secrets de mot de passe des rôles managés (drift L16) ─────────────
+    # Patron .example versionné = valeurs de test (banc). En prod : Secrets hors
+    # dépôt (config locale non versionnée), mêmes clés.
+    - name: Apply managed role password Secrets
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/cloudnative-pg/role-secrets.example.yaml'
+
+    # ── 4. ObjectStore (RGW) + Cluster (storageClass paramétré) ──────────────
+    - name: Apply CNPG ObjectStore (endpoint {{ cnpg_s3_endpoint }})
+      kubernetes.core.k8s:
+        state: present
+        template: objectstore.yaml.j2
+
+    # Charge le manifeste figé et n'ajuste que le storageClass (pas de .j2 du
+    # rendu : une seule source de vérité, ADR 0033). Les digests pinned et le
+    # bloc plugins Barman restent intacts.
+    - name: Load the pinned Cluster manifest
+      ansible.builtin.set_fact:
+        cnpg_cluster_defs: >-
+          {{ lookup('file', platform_repo_dir ~ '/platform/cloudnative-pg/cluster.yaml')
+             | from_yaml_all | list }}
+
+    - name: Apply CNPG Cluster (storageClass={{ cnpg_storage_class }})
+      kubernetes.core.k8s:
+        state: present
+        definition: >-
+          {{ item
+             | combine({'spec': {'storage': {'storageClass': cnpg_storage_class}}}, recursive=True)
+             if (item.kind | default('')) == 'Cluster' else item }}
+      loop: '{{ cnpg_cluster_defs | select | list }}'
+      loop_control:
+        label: "{{ item.kind | default('?') }}/{{ item.metadata.name | default('?') }}"
+
+    - name: Wait for the pg Cluster to be healthy
+      kubernetes.core.k8s_info:
+        api_version: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg
+        namespace: '{{ cnpg_namespace }}'
+      register: cnpg_cluster
+      until: >-
+        cnpg_cluster.resources | length > 0
+        and (cnpg_cluster.resources[0].status.phase | default('')) == 'Cluster in healthy state'
+      retries: '{{ cnpg_cluster_healthy_retries }}'
+      delay: '{{ cnpg_cluster_healthy_delay }}'
+
+    # ── 5. bases logiques (CREATE DATABASE + CREATE EXTENSION vector) ────────
+    - name: Apply logical databases
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/cloudnative-pg/database.yaml'
+
+    - name: Apply scheduled backup
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/cloudnative-pg/backup.yaml'

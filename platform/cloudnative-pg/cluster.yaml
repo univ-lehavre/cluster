@@ -34,10 +34,11 @@ spec:
           reference: ghcr.io/cloudnative-pg/pgvector:0.8.2-18-trixie@sha256:16410c599bd2bfea40653c05c67d98ab4c04befc53eaa3445a5f4cf898b1e98e
   storage:
     size: 5Gi
-    # PARAMÉTRABLE : défaut banc léger = standard (local-path).
-    # Topologie bare-metal : surcharger par rook-ceph-block-replicated (RBD ×3, ADR 0001 — JAMAIS
-    # EC 2+1 pour ce stateful) via config locale non versionnée (ADR 0023).
-    storageClass: standard
+    # Défaut versionné = PROD (ADR 0033) : RBD répliqué ×3 (ADR 0001 — JAMAIS
+    # EC 2+1 pour ce stateful). Le rôle Ansible platform-cnpg surcharge ce champ
+    # par topologie (cnpg_storage_class) ; une autre topologie peut pointer une
+    # autre storageClass via group_vars (ADR 0023).
+    storageClass: rook-ceph-block-replicated
   # Rôles propriétaires des trois bases logiques (cf. database.yaml). CNPG ne crée
   # pas l'owner automatiquement → on les déclare ici (login, sans superuser).
   #

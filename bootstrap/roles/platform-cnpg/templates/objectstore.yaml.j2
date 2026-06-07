@@ -1,0 +1,24 @@
+# Généré par le rôle platform-cnpg — ObjectStore S3 des sauvegardes CNPG.
+# Endpoint paramétré par topologie (défaut RGW Ceph datalake). Creds dans le
+# Secret pg-backup-s3 (dérivé de l'OBC Rook). Reflète
+# platform/cloudnative-pg/objectstore.yaml.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: pg-backup
+  namespace: {{ cnpg_namespace }}
+spec:
+  configuration:
+    destinationPath: s3://{{ cnpg_s3_bucket }}/
+    endpointURL: {{ cnpg_s3_endpoint }}
+    s3Credentials:
+      accessKeyId:
+        name: pg-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: pg-backup-s3
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip

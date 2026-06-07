@@ -1,0 +1,29 @@
+---
+# Valeurs par défaut du rôle platform-cnpg (ADR 0033/0024).
+# Défaut = PROD/banc Ceph (le seul mode supporté pour CNPG, cf. ADR 0033 :
+# Barman exige un S3 → le RGW Ceph ; le banc léger sans Ceph ne monte pas CNPG).
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+cnpg_namespace: postgres
+cnpg_operator_namespace: cnpg-system
+
+# storageClass du Cluster pg. PROD/banc Ceph : RBD répliqué ×3 (ADR 0001 —
+# JAMAIS EC 2+1 pour ce stateful).
+cnpg_storage_class: rook-ceph-block-replicated
+
+# Cible S3 des sauvegardes Barman. RGW Ceph (datalake) — service intra-cluster.
+cnpg_s3_endpoint: http://rook-ceph-rgw-datalake.rook-ceph:80
+# Bucket des sauvegardes CNPG (créé par le Job init-buckets).
+cnpg_s3_bucket: cnpg-backups
+# OBC Rook qui provisionne le bucket + le Secret de creds (clés
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY dans son namespace).
+cnpg_obc_name: cnpg-backups
+cnpg_obc_namespace: rook-ceph
+cnpg_obc_storage_class: rook-ceph-datalake
+
+# Gates (alignés sur les prédicats du shell dataops-chain).
+cnpg_operator_ready_retries: 36 # 36×5s = 180s
+cnpg_operator_ready_delay: 5
+cnpg_cluster_healthy_retries: 60 # 60×10s = 600s
+cnpg_cluster_healthy_delay: 10

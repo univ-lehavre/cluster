@@ -1,0 +1,35 @@
+# code: language=ansible
+# Rôle platform-cert-manager (ADR 0033) — TLS interne du cluster (ADR 0021),
+# prérequis du plugin Barman Cloud (CNPG, ADR 0024). Appliqué depuis le
+# control-plane. Manifestes vendored figés (platform/cert-manager/).
+
+- name: Deploy cert-manager
+  run_once: true
+  block:
+    # CRDs volumineuses → server-side apply (comme operator CNPG / le RUNBOOK).
+    - name: Apply cert-manager (server-side)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/cert-manager/cert-manager.yaml'
+        server_side_apply:
+          field_manager: ansible-platform-cert-manager
+
+    # Le webhook d'admission doit être Ready avant d'appliquer des ressources
+    # cert-manager (Issuers) — sinon « failed calling webhook ».
+    - name: Wait for cert-manager webhook to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: cert-manager-webhook
+        namespace: '{{ cert_manager_namespace }}'
+      register: cm_webhook
+      until: >-
+        cm_webhook.resources | length > 0
+        and (cm_webhook.resources[0].status.readyReplicas | default(0)) >= 1
+      retries: '{{ cert_manager_ready_retries }}'
+      delay: '{{ cert_manager_ready_delay }}'
+
+    # Chaîne de CA interne (selfsigned-bootstrap → root-ca → internal-ca).
+    - name: Apply internal CA issuers
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/cert-manager/issuers.yaml'

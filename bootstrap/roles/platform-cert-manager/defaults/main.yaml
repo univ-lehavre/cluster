@@ -1,0 +1,14 @@
+---
+# Valeurs par défaut du rôle platform-cert-manager (ADR 0033).
+# cert-manager fournit le TLS interne (ADR 0021) ; prérequis du plugin Barman
+# (TLS plugin↔operator, ADR 0024) et de l'exposition de bordure.
+
+# Racine du dépôt côté control-plane (manifestes lus puis appliqués).
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+cert_manager_namespace: cert-manager
+
+# Gate : attente que le webhook cert-manager soit Ready avant d'appliquer les
+# Issuers (un apply trop tôt échoue sur le webhook d'admission).
+cert_manager_ready_retries: 30
+cert_manager_ready_delay: 5

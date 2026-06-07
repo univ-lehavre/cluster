@@ -20,3 +20,11 @@
 # Le nom/port du registry interne et la version Gateway API ont des défauts prod
 # (cf. roles/platform-registry/defaults/main.yaml) ; ne surcharger qu'au besoin.
 # gateway_api_version: '1.4.1'
+
+# ─── platform-cnpg ───────────────────────────────────────────────────────────
+# CNPG suppose le mode Ceph (RGW pour Barman + storageClass RBD ; ADR 0033).
+# Les défauts du rôle ciblent déjà le RGW Ceph (rook-ceph-rgw-datalake) et la
+# storageClass rook-ceph-block-replicated. Surcharger seulement pour un autre
+# endpoint S3 ou une autre storageClass.
+# cnpg_storage_class: rook-ceph-block-replicated
+# cnpg_s3_endpoint: http://rook-ceph-rgw-datalake.rook-ceph:80

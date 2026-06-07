@@ -27,6 +27,19 @@
         name: platform-registry
       tags: registry-cluster
 
+    # cert-manager AVANT cnpg : le plugin Barman exige le TLS plugin↔operator.
+    - name: TLS interne (cert-manager, prérequis Barman)
+      ansible.builtin.import_role:
+        name: platform-cert-manager
+      tags: cert-manager
+
+    # CloudNativePG (operator + plugin Barman + cluster pg + bases). Dépend du
+    # registry (pas directement) et de cert-manager ; cible le RGW Ceph.
+    - name: Store PostgreSQL HA CloudNativePG (+ backups Barman)
+      ansible.builtin.import_role:
+        name: platform-cnpg
+      tags: cnpg
+
 - name: Plateforme DataOps — étape nœuds (containerd insecure-registry)
   hosts: cloud
   gather_facts: false
