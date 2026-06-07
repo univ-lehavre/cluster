@@ -1,0 +1,16 @@
+# Généré par le rôle platform-registry — PVC du registry interne.
+# Seul le storageClass est paramétré (drift L10 / #158) : défaut prod
+# Rook-Ceph répliqué, banc surchargé à local-path. Le reste reflète
+# platform/container-registry/persistent-volume-claim.yaml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-pvc
+  namespace: {{ registry_namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: {{ registry_storage_class }}

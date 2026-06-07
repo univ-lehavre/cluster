@@ -1,0 +1,22 @@
+# code: language=ansible
+#
+# Surcharges par topologie de la couche plateforme DataOps (ADR 0033/0023) —
+# MODÈLE d'exemple générique.
+#
+# Les rôles platform-* portent en `defaults/main.yaml` les valeurs de PRODUCTION
+# (Rook-Ceph répliqué, images par digest…). Une topologie qui s'en écarte (le
+# banc Lima : local-path, images arm64 dé-épinglées) surcharge ces variables
+# dans un group_vars d'inventaire **non versionné**.
+#
+# Usage : copier les lignes utiles dans le group_vars de l'inventaire de banc
+# (ex. test/lima/.work/group_vars/all.yaml, gitignoré), PAS dans bootstrap/.
+# Ce `.example` documente les variables surchargeables ; il n'est pas chargé tel
+# quel (suffixe .example).
+
+# ─── platform-registry ──────────────────────────────────────────────────────
+# storageClass du PVC registry. Banc sans Rook-Ceph → local-path (drift L10).
+# registry_storage_class: local-path
+
+# Le nom/port du registry interne et la version Gateway API ont des défauts prod
+# (cf. roles/platform-registry/defaults/main.yaml) ; ne surcharger qu'au besoin.
+# gateway_api_version: '1.4.1'

@@ -52,3 +52,4 @@ Format léger inspiré de Michael Nygard :
 | 0030 | [Nomenclature des bancs et topologies](0030-nomenclature-bancs-topologies.md)                              | Accepted |
 | 0031 | [Terrain d'exécution cloud ARM (cadrage)](0031-terrain-cloud-arm.md)                                       | Accepted |
 | 0032 | [OpenTofu pour le provisioning des VM cloud](0032-opentofu-provisioning-cloud.md)                          | Accepted |
+| 0033 | [Orchestration Ansible des addons plateforme DataOps](0033-orchestration-ansible-platform-dataops.md)      | Accepted |

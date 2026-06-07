@@ -1,0 +1,9 @@
+# Généré par le rôle Ansible platform-registry — NE PAS éditer à la main.
+# containerd certs.d : route le pull de {{ registry_host }}:{{ registry_port }}
+# en HTTP (registry interne sans TLS, ADR 0011). Le nom est résolu via /etc/hosts
+# vers la ClusterIP servie par Cilium eBPF.
+server = "http://{{ registry_host }}:{{ registry_port }}"
+
+[host."http://{{ registry_host }}:{{ registry_port }}"]
+  capabilities = ["pull", "resolve", "push"]
+  skip_verify = true

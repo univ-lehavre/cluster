@@ -36,11 +36,12 @@ Outils de la chaîne locale/CI, pas des composants déployés — pinnés au mê
 titre pour la reproductibilité. Langages cf.
 [ADR 0017](0017-langage-des-scripts.md).
 
-| Outil    | Version cible        | Fichier piloté                                                       |
-| -------- | -------------------- | -------------------------------------------------------------------- |
-| Python   | **>= 3.12**          | [`pyproject.toml`](../../pyproject.toml) (`requires-python`)         |
-| ruff     | **0.15.16** (pin ==) | [`pyproject.toml`](../../pyproject.toml) + `uv.lock`                 |
-| OpenTofu | **1.12.x**           | provisioning cloud (ADR 0032) — `.terraform.lock.hcl` (à introduire) |
+| Outil           | Version cible        | Fichier piloté                                                              |
+| --------------- | -------------------- | --------------------------------------------------------------------------- |
+| Python          | **>= 3.12**          | [`pyproject.toml`](../../pyproject.toml) (`requires-python`)                |
+| ruff            | **0.15.16** (pin ==) | [`pyproject.toml`](../../pyproject.toml) + `uv.lock`                        |
+| OpenTofu        | **1.12.x**           | provisioning cloud (ADR 0032) — `.terraform.lock.hcl` (à introduire)        |
+| kubernetes.core | **6.4.0**            | [`bootstrap/requirements.yml`](../../bootstrap/requirements.yml) (ADR 0033) |
 
 > **uv.lock** committé fige l'arbre exact des dépendances Python (ici ruff seul)
 > — reproductibilité locale/CI, dans l'esprit du pinning par digest des images.

@@ -1,0 +1,132 @@
+# code: language=ansible
+# Rôle platform-registry (ADR 0033) — deux familles de tâches :
+#   - tag `registry-cluster` : CRDs Gateway API + manifestes registry, appliqués
+#     une fois depuis le control-plane (kubernetes.core).
+#   - tag `registry-node` : config containerd insecure-registry sur chaque nœud
+#     (/etc/hosts + certs.d + use_local_image_pull, drifts L9/L13).
+# L'orchestration (quel play cible quel tag) est dans bootstrap/dataops.yaml.
+
+# ─── Cluster : CRDs Gateway API + registry interne ──────────────────────────
+- name: Deploy registry and Gateway API CRDs
+  tags: registry-cluster
+  run_once: true
+  block:
+    # Gateway API CRDs : cert-manager les exige (cni.sh active gatewayAPI ;
+    # Cilium ne les embarque pas, ADR 0006/0020). Sources figées au tag.
+    - name: Apply Gateway API CRDs ({{ gateway_api_version }})
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ gateway_api_crd_base }}/gateway.networking.k8s.io_{{ item }}.yaml'
+      loop:
+        - gatewayclasses
+        - gateways
+        - httproutes
+        - referencegrants
+        - grpcroutes
+
+    - name: Apply registry namespace
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/container-registry/namespace.yaml'
+
+    # PVC templé : storageClass paramétrable (drift L10 / #158), défaut prod.
+    - name: Apply registry PVC (storageClass={{ registry_storage_class }})
+      kubernetes.core.k8s:
+        state: present
+        template: registry-pvc.yaml.j2
+
+    - name: Apply registry deployment and service
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/container-registry/{{ item }}'
+      loop:
+        - deployment.yaml
+        - service.yaml
+        - garbage-collect-cronjob.yaml
+
+    # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
+    # allow ignoré). Ordre explicite via loop, pas un apply de dossier.
+    - name: Apply registry network policies (ordered)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/network-policies/registry/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-registry.yaml
+
+    - name: Wait for registry deployment to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: registry
+        namespace: '{{ registry_namespace }}'
+      register: registry_deploy
+      until: >-
+        registry_deploy.resources | length > 0
+        and (registry_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ registry_ready_retries }}'
+      delay: '{{ registry_ready_delay }}'
+
+# ─── Node : containerd insecure-registry (drifts L9, L13) ───────────────────
+- name: Configure containerd for the internal HTTP registry
+  tags: registry-node
+  become: true
+  become_method: ansible.builtin.sudo
+  block:
+    # ClusterIP du Service registry, récupérée à l'exécution (jamais hardcodée).
+    # delegate_to control-plane car la requête k8s part de là (KUBECONFIG admin).
+    - name: Get registry Service ClusterIP
+      kubernetes.core.k8s_info:
+        kind: Service
+        name: registry
+        namespace: '{{ registry_namespace }}'
+      register: registry_svc
+      delegate_to: "{{ groups['control'][0] }}"
+      run_once: true
+      become: false
+
+    - name: Assert registry ClusterIP is available
+      ansible.builtin.assert:
+        that:
+          - registry_svc.resources | length > 0
+          - registry_svc.resources[0].spec.clusterIP is defined
+          - registry_svc.resources[0].spec.clusterIP | length > 0
+        fail_msg: >-
+          Service {{ registry_namespace }}/registry introuvable — déployer le
+          registry (tag registry-cluster) avant de configurer les nœuds.
+
+    # /etc/hosts : nom `registry` → ClusterIP (drift L9). regexp idempotent.
+    - name: Map registry hostname to its ClusterIP in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: '{{ registry_svc.resources[0].spec.clusterIP }} {{ registry_host }}'
+        regexp: '\s{{ registry_host }}$'
+        state: present
+      notify: Restart containerd
+
+    - name: Ensure containerd certs.d directory for the registry exists
+      ansible.builtin.file:
+        path: '/etc/containerd/certs.d/{{ registry_host }}:{{ registry_port }}'
+        state: directory
+        mode: '0755'
+
+    # certs.d : route le pull en HTTP (drift L9). Insuffisant seul en
+    # containerd 2.2 (transfer service ignore certs.d) → L13 ci-dessous.
+    - name: Write containerd certs.d hosts.toml (HTTP registry)
+      ansible.builtin.template:
+        src: hosts.toml.j2
+        dest: '/etc/containerd/certs.d/{{ registry_host }}:{{ registry_port }}/hosts.toml'
+        mode: '0644'
+      notify: Restart containerd
+
+    # FIX RACINE L13 : containerd 2.2 route le pull via le transfer service qui
+    # IGNORE certs.d. use_local_image_pull=true force le chemin CRI legacy qui,
+    # lui, respecte certs.d. Sans ça : « HTTP response to HTTPS client ».
+    - name: Enable use_local_image_pull in containerd CRI config (drift L13)
+      ansible.builtin.lineinfile:
+        path: /etc/containerd/config.toml
+        line: '    use_local_image_pull = true'
+        insertafter: '^\s*\[plugins\..io\.containerd\.cri\.v1\.images.\]'
+        regexp: '^\s*use_local_image_pull\s*='
+        state: present
+      notify: Restart containerd

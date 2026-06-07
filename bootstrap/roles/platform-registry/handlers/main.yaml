@@ -1,0 +1,11 @@
+# code: language=ansible
+# Recharge containerd pour relire /etc/containerd/certs.d et la config CRI
+# (use_local_image_pull). Déclenché uniquement si la config change réellement
+# (idempotence stricte — redémarrer containerd interrompt brièvement les pods).
+- name: Restart containerd
+  become: true
+  become_method: ansible.builtin.sudo
+  ansible.builtin.systemd_service:
+    name: containerd
+    daemon_reload: true
+    state: restarted

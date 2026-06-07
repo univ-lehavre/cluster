@@ -7,3 +7,8 @@ collections:
     version: '2.2.0'
   - name: community.general
     version: '12.6.1'
+  # Orchestration des addons plateforme DataOps (ADR 0033) : apply idempotent
+  # (k8s), attente Ready (k8s_info + until), Secrets dérivés. Exige les libs
+  # Python `kubernetes` sur l'exécuteur (installées en CI).
+  - name: kubernetes.core
+    version: '6.4.0'

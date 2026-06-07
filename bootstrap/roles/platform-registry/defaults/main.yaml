@@ -1,0 +1,33 @@
+---
+# Valeurs par défaut du rôle platform-registry.
+#
+# Défaut = valeur PROD (ADR 0023/0033) : la surcharge banc (local-path, etc.)
+# vit dans un group_vars d'inventaire non versionné (cf.
+# bootstrap/group_vars/dataops.example.yaml). Versions figées (ADR 0006).
+
+# Chemin du dépôt côté poste de contrôle (pour localiser platform/*.yaml depuis
+# le control-plane distant : les manifestes sont lus localement et appliqués).
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+# Namespace du registry interne.
+registry_namespace: registry
+
+# storageClass du PVC registry. PROD : Rook-Ceph répliqué ×3 (ADR 0001/0018).
+# Banc : surchargé à 'local-path' (drift L10, #158).
+registry_storage_class: rook-ceph-block-replicated
+
+# Nom + port du registry interne HTTP (ADR 0011). Résolu côté nœud vers la
+# ClusterIP du Service (récupérée à l'exécution via k8s_info, jamais hardcodée).
+registry_host: registry
+registry_port: 80
+
+# Version des CRDs Gateway API (ADR 0006/0020). cert-manager les exige car
+# cni.sh active gatewayAPI ; Cilium ne les embarque pas.
+gateway_api_version: '1.4.1'
+# Base des CRDs standard Gateway API au tag ci-dessus (sources figées).
+gateway_api_crd_base: >-
+  https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v{{ gateway_api_version }}/config/crd/standard
+
+# Timeouts des gates (alignés sur les prédicats du shell dataops-chain).
+registry_ready_retries: 30
+registry_ready_delay: 5

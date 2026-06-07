@@ -1,0 +1,37 @@
+# code: language=ansible
+# Orchestrateur de la couche plateforme DataOps (ADR 0033), à lancer APRÈS le
+# bootstrap Kubernetes. Deux plays séparant nœuds et cluster (convention du
+# dépôt) :
+#   Play 1 (cluster) : applique les manifestes figés platform/ depuis le
+#     control-plane (kubernetes.core, KUBECONFIG admin).
+#   Play 2 (nœuds)   : configure containerd pour le registry interne HTTP.
+#
+# Ordre inter-briques (à compléter au fil des rôles, ADR 0033) :
+#   registry → cnpg → dagster / marquez. Cette PR ne porte que platform-registry.
+#
+# Surcharges par topologie : group_vars d'inventaire non versionné
+# (cf. bootstrap/group_vars/dataops.example.yaml). Défauts de rôle = prod.
+
+- name: Plateforme DataOps — étape cluster (manifestes figés)
+  hosts: control[0]
+  gather_facts: false
+  pre_tasks:
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: dataops.yaml
+  tasks:
+    - name: Registry interne + CRDs Gateway API
+      ansible.builtin.import_role:
+        name: platform-registry
+      tags: registry-cluster
+
+- name: Plateforme DataOps — étape nœuds (containerd insecure-registry)
+  hosts: cloud
+  gather_facts: false
+  tasks:
+    - name: Configuration containerd pour le registry interne
+      ansible.builtin.import_role:
+        name: platform-registry
+      tags: registry-node
