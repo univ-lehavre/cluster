@@ -30,6 +30,20 @@ par Cilium 1.19 et Rook 1.19, tous deux testés jusqu'à K8s 1.34).
 Plafond commun K8s = **1.34** (limite de Cilium 1.19 et Rook 1.19 testés). Ceph
 Squid v19 sort d'EOL en septembre 2026 → Tentacle pour une install neuve.
 
+### Outillage de développement (langages de script)
+
+Outils de la chaîne locale/CI, pas des composants déployés — pinnés au même
+titre pour la reproductibilité. Langages cf.
+[ADR 0017](0017-langage-des-scripts.md).
+
+| Outil  | Version cible        | Fichier piloté                                               |
+| ------ | -------------------- | ------------------------------------------------------------ |
+| Python | **>= 3.12**          | [`pyproject.toml`](../../pyproject.toml) (`requires-python`) |
+| ruff   | **0.15.16** (pin ==) | [`pyproject.toml`](../../pyproject.toml) + `uv.lock`         |
+
+> **uv.lock** committé fige l'arbre exact des dépendances Python (ici ruff seul)
+> — reproductibilité locale/CI, dans l'esprit du pinning par digest des images.
+
 ### Observabilité & DataOps (ajout juin 2026)
 
 Composants ajoutés avec l'observabilité (ADR 0016 palier 2) et le socle DataOps

@@ -123,6 +123,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint:dup
 
+  # Lint + format des scripts Python (ruff via uv ; ADR 0017 amendé / 0006).
+  # uv lit pyproject.toml + uv.lock (env reproductible) ; on appelle ruff
+  # directement (pas `pnpm lint:python`) pour éviter d'installer Node ici.
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
   # Tests unitaires des fonctions pures de state.sh (bats — audit P9 #12).
   bats:
     runs-on: ubuntu-latest

@@ -1,0 +1,31 @@
+# Outillage Python du dépôt — scripts de logique/données (ADR 0017 amendé).
+#
+# Ce dépôt est un catalogue d'infra : pas un paquet Python distribuable, mais un
+# socle de scripts outillés. uv gère l'environnement (uv.lock committé,
+# reproductible — esprit ADR 0006) ; ruff lint + formate (intégré à `pnpm lint`
+# via `lint:python`, et en CI). Versions pinnées : voir ADR 0006.
+
+[project]
+name = "cluster-tooling"
+version = "0.0.0"
+description = "Scripts outillage du dépôt cluster (Python ; ADR 0017)"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff==0.15.16",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# Code JETABLE de validation e2e (harnais #148, pas du code de production) —
+# exclu du lint comme les manifestes vendored le sont de prettier/yamllint
+# (CLAUDE.md). À retirer si ce code est repris en production (Phase 2+).
+extend-exclude = ["platform/dagster/image-openlineage/toy_assets.py"]
+
+[tool.ruff.lint]
+# E/F = erreurs + pyflakes ; I = imports triés ; UP = modernisation ;
+# B = bugbear ; SIM = simplifications. Aligné sur le dépôt freelance.
+select = ["E", "F", "I", "UP", "B", "SIM"]

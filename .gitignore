@@ -1,6 +1,11 @@
 # Node
 node_modules/
 
+# Python (uv) — environnement local ; uv.lock + pyproject.toml restent versionnés
+.venv/
+__pycache__/
+.ruff_cache/
+
 # macOS
 .DS_Store
 
