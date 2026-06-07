@@ -1,0 +1,44 @@
+---
+# Valeurs par défaut du rôle platform-build-images (ADR 0033/0026/0028).
+#
+# Construit (arm64) ou re-tague (x86) les images maison de la chaîne DataOps vers
+# le registry interne. S'exécute sur UN nœud builder (run_once). Drift L18 :
+# git + buildkit requis.
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+# Registry interne cible (cf. rôle platform-registry).
+build_registry_host: registry:80
+
+# Versions figées (ADR 0006) — verrou chart↔image 1:1.
+dagster_version: '1.13.7'
+marquez_version: '0.51.1'
+
+# Source upstream Marquez (clone pour build API Java + UI React).
+marquez_git_repo: https://github.com/MarquezProject/marquez.git
+
+# Émetteur OpenLineage jetable : harnais e2e (#148), PAS une brique prod
+# (ADR 0022). Non construit par défaut ; activé seulement pour la validation banc.
+build_emitter_image: false
+
+# Images maison de la chaîne. arch_image = image officielle amd64 à re-taguer sur
+# x86 (skip build) ; context/dockerfile = build arm64 interne.
+build_images:
+  - name: dagster-celery-k8s
+    tag: '{{ dagster_version }}'
+    official_image: 'docker.io/dagster/dagster-celery-k8s:{{ dagster_version }}'
+    context: '{{ platform_repo_dir }}/platform/dagster/image'
+    dockerfile: '{{ platform_repo_dir }}/platform/dagster/image/Dockerfile'
+    source: local # contexte local (pur Python)
+  - name: marquez
+    tag: '{{ marquez_version }}'
+    official_image: 'docker.io/marquezproject/marquez:{{ marquez_version }}'
+    dockerfile: '{{ platform_repo_dir }}/platform/marquez/image/Dockerfile'
+    source: marquez-clone # contexte = racine du clone source
+    clone_subdir: ''
+  - name: marquez-web
+    tag: '{{ marquez_version }}'
+    official_image: 'docker.io/marquezproject/marquez-web:{{ marquez_version }}'
+    dockerfile: '{{ platform_repo_dir }}/platform/marquez/image-web/Dockerfile'
+    source: marquez-clone # contexte = sous-dossier web/ du clone
+    clone_subdir: web
