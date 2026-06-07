@@ -1,13 +1,12 @@
 # code: language=ansible
 # Orchestrateur de la couche plateforme DataOps (ADR 0033), à lancer APRÈS le
-# bootstrap Kubernetes. Deux plays séparant nœuds et cluster (convention du
-# dépôt) :
-#   Play 1 (cluster) : applique les manifestes figés platform/ depuis le
-#     control-plane (kubernetes.core, KUBECONFIG admin).
-#   Play 2 (nœuds)   : configure containerd pour le registry interne HTTP.
+# bootstrap Kubernetes. Trois plays, dans l'ordre des dépendances inter-briques :
+#   Play 1 (cluster) : registry + cert-manager + CNPG (manifestes figés
+#     platform/ appliqués depuis le control-plane via kubernetes.core).
+#   Play 2 (nœuds)   : config containerd registry interne + build des images.
+#   Play 3 (cluster) : Dagster + Marquez (pull des images buildées au play 2).
 #
-# Ordre inter-briques (à compléter au fil des rôles, ADR 0033) :
-#   registry → cnpg → dagster / marquez. Cette PR ne porte que platform-registry.
+# Ordre inter-briques : registry → cert-manager → CNPG → (build) → Dagster/Marquez.
 #
 # Surcharges par topologie : group_vars d'inventaire non versionné
 # (cf. bootstrap/group_vars/dataops.example.yaml). Défauts de rôle = prod.
@@ -55,3 +54,19 @@
       ansible.builtin.import_role:
         name: platform-build-images
       tags: build-images
+
+- name: Plateforme DataOps — étape applicative (Dagster + Marquez)
+  hosts: control[0]
+  gather_facts: false
+  tasks:
+    # Dagster (orchestrateur vide) + Marquez (lineage) : pull des images
+    # registry:80 buildées au play 2 ; dérivent leurs Secrets PG du rôle CNPG.
+    - name: Orchestrateur Dagster (storage CNPG)
+      ansible.builtin.import_role:
+        name: platform-dagster
+      tags: dagster
+
+    - name: Store de lineage Marquez (storage CNPG)
+      ansible.builtin.import_role:
+        name: platform-marquez
+      tags: marquez

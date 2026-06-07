@@ -1,0 +1,19 @@
+---
+# Valeurs par défaut du rôle platform-marquez (ADR 0033/0028).
+# Store de lineage OpenLineage Marquez (API + UI web), store dans la base CNPG
+# `marquez` (migrations Flyway au démarrage).
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+marquez_namespace: marquez
+cnpg_namespace: postgres
+
+# Secret CNPG du rôle `marquez` (source de vérité — posé par platform-cnpg).
+marquez_cnpg_role_secret: pg-role-marquez
+# Secret dérivé attendu par le chart Marquez (clé marquez-db-password).
+marquez_pg_auth_secret: marquez-pg-auth
+
+# Gate : API ET web Ready (prédicat marquez_ready du shell, 300s/10s ; l'API
+# applique ses migrations Flyway au démarrage).
+marquez_ready_retries: 30
+marquez_ready_delay: 10

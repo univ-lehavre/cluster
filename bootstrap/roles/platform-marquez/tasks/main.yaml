@@ -1,0 +1,80 @@
+# code: language=ansible
+# Rôle platform-marquez (ADR 0033/0028) — store de lineage OpenLineage (API +
+# UI web), store dans la base CNPG `marquez` (Flyway). Appliqué depuis le
+# control-plane. Prérequis : CNPG (base marquez) + registry (images
+# registry:80/marquez{,-web}) + cert-manager (Gateway TLS).
+
+- name: Deploy Marquez lineage store
+  run_once: true
+  block:
+    - name: Apply Marquez namespace
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/marquez/namespace.yaml'
+
+    # NetworkPolicies : default-deny d'abord. allow-openlineage-ingress = pendant
+    # de l'egress dagster→marquez (L19).
+    - name: Apply Marquez network policies (default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ marquez_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/network-policies/marquez/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-intra-namespace.yaml
+        - allow-postgres-egress.yaml
+        - allow-openlineage-ingress.yaml
+        - allow-web-ingress.yaml
+
+    # Secret dérivé : mot de passe du rôle CNPG `marquez` → format attendu par le
+    # chart (clé marquez-db-password). Source de vérité unique (L16/L17).
+    - name: Read the CNPG marquez role password
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: '{{ marquez_cnpg_role_secret }}'
+        namespace: '{{ cnpg_namespace }}'
+      register: marquez_role_secret
+
+    - name: Assert the CNPG marquez role password exists
+      ansible.builtin.assert:
+        that:
+          - marquez_role_secret.resources | length > 0
+          - marquez_role_secret.resources[0].data.password is defined
+        fail_msg: >-
+          Secret {{ cnpg_namespace }}/{{ marquez_cnpg_role_secret }} introuvable —
+          déployer platform-cnpg avant platform-marquez.
+
+    - name: Derive the Marquez Postgres Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: '{{ marquez_pg_auth_secret }}'
+            namespace: '{{ marquez_namespace }}'
+          type: Opaque
+          data:
+            marquez-db-password: '{{ marquez_role_secret.resources[0].data.password }}'
+
+    - name: Apply Marquez manifest
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ marquez_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/marquez/marquez.yaml'
+
+    - name: Wait for Marquez API and web to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: '{{ item }}'
+        namespace: '{{ marquez_namespace }}'
+      register: marquez_deploy
+      until: >-
+        marquez_deploy.resources | length > 0
+        and (marquez_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ marquez_ready_retries }}'
+      delay: '{{ marquez_ready_delay }}'
+      loop:
+        - marquez
+        - marquez-web

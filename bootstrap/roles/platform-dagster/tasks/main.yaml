@@ -1,0 +1,83 @@
+# code: language=ansible
+# Rôle platform-dagster (ADR 0033/0026) — orchestrateur Dagster (webserver +
+# daemon), storage dans la base CNPG `dagster`. Appliqué depuis le control-plane.
+# Prérequis : CNPG (cluster pg sain, base dagster) + registry (image
+# registry:80/dagster-celery-k8s) + cert-manager (Gateway TLS).
+
+- name: Deploy Dagster orchestrator
+  run_once: true
+  block:
+    - name: Apply Dagster namespace
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/dagster/namespace.yaml'
+
+    # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
+    # allow ignoré). allow-marquez-egress = fix drift L19 (egress dagster→marquez).
+    - name: Apply Dagster network policies (default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ dagster_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/network-policies/dagster/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-intra-namespace.yaml
+        - allow-apiserver-egress.yaml
+        - allow-postgres-egress.yaml
+        - allow-registry-egress.yaml
+        - allow-marquez-egress.yaml
+        - allow-webserver-ingress.yaml
+
+    # Secret dérivé : lit le mot de passe du rôle CNPG `dagster` (source de
+    # vérité unique, fix L16/L17) et le pose au format attendu par le chart
+    # (clé postgresql-password). Pas de recopie manuelle.
+    - name: Read the CNPG dagster role password
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: '{{ dagster_cnpg_role_secret }}'
+        namespace: '{{ cnpg_namespace }}'
+      register: dagster_role_secret
+
+    - name: Assert the CNPG dagster role password exists
+      ansible.builtin.assert:
+        that:
+          - dagster_role_secret.resources | length > 0
+          - dagster_role_secret.resources[0].data.password is defined
+        fail_msg: >-
+          Secret {{ cnpg_namespace }}/{{ dagster_cnpg_role_secret }} introuvable —
+          déployer platform-cnpg avant platform-dagster.
+
+    - name: Derive the Dagster Postgres Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: '{{ dagster_pg_auth_secret }}'
+            namespace: '{{ dagster_namespace }}'
+          type: Opaque
+          data:
+            postgresql-password: '{{ dagster_role_secret.resources[0].data.password }}'
+
+    - name: Apply Dagster manifest
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ dagster_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/dagster/dagster.yaml'
+
+    - name: Wait for Dagster webserver and daemon to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: '{{ item }}'
+        namespace: '{{ dagster_namespace }}'
+      register: dagster_deploy
+      until: >-
+        dagster_deploy.resources | length > 0
+        and (dagster_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ dagster_ready_retries }}'
+      delay: '{{ dagster_ready_delay }}'
+      loop:
+        - dagster-dagster-webserver
+        - dagster-daemon

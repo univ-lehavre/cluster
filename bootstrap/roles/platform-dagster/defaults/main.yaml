@@ -1,0 +1,19 @@
+---
+# Valeurs par défaut du rôle platform-dagster (ADR 0033/0026).
+# Orchestrateur Dagster VIDE (aucune code-location — le code métier vit dans
+# atlas via Argo CD, ADR 0022). Storage dans la base CNPG `dagster`.
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+dagster_namespace: dagster
+cnpg_namespace: postgres
+
+# Secret CNPG du rôle `dagster` (source de vérité du mot de passe — posé par le
+# rôle platform-cnpg). On en DÉRIVE le Secret attendu par le chart Dagster.
+dagster_cnpg_role_secret: pg-role-dagster
+# Secret dérivé attendu par le chart (clé postgresql-password).
+dagster_pg_auth_secret: dagster-pg-auth
+
+# Gate : webserver ET daemon Ready (prédicat dagster_ready du shell, 300s/10s).
+dagster_ready_retries: 30
+dagster_ready_delay: 10
