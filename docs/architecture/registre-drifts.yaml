@@ -16,12 +16,515 @@
 #   correctif : ce qui a été fait
 #   statut    : corrige | caduc (topologie/contexte abandonné) | ouvert
 #
-# Historique antérieur (L1–L40) : détaillé dans lecons-des-runs.md et RESULTS.md
-# (par catégorie / campagne). Ce registre démarre au chantier #158/#186/topologies
-# et accueillera les drifts à venir. La migration de L1–L40 ici est un chantier
-# distinct (cf. ADR à venir sur le registre).
+# Couverture : L1–L46. Les pages de synthèse (lecons-des-runs.md) et les journaux
+# de campagne (test/RESULTS.md banc Vagrant déprécié, test/lima/RESULTS.md banc
+# courant) RÉFÈRENT à ce registre par id. Le préfixe L = banc Lima (source
+# canonique des fiches L1–L40) ; le banc Vagrant numérotait ses propres écarts
+# (0a–0e, #3–#26), repris ici par leur Lnn quand il existe — sinon laissés dans
+# test/RESULTS.md (artefacts du banc abandonné, ADR 0038).
 
 drifts:
+  # ── Bootstrap K8s sur Lima (#127 / #144) — L1–L11 ────────────────────────
+  - id: L1
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: harnais
+    symptome: >-
+      Au play `initialisation`, `ansible_user is undefined`.
+    cause: >-
+      L'inventaire posait l'utilisateur via SSH (ssh.config) mais pas la
+      variable `ansible_user`.
+    correctif: >-
+      Inventaire généré : `cloud.vars.ansible_user: lima`.
+    statut: corrige
+
+  - id: L2
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: code
+    symptome: >-
+      `initialisation` : `Permission denied: /home/lima` (création du `.kube`).
+    cause: >-
+      Le home Lima est `/home/lima.guest` (≠ `/home/lima`) ; le rôle
+      construisait le home via `ansible_user`.
+    correctif: >-
+      Rôles `k8s-initialization`/`k8s-rollback` : home résolu via
+      `ansible_env.HOME` (le vrai home, indépendant de l'utilisateur).
+    statut: corrige
+
+  - id: L2bis
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: code
+    symptome: >-
+      `join-workers` : `Unable to change directory` (/home/debian).
+    cause: >-
+      `chdir: /home/debian` codé en dur dans `k8s-join-cluster` ; ce chemin
+      n'existe pas sur Lima.
+    correctif: >-
+      `chdir` résolu via `ansible_env.HOME`.
+    statut: corrige
+
+  - id: L3
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: code
+    symptome: >-
+      `initialisation` : `taint "…control-plane" not found`.
+    cause: >-
+      Sous kubeadm v1.34, le control-plane ne porte pas le taint control-plane
+      → l'opération `taint …-` échoue.
+    correctif: >-
+      Tâche rendue tolérante : `failed_when` ignore « not found ».
+    statut: corrige
+
+  - id: L4
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: code
+    symptome: >-
+      `cni.sh` : `cluster unreachable: localhost:8080`.
+    cause: >-
+      `cni.sh` lancé en `sudo` → kubectl/cilium pointent sur le kubeconfig root
+      absent.
+    correctif: >-
+      Lancer `cni.sh` en tant qu'utilisateur (sudo interne seulement où
+      nécessaire).
+    statut: corrige
+
+  - id: L5
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: harnais
+    symptome: >-
+      Gate kubeconfig : l'API est injoignable depuis l'hôte.
+    cause: >-
+      L'IP user-v2 (`192.168.104.x`) n'est pas routable depuis macOS.
+    correctif: >-
+      Réécrire `server:` sur `127.0.0.1:<portForward>` + `tls-server-name:
+      cluster-api`.
+    statut: corrige
+
+  - id: L6
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: env
+    symptome: >-
+      OSD-prepare en CrashLoopBackOff : `binary lvm does not exist`.
+    cause: >-
+      Le `metadataDevice` (block.db) bascule Rook en mode LVM → `ceph-volume`
+      exige `lvm`, absent de l'image Lima.
+    correctif: >-
+      Installer `lvm2` dans le provision de la VM (`profiles/node.yaml.tmpl`).
+    statut: corrige
+
+  - id: L7
+    campagne: 'bootstrap K8s — banc Lima (#127)'
+    portee: harnais
+    symptome: >-
+      Le gate Ceph passe au vert avec 0 OSD.
+    cause: >-
+      `ceph health` = HEALTH_OK sur un cluster neuf SANS pool (rien à dégrader).
+    correctif: >-
+      Gate renforcé : HEALTH_OK ET le nombre d'OSD attendus up (nœuds × disques
+      data).
+    statut: corrige
+
+  - id: L8
+    campagne: 'validation DataOps Dagster — banc Lima (#144)'
+    portee: code
+    symptome: >-
+      cert-manager controller en CrashLoop : « Gateway API CRDs not present ».
+    cause: >-
+      `cni.sh` active `gatewayAPI` ; ni Cilium ni le bootstrap nu n'embarquent
+      ces CRDs.
+    correctif: >-
+      Phase `platform-prereqs` : pose les CRDs Gateway API v1.4.1.
+    statut: corrige
+
+  - id: L9
+    campagne: 'validation DataOps Dagster — banc Lima (#144)'
+    portee: code
+    symptome: >-
+      ImagePullBackOff : « HTTP response to HTTPS client » (`registry:80`).
+    cause: >-
+      containerd tente HTTPS sur le registry interne HTTP ; le nom `registry`
+      n'est pas résolu côté nœud.
+    correctif: >-
+      Phase `platform-prereqs` : `/etc/hosts` + `certs.d/registry:80/hosts.toml`
+      en HTTP.
+    statut: corrige
+
+  - id: L10
+    campagne: 'validation DataOps Dagster — banc Lima (#144)'
+    portee: harnais
+    symptome: >-
+      Pod registry Pending : `unbound PersistentVolumeClaim`.
+    cause: >-
+      Le PVC du registry était figé sur `rook-ceph-block-replicated`, absent du
+      banc (local-path).
+    correctif: >-
+      Override banc : PVC sur `local-path` (paramétré ensuite par profil, cf.
+      L41).
+    statut: corrige
+
+  - id: L11
+    campagne: 'validation DataOps Dagster — banc Lima (#144)'
+    portee: code
+    symptome: >-
+      `kubectl apply -f dagster.yaml` crée les ressources dans `default`.
+    cause: >-
+      Le helm template figé ne porte pas `metadata.namespace`.
+    correctif: >-
+      README : `kubectl apply -n dagster …` (corrigé).
+    statut: corrige
+
+  # ── Chaîne DataOps shell — phase dataops-chain (#148) — L12–L20 ───────────
+  - id: L12
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: harnais
+    symptome: >-
+      `bootstrap` sort en code 141 (SIGPIPE) — kubeconfig non récupéré.
+    cause: >-
+      Un `cilium status | grep` ferme le pipe avant `fetch_kubeconfig`.
+    correctif: >-
+      Contournement : phase `kubeconfig` séparée (le cluster était sain) ; reste
+      à durcir dans le bootstrap.
+    statut: ouvert
+
+  - id: L13
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: code
+    symptome: >-
+      Pull `registry:80` HTTP échoue : « HTTP response to HTTPS client ».
+    cause: >-
+      containerd v2.2 (Debian 13) route le pull via le transfer service qui
+      IGNORE `certs.d`.
+    correctif: >-
+      `use_local_image_pull = true` dans la config containerd (les 3 nœuds) —
+      fix racine.
+    statut: corrige
+
+  - id: L14
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: code
+    symptome: >-
+      CNPG bloqué : « unknown plugin being required ».
+    cause: >-
+      `cluster.yaml` exige le plugin Barman, non installé par `dataops-chain`.
+    correctif: >-
+      Contournement banc initial (retrait du bloc `plugins:`) puis éliminé à la
+      racine en #173 (Barman vers RGW Ceph via platform-s3-bucket).
+    statut: corrige
+
+  - id: L15
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: harnais
+    symptome: >-
+      PVC `pg` Pending : « unbound immediate PersistentVolumeClaims ».
+    cause: >-
+      `cluster.yaml` fige `storageClass: standard`, absent du banc (local-path).
+    correctif: >-
+      Surcharge banc : `standard → local-path` (paramétré par profil ensuite,
+      cf. #158/L41).
+    statut: corrige
+
+  - id: L16
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: code
+    symptome: >-
+      Dagster « too many retries for DB connection » (vrai bug du livrable).
+    cause: >-
+      `managed.roles` CNPG SANS `passwordSecret` → rôles créés sans mot de passe
+      (`rolpassword` NULL).
+    correctif: >-
+      Fix dépôt : `passwordSecret` par rôle + `role-secrets.example.yaml`.
+    statut: corrige
+
+  - id: L17
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: code
+    symptome: >-
+      Le Secret dérivé applicatif ne correspond pas au mot de passe réel du
+      rôle.
+    cause: >-
+      Il nécessitait une recopie manuelle.
+    correctif: >-
+      Résolu par L16 : `.example` de rôle et dérivés alignés sur les mêmes
+      valeurs de test.
+    statut: corrige
+
+  - id: L18
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: env
+    symptome: >-
+      Build d'images impossible dans les VMs.
+    cause: >-
+      `git` absent + `buildkitd` présent mais `disabled`.
+    correctif: >-
+      `apt install git` + `systemctl enable --now buildkit` (intégré à la
+      prépa-build).
+    statut: corrige
+
+  - id: L19
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: code
+    symptome: >-
+      Run émetteur en timeout sur le POST OpenLineage (vrai bug du livrable).
+    cause: >-
+      Aucune NetworkPolicy egress `dagster → marquez:5000` (seul l'ingress côté
+      marquez existait).
+    correctif: >-
+      Fix dépôt : `platform/network-policies/dagster/allow-marquez-egress.yaml`.
+    statut: corrige
+
+  - id: L20
+    campagne: 'chaîne DataOps shell — banc Lima (#148)'
+    portee: code
+    symptome: >-
+      webserver/daemon Dagster en CrashLoop : « no [tool.dagster] block ».
+    cause: >-
+      L'orchestrateur vide est lancé sans workspace (`-w`).
+    correctif: >-
+      Fix dépôt : ConfigMap `dagster-workspace` (`load_from: []`) monté + `-w`
+      dans dagster.yaml.
+    statut: corrige
+
+  # ── Portage DataOps en rôles Ansible — phase dataops (#173) — L21–L33 ─────
+  - id: L21
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: harnais
+    symptome: >-
+      `ansible_user_id is undefined` sur le play cluster.
+    cause: >-
+      `gather_facts: false` sur le play localhost, alors qu'audit-log le
+      requiert.
+    correctif: >-
+      Retrait de l'audit-log du play cluster (cf. L22).
+    statut: corrige
+
+  - id: L22
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: harnais
+    symptome: >-
+      `sudo: a password is required` (audit-log sur localhost).
+    cause: >-
+      audit-log écrit un log système (`become`) — sans objet sur le poste.
+    correctif: >-
+      audit-log retiré de `dataops.yaml` (conservé sur les playbooks de nœuds).
+    statut: corrige
+
+  - id: L23
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: env
+    symptome: >-
+      `SSL: CERTIFICATE_VERIFY_FAILED` (modules get_url/k8s).
+    cause: >-
+      Le Python d'Ansible (Homebrew) n'utilise pas le CA système.
+    correctif: >-
+      `SSL_CERT_FILE` via `certifi`, résolu en pré-tâche par le bon interpréteur.
+    statut: corrige
+
+  - id: L24
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: harnais
+    symptome: >-
+      Le volet « node » du rôle registry tourne sur localhost.
+    cause: >-
+      `import_role` charge tout le rôle ; le tag ne filtre pas les blocs
+      internes.
+    correctif: >-
+      Rôle scindé `cluster.yaml`/`node.yaml`, importés via `tasks_from`.
+    statut: corrige
+
+  - id: L25
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: code
+    symptome: >-
+      Secret dérivé : « namespaces postgres not found ».
+    cause: >-
+      Les Secrets étaient posés avant que `cluster.yaml` ne crée le namespace.
+    correctif: >-
+      Namespace `postgres` créé en premier dans `platform-cnpg`.
+    statut: corrige
+
+  - id: L26
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: code
+    symptome: >-
+      build : « dict has no attribute 'clone_subdir' ».
+    cause: >-
+      Le ternaire Jinja évalue les deux branches (image locale sans
+      `clone_subdir`).
+    correctif: >-
+      `default('')` sur les attributs optionnels.
+    statut: corrige
+
+  - id: L27
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: env
+    symptome: >-
+      build : « Dockerfile no such file or directory » sur le nœud.
+    cause: >-
+      Banc Lima `mounts: []` → les sources du dépôt sont absentes de la VM.
+    correctif: >-
+      Copier contextes/Dockerfiles sur le nœud avant le build.
+    statut: corrige
+
+  - id: L28
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: env
+    symptome: >-
+      build `marquez-web` OOM-killed (rc 137).
+    cause: >-
+      webpack/npm sature la VM 5 GiB (déjà k8s + Ceph + CNPG).
+    correctif: >-
+      `VM_MEMORY` 5 → 8 GiB (dimensionner pour le pic, pas le repos).
+    statut: corrige
+
+  - id: L29
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: env
+    symptome: >-
+      Operator CNPG en CrashLoop après un reboot.
+    cause: >-
+      reboot de `cp1` → Cilium pas reconvergé → ClusterIP du plugin injoignable.
+    correctif: >-
+      Artefact de reboot (cf. réserve « restore non fidèle ») : redémarrer
+      l'operator. Pas un défaut du livrable.
+    statut: caduc
+
+  - id: L30
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: code
+    symptome: >-
+      Pods Dagster en ImagePullBackOff sur `registry:80` (HTTP/HTTPS).
+    cause: >-
+      containerd des workers pas rechargé après pose de la config
+      insecure-registry.
+    correctif: >-
+      Restart containerd sur les nœuds (handler à fiabiliser).
+    statut: corrige
+
+  - id: L31
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: harnais
+    symptome: >-
+      Preuve de lineage : l'image émetteur est absente du registry.
+    cause: >-
+      L'émetteur jetable n'était pas dans `build_images` (hors prod, ADR 0022).
+    correctif: >-
+      `build_emitter_image=true` au banc (câblé conditionnellement).
+    statut: corrige
+
+  - id: L32
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: harnais
+    symptome: >-
+      « aucun job ingéré (1 → 1) » alors que le lineage est présent.
+    cause: >-
+      Le prédicat exigeait un delta ; le run est idempotent (namespace conservé).
+    correctif: >-
+      `classify_marquez_ingest` teste la présence (`after >= 1`) + bats à jour.
+    statut: corrige
+
+  - id: L33
+    campagne: 'portage DataOps Ansible — banc Lima (#173)'
+    portee: harnais
+    symptome: >-
+      « RGW datalake pas Ready » alors que les 3 pods sont 2/2 Running.
+    cause: >-
+      Le gate datalake testait `readyReplicas == 1`, or le CephObjectStore a
+      `instances: 3`.
+    correctif: >-
+      Gate `>= 1` (au moins une instance up).
+    statut: corrige
+
+  # ── storageClass + S3 / monitoring (#158/#186) — L34–L40 ──────────────────
+  - id: L34
+    campagne: 'storageClass + S3 — banc Lima (#158/#186)'
+    portee: code
+    symptome: >-
+      CRDs monitoring rejetées par le module k8s.
+    cause: >-
+      L'enum « - = » non quoté est rejeté par le SafeLoader PyYAML (tag
+      `yaml.org,2002:value`) ; kubectl (Go) les charge.
+    correctif: >-
+      Appliquer ces CRDs via `kubectl apply --server-side`, pas le module.
+    statut: corrige
+
+  - id: L35
+    campagne: 'storageClass + S3 — banc Lima (#158/#186)'
+    portee: code
+    symptome: >-
+      « no matches for cert-manager.io/v1.Certificate ».
+    cause: >-
+      Le manifeste monitoring contient des `Certificate`/`Issuer` → cert-manager
+      doit exister avant.
+    correctif: >-
+      `platform-cert-manager` appliqué AVANT monitoring (dans monitoring.yaml).
+    statut: corrige
+
+  - id: L36
+    campagne: 'storageClass + S3 — banc Lima (#158/#186)'
+    portee: code
+    symptome: >-
+      `PrometheusRule` rejetés en masse (HTTP 500 du webhook
+      `prometheusrulemutate`).
+    cause: >-
+      Appliqués avant que l'operator (porteur du webhook d'admission) soit Ready.
+    correctif: >-
+      Deux passes : stack sauf `PrometheusRule` → attente operator Ready →
+      `PrometheusRule`.
+    statut: corrige
+
+  - id: L37
+    campagne: 'storageClass + S3 — banc Lima (#158/#186)'
+    portee: code
+    symptome: >-
+      cert-manager en CrashLoop au démarrage (cause racine de L36).
+    cause: >-
+      Il tourne avec `--enable-gateway-api` mais les CRDs Gateway API sont
+      absentes.
+    correctif: >-
+      Le rôle `platform-cert-manager` pose lui-même les CRDs Gateway API
+      (v1.4.1).
+    statut: corrige
+
+  - id: L38
+    campagne: 'storageClass + S3 — banc Lima (#158/#186)'
+    portee: code
+    symptome: >-
+      Loki en CrashLoop `NoSuchBucket` (compactor), profil RGW uniquement.
+    cause: >-
+      L'OBC Rook n'expose qu'UN bucket auto-nommé + des creds restreints à ce
+      bucket → les buckets nommés `loki-chunks`/`loki-ruler` sont impossibles. Le
+      banc léger (creds admin SeaweedFS) masquait la contrainte.
+    correctif: >-
+      En RGW : résoudre le bucket de l'OBC et l'employer pour chunks ET ruler ;
+      init-buckets skippé.
+    statut: corrige
+
+  - id: L39
+    campagne: 'storageClass + S3 — banc Lima (#158/#186)'
+    portee: harnais
+    symptome: >-
+      Job init-buckets « prêt » alors que rien n'est créé (profil RGW).
+    cause: >-
+      Gate faux : le `grep make_bucket` matchait aussi « make_bucket failed ».
+    correctif: >-
+      Script réécrit (`set -eu`) : échec franc si le bucket n'est ni créé ni
+      déjà présent.
+    statut: corrige
+
+  - id: L40
+    campagne: 'storageClass + S3 — banc Lima (#158/#186)'
+    portee: code
+    symptome: >-
+      `platform-prereqs` meurt (EXIT 1) sur banc léger (monitoring sans dataops,
+      donc sans namespace registry).
+    cause: >-
+      `set -e` + `reg_ip=$(kubectl get svc registry …)` : sans le namespace
+      `registry`, kubectl sort en 1 → l'assignation tue le script avant le garde
+      `[ -z reg_ip ]`. Masqué jusque-là car les runs montaient toujours le
+      registry via `dataops`.
+    correctif: >-
+      `… || true` sur l'assignation (skip propre).
+    statut: corrige
+
   - id: L41
     campagne: 'topologies — DataOps sans Ceph (#158/#186 suite)'
     portee: code
