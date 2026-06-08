@@ -355,3 +355,46 @@ Drifts de cette campagne (détail :
 **L42/L43** (single-node : gate Dagster lent, éviction CNPG disque — _caducs_,
 topologie abandonnée ADR 0040), **L44** (dépendance à `WITH_CEPH` en variable
 d'env — _ouvert_ : dataops/monitoring devraient détecter le profil).
+
+## Métrologie du banc — run from-scratch (#216/#217/#219, 2026-06-08)
+
+> **✅ Socle validé from-scratch en mode Ceph (2026-06-08), branche
+> `feat/banc-metrologie-cache`.** Première preuve consignée **automatiquement**
+> dans [`runs-history.yaml`](runs-history.yaml) par `run-phases.sh` (plus de
+> saisie manuelle). Log brut :
+> [`runs/2026-06-08-banc-metrologie-e2e.log`](runs/2026-06-08-banc-metrologie-e2e.log).
+
+`NO_CACHE=1 WITH_CEPH=1 run-phases.sh all` — up → bootstrap → ceph → sc, monté
+de zéro (preuve ADR 0034) :
+
+| Phase     | Durée      | Gate                                          |
+| --------- | ---------- | --------------------------------------------- |
+| up        | 2m45s      | disques `vd*` présents sur les 3 VMs          |
+| bootstrap | 6m39s      | 3 nœuds Ready (Cilium 1.19 + WireGuard)       |
+| ceph      | 3m09s      | **9 OSD up, HEALTH_OK**                       |
+| sc        | 0m06s      | PVC test Bound (`rook-ceph-block-replicated`) |
+| **total** | **12m39s** | entrée `runs-history.yaml` appendée           |
+
+- **#219 cache du socle** prouvé : un second `WITH_CEPH=1 run-phases.sh all`
+  (socle inchangé, VMs up) a **sauté up+bootstrap+ceph+sc** et rendu la main en
+  **~1 s** (clé `socle:ceph:…` inchangée). `NO_CACHE=1` force le rebuild
+  (preuve).
+- **#217 métriques** échantillonnées depuis Prometheus (fenêtre 900 s, profil
+  Ceph) : **CPU 272 cœur·s, RAM pic 7606 MiB, moy 7489 MiB**.
+
+Drifts de cette campagne :
+
+- **L44 reproduit** (déjà _ouvert_) : la phase `monitoring` lancée **sans
+  propager `WITH_CEPH=1`** a choisi le profil léger (SeaweedFS/local-path) sur
+  un cluster dont le `default storageClass` est Ceph → PVC `local-path`
+  **Pending** (`unbound immediate PersistentVolumeClaims`). Confirme l'utilité
+  de l'auto-détection de profil que L44 réclame. Pas un bug du livrable — un
+  oubli d'invocation, exactement le piège que L44 documente.
+- **L47** (harnais, _corrigé_) : `metro_sample_prometheus` interrogeait
+  Prometheus via `kubectl exec` dans son pod **distroless** (ni `wget` ni `sh` —
+  même piège que le drift #14 etcd) → métriques toujours `?`. Et ses logs
+  partaient sur **stdout**, capturé dans le bloc YAML → **pollution ANSI du
+  `runs-history.yaml`**. Correctif : requête via pod **busybox éphémère**
+  ciblant le Service `prometheus-operated` ; tous les logs routés sur
+  **stderr**. Couvert par deux tests bats anti-régression (stdout sans ANSI,
+  Prometheus absent → stdout vide).

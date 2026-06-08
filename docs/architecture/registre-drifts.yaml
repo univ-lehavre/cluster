@@ -625,3 +625,24 @@ drifts:
       (couvre toutes les invocations du banc). Validé : warnings disparus, run vert
       sous inject_facts_as_vars=False.
     statut: corrige
+
+  - id: L47
+    campagne: 'métrologie du banc (#216/#217/#219)'
+    portee: harnais
+    symptome: >-
+      Échantillonnage Prometheus (#217) toujours `?`, ET le `runs-history.yaml`
+      pollué par des lignes ANSI (codes couleur) qui le rendaient invalide.
+    cause: >-
+      Double piège. (1) `metro_sample_prometheus` interrogeait Prometheus via
+      `kubectl exec` dans son pod, mais l'image est DISTROLESS (ni wget ni sh —
+      même piège que le drift #14 etcd) → la requête échouait silencieusement.
+      (2) La fonction écrit le bloc YAML sur stdout (capturé par l'appelant), or
+      ses `log`/`warn` partaient AUSSI sur stdout → ils étaient écrits dans le
+      fichier.
+    correctif: >-
+      Requête via un pod busybox éphémère ciblant le Service `prometheus-operated`
+      (pattern de `marquez_job_count`) ; tous les `log`/`warn` routés sur stderr
+      (`>&2`). Deux tests bats anti-régression (stdout sans ANSI ; Prometheus
+      absent → stdout vide). Métriques réelles obtenues (CPU 272 cœur·s, RAM pic
+      7606 MiB).
+    statut: corrige
