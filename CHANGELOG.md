@@ -14,6 +14,14 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.29.3](https://github.com/univ-lehavre/cluster/compare/v2.29.2...v2.29.3) (2026-06-08)
+
+
+### Documentation
+
+* **matrice:** retire la couverture Vagrant (déprécié, ADR 0038) ([2c32262](https://github.com/univ-lehavre/cluster/commit/2c322625f95a63b54a58d10de856a2223d5e762f))
+* **matrice:** retire la couverture Vagrant (déprécié, ADR 0038) ([7e94879](https://github.com/univ-lehavre/cluster/commit/7e94879025434e85eeae24a8c727090acf800523))
+
 ## [2.29.2](https://github.com/univ-lehavre/cluster/compare/v2.29.1...v2.29.2) (2026-06-08)
 
 
