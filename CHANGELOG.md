@@ -14,6 +14,20 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.29.2](https://github.com/univ-lehavre/cluster/compare/v2.29.1...v2.29.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **release:** auto-merge des releases en merge commit (ADR 0037) ([f8eb93d](https://github.com/univ-lehavre/cluster/commit/f8eb93d024b8121f19ca4002d695fa897dbeed0c))
+* **release:** auto-merge en merge commit (squash désactivé, ADR 0037) ([e43b343](https://github.com/univ-lehavre/cluster/commit/e43b343766cdaa5da283783246c548c7fc0559e4))
+
+
+### Documentation
+
+* **matrice:** colonne type (unit/intég/chaos) + synthèse par chaîne fonctionnelle ([f1d6218](https://github.com/univ-lehavre/cluster/commit/f1d621890cc0cf2b342c50db3e4e403879452430))
+* **matrice:** distinguer tests unitaires vs intégration de chaîne ([f8d8396](https://github.com/univ-lehavre/cluster/commit/f8d839627f51f792ba3333f8fb8682328529917f))
+
 ## [2.29.1](https://github.com/univ-lehavre/cluster/compare/v2.29.0...v2.29.1) (2026-06-08)
 
 
