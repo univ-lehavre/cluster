@@ -9,7 +9,7 @@ metadata:
   namespace: {{ cnpg_namespace }}
 spec:
   configuration:
-    destinationPath: s3://{{ cnpg_s3_bucket }}/
+    destinationPath: s3://{{ s3b_bucket_resolved | default(cnpg_s3_bucket) }}/
     endpointURL: {{ cnpg_s3_endpoint }}
     s3Credentials:
       accessKeyId:

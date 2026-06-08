@@ -1,0 +1,40 @@
+---
+# Valeurs par défaut du rôle platform-s3-bucket (ADR 0036).
+# Brique réutilisable : provisionne un (ou des) bucket(s) S3 + un Secret de creds
+# standardisé, selon le BACKING de la topologie. MÊME contrat pour tout
+# consommateur (Loki, CNPG/Barman…) — seul le backing change :
+#   - 'rgw' (prod / banc Ceph) : bucket(s) + creds via OBC Rook (dérivés) ;
+#   - 'seaweedfs' (banc léger)  : SeaweedFS, creds de test statiques, bucket via Job mb.
+#
+# Le consommateur DOIT fournir : s3b_name (préfixe ressources), s3b_namespace
+# (où poser le Secret), s3b_secret_name (Secret de creds produit), s3b_buckets
+# (liste). Les autres ont des défauts.
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+# Backing : 'rgw' (défaut prod) ou 'seaweedfs' (banc léger).
+s3b_backing: rgw
+
+# Endpoint S3 actif (défaut RGW prod ; banc léger surcharge vers SeaweedFS).
+s3b_endpoint: http://rook-ceph-rgw-datalake.rook-ceph:80
+
+# Contrat consommateur (à fournir) — valeurs neutres par défaut.
+s3b_name: s3bucket # préfixe des ressources (OBC, Job)
+s3b_namespace: default # namespace où poser le Secret de creds
+s3b_secret_name: s3-creds # Secret produit (clés ACCESS_KEY_ID / ACCESS_SECRET_KEY)
+s3b_buckets: [] # liste des buckets à garantir
+
+# Backing 'rgw' : OBC Rook (provisionne bucket + Secret de creds).
+s3b_obc_namespace: rook-ceph
+s3b_obc_storage_class: rook-ceph-datalake
+
+# Backing 'seaweedfs' : creds de test statiques (déploiement SeaweedFS, ADR 0036).
+s3b_access_key: seaweedadmin
+s3b_secret_key: seaweedadmin-secret
+
+# Image aws-cli pour le Job mb (épinglée, ADR 0006) — alignée sur Loki init-buckets.
+s3b_awscli_image: docker.io/amazon/aws-cli:2.31.21@sha256:ae7057ee66673816887b5964ea5e34663ec1c22d5179b234a4118dbc57dd8911
+
+# Gate Job mb.
+s3b_job_retries: 20
+s3b_job_delay: 6

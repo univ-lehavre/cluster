@@ -1,0 +1,108 @@
+# code: language=ansible
+# Rôle platform-s3-bucket (ADR 0036) — provisionne le backing S3 d'un consommateur
+# (bucket(s) + Secret de creds `{{ s3b_secret_name }}` dans `{{ s3b_namespace }}`),
+# selon `s3b_backing`. Brique factorisée depuis platform-loki / platform-cnpg.
+#
+# Sorties (faits exportés au play appelant) :
+#   - s3b_bucket_resolved : nom RÉEL du bucket principal (auto-nommé en RGW via
+#     l'OBC ; = premier de s3b_buckets en SeaweedFS). Le consommateur l'injecte
+#     dans sa config (ex. bucketnames Loki, destinationPath CNPG).
+#   - le Secret s3b_secret_name (clés ACCESS_KEY_ID / ACCESS_SECRET_KEY).
+
+# ── Backing RGW : OBC Rook → creds dérivés → bucket auto-nommé ────────────────
+- name: Provision the RGW backing (backing=rgw)
+  when: s3b_backing == 'rgw'
+  block:
+    - name: Claim a bucket from Ceph RGW (ObjectBucketClaim {{ s3b_name }})
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: objectbucket.io/v1alpha1
+          kind: ObjectBucketClaim
+          metadata:
+            name: '{{ s3b_name }}'
+            namespace: '{{ s3b_obc_namespace }}'
+          spec:
+            generateBucketName: '{{ s3b_name }}'
+            storageClassName: '{{ s3b_obc_storage_class }}'
+
+    - name: Wait for the OBC credentials Secret
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: '{{ s3b_name }}'
+        namespace: '{{ s3b_obc_namespace }}'
+      register: s3b_obc_secret
+      until: >-
+        s3b_obc_secret.resources | length > 0
+        and s3b_obc_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined
+      retries: 30
+      delay: 5
+
+    - name: Read the OBC ConfigMap (real bucket name)
+      kubernetes.core.k8s_info:
+        kind: ConfigMap
+        name: '{{ s3b_name }}'
+        namespace: '{{ s3b_obc_namespace }}'
+      register: s3b_obc_cm
+      until: >-
+        s3b_obc_cm.resources | length > 0
+        and s3b_obc_cm.resources[0].data.BUCKET_NAME is defined
+      retries: 30
+      delay: 5
+
+    - name: Resolve the real bucket name (RGW auto-named)
+      ansible.builtin.set_fact:
+        s3b_bucket_resolved: '{{ s3b_obc_cm.resources[0].data.BUCKET_NAME }}'
+
+    - name: Apply the S3 credentials Secret (from OBC)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: '{{ s3b_secret_name }}'
+            namespace: '{{ s3b_namespace }}'
+          type: Opaque
+          data:
+            ACCESS_KEY_ID: '{{ s3b_obc_secret.resources[0].data.AWS_ACCESS_KEY_ID }}'
+            ACCESS_SECRET_KEY: '{{ s3b_obc_secret.resources[0].data.AWS_SECRET_ACCESS_KEY }}'
+
+# ── Backing SeaweedFS : creds statiques + Job mb (l'OBC Rook n'existe pas) ────
+- name: Provision the SeaweedFS backing (backing=seaweedfs)
+  when: s3b_backing == 'seaweedfs'
+  block:
+    - name: Apply the S3 credentials Secret (SeaweedFS static creds)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: '{{ s3b_secret_name }}'
+            namespace: '{{ s3b_namespace }}'
+          type: Opaque
+          stringData:
+            ACCESS_KEY_ID: '{{ s3b_access_key }}'
+            ACCESS_SECRET_KEY: '{{ s3b_secret_key }}'
+
+    - name: Create the S3 bucket(s) on SeaweedFS (mb Job)
+      kubernetes.core.k8s:
+        state: present
+        template: s3-init-buckets.yaml.j2
+
+    - name: Wait for the bucket Job to complete
+      kubernetes.core.k8s_info:
+        kind: Job
+        name: '{{ s3b_name }}-init-buckets'
+        namespace: '{{ s3b_namespace }}'
+      register: s3b_job
+      until: >-
+        s3b_job.resources | length > 0
+        and (s3b_job.resources[0].status.succeeded | default(0)) >= 1
+      retries: '{{ s3b_job_retries }}'
+      delay: '{{ s3b_job_delay }}'
+
+    - name: Resolve bucket name (SeaweedFS = first requested bucket)
+      ansible.builtin.set_fact:
+        s3b_bucket_resolved: '{{ s3b_buckets[0] }}'

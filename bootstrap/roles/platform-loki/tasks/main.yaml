@@ -19,86 +19,48 @@
           metadata:
             name: '{{ loki_namespace }}'
 
-    # ── Backing RGW : OBC → creds dérivés ────────────────────────────────────
-    - name: Provision the RGW backing (backing=rgw)
-      when: loki_s3_backing == 'rgw'
-      block:
-        - name: Claim Loki buckets from Ceph RGW (ObjectBucketClaim)
-          kubernetes.core.k8s:
-            state: present
-            definition:
-              apiVersion: objectbucket.io/v1alpha1
-              kind: ObjectBucketClaim
-              metadata:
-                name: '{{ loki_obc_name }}'
-                namespace: '{{ loki_obc_namespace }}'
-              spec:
-                generateBucketName: loki
-                storageClassName: '{{ loki_obc_storage_class }}'
+    # ── Backing S3 (bucket + Secret creds) via le rôle platform-s3-bucket ─────
+    # Factorisé (ADR 0036). Le rôle crée le(s) bucket(s) + le Secret
+    # `loki-s3-creds`, et résout le nom réel du bucket dans `s3b_bucket_resolved`
+    # (en RGW : bucket OBC unique auto-nommé, drift L38 ; en SeaweedFS : loki-chunks).
+    - name: Provision the S3 backing (bucket + creds Secret)
+      ansible.builtin.include_role:
+        name: platform-s3-bucket
+      vars:
+        s3b_backing: '{{ loki_s3_backing }}'
+        s3b_endpoint: '{{ loki_s3_endpoint }}'
+        s3b_name: '{{ loki_obc_name }}'
+        s3b_namespace: '{{ loki_namespace }}'
+        s3b_secret_name: loki-s3-creds
+        s3b_buckets: '{{ loki_buckets }}'
+        s3b_obc_namespace: '{{ loki_obc_namespace }}'
+        s3b_obc_storage_class: '{{ loki_obc_storage_class }}'
+        s3b_access_key: '{{ loki_s3_access_key }}'
+        s3b_secret_key: '{{ loki_s3_secret_key }}'
 
-        - name: Wait for the OBC credentials Secret
-          kubernetes.core.k8s_info:
-            kind: Secret
-            name: '{{ loki_obc_name }}'
-            namespace: '{{ loki_obc_namespace }}'
-          register: loki_obc_secret
-          until: >-
-            loki_obc_secret.resources | length > 0
-            and loki_obc_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined
-          retries: 30
-          delay: 5
+    # Loki met ses creds EN CLAIR dans son ConfigMap (pas un Secret monté) → on
+    # relit le Secret produit par le rôle pour les décoder.
+    - name: Read the Loki S3 creds Secret (produit par platform-s3-bucket)
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: loki-s3-creds
+        namespace: '{{ loki_namespace }}'
+      register: loki_creds_secret
 
-        - name: Resolve S3 credentials from the OBC Secret
-          ansible.builtin.set_fact:
-            loki_s3_access_key: '{{ loki_obc_secret.resources[0].data.AWS_ACCESS_KEY_ID | b64decode }}'
-            loki_s3_secret_key: '{{ loki_obc_secret.resources[0].data.AWS_SECRET_ACCESS_KEY | b64decode }}'
-
-        # L'OBC Rook fournit UN bucket auto-nommé (BUCKET_NAME du ConfigMap
-        # homonyme) et des creds restreints à ce seul bucket → impossible d'en
-        # créer d'autres (drift L38). On l'emploie donc pour chunks ET ruler.
-        - name: Read the OBC ConfigMap (bucket name)
-          kubernetes.core.k8s_info:
-            kind: ConfigMap
-            name: '{{ loki_obc_name }}'
-            namespace: '{{ loki_obc_namespace }}'
-          register: loki_obc_cm
-          until: >-
-            loki_obc_cm.resources | length > 0
-            and loki_obc_cm.resources[0].data.BUCKET_NAME is defined
-          retries: 30
-          delay: 5
-
-        - name: Use the single OBC bucket for chunks and ruler (drift L38)
-          ansible.builtin.set_fact:
-            loki_bucket_chunks: '{{ loki_obc_cm.resources[0].data.BUCKET_NAME }}'
-            loki_bucket_ruler: '{{ loki_obc_cm.resources[0].data.BUCKET_NAME }}'
+    - name: Resolve Loki S3 creds + bucket (en clair pour le ConfigMap)
+      ansible.builtin.set_fact:
+        loki_s3_access_key: '{{ loki_creds_secret.resources[0].data.ACCESS_KEY_ID | b64decode }}'
+        loki_s3_secret_key: '{{ loki_creds_secret.resources[0].data.ACCESS_SECRET_KEY | b64decode }}'
+        # Un seul bucket résolu sert chunks ET ruler (drift L38 en RGW ; en
+        # SeaweedFS, loki-chunks/loki-ruler existent mais on unifie sur le résolu).
+        loki_bucket_chunks: '{{ s3b_bucket_resolved }}'
+        loki_bucket_ruler: '{{ s3b_bucket_resolved }}'
 
     # ── ConfigMap Loki templé (endpoint + creds + bucketnames du backing actif) ─
     - name: Apply Loki ConfigMap (S3 endpoint {{ loki_s3_endpoint }})
       kubernetes.core.k8s:
         state: present
         template: loki-config-s3.yaml.j2
-
-    # ── Buckets : init-buckets UNIQUEMENT en SeaweedFS (creds admin). En RGW,
-    #    l'OBC a déjà créé le bucket et les creds ne peuvent pas en créer d'autres.
-    - name: Create the Loki S3 buckets (init-buckets Job, SeaweedFS uniquement)
-      when: loki_s3_backing != 'rgw'
-      kubernetes.core.k8s:
-        state: present
-        template: loki-init-buckets.yaml.j2
-
-    - name: Wait for the init-buckets Job to complete
-      when: loki_s3_backing != 'rgw'
-      kubernetes.core.k8s_info:
-        kind: Job
-        name: loki-init-buckets
-        namespace: '{{ loki_namespace }}'
-      register: loki_buckets_job
-      until: >-
-        loki_buckets_job.resources | length > 0
-        and (loki_buckets_job.resources[0].status.succeeded | default(0)) >= 1
-      retries: 20
-      delay: 6
 
     # ── Manifeste Loki SANS son ConfigMap `loki` (remplacé ci-dessus) ────────
     - name: Load the Loki manifest (storageClass + sans le ConfigMap loki)
