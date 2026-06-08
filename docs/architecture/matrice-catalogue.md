@@ -290,24 +290,26 @@ vérité : [`test/lima/RESULTS.md`](../../test/lima/RESULTS.md) et
 [`test/RESULTS.md`](../../test/RESULTS.md).
 
 Toutes les lignes : topologie `multi-node-3` (1 CP + 2 workers), arch `arm64`,
-terrain `local`. La vraie variable est le **profil de briques** et ses
-dimensions fines. Colonne **Tuple** = notation
+terrain `local`, provisioner **Lima** (seul banc local,
+[ADR 0038](../decisions/0038-lima-seul-banc-local.md)). La vraie variable est le
+**profil de briques** et ses dimensions fines. Colonne **Tuple** = notation
 [ADR 0039](../decisions/0039-nomenclature-axes-catalogue.md)
 (`arch/terrain/topologie/profil`) :
 
-| Tuple                              | Provis. | storageClass | backing S3 | Briques validées                                                        | Run      |
-| ---------------------------------- | ------- | ------------ | ---------- | ----------------------------------------------------------------------- | -------- |
-| `arm64/local/multi-node-3/base`    | Lima    | local-path   | —          | k8s 1.34, Cilium+WireGuard, local-path                                  | 04/06    |
-| `arm64/local/multi-node-3/obs`     | Lima    | local-path   | SeaweedFS  | + Prometheus/Grafana/**Loki S3 réel** (#158/#186)                       | 07/06    |
-| `arm64/local/multi-node-3/store`   | Lima    | rook-ceph    | RGW (OBC)  | + Rook-Ceph (HEALTH_OK), SC, RGW datalake                               | 04→07/06 |
-| `arm64/local/multi-node-3/dataops` | Lima    | rook-ceph    | RGW (OBC)  | + **DataOps** : CNPG/PG18 + Barman→RGW, Dagster, Marquez lineage (#173) | 07/06    |
-| `arm64/local/multi-node-3/obs`     | Lima    | rook-ceph    | RGW (OBC)  | + Prometheus/Grafana/**Loki S3 RGW** (#158/#186)                        | 07/06    |
-| `arm64/local/multi-node-3/store`   | Vagrant | rook-ceph    | RGW        | k8s 1.34, Cilium ; Rook-Ceph + SC + datalake (déprécié, ADR 0038)       | 28→31/05 |
+| Tuple                              | storageClass | backing S3 | Briques validées                                                        | Run      |
+| ---------------------------------- | ------------ | ---------- | ----------------------------------------------------------------------- | -------- |
+| `arm64/local/multi-node-3/base`    | local-path   | —          | k8s 1.34, Cilium+WireGuard, local-path                                  | 04/06    |
+| `arm64/local/multi-node-3/obs`     | local-path   | SeaweedFS  | + Prometheus/Grafana/**Loki S3 réel** (#158/#186)                       | 07/06    |
+| `arm64/local/multi-node-3/store`   | rook-ceph    | RGW (OBC)  | + Rook-Ceph (HEALTH_OK), SC, RGW datalake                               | 04→07/06 |
+| `arm64/local/multi-node-3/dataops` | rook-ceph    | RGW (OBC)  | + **DataOps** : CNPG/PG18 + Barman→RGW, Dagster, Marquez lineage (#173) | 07/06    |
+| `arm64/local/multi-node-3/obs`     | rook-ceph    | RGW (OBC)  | + Prometheus/Grafana/**Loki S3 RGW** (#158/#186)                        | 07/06    |
 
-> Terrain = **local** pour toutes ces lignes (seul terrain monté à ce jour). Les
-> dimensions fines **storageClass** et **backing S3** sont validées sur **leurs
-> deux valeurs** (léger local-path/SeaweedFS **et** Ceph rook-ceph/RGW) — c'est
-> l'apport de #158/#186.
+> Toutes les lignes sont sur **Lima** (le banc Vagrant historique 28→31/05 n'est
+> plus listé — déprécié, ADR 0038 ; sa trace reste dans
+> [`test/RESULTS.md`](../../test/RESULTS.md)). Les dimensions fines
+> **storageClass** et **backing S3** sont validées sur **leurs deux valeurs**
+> (léger local-path/SeaweedFS **et** Ceph rook-ceph/RGW) — c'est l'apport de
+> #158/#186.
 
 ### Trous de la matrice (jamais buildés)
 
