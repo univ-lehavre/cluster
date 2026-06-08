@@ -22,6 +22,13 @@
 LIMA_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "${LIMA_DIR}/../.." && pwd)
 
+# Le banc lance ansible-playbook depuis un CWD ≠ bootstrap/ avec le playbook en
+# chemin absolu → Ansible ne trouverait PAS bootstrap/ansible.cfg (cherché dans
+# le CWD), donc roles_path / interpreter_python / inject_facts_as_vars seraient
+# ignorés (drift L46 : warnings interpréteur + config non appliquée). On force
+# donc le chargement de la config du dépôt pour TOUTES les invocations du banc.
+export ANSIBLE_CONFIG="${REPO}/bootstrap/ansible.cfg"
+
 # ── Helpers d'affichage (repris de run-phases.sh) ────────────────────────────
 log() { printf '\n\033[1;36m[%s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; }
 ok() { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
