@@ -7,9 +7,9 @@
       # Même logique de surcharge que dans k8s-install/k8s-initialization :
       # sur le banc multi-node, `control_plane_ip` est posée à l'IP du
       # réseau privé inter-VM (10.0.0.11). En prod, on tombe sur
-      # `ansible_default_ipv4.address` du control plane.
+      # `ansible_facts.default_ipv4.address` du control plane.
       ansible.builtin.wait_for:
-        host: "{{ control_plane_ip | default(hostvars[groups['control'][0]].ansible_default_ipv4.address, true) }}"
+        host: "{{ control_plane_ip | default(hostvars[groups['control'][0]].ansible_facts.default_ipv4.address, true) }}"
         port: '{{ control_plane_port }}'
         timeout: 30
 
@@ -18,5 +18,5 @@
       args:
         # Home de l'utilisateur connecté (≠ /home/debian codé en dur) : existe sur
         # les nœuds réels / Vagrant (debian) ET sur le banc Lima (/home/lima.guest).
-        chdir: '{{ ansible_env.HOME }}'
+        chdir: '{{ ansible_facts.env.HOME }}'
         creates: node-joined.log

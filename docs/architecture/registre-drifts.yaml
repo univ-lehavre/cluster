@@ -86,3 +86,39 @@ drifts:
       refuser proprement si incohérent. Contournement actuel : passer WITH_CEPH=1
       à toutes les phases d'un banc Ceph.
     statut: ouvert
+
+  - id: L45
+    campagne: 'migration ansible_facts (échéance ansible-core 2.24)'
+    portee: code
+    symptome: >-
+      Au run, `set_fact all_hostnames` échoue : « object of type 'HostVarsVars'
+      has no attribute 'ansible_facts.hostname' » (bootstrap k8s-pre-install).
+    cause: >-
+      La migration ansible_<fact> → ansible_facts.<fact> a transformé
+      `map('extract', hostvars, 'ansible_hostname')` en
+      `map('extract', hostvars, 'ansible_facts.hostname')` : `extract` attend une
+      CLÉ (string plate), pas un chemin pointé — `ansible_facts.hostname` n'existe
+      pas comme clé. (Le lint ne le voit pas ; seul le run e2e l'expose, ADR 0034.)
+    correctif: >-
+      Passer une LISTE de clés pour la descente :
+      `map('extract', hostvars, ['ansible_facts', 'hostname'])`. Validé e2e
+      (bootstrap vert).
+    statut: corrige
+
+  - id: L46
+    campagne: 'migration ansible_facts (échéance ansible-core 2.24)'
+    portee: harnais
+    symptome: >-
+      Warnings « discovered Python interpreter could change » persistants malgré
+      `interpreter_python = auto_silent` dans bootstrap/ansible.cfg ; et
+      `inject_facts_as_vars = False` non appliqué au banc.
+    cause: >-
+      Le banc lance `ansible-playbook` depuis un CWD ≠ bootstrap/ avec le playbook
+      en chemin absolu → Ansible cherche ansible.cfg dans le CWD et ne trouve PAS
+      bootstrap/ansible.cfg. La config du dépôt n'était donc jamais chargée par le
+      banc (roles_path marchait par chance).
+    correctif: >-
+      Exporter `ANSIBLE_CONFIG="${REPO}/bootstrap/ansible.cfg"` dans test/lima/lib.sh
+      (couvre toutes les invocations du banc). Validé : warnings disparus, run vert
+      sous inject_facts_as_vars=False.
+    statut: corrige

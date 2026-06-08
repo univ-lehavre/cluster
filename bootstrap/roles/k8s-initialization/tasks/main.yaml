@@ -77,14 +77,14 @@
       args:
         creates: /etc/kubernetes/admin.conf
 
-    # Home de l'utilisateur connecté via `ansible_env.HOME` (et NON
+    # Home de l'utilisateur connecté via `ansible_facts.env.HOME` (et NON
     # `/home/{{ ansible_user }}`) : `debian` → /home/debian (nœuds réels / banc
     # Vagrant), mais le banc Lima crée l'utilisateur `lima` avec un home
-    # /home/lima.guest (≠ /home/lima). `ansible_env.HOME` résout le vrai home
+    # /home/lima.guest (≠ /home/lima). `ansible_facts.env.HOME` résout le vrai home
     # dans les deux cas — pas de chemin codé en dur.
     - name: Create the .kube directory for the connecting user
       ansible.builtin.file:
-        path: '{{ ansible_env.HOME }}/.kube'
+        path: '{{ ansible_facts.env.HOME }}/.kube'
         state: directory
         mode: '0755'
 
@@ -94,7 +94,7 @@
       ansible.builtin.copy:
         src: /etc/kubernetes/admin.conf
         remote_src: true
-        dest: '{{ ansible_env.HOME }}/.kube/config'
+        dest: '{{ ansible_facts.env.HOME }}/.kube/config'
         owner: '{{ ansible_user }}'
         mode: '0600'
 
@@ -114,7 +114,7 @@
         - taint_result.rc != 0
         - "'not found' not in taint_result.stderr"
       args:
-        chdir: '{{ ansible_env.HOME }}'
+        chdir: '{{ ansible_facts.env.HOME }}'
 
     - name: Exclude the control plane from external load balancers
       ansible.builtin.shell: >-
@@ -122,5 +122,5 @@
         node.kubernetes.io/exclude-from-external-load-balancers-
         >> lb-setup.log
       args:
-        chdir: '{{ ansible_env.HOME }}'
+        chdir: '{{ ansible_facts.env.HOME }}'
         creates: lb-setup.log

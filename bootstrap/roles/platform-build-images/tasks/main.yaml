@@ -22,14 +22,14 @@
         state: present
         update_cache: true
         cache_valid_time: 3600
-      when: ansible_architecture == 'aarch64'
+      when: ansible_facts.architecture == 'aarch64'
 
     - name: Enable and start buildkit
       ansible.builtin.systemd_service:
         name: buildkit
         enabled: true
         state: started
-      when: ansible_architecture == 'aarch64'
+      when: ansible_facts.architecture == 'aarch64'
 
     # ── Sources sur le nœud (drift L27 : pas de montage hôte) ────────────────
     - name: Ensure per-image build directories exist
@@ -41,7 +41,7 @@
         - dagster
         - marquez
         - marquez-web
-      when: ansible_architecture == 'aarch64'
+      when: ansible_facts.architecture == 'aarch64'
 
     # Dagster : contexte local (Dockerfile pur Python) copié tel quel sur le nœud.
     - name: Copy Dagster build context to the builder node
@@ -49,7 +49,7 @@
         src: '{{ platform_repo_dir }}/platform/dagster/image/'
         dest: '{{ build_workdir }}/dagster/'
         mode: '0644'
-      when: ansible_architecture == 'aarch64'
+      when: ansible_facts.architecture == 'aarch64'
 
     # Marquez : clone du source upstream SUR le nœud (contexte gradle/web).
     - name: Clone Marquez source at the pinned tag
@@ -59,7 +59,7 @@
         version: '{{ marquez_version }}'
         depth: 1
         single_branch: true
-      when: ansible_architecture == 'aarch64'
+      when: ansible_facts.architecture == 'aarch64'
 
     # Les Dockerfiles Marquez sont VERSIONNÉS dans le dépôt (copies fidèles
     # upstream, ADR 0028) → copiés sur le nœud à côté des contextes de build.
@@ -75,7 +75,7 @@
           dest: '{{ build_workdir }}/marquez-web/Dockerfile'
       loop_control:
         label: '{{ item.dest }}'
-      when: ansible_architecture == 'aarch64'
+      when: ansible_facts.architecture == 'aarch64'
 
     # Émetteur OpenLineage jetable (harnais e2e, ADR 0022) — contexte copié sur
     # le nœud UNIQUEMENT si la preuve lineage du banc est demandée (drift L31).
@@ -85,7 +85,7 @@
         dest: '{{ build_workdir }}/emitter/'
         mode: '0644'
       when:
-        - ansible_architecture == 'aarch64'
+        - ansible_facts.architecture == 'aarch64'
         - build_emitter_image | bool
 
     # ── Build (arm64) ou re-tag (x86) image par image ────────────────────────

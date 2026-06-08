@@ -40,7 +40,7 @@
     - name: IPv4 forwarding is enabled
       ansible.builtin.assert:
         that: output_ipv4_forward.stdout == '1'
-        fail_msg: IPv4 forwarding is not enabled on {{ ansible_hostname }}.
+        fail_msg: IPv4 forwarding is not enabled on {{ ansible_facts.hostname }}.
 
     - name: Install APT dependencies
       ansible.builtin.apt:
@@ -70,10 +70,10 @@
     - name: Add the Docker repository
       ansible.builtin.apt_repository:
         repo: >-
-          deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}
+          deb [arch={{ 'amd64' if ansible_facts.architecture == 'x86_64' else 'arm64' }}
           signed-by=/etc/apt/keyrings/docker.asc]
           https://download.docker.com/linux/debian
-          {{ ansible_distribution_release }} stable
+          {{ ansible_facts.distribution_release }} stable
         state: present
         update_cache: true
 

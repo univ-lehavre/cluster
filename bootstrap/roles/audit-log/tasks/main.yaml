@@ -24,7 +24,7 @@
       "{{ audit_log_playbook | default('unknown') }}" \
       "{{ lookup('env', 'USER') | default('unknown') }}" \
       "{{ lookup('pipe', 'hostname') }}" \
-      "{{ ansible_user_id }}" \
+      "{{ ansible_facts.user_id }}" \
       >> /var/log/cluster-bootstrap.log
   changed_when: false
   args:

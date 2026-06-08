@@ -84,9 +84,9 @@
       # joindre le control plane. Utile sur le banc multi-node où le
       # réseau privé inter-VM (10.0.0.x) doit être préféré au NAT par
       # défaut détecté par Ansible (10.0.2.x). En prod, on laisse la
-      # variable vide et on tombe sur `ansible_default_ipv4.address`.
+      # variable vide et on tombe sur `ansible_facts.default_ipv4.address`.
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: '\s{{ control_plane_endpoint }}$'
-        line: "{{ control_plane_ip | default(hostvars[groups['control'][0]].ansible_default_ipv4.address, true) }} {{ control_plane_endpoint }}"
+        line: "{{ control_plane_ip | default(hostvars[groups['control'][0]].ansible_facts.default_ipv4.address, true) }} {{ control_plane_endpoint }}"
         state: present

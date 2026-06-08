@@ -28,20 +28,20 @@
           - '{{ img.dockerfile }}'
           - '{{ img.build_context }}'
       changed_when: true
-      when: ansible_architecture == 'aarch64'
+      when: ansible_facts.architecture == 'aarch64'
 
     # x86 : pas de build — pull de l'image officielle amd64 + re-tag vers le
     # registry interne (mêmes références que les manifestes).
     - name: 'Pull official amd64 image on x86 — {{ img.name }}'
       ansible.builtin.command: 'nerdctl pull --platform linux/amd64 {{ img.official_image }}'
       changed_when: true
-      when: ansible_architecture == 'x86_64'
+      when: ansible_facts.architecture == 'x86_64'
 
     - name: 'Retag official image to internal registry on x86 — {{ img.name }}'
       ansible.builtin.command: >-
         nerdctl tag {{ img.official_image }} {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
       changed_when: true
-      when: ansible_architecture == 'x86_64'
+      when: ansible_facts.architecture == 'x86_64'
 
     # Push vers le registry interne (les deux arch).
     - name: 'Push to the internal registry — {{ img.name }}'

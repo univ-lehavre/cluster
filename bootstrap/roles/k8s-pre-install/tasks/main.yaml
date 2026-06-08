@@ -3,29 +3,29 @@
 - name: Machines run a supported, homogeneous operating system (Debian 13)
   ansible.builtin.assert:
     that:
-      - ansible_distribution == 'Debian'
-      - ansible_distribution_major_version == '13'
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.distribution_major_version == '13'
     fail_msg: >-
-      The distribution {{ ansible_distribution }}
-      {{ ansible_distribution_version }} on {{ ansible_hostname }} is not
+      The distribution {{ ansible_facts.distribution }}
+      {{ ansible_facts.distribution_version }} on {{ ansible_facts.hostname }} is not
       supported (Debian 13 / Trixie required).
 
 - name: Machine characteristics suit Kubernetes
   block:
     - name: Each machine has enough RAM
       ansible.builtin.assert:
-        that: ansible_memory_mb.real.total >= 4096
+        that: ansible_facts.memory_mb.real.total >= 4096
         fail_msg: >-
-          {{ ansible_hostname }} has insufficient RAM: only
-          {{ ansible_memory_mb.real.total }} MB (>= 4096 required; plan ~4-5 GB
+          {{ ansible_facts.hostname }} has insufficient RAM: only
+          {{ ansible_facts.memory_mb.real.total }} MB (>= 4096 required; plan ~4-5 GB
           of RAM per OSD on storage nodes).
 
     - name: Each machine has at least 2 CPUs
       ansible.builtin.assert:
-        that: ansible_processor_vcpus >= 2
+        that: ansible_facts.processor_vcpus >= 2
         fail_msg: >-
-          {{ ansible_hostname }} has insufficient CPU: only
-          {{ ansible_processor_vcpus }} detected.
+          {{ ansible_facts.hostname }} has insufficient CPU: only
+          {{ ansible_facts.processor_vcpus }} detected.
 
 - name: Machine hostnames are unique in the cluster
   block:
@@ -33,7 +33,7 @@
       ansible.builtin.set_fact:
         all_hostnames: >-
           {{ ansible_play_hosts_all
-             | map('extract', hostvars, 'ansible_hostname') | list }}
+             | map('extract', hostvars, ['ansible_facts', 'hostname']) | list }}
 
     - name: Hostnames are unique
       run_once: true
@@ -71,13 +71,13 @@
 - name: Warn when the filesystem backing /var is small
   vars:
     var_mount: >-
-      {{ (ansible_mounts | selectattr('mount', 'equalto', '/var') | list)
-         | ternary(ansible_mounts | selectattr('mount', 'equalto', '/var')
-           | list, ansible_mounts | selectattr('mount', 'equalto', '/')
+      {{ (ansible_facts.mounts | selectattr('mount', 'equalto', '/var') | list)
+         | ternary(ansible_facts.mounts | selectattr('mount', 'equalto', '/var')
+           | list, ansible_facts.mounts | selectattr('mount', 'equalto', '/')
            | list) }}
   ansible.builtin.debug:
     msg: >-
-      WARNING: the filesystem backing /var on {{ ansible_hostname }} is only
+      WARNING: the filesystem backing /var on {{ ansible_facts.hostname }} is only
       {{ (var_mount[0].size_total / 1073741824) | round(1) }} GB; >= 100 GB is
       recommended (containerd images, logs, etcd, /var/lib/rook).
   when:

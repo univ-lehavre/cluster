@@ -93,10 +93,10 @@
     - /etc/apt/keyrings/docker.asc
     # Home de l'utilisateur connecté (≠ /home/debian codé en dur) : /home/debian
     # sur les nœuds réels / Vagrant, /home/lima.guest sur le banc Lima.
-    - '{{ ansible_env.HOME }}/.kube'
-    - '{{ ansible_env.HOME }}/cluster-setup.log'
-    - '{{ ansible_env.HOME }}/taint-setup.log'
-    - '{{ ansible_env.HOME }}/lb-setup.log'
+    - '{{ ansible_facts.env.HOME }}/.kube'
+    - '{{ ansible_facts.env.HOME }}/cluster-setup.log'
+    - '{{ ansible_facts.env.HOME }}/taint-setup.log'
+    - '{{ ansible_facts.env.HOME }}/lb-setup.log'
 
 - name: Décharger les modules noyau (best-effort, sans erreur si absents)
   become: true
