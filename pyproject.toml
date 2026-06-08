@@ -27,5 +27,5 @@ extend-exclude = ["platform/dagster/image-openlineage/toy_assets.py"]
 
 [tool.ruff.lint]
 # E/F = erreurs + pyflakes ; I = imports triés ; UP = modernisation ;
-# B = bugbear ; SIM = simplifications. Aligné sur le dépôt freelance.
+# B = bugbear ; SIM = simplifications.
 select = ["E", "F", "I", "UP", "B", "SIM"]
