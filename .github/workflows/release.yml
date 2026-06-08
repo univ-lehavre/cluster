@@ -43,10 +43,10 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Active l'auto-merge (squash) sur la PR de release dès qu'elle existe.
-      # GitHub la fusionnera tout seul quand les 6 checks requis de la branch
-      # protection (prettier, yamllint, shellcheck, kubeconform, ansible-lint,
-      # commitlint) seront verts.
+      # Active l'auto-merge (MERGE COMMIT, ADR 0037 — le squash est désactivé au
+      # niveau dépôt) sur la PR de release dès qu'elle existe. GitHub la fusionnera
+      # tout seul quand les 6 checks requis de la branch protection (prettier,
+      # yamllint, shellcheck, kubeconform, ansible-lint, commitlint) seront verts.
       #
       # Garde sur `prs_created` (booléen, toujours valide) et NON sur
       # `fromJSON(outputs.pr)` : sur un run sans PR créée, `outputs.pr` est une
@@ -61,4 +61,4 @@ jobs:
           RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
           PR_NUMBER=$(echo "$RELEASE_PR" | jq -r '.number')
-          gh pr merge "$PR_NUMBER" --auto --squash --repo "$GITHUB_REPOSITORY"
+          gh pr merge "$PR_NUMBER" --auto --merge --repo "$GITHUB_REPOSITORY"
