@@ -15,13 +15,12 @@ store **CNPG** ([ADR 0024](0024-postgres-manage-cloudnative-pg.md)),
 observabilité (Prometheus/Grafana/Loki) et backing S3 paramétrable
 ([ADR 0036](0036-backing-s3-unique-rgw.md)).
 
-Confrontée au marché DataOps (cf. `../freelance/market/02-dataops.md`) et à la
-demande « gouvernance et catalogue de données », il manque : **transformation
-dbt**, **data quality** (tests), **catalogue de données**
-(DataHub/OpenMetadata), **data contracts**, et un cadre de **gouvernance**
-(owner, classification PII, KPI qualité). Plusieurs questions étaient ouvertes :
-intégrer Airflow **en choix** de Dagster ? dbt est-il dans la chaîne ? la
-gouvernance est-elle pertinente ?
+Comparée aux pratiques DataOps usuelles et à la demande « gouvernance et
+catalogue de données », il manque : **transformation dbt**, **data quality**
+(tests), **catalogue de données** (DataHub/OpenMetadata), **data contracts**, et
+un cadre de **gouvernance** (owner, classification PII, KPI qualité). Plusieurs
+questions étaient ouvertes : intégrer Airflow **en choix** de Dagster ? dbt
+est-il dans la chaîne ? la gouvernance est-elle pertinente ?
 
 Deux invariants du dépôt **contraignent fortement** la réponse :
 
@@ -42,18 +41,20 @@ fixe le périmètre, l'ordre et la frontière.
 
 ### 1. Plan INFRA — déployable dans ce dépôt (rôle Ansible + manifeste figé)
 
-| Brique                    | Décision                                                                                                                                                                                                                                                                    | Statut                   |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| Orchestrateur **Airflow** | option **alternative** à Dagster (axe catalogue [ADR 0023](0023-plateforme-exemple-generique.md)/[0039](0039-nomenclature-axes-catalogue.md) : _une_ activée, jamais les deux) ; KubernetesExecutor (pas de Celery/Redis), base CNPG dédiée, provider OpenLineage → Marquez | cible                    |
-| **Catalogue de données**  | **OpenMetadata** (pas DataHub : évite Kafka + Elasticsearch ; OpenMetadata = Postgres CNPG + 1 moteur de recherche) ; ingère le lineage Marquez                                                                                                                             | cible (en ligne de mire) |
+| Brique                    | Décision                                                                                                                                                                                                                                                                                                                            | Statut                   |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Orchestrateur **Airflow** | option **alternative** à Dagster (axe catalogue [ADR 0023](0023-plateforme-exemple-generique.md)/[0039](0039-nomenclature-axes-catalogue.md) : _une_ activée, jamais les deux) ; outil d'orchestration le plus répandu de l'écosystème ; KubernetesExecutor (pas de Celery/Redis), base CNPG dédiée, provider OpenLineage → Marquez | cible                    |
+| **Catalogue de données**  | **OpenMetadata** (pas DataHub : évite Kafka + Elasticsearch ; OpenMetadata = Postgres CNPG + 1 moteur de recherche) ; ingère le lineage Marquez                                                                                                                                                                                     | cible (en ligne de mire) |
 
 - **Airflow ≠ cumul.** L'orchestrateur reste un **axe à une valeur** : on
   déploie Dagster **ou** Airflow, jamais les deux (sinon double infra + lineage
   brouillé). Le débat « Dagster vs Airflow » n'est **pas rouvert**
   ([ADR 0026](0026-orchestration-dagster.md) tient) : Airflow est ajouté comme
-  **option de catalogue** parce qu'il est le **standard de marché** (volume
-  d'offres, écosystème managé, certif) — c'est un argument de _matching_,
-  documenté comme tel, pas une supériorité technique.
+  **option de catalogue** parce qu'il est l'orchestrateur **le plus répandu** de
+  l'écosystème (large base d'utilisateurs, versions managées chez les
+  fournisseurs cloud, abondante documentation) — c'est un argument
+  d'**interopérabilité et de familiarité**, pas une supériorité technique sur
+  Dagster.
 - **Le catalogue est la brique la plus chère** : son moteur de recherche est un
   **stateful hors CNPG** (PVC RBD ×3, opérateur/manifeste à vendorer et bumper —
   [ADR 0001](0001-replication-x3-pour-workloads-bloc.md)/[0006](0006-matrice-de-versions-et-politique-de-bump.md)).
@@ -104,9 +105,9 @@ lineage, qualité, contrats, propriété/PII**. **Seul le lineage est livré**
 Accepted (cadrage). Chaque brique infra (Airflow, catalogue) et chaque pratique
 fera l'objet d'un ADR/PR dédié, validé e2e
 ([ADR 0034](0034-validation-e2e-from-scratch.md)) avant d'être déclaré acquis.
-Ordre de priorité (marché + ROI) : **dbt (atlas) → data quality (atlas) →
-catalogue OpenMetadata (infra) → data contracts** ; Airflow traité quand le
-besoin de matching l'exige.
+Ordre de priorité (valeur / coût d'intégration) : **dbt (atlas) → data quality
+(atlas) → catalogue OpenMetadata (infra) → data contracts** ; Airflow traité
+quand le besoin d'interopérabilité l'exige.
 
 ## Conséquences
 
@@ -127,5 +128,3 @@ besoin de matching l'exige.
   zéro-PII dans le lineage** reconduit pour toute brique qui ingère des données
   ; (f) génériser (ADR 0023) — garder les noms de briques (Airflow,
   OpenMetadata, dbt…), génériser les sources métier.
-- **Lien marché** : à mettre à jour côté `../freelance` — le lineage OpenLineage
-  n'est plus un trou (livré), le gap résiduel est dbt + qualité + catalogue.
