@@ -1,0 +1,33 @@
+# Historique des runs du banc Lima — preuve datée (ADR 0034/0042).
+#
+# VERSIONNÉ : la date vit dans le contenu (le checkout CI ne préserve pas le
+# mtime). Le garde-fou de fraîcheur (.github/workflows/bench-freshness.yml, ADR
+# 0042) lit la date de la DERNIÈRE entrée et alerte au-delà du seuil (7 j).
+#
+# Une entrée est appendée par run `all` COMPLÉTÉ (test/lima/run-phases.sh). Les
+# valeurs sont génériques (ADR 0023) : pas d'identifiant réel de déploiement.
+#
+# Schéma : id, date (ISO 8601 UTC), branche, commit, profil (ceph|local-path),
+# topologie, arch, hote, total_s, phases{nom: secondes}, [metriques{…}].
+
+runs:
+  - id: 2026-06-08T16-ceph-08f6c3f
+    date: 2026-06-08T16:20:49Z
+    branche: feat/banc-metrologie-cache
+    commit: 08f6c3f
+    profil: ceph
+    topologie: multi-node-3
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 759
+    phases:
+      up: 165
+      bootstrap: 399
+      ceph: 189
+      sc: 6
+    # Métriques échantillonnées a posteriori (monitoring déployé après le socle)
+    # — preuve #217 sur le cluster réel du run (fenêtre 900 s, profil Ceph).
+    metriques:
+      cpu_core_s: 272
+      ram_peak_mib: 7606
+      ram_mean_mib: 7489

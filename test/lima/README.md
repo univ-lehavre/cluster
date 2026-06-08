@@ -72,10 +72,45 @@ test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde), gate HE
 test/lima/run-phases.sh sc             # StorageClasses Ceph, gate PVC Bound
 test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman), gate Ready
 test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage
+test/lima/run-phases.sh monitoring     # observabilité (Prometheus + Grafana + Loki)
 test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
 WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
 test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
+test/lima/run-phases.sh status         # état du banc : VMs, nœuds, phases, UIs, dernier run
 test/lima/run-phases.sh down           # détruit VMs + disques nommés
+```
+
+## Métrologie, cache & fraîcheur des runs
+
+Le banc s'instrumente lui-même (`metrology.sh`) — pas de saisie manuelle.
+
+- **Historique des runs** (`runs-history.yaml`, versionné) : chaque run `all`
+  complété y **append** une entrée datée (id, date ISO UTC, branche, commit,
+  profil, topologie, arch, hôte, durées par phase). C'est la **preuve datée**
+  qu'exploite le garde-fou de fraîcheur
+  ([ADR 0042](../../docs/decisions/0042-fraicheur-preuves-banc.md)) — la date
+  vit dans le **contenu** (le checkout CI ne préserve pas le mtime).
+- **Métriques de coût** (si `monitoring` déployé) : l'entrée porte un bloc
+  `metriques` échantillonné depuis **Prometheus** sur la fenêtre du run —
+  `cpu_core_s` (cumul CPU×temps), `ram_peak_mib`, `ram_mean_mib`. Best-effort :
+  `?` si Prometheus est absent (banc rapide).
+- **Cache du socle** (`#219`) : un run `all` **saute**
+  `up`+`bootstrap`(+`ceph`+`sc`) si le socle en cache est encore valable — VMs
+  up, cluster Ready, **et contenu inchangé** (clé `socle:<profil>:<hash>` sur
+  les rôles/manifestes/versions). Tout changement du socle invalide le cache.
+  **`NO_CACHE=1` force le rebuild from-scratch** — c'est lui qui produit la
+  **preuve**
+  ([ADR 0034](../../docs/decisions/0034-validation-e2e-from-scratch.md)), le
+  cache n'étant qu'un accélérateur d'itération.
+- **Fraîcheur** : `test/lima/check-freshness.sh` (seuil `SEUIL_JOURS`, défaut 7)
+  lit la date du dernier run et sort en échec si elle est périmée. Le workflow
+  cron `.github/workflows/bench-freshness.yml` l'exécute 1×/jour et ouvre une
+  issue de rappel — **non bloquant** pour les PR (ADR 0042).
+
+```bash
+NO_CACHE=1 WITH_CEPH=1 test/lima/run-phases.sh all   # run-preuve from-scratch (ADR 0034)
+test/lima/run-phases.sh status                       # dont le dernier run consigné
+SEUIL_JOURS=7 test/lima/check-freshness.sh           # garde-fou fraîcheur (local)
 ```
 
 ## Run DataOps complet (validation #173)

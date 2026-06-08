@@ -1,0 +1,156 @@
+
+[1;36m[18:27:07] Phase monitoring — Prometheus + Grafana + Loki (via Ansible)[0m
+
+[1;36m[18:27:07]   storageClass=rook-ceph-block-replicated, backing S3 Loki=rgw (http://rook-ceph-rgw-datalake.rook-ceph:80)[0m
+
+PLAY [Observabilité — monitoring + logs] ***************************************
+
+TASK [Ensure the Python kubernetes client is present] **************************
+ok: [localhost]
+
+TASK [Resolve the certifi CA bundle path] **************************************
+ok: [localhost]
+
+TASK [Set the CA bundle for HTTPS requests] ************************************
+ok: [localhost]
+
+TASK [platform-cert-manager : Ensure the Gateway API CRD download directory exists] ***
+ok: [localhost]
+
+TASK [platform-cert-manager : Download Gateway API CRDs (1.4.1)] ***************
+[WARNING]: Deprecation warnings can be disabled by setting `deprecation_warnings=False` in ansible.cfg.
+[DEPRECATION WARNING]: Importing 'to_bytes' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.
+[DEPRECATION WARNING]: Importing 'to_native' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.
+[DEPRECATION WARNING]: Importing 'to_text' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.
+ok: [localhost] => (item=gatewayclasses)
+ok: [localhost] => (item=gateways)
+ok: [localhost] => (item=httproutes)
+ok: [localhost] => (item=referencegrants)
+ok: [localhost] => (item=grpcroutes)
+
+TASK [platform-cert-manager : Apply Gateway API CRDs (1.4.1)] ******************
+ok: [localhost] => (item=gatewayclasses)
+ok: [localhost] => (item=gateways)
+ok: [localhost] => (item=httproutes)
+ok: [localhost] => (item=referencegrants)
+ok: [localhost] => (item=grpcroutes)
+
+TASK [platform-cert-manager : Apply cert-manager (server-side)] ****************
+ok: [localhost]
+
+TASK [platform-cert-manager : Wait for cert-manager webhook to be Ready] *******
+ok: [localhost]
+
+TASK [platform-cert-manager : Apply internal CA issuers] ***********************
+ok: [localhost]
+
+TASK [platform-monitoring : Ensure the monitoring namespace exists] ************
+ok: [localhost]
+
+TASK [platform-monitoring : Apply monitoring CRDs (server-side, via kubectl)] ***
+changed: [localhost]
+
+TASK [platform-monitoring : Wait for monitoring CRDs to be Established] ********
+ok: [localhost]
+
+TASK [platform-monitoring : Load the monitoring manifest with the topology storageClass] ***
+ok: [localhost]
+
+TASK [platform-monitoring : Apply monitoring stack (sauf PrometheusRule)] ******
+ok: [localhost] => (item=ServiceAccount/kube-prometheus-stack-grafana)
+ok: [localhost] => (item=ServiceAccount/kube-prometheus-stack-kube-state-metrics)
+ok: [localhost] => (item=ServiceAccount/kube-prometheus-stack-prometheus-node-exporter)
+ok: [localhost] => (item=ServiceAccount/kube-prometheus-stack-alertmanager)
+ok: [localhost] => (item=ServiceAccount/kube-prometheus-stack-operator)
+ok: [localhost] => (item=ServiceAccount/kube-prometheus-stack-prometheus)
+ok: [localhost] => (item=Secret/kube-prometheus-stack-grafana)
+ok: [localhost] => (item=Secret/alertmanager-kube-prometheus-stack-alertmanager)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-grafana-config-dashboards)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-grafana)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-grafana-datasource)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-alertmanager-overview)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-apiserver)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-cluster-total)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-controller-manager)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-etcd)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-grafana-overview)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-coredns)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-resources-cluster)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-resources-multicluster)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-resources-namespace)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-resources-node)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-resources-pod)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-resources-workload)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-k8s-resources-workloads-namespace)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-kubelet)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-namespace-by-pod)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-namespace-by-workload)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-node-cluster-rsrc-use)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-node-rsrc-use)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-nodes-aix)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-nodes-darwin)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-nodes)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-persistentvolumesusage)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-pod-total)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-prometheus)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-proxy)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-scheduler)
+ok: [localhost] => (item=ConfigMap/kube-prometheus-stack-workload-total)
+[ERROR]: Task failed: Module failed: Failed to patch object: b'{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"PersistentVolumeClaim \\"kube-prometheus-stack-grafana\\" is invalid: spec: Forbidden: spec is immutable after creation except resources.requests and volumeAttributesClassName for bound claims\\n@@ -10,7 +10,7 @@\\n   }\\n  },\\n  \\"VolumeName\\": \\"\\",\\n- \\"StorageClassName\\": \\"local-path\\",\\n+ \\"StorageClassName\\": \\"rook-ceph-block-replicated\\",\\n  \\"VolumeMode\\": \\"Filesystem\\",\\n  \\"DataSource\\": null,\\n  \\"DataSourceRef\\": null,\\n","reason":"Invalid","details":{"name":"kube-prometheus-stack-grafana","kind":"PersistentVolumeClaim","causes":[{"reason":"FieldValueForbidden","message":"Forbidden: spec is immutable after creation except resources.requests and volumeAttributesClassName for bound claims\\n@@ -10,7 +10,7 @@\\n   }\\n  },\\n  \\"VolumeName\\": \\"\\",\\n- \\"StorageClassName\\": \\"local-path\\",\\n+ \\"StorageClassName\\": \\"rook-ceph-block-replicated\\",\\n  \\"VolumeMode\\": \\"Filesystem\\",\\n  \\"DataSource\\": null,\\n  \\"DataSourceRef\\": null,\\n","field":"spec"}]},"code":422}\n'
+Origin: /Users/pierre-olivier.chasset/Hub/github/cluster/bootstrap/roles/platform-monitoring/tasks/main.yaml:59:7
+
+57     # d'abord tout SAUF les PrometheusRule (dont l'operator + ses Certificate),
+58     # on attend l'operator Ready, puis les PrometheusRule.
+59     - name: Apply monitoring stack (sauf PrometheusRule)
+         ^ column 7
+
+failed: [localhost] (item=PersistentVolumeClaim/kube-prometheus-stack-grafana) => {"ansible_loop_var": "item", "changed": false, "item": {"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": {"finalizers": ["kubernetes.io/pvc-protection"], "labels": {"app.kubernetes.io/instance": "kube-prometheus-stack", "app.kubernetes.io/name": "grafana", "app.kubernetes.io/version": "13.0.1-security-01", "helm.sh/chart": "grafana-12.4.1"}, "name": "kube-prometheus-stack-grafana", "namespace": "monitoring"}, "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "2Gi"}}, "storageClassName": "rook-ceph-block-replicated"}}, "msg": "Failed to patch object: b'{\"kind\":\"Status\",\"apiVersion\":\"v1\",\"metadata\":{},\"status\":\"Failure\",\"message\":\"PersistentVolumeClaim \\\\\"kube-prometheus-stack-grafana\\\\\" is invalid: spec: Forbidden: spec is immutable after creation except resources.requests and volumeAttributesClassName for bound claims\\\\n@@ -10,7 +10,7 @@\\\\n   }\\\\n  },\\\\n  \\\\\"VolumeName\\\\\": \\\\\"\\\\\",\\\\n- \\\\\"StorageClassName\\\\\": \\\\\"local-path\\\\\",\\\\n+ \\\\\"StorageClassName\\\\\": \\\\\"rook-ceph-block-replicated\\\\\",\\\\n  \\\\\"VolumeMode\\\\\": \\\\\"Filesystem\\\\\",\\\\n  \\\\\"DataSource\\\\\": null,\\\\n  \\\\\"DataSourceRef\\\\\": null,\\\\n\",\"reason\":\"Invalid\",\"details\":{\"name\":\"kube-prometheus-stack-grafana\",\"kind\":\"PersistentVolumeClaim\",\"causes\":[{\"reason\":\"FieldValueForbidden\",\"message\":\"Forbidden: spec is immutable after creation except resources.requests and volumeAttributesClassName for bound claims\\\\n@@ -10,7 +10,7 @@\\\\n   }\\\\n  },\\\\n  \\\\\"VolumeName\\\\\": \\\\\"\\\\\",\\\\n- \\\\\"StorageClassName\\\\\": \\\\\"local-path\\\\\",\\\\n+ \\\\\"StorageClassName\\\\\": \\\\\"rook-ceph-block-replicated\\\\\",\\\\n  \\\\\"VolumeMode\\\\\": \\\\\"Filesystem\\\\\",\\\\n  \\\\\"DataSource\\\\\": null,\\\\n  \\\\\"DataSourceRef\\\\\": null,\\\\n\",\"field\":\"spec\"}]},\"code\":422}\\n'", "reason": "Unprocessable Entity"}
+ok: [localhost] => (item=ClusterRole/kube-prometheus-stack-grafana-clusterrole)
+ok: [localhost] => (item=ClusterRole/kube-prometheus-stack-kube-state-metrics)
+ok: [localhost] => (item=ClusterRole/kube-prometheus-stack-operator)
+ok: [localhost] => (item=ClusterRole/kube-prometheus-stack-prometheus)
+ok: [localhost] => (item=ClusterRoleBinding/kube-prometheus-stack-grafana-clusterrolebinding)
+ok: [localhost] => (item=ClusterRoleBinding/kube-prometheus-stack-kube-state-metrics)
+ok: [localhost] => (item=ClusterRoleBinding/kube-prometheus-stack-operator)
+ok: [localhost] => (item=ClusterRoleBinding/kube-prometheus-stack-prometheus)
+ok: [localhost] => (item=Service/kube-prometheus-stack-grafana)
+ok: [localhost] => (item=Service/kube-prometheus-stack-kube-state-metrics)
+ok: [localhost] => (item=Service/kube-prometheus-stack-prometheus-node-exporter)
+ok: [localhost] => (item=Service/kube-prometheus-stack-alertmanager)
+ok: [localhost] => (item=Service/kube-prometheus-stack-coredns)
+ok: [localhost] => (item=Service/kube-prometheus-stack-kube-controller-manager)
+ok: [localhost] => (item=Service/kube-prometheus-stack-kube-etcd)
+ok: [localhost] => (item=Service/kube-prometheus-stack-kube-proxy)
+ok: [localhost] => (item=Service/kube-prometheus-stack-kube-scheduler)
+ok: [localhost] => (item=Service/kube-prometheus-stack-operator)
+ok: [localhost] => (item=Service/kube-prometheus-stack-prometheus)
+ok: [localhost] => (item=DaemonSet/kube-prometheus-stack-prometheus-node-exporter)
+ok: [localhost] => (item=Deployment/kube-prometheus-stack-grafana)
+ok: [localhost] => (item=Deployment/kube-prometheus-stack-kube-state-metrics)
+ok: [localhost] => (item=Deployment/kube-prometheus-stack-operator)
+ok: [localhost] => (item=MutatingWebhookConfiguration/kube-prometheus-stack-admission)
+ok: [localhost] => (item=ValidatingWebhookConfiguration/kube-prometheus-stack-admission)
+changed: [localhost] => (item=Alertmanager/kube-prometheus-stack-alertmanager)
+ok: [localhost] => (item=Certificate/kube-prometheus-stack-root-cert)
+ok: [localhost] => (item=Certificate/kube-prometheus-stack-admission)
+ok: [localhost] => (item=Issuer/kube-prometheus-stack-self-signed-issuer)
+ok: [localhost] => (item=Issuer/kube-prometheus-stack-root-issuer)
+changed: [localhost] => (item=Prometheus/kube-prometheus-stack-prometheus)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-grafana)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-kube-state-metrics)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-prometheus-node-exporter)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-alertmanager)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-coredns)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-apiserver)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-kube-controller-manager)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-kube-etcd)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-kube-proxy)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-kube-scheduler)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-kubelet)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-operator)
+ok: [localhost] => (item=ServiceMonitor/kube-prometheus-stack-prometheus)
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=13   changed=1    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+
+[1;31mÉCHEC: monitoring.yaml : échec du déploiement de l'observabilité[0m

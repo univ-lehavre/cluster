@@ -22,6 +22,7 @@
 #   test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
 #   WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
 #   test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
+#   test/lima/run-phases.sh status         # état du banc : VMs, nœuds, phases, UIs, dernier run (#149)
 #   test/lima/run-phases.sh down           # détruit les VMs + disques nommés
 #
 # Pré-requis poste : limactl (Lima ≥ 2.0), ansible-playbook, kubectl, python3.
@@ -32,6 +33,8 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=test/lima/lib.sh
 . "${HERE}/lib.sh"
+# shellcheck source=test/lima/metrology.sh
+. "${HERE}/metrology.sh"
 
 # ── Table des nœuds (noms génériques — ADR 0023) ─────────────────────────────
 # "nom:rôle". Topologie `multi-node-3` : 1 control-plane + 2 workers = quorum mon
@@ -85,6 +88,9 @@ KUBECTL=(kubectl --kubeconfig "${KUBECONFIG_LOCAL}")
 # Consignées dans WORKDIR/metrics.txt à reporter en en-tête du log archivé
 # (test/lima/runs/, cf. RESULTS.md). Reproductible — pas de saisie manuelle.
 METRICS="${WORKDIR}/metrics.txt"
+# Durées par phase au format TSV (nom<TAB>secondes), consommé par metro_record_run
+# pour bâtir l'entrée d'historique versionnée (#216). Éphémère (.work/).
+PHASE_DURATIONS="${WORKDIR}/phase-durations.tsv"
 
 # Émet l'en-tête matériel UNE fois par fichier de métriques (idempotent).
 metrics_header() {
@@ -114,8 +120,22 @@ time_phase() {
     end=$(date +%s)
     dur=$((end - start))
     printf '%s\t%dm%02ds\n' "${name}" "$((dur / 60))" "$((dur % 60))" >> "${METRICS}"
+    # Durée brute en secondes pour l'historique versionné (#216).
+    printf '%s\t%d\n' "${name}" "${dur}" >> "${PHASE_DURATIONS}"
     log "⏱  phase ${name} : $((dur / 60))m$((dur % 60))s"
     return "${rc}"
+}
+
+# Consigne le run complet dans l'historique versionné (#216) et, si Prometheus
+# est déployé, y joint les métriques de coût échantillonnées (#217). Appelé en
+# fin de run `all` réussi. <total_s> = durée cumulée ; <profil> dérivé de WITH_CEPH.
+record_full_run() {
+    local total=$1 profil block
+    profil=$(metro_profil "${WITH_CEPH:-0}")
+    # Échantillonnage Prometheus sur la fenêtre du run (best-effort, non bloquant).
+    block=$(METRO_METRICS_BLOCK='' metro_sample_prometheus "${total}" || true)
+    METRO_METRICS_BLOCK="${block}" \
+        metro_record_run "${profil}" "multi-node-3" "${total}" "${PHASE_DURATIONS}"
 }
 
 # Noms des disques nommés Lima d'un nœud (data hdd1..N + blockdb).
@@ -665,6 +685,105 @@ marquez_job_count() {
     parse_ol_job_count "${json}"
 }
 
+# ── Status — visualisation de l'état du banc (#149) ──────────────────────────
+# Lecture seule : VMs Lima (état), nœuds K8s, phases franchies (déduites de
+# l'état réel du cluster, pas d'un fichier d'étape), liens vers les UIs, et le
+# dernier run consigné. Ne monte rien, ne casse rien — utile pour « où en est le
+# banc ? » sans relire les logs.
+phase_status() {
+    require_lima
+    log "État du banc Lima"
+
+    # 1. VMs Lima + disques.
+    printf '\n  \033[1mVMs Lima\033[0m\n'
+    local entry vm st
+    for entry in "${NODES[@]}"; do
+        vm="${entry%%:*}"
+        if vm_exists "${vm}"; then
+            st=$(limactl list "${vm}" --format '{{.Status}}' 2>/dev/null || echo '?')
+            printf '    %-7s %s\n' "${vm}" "${st}"
+        else
+            printf '    %-7s \033[2mabsente\033[0m\n' "${vm}"
+        fi
+    done
+
+    # Sans kubeconfig, le cluster n'est pas joignable : on s'arrête là.
+    if [ ! -f "${KUBECONFIG_LOCAL}" ]; then
+        printf '\n  \033[2mPas de kubeconfig (%s) — cluster non démarré ?\033[0m\n' "${KUBECONFIG_LOCAL}"
+        status_last_run
+        return 0
+    fi
+
+    # 2. Nœuds K8s + phases franchies (déduites des objets réellement présents).
+    printf '\n  \033[1mNœuds Kubernetes\033[0m\n'
+    "${KUBECTL[@]}" get nodes --no-headers 2>/dev/null \
+        | awk '{printf "    %-7s %s\n", $1, $2}' || printf '    \033[2minjoignable\033[0m\n'
+
+    printf '\n  \033[1mPhases franchies\033[0m (déduites de l'\''état du cluster)\n'
+    status_probe "nœuds Ready" nodes_ready_all
+    status_probe "Ceph (OSD up)" "ceph_present"
+    status_probe "StorageClass default" "sc_default_present"
+    status_probe "DataOps (Dagster+Marquez)" "dataops_present"
+    status_probe "monitoring (Prometheus)" "prometheus_present"
+
+    # 3. Liens vers les UIs exposées (port-forward suggéré, pas lancé).
+    printf '\n  \033[1mAccès UIs\033[0m (port-forward à lancer si besoin)\n'
+    status_ui "API K8s" "https://127.0.0.1:${API_PORT}" ""
+    status_ui_pf "Grafana" monitoring svc/grafana 3000 80
+    status_ui_pf "Prometheus" monitoring svc/prometheus-operated 9090 9090
+    status_ui_pf "Marquez (web)" marquez svc/marquez-web 3000 3000
+    status_ui_pf "Dagster" dagster svc/dagster-dagster-webserver 3001 80
+
+    status_last_run
+}
+
+# Affiche une ligne « phase franchie » : ✓/✗ selon un prédicat (lecture seule).
+status_probe() {
+    local label=$1 pred=$2
+    if "${pred}" 2>/dev/null; then
+        printf '    \033[32m✓\033[0m %s\n' "${label}"
+    else
+        printf '    \033[2m·\033[0m %s\n' "${label}"
+    fi
+}
+
+# Prédicats de présence (best-effort, lecture seule) pour le status.
+ceph_present() { [ -n "$("${KUBECTL[@]}" -n rook-ceph get deploy rook-ceph-operator -o name 2>/dev/null)" ] && osds_up; }
+sc_default_present() { "${KUBECTL[@]}" get sc -o jsonpath='{range .items[*]}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}' 2>/dev/null | grep -q true; }
+dataops_present() { [ -n "$("${KUBECTL[@]}" -n dagster get deploy -o name 2>/dev/null)" ] && [ -n "$("${KUBECTL[@]}" -n marquez get deploy -o name 2>/dev/null)" ]; }
+prometheus_present() { [ -n "$("${KUBECTL[@]}" -n monitoring get pods -l app.kubernetes.io/name=prometheus -o name 2>/dev/null)" ]; }
+
+# Affiche un lien UI direct (déjà joignable, ex. API forwardée).
+status_ui() {
+    local label=$1 url=$2
+    printf '    %-16s %s\n' "${label}" "${url}"
+}
+
+# Affiche la commande port-forward d'une UI SI le Service existe.
+# Args : label ns ressource port_local port_distant
+status_ui_pf() {
+    local label=$1 ns=$2 res=$3 lport=$4 rport=$5
+    if "${KUBECTL[@]}" -n "${ns}" get "${res}" -o name >/dev/null 2>&1; then
+        printf '    %-16s \033[2mkubectl -n %s port-forward %s %s:%s\033[0m → http://127.0.0.1:%s\n' \
+            "${label}" "${ns}" "${res}" "${lport}" "${rport}" "${lport}"
+    fi
+}
+
+# Affiche le dernier run consigné dans l'historique (date + tuple).
+status_last_run() {
+    local f last
+    f=$(metro_history_file)
+    printf '\n  \033[1mDernier run consigné\033[0m\n'
+    if [ ! -f "${f}" ] || ! grep -q '^[[:space:]]*- id:' "${f}" 2>/dev/null; then
+        # shellcheck disable=SC2016  # `all` est un libellé littéral, pas une expansion
+        printf '    \033[2maucun (lancer un run `all` pour en consigner un)\033[0m\n'
+        return 0
+    fi
+    last=$(grep -E '^[[:space:]]*- id:' "${f}" | tail -1 | sed -E 's/.*- id:[[:space:]]*//')
+    printf '    %s\n' "${last}"
+    printf '    \033[2m(détail : %s ; fraîcheur : test/lima/check-freshness.sh)\033[0m\n' "$(basename "${f}")"
+}
+
 # ── Down — détruit VMs + disques nommés ──────────────────────────────────────
 phase_down() {
     require_lima
@@ -696,18 +815,34 @@ case "${1:-}" in
     all)
         # Mode RAPIDE par défaut : stockage simple (local-path), sans Ceph.
         # WITH_CEPH=1 ajoute le stockage réel (Rook/Ceph + StorageClasses, ~15 min).
-        time_phase up phase_up
-        time_phase bootstrap phase_bootstrap
-        if [ "${WITH_CEPH:-0}" = 1 ]; then
-            time_phase ceph phase_ceph
-            time_phase sc phase_sc
-            log "🎉 Banc Lima validé (mode Ceph) : up → bootstrap → ceph → storageClasses."
+        mkdir -p "${WORKDIR}"
+        : > "${PHASE_DURATIONS}" # repart d'un relevé propre pour CE run
+        run_start=$(date +%s)
+        profil=$(metro_profil "${WITH_CEPH:-0}")
+        # Cache du socle (#219) : on saute up+bootstrap(+ceph+sc) SI le socle en
+        # cache est encore valable (VMs up, cluster Ready, contenu inchangé).
+        # NO_CACHE=1 force le rebuild from-scratch (la PREUVE, ADR 0034).
+        if metro_cache_valid "${profil}"; then
+            ok "socle réutilisé depuis le cache (clé inchangée) — up/bootstrap sautés (#219)"
+            log "ℹ️  Forcer un rebuild from-scratch (preuve ADR 0034) : NO_CACHE=1 $0 all"
         else
-            time_phase storage-simple phase_storage_simple
-            log "🎉 Banc Lima validé (mode rapide) : up → bootstrap → storage-simple."
-            log "ℹ️  Pour le stockage réel : WITH_CEPH=1 $0 all  (ou : $0 ceph && $0 sc)"
+            time_phase up phase_up
+            time_phase bootstrap phase_bootstrap
+            if [ "${WITH_CEPH:-0}" = 1 ]; then
+                time_phase ceph phase_ceph
+                time_phase sc phase_sc
+                log "🎉 Banc Lima validé (mode Ceph) : up → bootstrap → ceph → storageClasses."
+            else
+                time_phase storage-simple phase_storage_simple
+                log "🎉 Banc Lima validé (mode rapide) : up → bootstrap → storage-simple."
+                log "ℹ️  Pour le stockage réel : WITH_CEPH=1 $0 all  (ou : $0 ceph && $0 sc)"
+            fi
+            metro_cache_save "${profil}" # socle bâti → réutilisable au prochain run
         fi
+        # Consigne le run complété (date/tuple/durées + métriques) — ADR 0034/0042.
+        record_full_run "$(( $(date +%s) - run_start ))"
         ;;
+    status) phase_status ;;
     down) phase_down ;;
     *)
         grep -E '^#( |$)' "$0" | sed -E 's/^# ?//' | head -40
