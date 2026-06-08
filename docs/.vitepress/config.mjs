@@ -110,11 +110,10 @@ export default defineConfig({
         items: [{ text: 'RStudio', link: '/apps/rstudio/' }],
       },
       {
-        text: 'Banc de test (VirtualBox)',
+        text: 'Banc de test (Lima)',
         items: [
           { text: "Vue d'ensemble", link: '/test/' },
-          { text: 'Mono-nœud (Phase 1-2)', link: '/test/single-node/' },
-          { text: 'Multi-nœuds (Phase 1-5 + Ceph)', link: '/test/multi-node/' },
+          { text: 'Banc Lima (multi-nœuds)', link: '/test/lima/' },
           { text: 'Résultats du dernier banc', link: '/test/RESULTS' },
           { text: 'Scénarios reproductibles', link: '/test/scenarios/' },
         ],

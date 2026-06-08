@@ -100,10 +100,9 @@ multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
 Les bancs doivent cibler la **même version Kubernetes (1.34)** que le bootstrap
 — sinon dérive silencieuse (cf. encadré ImageVolume ci-dessus).
 
-| Banc                        | Installeur K8s                                 | Version  |
-| --------------------------- | ---------------------------------------------- | -------- |
-| `test/multi-node` (Vagrant) | kubeadm via `bootstrap/` (`pkgs.k8s.io/v1.34`) | **1.34** |
-| `test/lima` (Lima)          | kubeadm via `bootstrap/` (VMs Lima)            | **1.34** |
+| Banc               | Installeur K8s                      | Version  |
+| ------------------ | ----------------------------------- | -------- |
+| `test/lima` (Lima) | kubeadm via `bootstrap/` (VMs Lima) | **1.34** |
 
 > **kind est abandonné** : son image de node figeait K8s en 1.31 (divergent de
 > la matrice), ce qui a bloqué pgvector. Le banc léger est rebâti sur des **VMs
@@ -126,10 +125,10 @@ Les bancs doivent cibler la **même version Kubernetes (1.34)** que le bootstrap
    Vérification :
    [`scripts/audit-image-digests.sh`](../../scripts/audit-image-digests.sh)
    (audite tous les digests épinglés du dépôt).
-4. **Valider sur le banc multi-nœuds**
-   ([`test/multi-node/`](../../test/multi-node/)) avant tout déploiement sur une
-   topologie cible : déployer la nouvelle version, vérifier `state.sh` toutes
-   couches vertes, jouer un cycle bootstrap → rollback → re-bootstrap.
+4. **Valider sur le banc multi-nœuds** ([`test/lima/`](../../test/lima/)) avant
+   tout déploiement sur une topologie cible : déployer la nouvelle version,
+   vérifier `state.sh` toutes couches vertes, jouer un cycle bootstrap →
+   rollback → re-bootstrap.
 5. **Mettre à jour cette ADR** (avec la nouvelle matrice + date).
 
 ## Statut

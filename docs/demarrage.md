@@ -57,7 +57,7 @@ pas. Les sections avancées sont signalées.
 
 ## Avant de toucher la production
 
-- **Tout se valide d'abord sur le banc** Vagrant ([`test/`](../test/)) — voir
+- **Tout se valide d'abord sur le banc** Lima ([`test/`](../test/)) — voir
   [SAFEGUARDS.md](../SAFEGUARDS.md) pour les garde-fous (hooks, CI, banc).
 - **L'état d'avancement** du durcissement (par rapport à l'audit) est suivi dans
   [`STATUS.md`](../STATUS.md) ; l'audit complet est dans

@@ -130,46 +130,28 @@ Configurée côté GitHub (non versionnable, documentée ici pour mémoire) :
 > gh workflow run release.yml && gh run list --workflow release.yml -L 1
 > ```
 
-## Bancs d'essai Vagrant
+## Banc d'essai Lima
 
-[`test/`](test/) — deux topologies pour valider sur **vrai Debian 13** avant de
-toucher les serveurs.
+[`test/`](test/) — valider sur **vrai Debian 13** avant de toucher les serveurs.
 
-### [`test/single-node/`](test/single-node/) — itération rapide (5 min)
+### [`test/lima/`](test/lima/) — banc multi-nœuds (ADR 0038, seul banc local)
 
-1 VM mono-nœud. Couvre **Phase 1-2** :
-`checks → cri → kubeadm → initialisation → cni.sh`. Pas de Ceph (mono-nœud).
+3 VMs Lima Debian 13 arm64 (réseau user-v2 `192.168.104.0/24`) + disques bruts
+pour Ceph. Orchestré par [`test/lima/run-phases.sh`](test/lima/run-phases.sh) à
+**gates** : `up → bootstrap → ceph → sc → datalake → dataops → monitoring`. Deux
+profils — léger (local-path/SeaweedFS, ~11 min) et Ceph (RGW, ~30 min). Couvre
+la chaîne complète Phase 1-5 + DataOps.
 
-### [`test/multi-node/`](test/multi-node/) — validation complète (15 min)
+**Toujours valider sur le banc avant la prod** — c'est le seul endroit où le
+multi-VM et les disques Ceph sont exercés (validation = run e2e from-scratch,
+[ADR 0034](docs/decisions/0034-validation-e2e-from-scratch.md)).
 
-3 VMs Debian 13 arm64 + réseau privé `192.168.67.0/24` + 3 disques HDD virtuels
+#### Isolation banc ↔ prod
 
-- 1 disque "NVMe" par VM. Couvre **Phase 1-5** : bootstrap, join-workers,
-  Rook-Ceph, StorageClasses, workloads applicatifs.
-
-**Toujours valider sur multi-node avant la prod** — c'est le seul endroit où le
-multi-VM et les disques Ceph sont exercés.
-
-#### Règle d'isolation banc ↔ prod
-
-> **La plage IP du banc DOIT être disjointe de toute plage de production
-> accessible depuis le poste de contrôle.**
-
-Si le banc et la prod partagent une plage IP (cas vécu : `10.0.0.0/22` des deux
-côtés), VirtualBox crée une interface host-only sur cette plage et **capture
-toutes les routes locales** vers les vrais serveurs → on perd l'accès SSH à la
-prod tant que le banc tourne. Cf.
-[drift #6 dans test/RESULTS.md](test/RESULTS.md).
-
-Garde-fous en place :
-
-- **Plage banc** : `192.168.67.0/24` (disjointe de prod `10.0.0.0/22`).
-- **Pre-flight Vagrantfile**
-  ([test/multi-node/Vagrantfile](test/multi-node/Vagrantfile)) : refuse
-  `vagrant up` si VBox a déjà une interface host-only sur la plage prod (signe
-  d'un ancien banc non nettoyé).
-- À vérifier manuellement avant un cycle : `netstat -rn | grep 10.0.0` +
-  `VBoxManage list hostonlyifs | grep IPAddress`.
+Le banc Lima est volontairement **isolé** (`mounts: []`, réseau user-v2 dédié
+`192.168.104.0/24`, disjoint de la plage de production `10.0.0.0/22`). Il n'a
+pas d'interface host-only susceptible de capturer les routes vers les vrais
+serveurs.
 
 ## Vérifications en place sur les nœuds
 

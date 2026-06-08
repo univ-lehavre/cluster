@@ -1,34 +1,42 @@
-# Résultats — banc multi-node
+# Résultats — banc multi-nœuds (historique, banc Vagrant déprécié)
 
+> **Banc Vagrant/VirtualBox déprécié**
+> ([ADR 0038](../docs/decisions/0038-lima-seul-banc-local.md)) — son code
+> (`test/multi-node/`, `test/single-node/`) a été supprimé ; ce journal est
+> **conservé en l'état** (honnêteté des Runs, ADR 0023). Les liens vers les
+> fichiers du banc sont donc en texte brut, et les identifiants réels d'un
+> déploiement ont été génériqués (ADR 0023). Journal du banc **courant** (Lima)
+> : [`lima/RESULTS.md`](lima/RESULTS.md).
+>
 > Dernière exécution : **2026-05-28**, branche `chore/cluster-rebuild-debian13`,
 > banc `test/multi-node/` sur Mac Apple Silicon (M3 Max, 48 GiB) + VirtualBox
 > 7.2.8 + Vagrant 2.4.9.
 
 ## Topologie testée
 
-| VM       | IP NAT         | IP privée     | Rôle          | Disques                                     |
-| -------- | -------------- | ------------- | ------------- | ------------------------------------------- |
-| dirqual1 | 127.0.0.1:2222 | 192.168.67.11 | control plane | sda=OS 64G, sdb-sdd=HDD 10G ×3, sde=NVMe 5G |
-| dirqual2 | 127.0.0.1:2200 | 192.168.67.12 | worker        | (idem, ordre différent)                     |
-| dirqual3 | 127.0.0.1:2201 | 192.168.67.13 | worker        | (idem, ordre différent)                     |
+| VM    | IP NAT         | IP privée     | Rôle          | Disques                                     |
+| ----- | -------------- | ------------- | ------------- | ------------------------------------------- |
+| cp1   | 127.0.0.1:2222 | 192.168.67.11 | control plane | sda=OS 64G, sdb-sdd=HDD 10G ×3, sde=NVMe 5G |
+| node1 | 127.0.0.1:2200 | 192.168.67.12 | worker        | (idem, ordre différent)                     |
+| node2 | 127.0.0.1:2201 | 192.168.67.13 | worker        | (idem, ordre différent)                     |
 
 Box : `bento/debian-13` arm64 v202510.26.0, kernel `6.12.48+deb13-arm64`.
 
 ## Chemin obligatoire testé
 
-| #   | Étape                                           | Résultat                                                          | Idempotence (2ᵉ run)     |
-| --- | ----------------------------------------------- | ----------------------------------------------------------------- | ------------------------ |
-| 0   | `vagrant up` 3 VMs + disques                    | ✅ après 3 fixes Vagrantfile (cf. drifts 0a, 0b, 0c)              | n/a                      |
-| 1   | `audit-log-baseline.yaml` (test du rôle)        | ✅ ligne posée sur 3 VMs                                          | ✓ rejouable              |
-| 2   | `checks.yaml` (Phase 1.1)                       | ✅ 3 VMs, swap désactivé, warning `/var` < 100 GB (banc)          | ✓ `changed=0`            |
-| 3   | `cri.yaml` (Phase 1.2)                          | ✅ containerd.io 2.2.4 + `SystemdCgroup=true`                     | non testé (manque temps) |
-| 4   | `kubeadm.yaml` (Phase 1.3)                      | ✅ kubeadm/kubelet 1.34.8 installé, `/etc/hosts cluster-api` posé | non testé                |
-| 5   | `control-planes.yaml` (Phase 1.4)               | ✅ kubectl posé sur dirqual1                                      | non testé                |
-| 6   | `initialisation.yaml` (Phase 2.1)               | ✅ après fix drift #3, `kubeadm init` réussi avec endpoint        | non testé                |
-| 7   | `cni.sh` (Phase 2.2)                            | ✅ Cilium 1.19.4 installé sur dirqual1, pod CIDR `10.244.0.0/16`  | non testé                |
-| 8   | `join-workers.yaml` (Phase 2.3)                 | ✅ après fix drift #3bis, dirqual2 + dirqual3 joints              | non testé                |
-| 9   | `state.sh` couches 0-3b                         | ✅ détecte audit-log + bootstrap K8s + disques bruts              | n/a                      |
-| 10  | `rollback.yaml --limit dirqual3 -e confirm=yes` | ✅ kubeadm + containerd + configs supprimés                       | n/a                      |
+| #   | Étape                                        | Résultat                                                          | Idempotence (2ᵉ run)     |
+| --- | -------------------------------------------- | ----------------------------------------------------------------- | ------------------------ |
+| 0   | `vagrant up` 3 VMs + disques                 | ✅ après 3 fixes Vagrantfile (cf. drifts 0a, 0b, 0c)              | n/a                      |
+| 1   | `audit-log-baseline.yaml` (test du rôle)     | ✅ ligne posée sur 3 VMs                                          | ✓ rejouable              |
+| 2   | `checks.yaml` (Phase 1.1)                    | ✅ 3 VMs, swap désactivé, warning `/var` < 100 GB (banc)          | ✓ `changed=0`            |
+| 3   | `cri.yaml` (Phase 1.2)                       | ✅ containerd.io 2.2.4 + `SystemdCgroup=true`                     | non testé (manque temps) |
+| 4   | `kubeadm.yaml` (Phase 1.3)                   | ✅ kubeadm/kubelet 1.34.8 installé, `/etc/hosts cluster-api` posé | non testé                |
+| 5   | `control-planes.yaml` (Phase 1.4)            | ✅ kubectl posé sur cp1                                           | non testé                |
+| 6   | `initialisation.yaml` (Phase 2.1)            | ✅ après fix drift #3, `kubeadm init` réussi avec endpoint        | non testé                |
+| 7   | `cni.sh` (Phase 2.2)                         | ✅ Cilium 1.19.4 installé sur cp1, pod CIDR `10.244.0.0/16`       | non testé                |
+| 8   | `join-workers.yaml` (Phase 2.3)              | ✅ après fix drift #3bis, node1 + node2 joints                    | non testé                |
+| 9   | `state.sh` couches 0-3b                      | ✅ détecte audit-log + bootstrap K8s + disques bruts              | n/a                      |
+| 10  | `rollback.yaml --limit node2 -e confirm=yes` | ✅ kubeadm + containerd + configs supprimés                       | n/a                      |
 
 ## Phases non encore testées (gap connu)
 
@@ -65,8 +73,8 @@ Stderr: Could not find a controller named 'SATA Controller'
 
 **Correctif appliqué**
 ([commit b3a742a](https://github.com/univ-lehavre/cluster/commit/b3a742a)) :
-[test/multi-node/Vagrantfile](multi-node/Vagrantfile) remplace
-`"SATA Controller"` par `"VirtIO Controller"`.
+`test/multi-node/Vagrantfile` remplace `"SATA Controller"` par
+`"VirtIO Controller"`.
 
 ### 🟠 0b — Création contrôleur NVMe séparé fragile sur arm64
 
@@ -92,7 +100,7 @@ les a pas explicitement `closemedium --delete`. `vagrant destroy` sur une VM
 partielle ne nettoie pas tout.
 
 **Correctif suggéré** (procédure manuelle, documentée dans
-[test/multi-node/README.md](multi-node/README.md)) :
+`test/multi-node/README.md`) :
 
 ```bash
 for uuid in $(VBoxManage list hdds | awk '/^UUID/ {print $2}'); do
@@ -111,8 +119,7 @@ appellent `jq`, absent de la box.
 ressemble à une coupure réseau totale.
 
 **Correctif appliqué** (provisioning persistant, survit à `vagrant destroy`) —
-dans le bloc `config.vm.provision "shell"` de
-[`test/multi-node/Vagrantfile`](multi-node/Vagrantfile) :
+dans le bloc `config.vm.provision "shell"` de `test/multi-node/Vagrantfile` :
 
 - `supersede domain-name-servers 10.0.2.3, 1.1.1.1;` ajouté à
   `/etc/dhcp/dhclient.conf` → le DHCP ne réécrase plus le DNS (persiste au
@@ -131,7 +138,7 @@ serveurs HPE ont un DNS interne joignable et `jq` provisionné par les rôles.
 `Timeout when waiting for 10.0.2.15:6443`. L'IP NAT n'est pas routable inter-VM.
 
 **Cause** : sur un banc Vagrant multi-VM, chaque VM a 2 interfaces : eth0 (NAT
-10.0.2.15) et eth1 (réseau privé 10.67.2.x). Ansible
+10.0.2.15) et eth1 (réseau privé 10.0.0.x). Ansible
 `ansible_default_ipv4.address` retourne le NAT. Le rôle utilisait cette IP pour
 `/etc/hosts cluster-api` et pour `kubeadm init`.
 
@@ -146,10 +153,10 @@ serveurs HPE ont un DNS interne joignable et `jq` provisionné par les rôles.
     variable est posée ;
   - [`k8s-join-cluster`](../bootstrap/roles/k8s-join-cluster/tasks/main.yaml) :
     `wait_for host=<control_plane_ip>`.
-- [`test/multi-node/inventory.yaml`](multi-node/inventory.yaml) (gitignoré) pose
-  `control_plane_ip: 10.67.2.11` au niveau du groupe.
+- `test/multi-node/inventory.yaml` (gitignoré) pose
+  `control_plane_ip: 10.0.0.11` au niveau du groupe.
 - **En prod** : la variable reste vide → `ansible_default_ipv4.address` retourne
-  `10.67.2.X` directement (les nœuds n'ont qu'une interface cluster, pas de NAT
+  `10.0.0.X` directement (les nœuds n'ont qu'une interface cluster, pas de NAT
   séparé).
 
 ### 🔴 4 — INTERNAL-IP du kubelet = NAT (corrigé)
@@ -167,26 +174,25 @@ banc multi-VM.
   [`k8s-install`](../bootstrap/roles/k8s-install/tasks/main.yaml). Pose
   `/etc/default/kubelet KUBELET_EXTRA_ARGS=--node-ip=<ip>` + handler
   `Restart kubelet`.
-- [`test/multi-node/inventory.yaml`](multi-node/inventory.yaml) pose la variable
-  par host (192.168.67.X).
+- `test/multi-node/inventory.yaml` pose la variable par host (192.168.67.X).
 - Sans la variable (prod) → kubelet détecte l'IP de l'interface cluster unique.
 
 ### 🔴 #6 — Collision réseau prod ↔ banc (critique, fixé)
 
 **Symptôme** : pendant le test, l'utilisateur n'arrivait plus à se connecter au
-serveur prod `dirqual1` (10.67.2.11). `ssh-keyscan` montrait une clé hôte
-ED25519 différente de celle stockée dans `~/.ssh/known_hosts`.
+serveur prod `cp1` (10.0.0.11). `ssh-keyscan` montrait une clé hôte ED25519
+différente de celle stockée dans `~/.ssh/known_hosts`.
 
 **Cause** : le banc multi-node avait été configuré sur **la même plage IP que la
-prod** (`10.67.2.0/24`). VirtualBox crée une interface host-only sur cette plage
-→ toutes les routes locales `10.67.2.X` partent vers les VMs du banc, capturant
+prod** (`10.0.0.0/24`). VirtualBox crée une interface host-only sur cette plage
+→ toutes les routes locales `10.0.0.X` partent vers les VMs du banc, capturant
 tout SSH vers les vrais serveurs.
 
 ```text
 # bridge100 (interface host-only VBox sur la plage prod) :
-bridge100: inet 10.67.2.1 netmask 0xffffff00
+bridge100: inet 10.0.0.1 netmask 0xffffff00
 # Route locale :
-10.67.2.11    8.0.27.3c.ba.c7    UHLWIi  bridge100    # = VM banc, pas prod
+10.0.0.11    8.0.27.3c.ba.c7    UHLWIi  bridge100    # = VM banc, pas prod
 ```
 
 **Impact opérationnel** : tant que le banc tournait, l'utilisateur perdait
@@ -198,7 +204,7 @@ l'accès SSH aux 4 serveurs prod. À la limite du sabotage involontaire.
    possible. Plage `192.168.0.0/16` autorisée par défaut par VBox → plus de
    `networks.conf` nécessaire.
 2. **Pre-flight dans le Vagrantfile** : refuse le `vagrant up` si une interface
-   VBox host-only existe encore sur la plage prod (10.67.2.x), signe d'un ancien
+   VBox host-only existe encore sur la plage prod (10.0.0.x), signe d'un ancien
    banc non nettoyé.
 3. Documentation dans `SAFEGUARDS.md` (règle d'isolation banc/prod) et
    `test/multi-node/README.md`.
@@ -219,7 +225,7 @@ VBoxManage list hostonlyifs | grep -E 'Name|IPAddress'       # interfaces VBox
 
 ### 🟢 5 — `vagrant ssh` se connecte comme `vagrant` (kubeconfig manquant)
 
-**Symptôme** : `vagrant ssh dirqual1 -c 'kubectl get nodes'` retourne
+**Symptôme** : `vagrant ssh cp1 -c 'kubectl get nodes'` retourne
 `connection refused localhost:8080` — kubectl en tant que `vagrant` ne trouve
 pas `/home/vagrant/.kube/config`.
 
@@ -228,8 +234,7 @@ pas `/home/vagrant/.kube/config`.
 `debian`).
 
 **Contournement** : utiliser `ssh -p <port> debian@127.0.0.1` avec la clé
-Vagrant directement. Documenté dans
-[test/multi-node/README.md](multi-node/README.md).
+Vagrant directement. Documenté dans `test/multi-node/README.md`.
 
 ## Verdict
 
@@ -276,7 +281,7 @@ source IP NAT `10.0.2.15`, l'API à `192.168.67.11` ne peut pas y répondre.
 Conntrack montre `UNREPLIED`.
 
 **Correctif** : route `10.96.0.0/12 dev eth1` posée par le provisioner
-[Vagrantfile](multi-node/Vagrantfile) via systemd-networkd drop-in.
+`Vagrantfile` via systemd-networkd drop-in.
 
 **Statut prod** : non-applicable — eth0 prod = interface cluster unique.
 
@@ -356,16 +361,14 @@ passe.
 
 ### 🔴 #11 — `run-phases.sh` câblé sur `/dev/vd*` alors que VirtioSCSI expose `/dev/sd*`
 
-- **Fichiers** : [`run-phases.sh`](multi-node/run-phases.sh) (gate Phase 0,
-  `CEPH_HDD_GLOB`, `CEPH_BLOCK_DEVICE`, surcharge `metadataDevice`,
-  `DATA_DEVICE_GLOB`, `NVME_BLOCK_DEVICE`),
-  [`Vagrantfile`](multi-node/Vagrantfile) (commentaires),
-  [README multi-node](multi-node/README.md).
+- **Fichiers** : `run-phases.sh` (gate Phase 0, `CEPH_HDD_GLOB`,
+  `CEPH_BLOCK_DEVICE`, surcharge `metadataDevice`, `DATA_DEVICE_GLOB`,
+  `NVME_BLOCK_DEVICE`), `Vagrantfile` (commentaires), `README multi-node`.
 - **Symptôme** : le gate `lsblk … | grep "^vdb"` ne matche jamais ; les 3 VMs
-  bootent pourtant avec leurs disques. `lsblk` sur dirqual1 montre `sda` (OS) +
+  bootent pourtant avec leurs disques. `lsblk` sur cp1 montre `sda` (OS) +
   `sdb/sdc/sdd` (HDD) + `sde` (block.db) — **aucun `vd*`**.
 - **Cause** : le contrôleur de la box `bento/debian-13` est de type
-  **`VirtioSCSI`** (vérifié : `VBoxManage showvminfo dirqual1` →
+  **`VirtioSCSI`** (vérifié : `VBoxManage showvminfo cp1` →
   `storagecontrollertype0="VirtioSCSI"`). VirtioSCSI présente ses disques au
   noyau comme du **SCSI** → `/dev/sd*`. Seul `virtio-blk` produirait `/dev/vd*`.
   L'hypothèse « VirtioSCSI ⇒ `vd*` » des drifts 0a/0b et de `run-phases.sh`
@@ -452,7 +455,7 @@ passe.
 
 ### 🟢 #15 — Gate Phase 6 : `$(ls …)` hors du `sudo` → faux négatif (banc-only)
 
-- **Fichier** : [`run-phases.sh`](multi-node/run-phases.sh).
+- **Fichier** : `run-phases.sh`.
 - **Symptôme** :
   `ls: cannot access '/var/lib/etcd-backups/etcd-*.db': Permission denied` →
   `GATE ÉCHOUÉ: aucun snapshot etcd produit` alors que le snapshot venait d'être
@@ -541,8 +544,8 @@ témoin réapparaît à l'identique**. Logs clés :
 - **banc** : `osd.requests=512Mi` (sinon 1 OSD/hôte → peering figé, cf. #10).
 
 > ⚠️ **Périmètre 03/04 — résilience prouvée, restore = artefact banc (PAS
-> prod).** Le scénario 03 (perte de `dirqual3`) valide la **vraie** question :
-> Ceph passe proprement en `HEALTH_WARN` (`1 host down`, `3 osds down`, 33 %
+> prod).** Le scénario 03 (perte de `node2`) valide la **vraie** question : Ceph
+> passe proprement en `HEALTH_WARN` (`1 host down`, `3 osds down`, 33 %
 > degraded), les **6 OSD survivants restent up et les I/O continuent** (réplica
 > ×3, `failureDomain: host`, `min_size 2`). **Cette résilience est valable en
 > prod.** L'`exit 1` provient de la phase **restore** du banc, sur des artefacts
@@ -564,7 +567,7 @@ témoin réapparaît à l'identique**. Logs clés :
 
 Ajout et validation des **scénarios 10-13** (sécurité, pas résilience). Banc
 multi-node `192.168.67.0/24`, 3 VMs Debian 13 arm64, cluster K8s 1.34.8 + Cilium
-1.19.4 (3 nœuds `Ready`). Scénarios exécutés sur `dirqual1` (`kubectl` via
+1.19.4 (3 nœuds `Ready`). Scénarios exécutés sur `cp1` (`kubectl` via
 `admin.conf`) ; le 13 lancé depuis le poste de contrôle (SSH).
 
 | #   | Scénario                | Résultat banc | Assertion clé                                                      |
@@ -841,9 +844,9 @@ config peuplée.
 
 ## Run #10 (2026-06-02) — exposition tout-Cilium (ADR 0020) sur banc
 
-Validation **réelle sur banc multi-node** (dirqual1/2/3, arm64, K8s 1.34.8,
-Cilium 1.19.4) du `cni.sh` modifié + des CRs `platform/cilium-expo/`. Banc
-préexistant en Cilium baseline (kube-proxy présent) ; snapshots pris avant.
+Validation **réelle sur banc multi-node** (cp1/2/3, arm64, K8s 1.34.8, Cilium
+1.19.4) du `cni.sh` modifié + des CRs `platform/cilium-expo/`. Banc préexistant
+en Cilium baseline (kube-proxy présent) ; snapshots pris avant.
 
 | Étape                                             | Gate                                                                                                                 | Résultat                |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------- |

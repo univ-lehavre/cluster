@@ -1,8 +1,8 @@
-# Banc léger Lima (multi-VM + Ceph)
+# Banc Lima (multi-VM + Ceph)
 
-Banc d'essai **équivalent fonctionnel du banc Vagrant
-[`multi-node/`](../multi-node/)** — 3 VMs + disques bruts + Rook/Ceph — mais sur
-des **VMs Lima** au lieu de VirtualBox.
+**Seul banc local**
+([ADR 0038](../../docs/decisions/0038-lima-seul-banc-local.md)) — 3 VMs +
+disques bruts + Rook/Ceph, sur des **VMs Lima**.
 
 Pourquoi Lima
 ([ADR 0006](../../docs/decisions/0006-matrice-de-versions-et-politique-de-bump.md))
@@ -10,10 +10,11 @@ Pourquoi Lima
 
 - **kind est abandonné** : son image de nœud figeait Kubernetes en **1.31**
   (incompatible `ImageVolume`/pgvector).
-- **Vagrant + VirtualBox** reste valable mais lourd. Lima monte une **vraie VM
-  Linux** (vrai noyau, vrais cgroups, swap contrôlable, SSH natif) sur laquelle
-  tourne le **VRAI bootstrap Ansible** — même chemin que la prod, sans overlayfs
-  imbriqué (échec du DinD) ni VirtualBox.
+- **Vagrant + VirtualBox sont dépréciés** (ADR 0038, VirtualBox sans support
+  arm64 fiable). Lima monte une **vraie VM Linux** (vrai noyau, vrais cgroups,
+  swap contrôlable, SSH natif) sur laquelle tourne le **VRAI bootstrap Ansible**
+  — même chemin que la prod, sans overlayfs imbriqué (échec du DinD) ni
+  VirtualBox.
 
 ## Topologie
 
@@ -32,8 +33,8 @@ Pourquoi Lima
   nommés persistants (`<nœud>-hdd1..3`, `<nœud>-blockdb`) sont créés **avant**
   le démarrage et attachés en `additionalDisks: {format: false}` pour rester
   bruts (exigence Ceph). Lima les présente en **virtio-blk → `/dev/vd*`** (≠
-  banc VirtualBox VirtioSCSI → `/dev/sd*`), d'où les surcharges `CEPH_HDD_GLOB`,
-  `CEPH_BLOCK_DEVICE=vde` dans l'orchestrateur.
+  l'ex-banc VirtualBox VirtioSCSI → `/dev/sd*`), d'où les surcharges
+  `CEPH_HDD_GLOB`, `CEPH_BLOCK_DEVICE=vde` dans l'orchestrateur.
 
 ## Pré-requis poste
 
@@ -126,12 +127,12 @@ KUBECONFIG=test/lima/.work/kubeconfig kubectl -n rook-ceph exec deploy/rook-ceph
   le tag multi-arch) côté banc UNIQUEMENT — le livrable garde ses digests
   intacts.
 - **Fonctionnel, pas perfs** : VMs modestes, disques virtuels petits.
-- **`os-upgrade` n'est PAS rejoué** (contrairement au banc Vagrant) : l'image
-  `_images/debian-13` de Lima est fraîche. C'est une divergence **assumée** — ne
-  pas la « corriger ».
+- **`os-upgrade` n'est PAS rejoué** : l'image `_images/debian-13` de Lima est
+  fraîche. C'est une divergence **assumée** — ne pas la « corriger ».
 - **Couverture** : up → bootstrap → stockage (simple par défaut, Ceph en
-  option). Les workloads applicatifs (WordPress/datalake) et l'etcd-backup
-  restent validés sur le banc Vagrant [`multi-node/`](../multi-node/).
+  option). Les workloads applicatifs (WordPress/datalake) et l'etcd-backup ne
+  sont pas encore portés sur ce banc (cf.
+  [matrice du catalogue](../../docs/architecture/matrice-catalogue.md)).
 - **`local-path`** : stockage `WaitForFirstConsumer` sur disque local du nœud
   (pas de réplication, pas de bascule) — suffisant pour des PVC simples, mais le
   stockage **résilient** (réplication ×3, RWX, objet S3) se valide en mode Ceph.
@@ -140,7 +141,6 @@ KUBECONFIG=test/lima/.work/kubeconfig kubectl -n rook-ceph exec deploy/rook-ceph
 
 ```bash
 test/lima/run-phases.sh down   # détruit ce banc (VMs + disques nommés)
-./test/prune.sh                # nettoyage global des bancs (Vagrant + Lima)
 ```
 
 ## Résultats de validation

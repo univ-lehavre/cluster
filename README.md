@@ -24,7 +24,7 @@ publiée automatiquement depuis `main` par
 | **opérer Ceph** (storage)               | [`storage/ceph/RUNBOOK.md`](storage/ceph/RUNBOOK.md)                      |
 | **voir les raccourcis de commandes**    | [`Justfile`](Justfile) — `just` pour la liste (nomme l'existant)          |
 | **vérifier l'état du cluster**          | `just state` (ou [`bootstrap/state.sh`](bootstrap/state.sh))              |
-| **tester avant la prod**                | [`test/`](test/) — banc Vagrant ; `just bench all`                        |
+| **tester avant la prod**                | [`test/`](test/) — banc Lima ; `just bench all`                           |
 | **comprendre les choix d'architecture** | [`docs/decisions/`](docs/decisions/) (ADR)                                |
 | **suivre l'avancement du durcissement** | [`STATUS.md`](STATUS.md) · audit complet : [`docs/audit/`](docs/audit/)   |
 
@@ -40,7 +40,7 @@ publiée automatiquement depuis `main` par
 | [`storage/ceph/`](storage/ceph/) | Stockage distribué (Rook-Ceph)                                       |
 | [`platform/`](platform/)         | Services transverses (dashboard, registry, metrics, NetworkPolicies) |
 | [`apps/`](apps/)                 | Charges applicatives (RStudio)                                       |
-| [`test/`](test/)                 | Bancs Vagrant + scénarios reproductibles                             |
+| [`test/`](test/)                 | Banc Lima + scénarios reproductibles                                 |
 | [`docs/`](docs/)                 | Glossaire, démarrage, ADR, audit (site VitePress)                    |
 
 ## Qualité — garde-fous en place
@@ -59,9 +59,8 @@ la prod :
   de drift detection) +
   [`bootstrap/security/report.sh`](bootstrap/security/report.sh) (visibilité
   hardening) + audit-log par nœud + sauvegarde etcd + rollback scripté.
-- **Avant la prod** : banc d'essai Vagrant
-  ([`test/multi-node/`](test/multi-node/)) qui exerce Phase 1-5 sur 3 VMs Debian
-  13 avec disques Ceph.
+- **Avant la prod** : banc d'essai Lima ([`test/lima/`](test/lima/)) qui exerce
+  Phase 1-5 + DataOps sur 3 VMs Debian 13 avec disques Ceph.
 
 Inventaire complet et détaillé : [SAFEGUARDS.md](SAFEGUARDS.md). Comment
 contribuer / outillage local : [CONTRIBUTING.md](CONTRIBUTING.md).
