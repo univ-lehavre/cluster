@@ -1,0 +1,121 @@
+# Contrat d'interface cluster → atlas — ENDPOINTS (exemple générique)
+#
+# Services que le socle `cluster` expose à un consommateur intra-cluster
+# (`atlas`). Valeurs d'exemple GÉNÉRIQUES (ADR 0023) : les FQDN/ports sont des
+# briques stables que le dépôt propose (donc réels), mais aucune valeur propre à
+# un déploiement (creds, IP de prod) n'y figure.
+#
+# Source de vérité pédagogique : docs/guide-dev-data.md (« Points d'accès »).
+# Décision : docs/decisions/0043-contrat-interface-cluster-atlas.md.
+#
+# Tous les endpoints sont INTRA-CLUSTER (FQDN `*.svc.cluster.local`) : le code
+# `atlas` tourne dans un pod du cluster. Les UIs sont aussi exposées en bordure
+# via Gateway Cilium + cert-manager (hostnames d'exemple `*.cluster.lan`).
+
+contract_version: '1.0'
+
+endpoints:
+  # ── Base de données (CloudNativePG, cluster `pg`, ns postgres) ─────────────
+  - id: postgres-rw
+    service: pg-rw
+    namespace: postgres
+    fqdn: pg-rw.postgres.svc.cluster.local
+    port: 5432
+    protocol: tcp
+    auth: secret-role # Secret `pg-role-<rôle>` (cf. namespaces-secrets)
+    role: primary read-write
+    source: platform/cloudnative-pg/cluster.yaml # Service généré par l'operator CNPG
+    note: >-
+      Cluster CNPG `pg` (HA 3 instances). Bases logiques : dagster, marquez,
+      pgvector (extension SQL `vector`).
+
+  - id: postgres-ro
+    service: pg-ro
+    namespace: postgres
+    fqdn: pg-ro.postgres.svc.cluster.local
+    port: 5432
+    protocol: tcp
+    auth: secret-role
+    role: replicas read-only
+    source: platform/cloudnative-pg/cluster.yaml
+    note: Load-balance les lectures sur les réplicas (analytics/OLAP).
+
+  # ── Lineage (Marquez / OpenLineage, ns marquez) ───────────────────────────
+  - id: marquez-api
+    service: marquez
+    namespace: marquez
+    fqdn: marquez.marquez.svc.cluster.local
+    port: 5000
+    protocol: http
+    auth: none # intra-cluster
+    source: platform/marquez/marquez.yaml
+    note: >-
+      API OpenLineage. POST événements sur /api/v1/lineage ; lecture sur
+      /api/v1/namespaces/<ns>/jobs. Variable consommateur :
+      OPENLINEAGE_URL=http://marquez.marquez.svc.cluster.local:5000
+
+  - id: marquez-web
+    service: marquez-web
+    namespace: marquez
+    fqdn: marquez-web.marquez.svc.cluster.local
+    port: 3000
+    protocol: http
+    auth: none
+    source: platform/marquez/marquez.yaml
+    ui_hostname: marquez.cluster.lan # exemple générique (Gateway + cert-manager)
+    note: UI de visualisation du lineage.
+
+  # ── Orchestrateur (Dagster, ns dagster) ───────────────────────────────────
+  - id: dagster-webserver
+    service: dagster-dagster-webserver
+    namespace: dagster
+    fqdn: dagster-dagster-webserver.dagster.svc.cluster.local
+    port: 80
+    protocol: http
+    auth: none
+    source: platform/dagster/dagster.yaml
+    ui_hostname: dagster.cluster.lan # exemple générique
+    note: >-
+      Orchestrateur livré VIDE ; le code (assets/code-locations) est déployé
+      par atlas (ADR 0022/0026). Event log dans la base `dagster` (CNPG).
+
+  # ── Registry d'images interne (ns registry) ───────────────────────────────
+  - id: registry
+    service: registry
+    namespace: registry
+    fqdn: registry.registry.svc.cluster.local
+    short_ref: registry:80 # alias résolu côté nœud (manifestes : registry:80/<repo>:<tag>)
+    port: 80
+    protocol: http # HTTP sans auth (ADR 0011, air-gap)
+    auth: none
+    source: platform/container-registry/service.yaml
+    note: >-
+      Référencer les images en `registry:80/<repo>:<tag>`. Pull en HTTP sur les
+      nœuds (containerd `use_local_image_pull`).
+
+  # ── Stockage objet S3 — DEUX backings selon le profil (ADR 0036) ──────────
+  - id: s3-datalake-ceph
+    service: rook-ceph-rgw-datalake
+    namespace: rook-ceph
+    fqdn: rook-ceph-rgw-datalake.rook-ceph.svc.cluster.local
+    port: 80
+    protocol: http
+    auth: secret-obc # creds générés par un ObjectBucketClaim (cf. namespaces-secrets)
+    profil: ceph # prod / banc Ceph
+    source: storage/ceph/storageClass/datalake/
+    note: >-
+      RGW Ceph (CephObjectStore `datalake`, 3 instances). Endpoint S3 path-style.
+      Un consommateur crée son bucket via un ObjectBucketClaim.
+
+  - id: s3-datalake-light
+    service: seaweedfs
+    namespace: s3
+    fqdn: seaweedfs.s3.svc.cluster.local
+    port: 8333
+    protocol: http
+    auth: secret-static # creds de test génériques (banc uniquement)
+    profil: local-path # banc rapide (sans Ceph)
+    source: platform/seaweedfs/seaweedfs.yaml
+    note: >-
+      SeaweedFS — backing S3 LÉGER du banc rapide (ADR 0036). N'existe pas en
+      prod : en mode Ceph, viser `s3-datalake-ceph`.

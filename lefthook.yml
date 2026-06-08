@@ -86,6 +86,7 @@ pre-push:
           ':!:test/*/inventory.yaml' \
           ':!:docs/architecture/registre-drifts.yaml' \
           ':!:test/lima/runs-history.yaml' \
+          ':!:contract/*.example.yaml' \
           | xargs -0 -r kubeconform \
             -strict -ignore-missing-schemas \
             -schema-location default \

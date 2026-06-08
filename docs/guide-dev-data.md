@@ -31,6 +31,12 @@ Exposition **hors cluster** (UI) via le Gateway Cilium + TLS interne
 : p. ex. `https://dagster.cluster.lan`, `https://marquez.cluster.lan` (hostnames
 `*.cluster.lan` = **placeholders génériques** ; l'admin réseau pose les vrais).
 
+> **Version machine-lisible.** Cette table (et les StorageClasses / namespaces /
+> conventions de secrets) est aussi publiée comme **contrat versionné** sous
+> [`contract/`](../contract/) — diff-able et consommable par un script
+> ([ADR 0043](decisions/0043-contrat-interface-cluster-atlas.md)). Ce guide en
+> est la version pédagogique ; `contract/`, la version donnée.
+
 ## PostgreSQL (CloudNativePG)
 
 Un cluster HA unique `pg` (namespace `postgres`) porte **trois bases logiques**,

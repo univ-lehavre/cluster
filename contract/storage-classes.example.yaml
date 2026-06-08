@@ -1,0 +1,93 @@
+# Contrat d'interface cluster → atlas — STORAGECLASSES (exemple générique)
+#
+# StorageClasses que le socle expose, PAR PROFIL (ADR 0035/0036). Un consommateur
+# `atlas` choisit sa SC selon le profil actif du déploiement.
+#
+# Décision : docs/decisions/0043-contrat-interface-cluster-atlas.md.
+# Règle : UNE SEULE SC `default` est active à la fois (posée par le banc via
+# test/lima/run-phases.sh::set_default_sc — local-path en mode rapide,
+# rook-ceph-block-replicated en mode Ceph).
+
+contract_version: '1.0'
+
+profils:
+  # ── Profil Ceph : stockage résilient (prod / preuve e2e) ──────────────────
+  ceph:
+    description: >-
+      Stockage résilient via Rook-Ceph (RBD bloc, CephFS, RGW objet). Profil de
+      PRODUCTION et de preuve (ADR 0034). Réplication ×3 ou erasure coding 2+1.
+    default_storage_class: rook-ceph-block-replicated
+    storage_classes:
+      - name: rook-ceph-block-replicated
+        provisioner: rook-ceph.rbd.csi.ceph.com
+        kind: block # RBD
+        durabilite: réplication ×3 (failureDomain host)
+        reclaim_policy: Delete
+        expansion: true
+        default: true
+        usage: >-
+          SC par défaut. StatefulSets et workloads durables (CNPG l'utilise —
+          jamais d'EC pour le stateful, ADR 0001).
+        source: storage/ceph/storageClass/block-replicated.yaml
+
+      - name: rook-ceph-block-ec
+        provisioner: rook-ceph.rbd.csi.ceph.com
+        kind: block # RBD + erasure coding 2+1
+        durabilite: metadata ×3 + data EC 2+1 (compact)
+        reclaim_policy: Retain
+        expansion: true
+        default: false
+        usage: Archives / données peu accédées. PAS pour le stateful (ADR 0001).
+        source: storage/ceph/storageClass/block-ec-retain.yaml
+
+      - name: rook-ceph-block-ec-delete
+        provisioner: rook-ceph.rbd.csi.ceph.com
+        kind: block # variante reclaim Delete
+        durabilite: metadata ×3 + data EC 2+1
+        reclaim_policy: Delete
+        expansion: true
+        default: false
+        usage: Données éphémères + erasure coding.
+        source: storage/ceph/storageClass/block-ec-delete.yaml
+
+      - name: rook-cephfs
+        provisioner: rook-ceph.cephfs.csi.ceph.com
+        kind: filesystem # CephFS, ReadWriteMany
+        durabilite: réplication ×3
+        reclaim_policy: Delete
+        expansion: false
+        default: false
+        usage: Volumes partagés POSIX multi-lecteur (RWX).
+        source: storage/ceph/storageClass/filesystem/
+
+    object_store:
+      # S3 n'est PAS une StorageClass : on l'obtient via ObjectBucketClaim
+      # (cf. contract/namespaces-secrets.example.yaml).
+      bucket_storage_class: rook-ceph-bucket
+      provisioner: rook-ceph.ceph.rook.io/bucket
+      endpoint: rook-ceph-rgw-datalake.rook-ceph.svc.cluster.local:80
+      note: Déclarer un ObjectBucketClaim avec cette StorageClass pour un bucket S3.
+
+  # ── Profil local-path : stockage léger (banc rapide, NON résilient) ───────
+  local-path:
+    description: >-
+      Stockage local au nœud (rancher local-path), NON résilient. Profil
+      d'ITÉRATION rapide (~11 min sans Ceph, ADR 0035). PAS une preuve : un
+      changement validé ici doit repasser en profil Ceph (ADR 0034).
+    default_storage_class: local-path
+    storage_classes:
+      - name: local-path
+        provisioner: rancher.io/local-path
+        kind: block # filesystem local node-bound
+        durabilite: aucune (perte du nœud = perte des données)
+        reclaim_policy: Delete
+        volume_binding_mode: WaitForFirstConsumer
+        default: true
+        usage: PVC simples pour itérer vite sur ce qui n'exige pas Ceph.
+        source: storage/local-path/local-path-storage.yaml
+
+    object_store:
+      endpoint: seaweedfs.s3.svc.cluster.local:8333
+      note: >-
+        Backing S3 léger = SeaweedFS (ADR 0036), creds de test statiques. Pas
+        d'ObjectBucketClaim (pas de provisioner bucket en profil léger).
