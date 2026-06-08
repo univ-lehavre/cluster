@@ -56,10 +56,10 @@ pre-push:
     kubeconform:
       run: |
         # On part des seuls fichiers VERSIONNÉS (git ls-files) : exclut
-        # nativement les .yaml gitignorés (ex. test/**/.vagrant/cluster-bench.yaml
-        # généré par run-phases.sh) que `find` ramassait et qui cassaient le
-        # push (cf. drift hook pre-push). Les exclusions ci-dessous restent pour
-        # les fichiers versionnés non kubeconform-ables.
+        # nativement les .yaml gitignorés (ex. inventaires/kubeconfig générés par
+        # le banc) que `find` ramassait et qui cassaient le push (cf. drift hook
+        # pre-push). Les exclusions ci-dessous restent pour les fichiers
+        # versionnés non kubeconform-ables.
         git ls-files -z -- '*.yaml' \
           ':!:bootstrap/**' \
           ':!:pnpm-lock.yaml' \

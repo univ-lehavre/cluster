@@ -193,7 +193,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           trivyignores: .trivyignore.yaml
-          skip-dirs: node_modules,test/**/.vagrant
+          skip-dirs: node_modules
 
   commitlint:
     runs-on: ubuntu-latest

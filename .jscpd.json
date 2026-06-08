@@ -8,8 +8,6 @@
     "**/.git/**",
     "docs/.vitepress/cache/**",
     "docs/.vitepress/dist/**",
-    "test/.vagrant/**",
-    "test/inventory.yaml",
     "pnpm-lock.yaml",
     "CHANGELOG.md",
     "storage/ceph/crds.yaml",
