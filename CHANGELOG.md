@@ -14,6 +14,19 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.29.1](https://github.com/univ-lehavre/cluster/compare/v2.29.0...v2.29.1) (2026-06-08)
+
+
+### Documentation
+
+* **adr:** 0037 stratégie de merge — merge commit (préserver les références) ([48fc8a9](https://github.com/univ-lehavre/cluster/commit/48fc8a9fe61bb2a29aa59c3712281588457d5423))
+* **adr:** 0038 lima seul banc local + catalogue 4 axes (mat/topo HA/terrain/briques) ([07ded66](https://github.com/univ-lehavre/cluster/commit/07ded6697ad905360f43307cc027e3ab1d7cbc56))
+* **adr:** 0039 nomenclature des axes (codes arch/terrain/profil + tuple) ([c0c4838](https://github.com/univ-lehavre/cluster/commit/c0c4838f32a2acaae0dcecf1f58113efe3308d4e))
+* **catalogue:** matrice 4 axes nommés, stratégie merge-commit, scénarios obs ([#171](https://github.com/univ-lehavre/cluster/issues/171)) ([4b8efcf](https://github.com/univ-lehavre/cluster/commit/4b8efcf5f9687e681387d72098942f3b081cd404))
+* **matrice:** bloc 'scénarios exécutés' — statut réel par combinaison (tuple) ([bb0a065](https://github.com/univ-lehavre/cluster/commit/bb0a0651d715741208ffc3d7aa2114418daf7ce7))
+* **matrice:** cohérence + briques S3/Loki + scénarios obs 24-26 (à écrire) ([62d07b7](https://github.com/univ-lehavre/cluster/commit/62d07b74a108068563b1daeecf4904ed6c76005a))
+* **matrice:** dimensions fines paramétrables (storageClass, backing S3) + couverture [#158](https://github.com/univ-lehavre/cluster/issues/158)/[#186](https://github.com/univ-lehavre/cluster/issues/186) ([2b3ff70](https://github.com/univ-lehavre/cluster/commit/2b3ff70e45c123811ce959b79aba713524ebc7f6))
+
 ## [2.29.0](https://github.com/univ-lehavre/cluster/compare/v2.28.1...v2.29.0) (2026-06-07)
 
 
