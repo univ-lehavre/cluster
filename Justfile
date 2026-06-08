@@ -98,13 +98,13 @@ metrics-server:
 docs:
     pnpm docs:dev
 
-# ─── Banc de test (VirtualBox + Vagrant) ────────────────────────────────────
-# Orchestrateur à gates : voir test/multi-node/run-phases.sh.
+# ─── Banc de test (Lima — seul banc local, ADR 0038) ────────────────────────
+# Orchestrateur à gates : voir test/lima/run-phases.sh.
 
-# Banc multi-nœuds, phase par phase ou tout : `just bench all` / `just bench ceph`.
+# Banc multi-nœuds Lima, phase par phase ou tout : `just bench all` / `just bench ceph`.
 bench phase="all":
-    test/multi-node/run-phases.sh {{ phase }}
+    test/lima/run-phases.sh {{ phase }}
 
-# Détruit les VMs du banc multi-nœuds.
+# Détruit les VMs du banc Lima.
 bench-destroy:
-    cd test/multi-node && vagrant destroy -f
+    test/lima/run-phases.sh down

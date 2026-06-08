@@ -34,9 +34,9 @@ déploiement (qui vivent dans une config locale non versionnée).
 - **Spécificités réelles** = fichier de config **local non versionné**
   (gitignoré) surchargeant un **`*.example` versionné** — voir la convention
   `.env` / `.env.example` et les inventaires de banc.
-- **Exceptions** : le banc Vagrant (`192.168.67.0/24`) reste tel quel (exemple
-  fonctionnel public) ; l'historique de validation banc (`test/RESULTS.md`)
-  n'est **pas** réécrit (honnêteté des Runs).
+- **Exceptions** : le réseau d'exemple du banc local (`192.168.67.0/24`) reste
+  tel quel (exemple fonctionnel public) ; l'historique de validation banc
+  (`test/RESULTS.md`) n'est **pas** réécrit (honnêteté des Runs).
 
 ## Traçabilité : ADR, audits, plans
 
@@ -145,13 +145,13 @@ shellcheck $(find . -name '*.sh' -not -path './node_modules/*')
 
 ## Tests
 
-Voir [`test/`](test/) — deux bancs Vagrant pour valider sur Debian 13 arm64
-avant de toucher les serveurs :
+Voir [`test/`](test/) — banc **Lima** pour valider sur Debian 13 arm64 avant de
+toucher les serveurs (seul banc local,
+[ADR 0038](docs/decisions/0038-lima-seul-banc-local.md)) :
 
-- [`test/single-node/`](test/single-node/) — Phase 1-2 mono-VM (~5 min, sans
-  Ceph).
-- [`test/multi-node/`](test/multi-node/) — Phase 1-5 multi-VM avec disques +
-  réseau privé `10.0.0.0/22` (~15 min, exerce Rook-Ceph).
+- [`test/lima/`](test/lima/) — banc multi-nœuds, profils léger (~11 min) et Ceph
+  (~30 min), via [`run-phases.sh`](test/lima/run-phases.sh) à gates. Exerce le
+  multi-VM + Rook-Ceph + la chaîne DataOps.
 
 Résultats du dernier banc : [`test/RESULTS.md`](test/RESULTS.md).
 
