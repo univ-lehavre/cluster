@@ -175,41 +175,90 @@ exigé) — **pas** s'il a tourné. Le statut d'exécution réel (quoi a été p
 sur quelle combinaison, quand) est dans le **bloc « Scénarios exécutés »** juste
 après la table. Source : [`test/scenarios/`](../../test/scenarios/).
 
-| #   | Scénario                           | Catégorie     | Topologie req. | Briques testées          | Terrain particulier    |
-| --- | ---------------------------------- | ------------- | -------------- | ------------------------ | ---------------------- |
-| 01  | RBD block write-read               | stockage      | agnostique     | Rook-Ceph, k8s           | —                      |
-| 02  | Pod rescheduling (persistance)     | stockage      | agnostique     | Rook-Ceph, k8s           | —                      |
-| 03  | Perte worker + Ceph HEALTH         | résilience    | multi-nœuds    | Rook-Ceph, k8s           | SSH hôte + halt/up     |
-| 04  | Perte control plane + snapshot     | résilience    | mono-nœud      | etcd, k8s                | SSH hôte + halt/up     |
-| 05  | Bump réplication pool              | stockage      | multi-nœuds    | Rook-Ceph                | —                      |
-| 06  | Object store (RGW) smoke           | stockage      | agnostique     | Rook-Ceph, k8s           | —                      |
-| 07  | Connectivité Cilium                | réseau        | agnostique     | Cilium, k8s              | —                      |
-| 08  | Audit requests/limits              | observabilité | agnostique     | Rook-Ceph, k8s           | —                      |
-| 09  | Restore snapshot etcd              | résilience    | mono-nœud      | etcd                     | SSH hôte + etcdctl     |
-| 10  | Pod Security Admission             | sécurité      | agnostique     | PSA, k8s                 | —                      |
-| 11  | NetworkPolicy default-deny         | sécurité      | agnostique     | Cilium, NetworkPolicy    | —                      |
-| 12  | securityContext runtime            | sécurité      | agnostique     | k8s, securityContext     | —                      |
-| 13  | Durcissement host/node             | sécurité      | agnostique     | host-hardening           | SSH hôte + state.sh    |
-| 14  | Chiffrement Cilium + Hubble        | sécurité      | multi-nœuds    | Cilium, WireGuard        | —                      |
-| 15  | Chiffrement at-rest etcd + audit   | sécurité      | mono-nœud      | etcd, PSA                | SSH hôte + etcdctl     |
-| 16  | Brute-force SSH → fail2ban         | sécurité      | agnostique     | host-hardening, fail2ban | SSH hôte               |
-| 17  | Évasion pod → PSA rejette          | sécurité      | agnostique     | PSA, k8s                 | offensif (BANC=1)      |
-| 18  | Exfiltration → NetworkPolicy       | sécurité      | agnostique     | Cilium, NetworkPolicy    | offensif (BANC=1)      |
-| 19  | Chaos perte paquets/partition      | chaos         | multi-nœuds    | Cilium, Rook-Ceph, k8s   | tc netem (VM réelle)   |
-| 20  | Chaos kill pods                    | chaos         | agnostique     | k8s, Rook-Ceph           | offensif (BANC=1)      |
-| 21  | Chaos saturation CPU/mém           | chaos         | agnostique     | k8s, resource limits     | offensif (BANC=1)      |
-| 22  | Alerte détecteurs → Mailpit        | observabilité | agnostique     | host-hardening, Mailpit  | SSH hôte               |
-| 23  | Marquez OpenLineage                | dataops       | agnostique     | DataOps, CNPG, Dagster   | API Marquez            |
-| 24  | Prometheus scrape + Grafana up     | observabilité | agnostique     | kube-prometheus-stack    | API Prometheus/Grafana |
-| 25  | PrometheusRule → alerte tirée      | observabilité | agnostique     | Prometheus, Alertmanager | API Prometheus         |
-| 26  | Loki : ingest logs + requête LogQL | observabilité | agnostique     | Loki, S3 (SeaweedFS/RGW) | API Loki               |
+La colonne **Type** distingue la **nature** de l'épreuve :
 
+- **`unit`** — vérifie **une propriété isolée** d'une brique (ex. un PVC se
+  monte, une NetworkPolicy bloque, un pod non conforme est rejeté).
+- **`intég`** — **test d'intégration de chaîne** : un flux **traverse plusieurs
+  briques** bout-en-bout, et c'est le bout du flux qu'on observe (ex. lineage
+  Dagster→OpenLineage→Marquez ; log poussé→Loki→S3→relu en LogQL ;
+  snapshot→restore→le témoin revient).
+- **`chaos`** — intégration **sous panne** : on casse (réseau, nœud, ressources)
+  et on vérifie que la chaîne **survit et reconverge**
+  ([ADR 0025](../decisions/0025-securite-active-chaos-attaques-controlees.md)).
+
+| #   | Scénario                           | Type      | Catégorie     | Topologie req. | Briques testées          | Terrain particulier    |
+| --- | ---------------------------------- | --------- | ------------- | -------------- | ------------------------ | ---------------------- |
+| 01  | RBD block write-read               | unit      | stockage      | agnostique     | Rook-Ceph, k8s           | —                      |
+| 02  | Pod rescheduling (persistance)     | **intég** | stockage      | agnostique     | Rook-Ceph, k8s           | —                      |
+| 03  | Perte worker + Ceph HEALTH         | chaos     | résilience    | multi-nœuds    | Rook-Ceph, k8s           | SSH hôte + halt/up     |
+| 04  | Perte control plane + snapshot     | chaos     | résilience    | mono-nœud      | etcd, k8s                | SSH hôte + halt/up     |
+| 05  | Bump réplication pool              | **intég** | stockage      | multi-nœuds    | Rook-Ceph                | —                      |
+| 06  | Object store (RGW) smoke           | **intég** | stockage      | agnostique     | Rook-Ceph, k8s           | —                      |
+| 07  | Connectivité Cilium                | unit      | réseau        | agnostique     | Cilium, k8s              | —                      |
+| 08  | Audit requests/limits              | unit      | observabilité | agnostique     | Rook-Ceph, k8s           | —                      |
+| 09  | Restore snapshot etcd              | **intég** | résilience    | mono-nœud      | etcd                     | SSH hôte + etcdctl     |
+| 10  | Pod Security Admission             | unit      | sécurité      | agnostique     | PSA, k8s                 | —                      |
+| 11  | NetworkPolicy default-deny         | unit      | sécurité      | agnostique     | Cilium, NetworkPolicy    | —                      |
+| 12  | securityContext runtime            | unit      | sécurité      | agnostique     | k8s, securityContext     | —                      |
+| 13  | Durcissement host/node             | unit      | sécurité      | agnostique     | host-hardening           | SSH hôte + state.sh    |
+| 14  | Chiffrement Cilium + Hubble        | unit      | sécurité      | multi-nœuds    | Cilium, WireGuard        | —                      |
+| 15  | Chiffrement at-rest etcd + audit   | **intég** | sécurité      | mono-nœud      | etcd, PSA                | SSH hôte + etcdctl     |
+| 16  | Brute-force SSH → fail2ban         | **intég** | sécurité      | agnostique     | host-hardening, fail2ban | SSH hôte               |
+| 17  | Évasion pod → PSA rejette          | unit      | sécurité      | agnostique     | PSA, k8s                 | offensif (BANC=1)      |
+| 18  | Exfiltration → NetworkPolicy       | **intég** | sécurité      | agnostique     | Cilium, NetworkPolicy    | offensif (BANC=1)      |
+| 19  | Chaos perte paquets/partition      | chaos     | chaos         | multi-nœuds    | Cilium, Rook-Ceph, k8s   | tc netem (VM réelle)   |
+| 20  | Chaos kill pods                    | chaos     | chaos         | agnostique     | k8s, Rook-Ceph           | offensif (BANC=1)      |
+| 21  | Chaos saturation CPU/mém           | chaos     | chaos         | agnostique     | k8s, resource limits     | offensif (BANC=1)      |
+| 22  | Alerte détecteurs → Mailpit        | **intég** | observabilité | agnostique     | host-hardening, Mailpit  | SSH hôte               |
+| 23  | Marquez OpenLineage                | **intég** | dataops       | agnostique     | DataOps, CNPG, Dagster   | API Marquez            |
+| 24  | Prometheus scrape + Grafana up     | **intég** | observabilité | agnostique     | kube-prometheus-stack    | API Prometheus/Grafana |
+| 25  | PrometheusRule → alerte tirée      | **intég** | observabilité | agnostique     | Prometheus, Alertmanager | API Prometheus         |
+| 26  | Loki : ingest logs + requête LogQL | **intég** | observabilité | agnostique     | Loki, S3 (SeaweedFS/RGW) | API Loki               |
+
+> **Tests d'intégration de chaîne (`intég`)** — ce sont eux qui valident que
+> **toute une chaîne fonctionne bout-en-bout**, pas seulement qu'elle est montée
+> (§3). Les principaux : **23** (chaîne DataOps complète : un run Dagster réel →
+> OpenLineage → ingéré dans Marquez, #173/#148) ; **26** (chaîne logs : push →
+> Loki → backing S3 → relu en LogQL) ; **09** (sauvegarde etcd réellement
+> _restaurable_, pas juste produite). La séquence `run-phases.sh dataops`
+> elle-même **est** le test d'intégration de montage de la chaîne DataOps
+> (registry → CNPG+Barman → Dagster → Marquez) ; le scénario 23 en revérifie le
+> maillon final a posteriori.
+>
 > **Scénarios 24–26 (observabilité) : écrits et éprouvés (2026-06-08).** La
 > stack monitoring/Loki (#158/#186) est désormais **sollicitée par des
 > épreuves** réelles, scriptées dans [`test/scenarios/`](../../test/scenarios/)
 > : Prometheus scrape ses targets (22 UP), l'alerte témoin `Watchdog` est bien
 > _firing_, et un log poussé est relu en LogQL (round-trip via le backing S3).
 > Passés au vert sur le banc Ceph (profil RGW) — _monté **et** éprouvé_.
+
+### Synthèse — unitaire vs intégration, par chaîne fonctionnelle
+
+Lecture transversale : pour chaque **chaîne**, ce qui est couvert en
+**unitaire** (propriétés isolées) et en **intégration** (le flux complet
+bout-en-bout).
+
+| Chaîne fonctionnelle    | Tests **unitaires**        | Test **d'intégration** (flux e2e)                                 | Couvert ?   |
+| ----------------------- | -------------------------- | ----------------------------------------------------------------- | ----------- |
+| Stockage bloc (Ceph)    | 01 (PVC RBD)               | 02 (pod→PVC persiste), 05 (rebalance ×3→×5)                       | ✅          |
+| Stockage objet (S3/RGW) | —                          | 06 (bucket PUT/GET/DELETE)                                        | ✅          |
+| Réseau (Cilium)         | 07 (connectivité), 14 (WG) | 11/18 (NetworkPolicy coupe un flux réel)                          | ✅          |
+| Sauvegarde plan ctrl    | —                          | 09 (snapshot etcd → **restore** → témoin revient)                 | ✅          |
+| Sécurité admission      | 10, 12, 17 (pods rejetés)  | 16 (brute-force→fail2ban), 22 (détecteur→alerte→Mailpit)          | ✅          |
+| **DataOps**             | —                          | **23** (run Dagster → OpenLineage → Marquez) + séquence `dataops` | ✅          |
+| **Observabilité métr.** | —                          | **24** (scrape→targets+Grafana), **25** (rule→alerte firing)      | ✅          |
+| **Observabilité logs**  | —                          | **26** (push→Loki→S3→LogQL)                                       | ✅          |
+| Résilience / chaos      | —                          | 03, 04, 19, 20, 21 (panne → reconvergence)                        | ✅          |
+| Sauvegarde **données**  | —                          | _PVC → backup Barman → **restore**_                               | ❌ à écrire |
+
+> **À retenir** : la plupart des chaînes ont leur test d'intégration (`intég`).
+> Le **trou** notable est la **restauration des données applicatives** :
+> CNPG/Barman sauvegarde bien vers le RGW (monté, #173), mais aucun scénario ne
+> prouve encore un cycle **PVC → backup → restore → données retrouvées**
+> (l'équivalent du 09 pour les données, pas l'etcd). À écrire — c'est le pendant
+> données du « backup restaurable »
+> ([ADR 0013](../decisions/0013-sauvegarde-donnees-applicatives.md)).
 
 ### Scénarios exécutés (statut réel)
 
