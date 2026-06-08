@@ -1,0 +1,88 @@
+# Registre des drifts — source de vérité unique (honnêteté des Runs, ADR 0023/0034).
+#
+# Un « drift » = un écart révélé par un run e2e que le lint ne voyait pas. Ce
+# fichier est LE catalogue indexé ; les pages de synthèse (lecons-des-runs.md) et
+# les journaux de campagne (test/lima/RESULTS.md) y RÉFÈRENT par id, sans
+# dupliquer le détail.
+#
+# Champs par entrée :
+#   id        : Lnn (stable, citable)
+#   campagne  : chantier/issue qui l'a révélé
+#   portee    : code (défaut du livrable, vaut pour tous les bancs ET la prod)
+#             | env (artefact d'un banc précis)
+#             | harnais (outillage de test, pas le livrable)
+#   symptome  : ce qu'on a vu
+#   cause     : la cause-racine
+#   correctif : ce qui a été fait
+#   statut    : corrige | caduc (topologie/contexte abandonné) | ouvert
+#
+# Historique antérieur (L1–L40) : détaillé dans lecons-des-runs.md et RESULTS.md
+# (par catégorie / campagne). Ce registre démarre au chantier #158/#186/topologies
+# et accueillera les drifts à venir. La migration de L1–L40 ici est un chantier
+# distinct (cf. ADR à venir sur le registre).
+
+drifts:
+  - id: L41
+    campagne: 'topologies — DataOps sans Ceph (#158/#186 suite)'
+    portee: code
+    symptome: >-
+      Le déploiement registry (puis CNPG) reste Pending : PVC non lié, pod
+      registry 0/1 « Deployment does not have minimum availability ».
+    cause: >-
+      Le storageClass des PVC (registry, CNPG) était figé sur le profil de la
+      phase, sans s'aligner au profil réel du banc — un PVC rook-ceph sur un banc
+      local-path (ou l'inverse) reste Pending faute de provisioner.
+    correctif: >-
+      phase_dataops (run-phases.sh) choisit storageClass + backing S3 selon le
+      profil (registry_storage_class / cnpg_storage_class / cnpg_s3_backing /
+      cnpg_s3_endpoint), comme phase_monitoring. Le rôle CNPG est par ailleurs
+      découplé du RGW via platform-s3-bucket (backing rgw|seaweedfs, ADR 0036).
+    statut: corrige
+
+  - id: L42
+    campagne: 'topologies — banc single-node (exploratoire)'
+    portee: env
+    symptome: >-
+      Gate « Wait for Dagster webserver and daemon to be Ready » expire alors que
+      les pods finissent par devenir Ready peu après.
+    cause: >-
+      Sur un nœud unique portant tout (k8s + monitoring + CNPG + registry +
+      Dagster), le démarrage est plus lent que le timeout du gate, calibré pour
+      multi-nœuds.
+    correctif: >-
+      Aucun (topologie single-node abandonnée — ADR 0040). Consigné pour la
+      traçabilité de l'abandon.
+    statut: caduc
+
+  - id: L43
+    campagne: 'topologies — banc single-node (exploratoire)'
+    portee: env
+    symptome: >-
+      Pods CloudNativePG (pg-1/2/3) évincés : « The node was low on resource:
+      ephemeral-storage » ; nœud taint disk-pressure → plus de placement.
+    cause: >-
+      3 instances pg + build d'images + registry + monitoring sur un seul nœud
+      (disque VM 20 Go) saturent l'ephemeral-storage. CNPG ×3 sur 1 nœud n'a de
+      toute façon aucun sens (pas de HA mono-nœud).
+    correctif: >-
+      Aucun (topologie single-node abandonnée — ADR 0040). Aurait exigé CNPG ×1 +
+      disque accru ; non représentatif. Consigné pour la traçabilité.
+    statut: caduc
+
+  - id: L44
+    campagne: 'topologies — DataOps sans Ceph (#158/#186 suite)'
+    portee: harnais
+    symptome: >-
+      Une phase (dataops, monitoring) lancée sans WITH_CEPH=1 sur un banc Ceph
+      choisit silencieusement le profil léger (storageClass local-path) → PVC
+      Pending sur le banc Ceph, échec en aval.
+    cause: >-
+      Le profil (léger/Ceph) est porté par la variable d'environnement WITH_CEPH,
+      facile à oublier quand on enchaîne les phases à la main. Aucune détection de
+      l'état réel du cluster.
+    correctif: >-
+      À faire (ouvert) : faire que dataops/monitoring DÉTECTENT le profil (présence
+      d'un storageClass rook-ceph / du RGW) au lieu de dépendre de WITH_CEPH, ou
+      refuser proprement si incohérent. Contournement actuel : passer WITH_CEPH=1
+      à toutes les phases d'un banc Ceph.
+    statut: ouvert
