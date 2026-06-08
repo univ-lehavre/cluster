@@ -336,7 +336,11 @@ phase_platform_prereqs() {
 # Idempotent. Restart containerd pour que le CRI relise certs.d.
 configure_insecure_registry() {
     local reg_ip vm
-    reg_ip=$("${KUBECTL[@]}" -n registry get svc registry -o jsonpath='{.spec.clusterIP}' 2> /dev/null)
+    # `|| true` : sous `set -e`, l'assignation `x=$(cmd-qui-échoue)` tue le script.
+    # Or sur le banc LÉGER (monitoring seul, sans dataops) le ns registry n'existe
+    # pas → `kubectl get` sort en 1 (drift L40). On tolère l'échec et on skippe
+    # proprement via le garde ci-dessous (le registry n'est requis que par dataops).
+    reg_ip=$("${KUBECTL[@]}" -n registry get svc registry -o jsonpath='{.spec.clusterIP}' 2> /dev/null || true)
     if [ -z "${reg_ip}" ]; then
         warn "Service registry/registry absent — déployer le registry interne d'abord (skip insecure-registry)"
         return 0

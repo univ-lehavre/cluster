@@ -32,7 +32,7 @@ banc.
 | Bootstrap K8s (#127)           | Lima / Vagrant          | arm64               | L1–L11  | mixte (code + env)    | —               |
 | Chaîne DataOps shell (#148)    | Lima (rapide)           | arm64               | L12–L20 | surtout code          | —               |
 | Portage DataOps Ansible (#173) | Lima (Ceph)             | M3 Max 16c / 48 GiB | L21–L33 | mixte (code + env)    | ~30 min         |
-| storageClass + S3 (#158/#186)  | Lima (léger, puis Ceph) | M3 Max 16c / 48 GiB | L34–L39 | **code (universels)** | ~11 min (léger) |
+| storageClass + S3 (#158/#186)  | Lima (léger, puis Ceph) | M3 Max 16c / 48 GiB | L34–L40 | **code (universels)** | ~11 min (léger) |
 
 Détail des temps par phase du run #173 (M3 Max, mode Ceph, 8 GiB/VM) :
 
@@ -148,7 +148,13 @@ SeaweedFS créent n'importe quel bucket) :
   matchait aussi `make_bucket failed` → toujours vert, même quand rien n'était
   créé → réécrit pour **échouer franchement** si le bucket n'est ni créé ni déjà
   présent.
-- **Invariant** : un profil de banc qui **élargit les droits** (creds admin)
+- **L40** (symétrique, côté **léger**) `platform-prereqs` mourait sur le banc
+  léger : `set -e` + `reg_ip=$(kubectl get svc registry …)` sans le namespace
+  `registry` (présent uniquement avec `dataops`) → l'assignation échoue et tue
+  le script avant son garde → `… || true`. Masqué jusque-là car les runs
+  montaient toujours le registry via `dataops` ; seul un run **monitoring-seul**
+  l'expose.
+- **Invariant** : un profil de banc qui **élargit les droits** (creds admin) ou
   masque les contraintes du profil réel (creds restreints OBC). Un chemin de
   code partagé doit être **validé sur chaque backing réellement employé** —
   sinon le banc rapide valide une version plus permissive que la prod. C'est
@@ -165,7 +171,7 @@ SeaweedFS créent n'importe quel bucket) :
    la courbe de fiabilisation.
 3. **La connaissance capitalise.** Les drifts d'hier (L1–L20) ont servi de
    spécification au portage Ansible (#173). Ceux d'hier (L21–L33) et
-   d'aujourd'hui (L34–L39, tous **code**) serviront aux prochains terrains
+   d'aujourd'hui (L34–L40, tous **code**) serviront aux prochains terrains
    (cloud, x86, HA).
 4. **Tester le banc léger n'est pas tricher.** Le profil S3 (Loki, CNPG) est le
    **même code** partout — seul le backing change (SeaweedFS léger ↔ RGW Ceph,

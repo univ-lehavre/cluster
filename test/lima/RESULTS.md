@@ -304,3 +304,31 @@ qu'en RGW**. Le banc léger, avec ses creds admin SeaweedFS, validait une versio
 **plus permissive** que la prod. D'où la règle inscrite en
 [ADR 0036](../../docs/decisions/0036-backing-s3-unique-rgw.md) : un changement
 S3 validé en léger **doit** être revalidé en Ceph avant prod.
+
+## Re-validation from-scratch des deux bancs (2026-06-08)
+
+> **But** : confirmer **zéro drift résiduel** après les chantiers #158/#186, par
+> deux runs **from-scratch d'une traite** (banc détruit puis remonté), un par
+> profil ([ADR 0034](../../docs/decisions/0034-validation-e2e-from-scratch.md)).
+
+Un **drift de plus** est apparu — précisément ce que cherche un from-scratch :
+
+| #   | Symptôme                                         | Cause                                                                                                                                                                                         | Correctif | Portée |
+| --- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------ | ------------------------------------- | ---- |
+| L40 | `platform-prereqs` meurt (EXIT 1) sur banc léger | `set -e` + `reg_ip=$(kubectl get svc registry …)` : sans le ns `registry` (monitoring seul, pas de dataops), `kubectl` sort en 1 → l'assignation tue le script avant le garde `[ -z reg_ip ]` | `…        |        | true` sur l'assignation (skip propre) | code |
+
+> **L40 n'apparaît que sur le profil léger** (monitoring sans dataops, donc sans
+> registry) : les runs précédents montaient toujours le registry via `dataops`,
+> qui masquait le bug. Encore un drift qu'**un seul profil révèle** (cf.
+> [Leçons des Runs](../../docs/architecture/lecons-des-runs.md), cat. 7).
+
+Verdicts (M3 Max, 8 GiB/VM, `multi-node-3` arm64, local) :
+
+| Profil | Séquence from-scratch                                                  | Verdict                    | Temps notables                                 |
+| ------ | ---------------------------------------------------------------------- | -------------------------- | ---------------------------------------------- |
+| léger  | `all → platform-prereqs → monitoring`                                  | ✅ **0 drift** (après L40) | up 3m14s · bootstrap 6m40s · monitoring ~3m    |
+| Ceph   | `WITH_CEPH=1 all → datalake → platform-prereqs → dataops → monitoring` | ✅ **0 drift**             | ceph 3m09s · dataops 14m33s · monitoring 2m34s |
+
+Les **scénarios d'observabilité 24–26** (Prometheus scrape, alerte `Watchdog`
+firing, Loki round-trip LogQL) ont été **écrits puis passés au vert** sur le
+banc Ceph (profil RGW) — la stack monitoring passe de _montée_ à _éprouvée_.
