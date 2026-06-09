@@ -128,6 +128,25 @@ metro_parse_prom_scalar() {
     grep -oE '\[[0-9.]+,"[^"]*"\]' | head -1 | sed -E 's/.*,"([^"]*)"\].*/\1/'
 }
 
+# Parse un VECTEUR instantané Prometheus (plusieurs séries) en lignes
+# "<label>\t<valeur>", une par série, où <label> est la valeur du label demandé
+# (ex. `node`). PUR : lit le JSON sur stdin, grep/sed only (pas de jq), pas de
+# réseau. Robuste à l'ordre des champs `metric`/`value` dans chaque objet.
+# Usage : printf '%s' "$json" | metro_parse_prom_vector <label_key>
+# Une série sans le label demandé est ignorée (pas de ligne émise).
+metro_parse_prom_vector() {
+    local key=$1
+    # Découpe le JSON en un objet de résultat par ligne, puis extrait par objet
+    # la valeur du label `key` et la valeur numérique (2ᵉ élément de "value").
+    grep -oE '\{"metric":\{[^}]*\}[^}]*"value":\[[0-9.]+,"[^"]*"\]\}' \
+        | while IFS= read -r obj; do
+            local lbl val
+            lbl=$(printf '%s' "${obj}" | sed -nE "s/.*\"${key}\":\"([^\"]*)\".*/\1/p")
+            val=$(printf '%s' "${obj}" | sed -nE 's/.*"value":\[[0-9.]+,"([^"]*)"\].*/\1/p')
+            [ -n "${lbl}" ] && printf '%s\t%s\n' "${lbl}" "${val}"
+        done
+}
+
 # Arrondit un flottant Prometheus à l'entier le plus proche (ou "?" si NaN/vide).
 # Usage : metro_round <valeur>
 metro_round() {
@@ -147,6 +166,24 @@ metro_metrics_block() {
     printf '      cpu_core_s: %s\n' "${cpu}"
     printf '      ram_peak_mib: %s\n' "${peak}"
     printf '      ram_mean_mib: %s\n' "${mean}"
+}
+
+# Rend le sous-bloc YAML `par_noeud:` (sous `metriques:`) à partir de lignes
+# "<nom>\t<cpu_core_s>\t<ram_peak_mib>\t<ram_mean_mib>" (une par nœud) lues sur
+# stdin. PUR. N'émet RIEN si stdin est vide (métrique par-nœud indisponible →
+# on garde les agrégats globaux seuls, pas de bloc vide). Usage :
+#   printf '%s\n' "$lignes" | metro_metrics_per_node_block
+metro_metrics_per_node_block() {
+    local emitted=0 name cpu peak mean
+    while IFS=$'\t' read -r name cpu peak mean; do
+        [ -n "${name}" ] || continue
+        if [ "${emitted}" = 0 ]; then
+            printf '      par_noeud:\n'
+            emitted=1
+        fi
+        printf '        %s: { cpu_core_s: %s, ram_peak_mib: %s, ram_mean_mib: %s }\n' \
+            "${name}" "${cpu:-?}" "${peak:-?}" "${mean:-?}"
+    done
 }
 
 # ── Effets de bord (montent/lisent des artefacts ; non testés bats) ───────────
@@ -269,6 +306,42 @@ metro_sample_prometheus() {
 
     log "  métriques run : CPU=${cpu} cœur·s · RAM pic=${peak} MiB · RAM moy=${mean} MiB" >&2
     metro_metrics_block "${cpu}" "${peak}" "${mean}"
+
+    # ── Détail PAR NŒUD (#241) — mêmes métriques, groupées par `instance` ─────
+    # node_exporter porte toujours le label `instance` (host:port) ; on l'utilise
+    # comme clé de nœud (stable, garanti présent). Le mapping instance→nom lisible
+    # (cp1/node1/node2) se confirme au 1er run réel — à ajuster si besoin (le label
+    # peut être une IP). Best-effort : si la requête vectorielle échoue, on n'émet
+    # PAS le sous-bloc (les agrégats globaux suffisent).
+    # Helper : requête → vecteur "label\tvaleur" (une ligne par série).
+    _prom_vec() {
+        local query=$1 enc
+        enc=$(printf '%s' "${query}" | sed 's/ /%20/g; s/"/%22/g; s/{/%7B/g; s/}/%7D/g; s/!/%21/g; s/=/%3D/g; s/\[/%5B/g; s/\]/%5D/g; s/(/%28/g; s/)/%29/g; s/,/%2C/g; s/+/%2B/g; s#/#%2F#g; s/:/%3A/g')
+        "${KUBECTL[@]}" -n monitoring run prom-qv-$$-"${RANDOM}" --rm -i --restart=Never \
+            --image=busybox:1.36 --quiet -- \
+            wget -qO- "http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/query?query=${enc}" 2>/dev/null \
+            | metro_parse_prom_vector instance
+    }
+    local nodes_cpu nodes_peak nodes_mean per_node
+    nodes_cpu=$(_prom_vec "sum by (instance) (increase(node_cpu_seconds_total{mode!=\"idle\"}[${window}s]))")
+    nodes_peak=$(_prom_vec "max_over_time((sum by (instance) (node_memory_MemTotal_bytes-node_memory_MemAvailable_bytes)/1048576)[${window}s:30s])")
+    nodes_mean=$(_prom_vec "avg_over_time((sum by (instance) (node_memory_MemTotal_bytes-node_memory_MemAvailable_bytes)/1048576)[${window}s:30s])")
+    # Assemble par nœud : jointure des 3 vecteurs sur la clé `instance` (PUR awk).
+    per_node=$(printf '%s\n---CPU---\n%s\n---PEAK---\n%s\n' "${nodes_cpu}" "${nodes_peak}" "${nodes_mean}" \
+        | awk '
+            /^---CPU---$/ { sect="cpu"; next }
+            /^---PEAK---$/ { sect="peak"; next }
+            NF==0 { next }
+            { if (sect=="") sect="cpu";
+              if (sect=="cpu")  cpu[$1]=$2;
+              else if (sect=="peak") peak[$1]=$2;
+              else mean[$1]=$2;
+              seen[$1]=1 }
+            END { for (n in seen) printf "%s\t%.0f\t%.0f\t%.0f\n", n, cpu[n], peak[n], mean[n] }')
+    if [ -n "${per_node}" ]; then
+        log "  détail par nœud (#241) — clé=instance (mapping à confirmer au run)" >&2
+        printf '%s\n' "${per_node}" | metro_metrics_per_node_block
+    fi
 }
 
 # ── Cache du socle bootstrap (#219) ──────────────────────────────────────────

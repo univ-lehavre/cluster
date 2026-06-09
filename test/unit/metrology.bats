@@ -230,3 +230,42 @@ YAML
     run metro_seuil_for_target inconnu
     [ "$output" = "7" ]
 }
+
+# ─── metro_parse_prom_vector : vecteur multi-séries → label\tvaleur (#241) ───
+
+# Les fonctions sont sourcées dans setup() ; on pipe directement dessus (pas de
+# `bash -c` qui re-spawnerait un shell SANS la fonction).
+@test "metro_parse_prom_vector : 2 séries → 2 lignes node\tval" {
+    json='{"data":{"result":[{"metric":{"instance":"cp1:9100"},"value":[1,"42.5"]},{"metric":{"instance":"node1:9100"},"value":[1,"17.2"]}]}}'
+    run metro_parse_prom_vector instance <<<"$json"
+    [ "$status" -eq 0 ]
+    [[ "${lines[0]}" == "cp1:9100"$'\t'"42.5" ]]
+    [[ "${lines[1]}" == "node1:9100"$'\t'"17.2" ]]
+}
+
+@test "metro_parse_prom_vector : série sans le label → ignorée" {
+    json='{"data":{"result":[{"metric":{"job":"node"},"value":[1,"9"]},{"metric":{"instance":"cp1:9100"},"value":[1,"3"]}]}}'
+    run metro_parse_prom_vector instance <<<"$json"
+    [ "${#lines[@]}" -eq 1 ]
+    [[ "${lines[0]}" == "cp1:9100"$'\t'"3" ]]
+}
+
+@test "metro_parse_prom_vector : vecteur vide → aucune ligne" {
+    run metro_parse_prom_vector instance <<<'{"data":{"result":[]}}'
+    [ -z "$output" ]
+}
+
+# ─── metro_metrics_per_node_block : lignes → YAML par_noeud (#241) ───────────
+
+@test "metro_metrics_per_node_block : 2 entrees rendent un bloc YAML par_noeud" {
+    run metro_metrics_per_node_block <<<"$(printf 'cp1\t100\t900\t800\nnode1\t50\t400\t300')"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"par_noeud:"* ]]
+    [[ "$output" == *"cp1: { cpu_core_s: 100, ram_peak_mib: 900, ram_mean_mib: 800 }"* ]]
+    [[ "$output" == *"node1: { cpu_core_s: 50, ram_peak_mib: 400, ram_mean_mib: 300 }"* ]]
+}
+
+@test "metro_metrics_per_node_block : stdin vide → AUCUN bloc (pas de par_noeud: vide)" {
+    run metro_metrics_per_node_block </dev/null
+    [ -z "$output" ]
+}
