@@ -745,13 +745,19 @@ drifts:
       workflows.git/info/refs : context deadline exceeded » — clone du dépôt
       Gitea impossible.
     cause: >-
-      `allow-reposerver-egress` autorise le port git via `to.ipBlock 0.0.0.0/0` ;
-      sous Cilium un ipBlock EXCLUT les IPs des pods du cluster (même piège que
-      L48) → Gitea (un pod) injoignable.
+      DEUX causes cumulées. (1) `allow-reposerver-egress` autorise le port git via
+      `to.ipBlock 0.0.0.0/0` ; sous Cilium un ipBlock EXCLUT les IPs des pods du
+      cluster (même piège que L48) → Gitea injoignable. (2) Même avec un
+      namespaceSelector vers gitea, ouvrir le port 80 (du Service) ne suffit PAS :
+      sous Cilium, la NetworkPolicy egress filtre le port du POD de destination
+      APRÈS DNAT du Service (gitea écoute 3000, le Service mappe 80→3000) — un
+      egress limité à 80 reste bloqué. Symptôme trompeur car un fix appliqué « à
+      chaud » lors d'une session antérieure avait paru fonctionner (faux positif).
     correctif: >-
       NetworkPolicy `allow-reposerver-gitea-egress` ciblant le namespace gitea
-      par namespaceSelector (port 80 du Service). Validé : repo-server clone, app
-      passe Synced.
+      par namespaceSelector, ports 3000 (cible réelle du pod après DNAT) ET 80
+      (robustesse). Validé banc : repo-server clone, Application Synced/Healthy,
+      scénario 27 PASS + 9 scénarios pertinents PASS (10/10).
     statut: corrige
 
   - id: L54
