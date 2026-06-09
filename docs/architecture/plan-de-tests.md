@@ -53,7 +53,7 @@ pure extraite ni bats. À densifier (logique testable hors cluster) :
 Chaque phase du harnais [`run-phases.sh`](../../test/lima/run-phases.sh) se
 termine par un **gate** bloquant (exit ≠ 0 sinon) sur le cluster réel. Le détail
 gate/assertion par couche, et leur regroupement en **chemins d'installation**
-(`socle` / `atlas` / `cluster`), est décidé par
+(`socle` / `atlas` / `storage-real` / `cluster-dataops`), est décidé par
 [ADR 0045](../decisions/0045-chemins-installation-banc-couches.md). Synthèse :
 
 | Couche / phase   | Gate (preuve sur banc)                                                 |
@@ -61,7 +61,8 @@ gate/assertion par couche, et leur regroupement en **chemins d'installation**
 | `bootstrap`      | N nœuds **Ready** (Cilium up)                                          |
 | `storage-simple` | provisioner Ready + PVC `local-path` **Bound**                         |
 | `ceph` / `sc`    | operator Ready + **HEALTH_OK** ; PVC SC Ceph **Bound**                 |
-| `datalake`       | **RGW Ready** (cible S3 Barman)                                        |
+| `datalake`       | **RGW Ready** + **smoke S3 PUT/GET/DELETE** (sc. 06)                   |
+| WordPress (Ceph) | PVC bloc **RWO Bound** sur la SC Ceph + **Pod Ready**                  |
 | backing S3 léger | SeaweedFS Ready (rôle conditionnel `when` Ceph absent — pas une phase) |
 | `monitoring`     | Prometheus + Grafana + Loki **Ready**                                  |
 | `gitops`         | `deploy/gitea` + `deploy/argocd-server` **Ready**                      |
@@ -72,17 +73,25 @@ gate/assertion par couche, et leur regroupement en **chemins d'installation**
 26 scénarios numérotés ([`test/scenarios/`](../../test/scenarios/), runner
 `run-all.sh`), couvrant résilience, sécurité active, chaos et observabilité. La
 **matrice détaillée** (ce que teste chacun + couverture) vit dans
-[`test/scenarios/README.md`](../../test/scenarios/README.md). Familles
+[`test/scenarios/README.md`](../../test/scenarios/README.md). Chaque famille est
+**scellée par un chemin d'installation** (ADR 0045 §4/§6) — le chemin qui monte
+le banc requis et que le garde-fou de fraîcheur surveille à sa cadence
 ([ADR 0025](../decisions/0025-securite-active-chaos-attaques-controlees.md),
 [ADR 0042](../decisions/0042-fraicheur-preuves-banc.md)) :
 
-| Plage  | Famille                                                                                                                                            |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 01–09  | Stockage, résilience, restauration etcd                                                                                                            |
-| 10–15  | Durcissement (pod, hôte, réseau, etcd)                                                                                                             |
-| 16–22  | Sécurité active (offensif D/A/R, chaos)                                                                                                            |
-| 23–26  | Intégration DataOps + observabilité                                                                                                                |
-| **27** | **e2e GitOps → workflows atlas** (push Gitea → Argo CD déploie les workflows → run Dagster + lineage) — implémenté (#231), preuve banc à consigner |
+| Plage        | Famille                                                                                                                                            | Chemin scellant (§6)             |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| 06           | Smoke S3 (RGW) + montage WordPress (PVC bloc Ceph)                                                                                                 | `storage-real` (30 j)            |
+| 01–05, 07–22 | Stockage, résilience, etcd, durcissement, sécu active, chaos                                                                                       | `storage-real` (banc Ceph monté) |
+| 23–26        | Intégration DataOps + observabilité                                                                                                                | `cluster-dataops` (90 j)         |
+| **27**       | **e2e GitOps → workflows atlas** (push Gitea → Argo CD déploie les workflows → run Dagster + lineage) — implémenté (#231), preuve banc à consigner | `atlas` (7 j)                    |
+
+**Axe durcissement (`WITH_HARDENING=1`, ADR 0045 §3 / #240).** Les scénarios qui
+exigent un hôte durci ne passent que si le chemin a été monté avec
+`WITH_HARDENING=1` (phase `hardening`, tags `audit,detection`) : **10–15**
+(durcissement) et surtout **16** (fail2ban), qui _skippe_ sur un banc non durci.
+Sans le flag, ces scénarios restent en skip assumé — la variante durcie est une
+preuve distincte (run consigné avec suffixe `+hardening`).
 
 ### Scénario 27 — workflows atlas déployés par GitOps
 
