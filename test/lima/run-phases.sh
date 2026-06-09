@@ -546,6 +546,23 @@ phase_wordpress() {
         || die "wordpress pas Ready : $("${KUBECTL[@]}" -n default describe pvc wp-pv-claim | tail -10)"
     ok "WordPress monté — PVC bloc RWO Bound + Pods Ready (preuve stockage bloc Ceph)"
 
+    # SMOKE HTTP : Pod Ready ≠ application qui sert. On vérifie que WordPress
+    # RÉPOND via son Service (pod busybox éphémère → GET http://wordpress/). Une
+    # install neuve redirige (301/302) vers /wp-admin/install.php : c'est la PREUVE
+    # qu'il sert (PHP + lecture/écriture sur le PVC bloc Ceph). On accepte tout
+    # code < 400 (200/301/302) ; un timeout/5xx = échec.
+    log "  Smoke HTTP WordPress (GET http://wordpress/ via le Service)"
+    local wp_code
+    wp_code=$("${KUBECTL[@]}" -n default run wp-smoke-$$ --rm -i --restart=Never \
+        --image=busybox:1.36 --quiet --command -- \
+        wget -S -T 10 -qO /dev/null 'http://wordpress.default.svc.cluster.local/' 2>&1 \
+        | grep -oE 'HTTP/[0-9.]+ [0-9]+' | grep -oE '[0-9]+$' | head -1)
+    if [ -n "${wp_code}" ] && [ "${wp_code}" -lt 400 ]; then
+        ok "🎉 WordPress répond (HTTP ${wp_code}) — application servie sur stockage bloc Ceph"
+    else
+        die "smoke WordPress : pas de réponse HTTP < 400 (obtenu '${wp_code:-aucune}')"
+    fi
+
     # Cleanup : l'exemple n'a pas vocation à rester (le chemin prouve le montage,
     # pas un service durable). KEEP_WORDPRESS=1 pour le conserver.
     if [ "${KEEP_WORDPRESS:-0}" = 1 ]; then
