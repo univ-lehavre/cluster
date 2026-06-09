@@ -1,0 +1,22 @@
+---
+# Valeurs par défaut du rôle platform-gitea (forge git intra-banc, ADR 0044).
+#
+# Défaut = valeur PROD (ADR 0023/0033) : la surcharge banc (local-path, etc.)
+# vit dans un group_vars d'inventaire non versionné (cf.
+# bootstrap/group_vars/dataops.example.yaml). Versions figées (ADR 0006).
+
+# Chemin du dépôt côté poste de contrôle (pour localiser platform/*.yaml depuis
+# le control-plane distant : les manifestes sont lus localement et appliqués).
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+# Namespace de la forge Gitea.
+gitea_namespace: gitea
+
+# storageClass du PVC de données Gitea. PROD : Rook-Ceph répliqué ×3
+# (ADR 0001/0018). Banc atlas : surchargé à 'local-path' (ADR 0044, profil
+# local-path — pas de Ceph).
+gitea_storage_class: rook-ceph-block-replicated
+
+# Timeouts du gate Ready (alignés sur les autres rôles plateforme).
+gitea_ready_retries: 30
+gitea_ready_delay: 5

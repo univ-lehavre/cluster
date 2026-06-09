@@ -1,0 +1,16 @@
+# Généré par le rôle platform-gitea — PVC de données de la forge Gitea.
+# Seul le storageClass est paramétré (ADR 0044, profil banc local-path) : défaut
+# prod Rook-Ceph répliqué, banc surchargé à local-path. Le reste reflète
+# platform/gitea/persistent-volume-claim.yaml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitea-data
+  namespace: {{ gitea_namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: {{ gitea_storage_class }}

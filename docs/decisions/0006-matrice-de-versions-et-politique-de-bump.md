@@ -54,20 +54,21 @@ Composants ajoutés avec l'observabilité (ADR 0016 palier 2) et le socle DataOp
 (CloudNativePG). Toutes les images sont épinglées par **digest d'index
 multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
 
-| Composant             | Version cible                                  | Fichier piloté                                                                                                |
-| --------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| kube-prometheus-stack | chart **86.1.0** (operator v0.91.0)            | [`platform/kube-prometheus-stack/`](../../platform/kube-prometheus-stack/) (helm template figé)               |
-| Loki                  | chart **7.0.0** (app 3.6.7)                    | [`platform/loki/loki.yaml`](../../platform/loki/loki.yaml)                                                    |
-| Promtail              | chart **6.17.1** (app 3.5.1, déprécié → Alloy) | [`platform/loki/promtail.yaml`](../../platform/loki/promtail.yaml)                                            |
-| Mailpit               | **v1.30.1**                                    | [`platform/mailpit/mailpit.yaml`](../../platform/mailpit/mailpit.yaml)                                        |
-| CloudNativePG         | operator **1.29.1**                            | [`platform/cloudnative-pg/operator.yaml`](../../platform/cloudnative-pg/operator.yaml)                        |
-| Barman Cloud Plugin   | **v0.12.0**                                    | [`platform/cloudnative-pg/plugin-barman-cloud.yaml`](../../platform/cloudnative-pg/plugin-barman-cloud.yaml)  |
-| PostgreSQL (operand)  | **18** (`18-minimal-trixie`)                   | [`platform/cloudnative-pg/cluster.yaml`](../../platform/cloudnative-pg/cluster.yaml)                          |
-| pgvector              | **0.8.2** (`0.8.2-18-trixie`)                  | [`platform/cloudnative-pg/cluster.yaml`](../../platform/cloudnative-pg/cluster.yaml) (image volume extension) |
-| SeaweedFS             | **4.31**                                       | banc léger uniquement (objectstore S3 de test)                                                                |
-| aws-cli               | **2.31.21**                                    | Jobs d'init de buckets S3 (`init-buckets.yaml`)                                                               |
-| Dagster               | chart **1.13.7** (app 1.13.7)                  | [`platform/dagster/values.bench.yaml`](../../platform/dagster/values.bench.yaml) (helm template figé)         |
-| Marquez               | chart **0.51.1** (API + web)                   | [`platform/marquez/values.bench.yaml`](../../platform/marquez/values.bench.yaml) (helm template figé)         |
+| Composant             | Version cible                                  | Fichier piloté                                                                                                 |
+| --------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| kube-prometheus-stack | chart **86.1.0** (operator v0.91.0)            | [`platform/kube-prometheus-stack/`](../../platform/kube-prometheus-stack/) (helm template figé)                |
+| Loki                  | chart **7.0.0** (app 3.6.7)                    | [`platform/loki/loki.yaml`](../../platform/loki/loki.yaml)                                                     |
+| Promtail              | chart **6.17.1** (app 3.5.1, déprécié → Alloy) | [`platform/loki/promtail.yaml`](../../platform/loki/promtail.yaml)                                             |
+| Mailpit               | **v1.30.1**                                    | [`platform/mailpit/mailpit.yaml`](../../platform/mailpit/mailpit.yaml)                                         |
+| CloudNativePG         | operator **1.29.1**                            | [`platform/cloudnative-pg/operator.yaml`](../../platform/cloudnative-pg/operator.yaml)                         |
+| Barman Cloud Plugin   | **v0.12.0**                                    | [`platform/cloudnative-pg/plugin-barman-cloud.yaml`](../../platform/cloudnative-pg/plugin-barman-cloud.yaml)   |
+| PostgreSQL (operand)  | **18** (`18-minimal-trixie`)                   | [`platform/cloudnative-pg/cluster.yaml`](../../platform/cloudnative-pg/cluster.yaml)                           |
+| pgvector              | **0.8.2** (`0.8.2-18-trixie`)                  | [`platform/cloudnative-pg/cluster.yaml`](../../platform/cloudnative-pg/cluster.yaml) (image volume extension)  |
+| SeaweedFS             | **4.31**                                       | banc léger uniquement (objectstore S3 de test)                                                                 |
+| aws-cli               | **2.31.21**                                    | Jobs d'init de buckets S3 (`init-buckets.yaml`)                                                                |
+| Dagster               | chart **1.13.7** (app 1.13.7)                  | [`platform/dagster/values.bench.yaml`](../../platform/dagster/values.bench.yaml) (helm template figé)          |
+| Marquez               | chart **0.51.1** (API + web)                   | [`platform/marquez/values.bench.yaml`](../../platform/marquez/values.bench.yaml) (helm template figé)          |
+| Gitea                 | **1.26.2** (`-rootless`)                       | [`platform/gitea/deployment.yaml`](../../platform/gitea/deployment.yaml) (git intra-banc air-gapped, ADR 0044) |
 
 > **Dagster amd64-only.** Les images officielles Dagster sont publiées **amd64
 > uniquement** (dagster-io/dagster#11841). Dagster étant du pur Python, on
