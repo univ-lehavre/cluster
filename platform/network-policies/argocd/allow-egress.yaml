@@ -1,7 +1,11 @@
 # Egress sortants d'Argo CD sous default-deny.
 #  - repo-server -> git (SSH/HTTPS/git-daemon) + registry interne (ADR 0011) ;
-#  - tous les composants -> kube-apiserver:6443 (application-controller et
-#    server appliquent/observent les manifestes ; repo-server liste les CRDs).
+#  - tous les composants -> kube-apiserver : DEUX ports nécessaires —
+#      * 443  : Service ClusterIP `kubernetes.default` (10.96.0.1:443) — c'est
+#               ce que les pods joignent (ex. le secret-init de argocd-redis qui
+#               CRÉE le Secret argocd-redis via l'API ; sans ce port il échoue
+#               (exit 20) et tous les composants tombent en CreateContainerConfigError) ;
+#      * 6443 : endpoint réel du control-plane kubeadm (selon le datapath).
 # Idiome du dépôt : ipBlock 0.0.0.0/0 restreint PAR PORTS (cf. allow-registry).
 ---
 apiVersion: networking.k8s.io/v1
@@ -32,7 +36,15 @@ spec:
           port: 5000 # registry interne (conteneur), si pull direct
 ---
 # Controllers Argo CD -> kube-apiserver. podSelector {} : server,
-# application-controller, repo-server, applicationset peuvent appeler l'API.
+# application-controller, repo-server, applicationset, ET le secret-init de
+# argocd-redis (qui CRÉE le Secret argocd-redis via l'API — sans cet egress il
+# échoue (exit 20) et tous les composants tombent en CreateContainerConfigError).
+#
+# PAS de `to:` (donc PAS d'ipBlock) — c'est l'idiome du dépôt pour l'apiserver
+# (calque dagster/allow-apiserver-egress) : sous Cilium, l'API server et le
+# control-plane sont des ENTITÉS RÉSERVÉES (host/kube-apiserver) qu'un
+# `ipBlock: 0.0.0.0/0` EXCLUT — une règle egress sans `to` les autorise. Les
+# deux ports couvrent le Service ClusterIP (443) et l'endpoint kubeadm (6443).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -43,9 +55,8 @@ spec:
   policyTypes:
     - Egress
   egress:
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
+    - ports:
         - protocol: TCP
-          port: 6443
+          port: 443 # Service ClusterIP kubernetes.default (10.96.0.1:443)
+        - protocol: TCP
+          port: 6443 # endpoint réel du control-plane kubeadm
