@@ -398,3 +398,52 @@ Drifts de cette campagne :
   ciblant le Service `prometheus-operated` ; tous les logs routés sur
   **stderr**. Couvert par deux tests bats anti-régression (stdout sans ANSI,
   Prometheus absent → stdout vide).
+
+## Socle GitOps — Gitea + Argo CD sans Ceph (#230, 2026-06-09)
+
+> **✅ Socle GitOps validé sur banc (2026-06-09), branche
+> `feat/230-gitea-banc-atlas`.** Première mise en service d'**Argo CD par le
+> banc** (jusqu'ici posé en `kubectl` manuel) + **Gitea** (forge git intra-banc
+> air-gapped, ADR 0044). Profil **léger** : `local-path`, **sans Ceph**.
+
+`run-phases.sh gitops` (par-dessus `up → bootstrap → storage-simple`) — déploie
+Gitea puis Argo CD via `bootstrap/gitops.yaml` :
+
+| Brique                 | Gate                         | Résultat                        |
+| ---------------------- | ---------------------------- | ------------------------------- |
+| Gitea (rootless arm64) | `deploy/gitea` Ready         | ✅ 1/1 (image par digest index) |
+| Argo CD                | `deploy/argocd-server` Ready | ✅ 7 pods 1/1 (après fix L48)   |
+
+- **Image Gitea rootless arm64** : démarre sans souci (digest d'**index
+  multi-arch** ADR 0006 — pas de `exec format error`).
+
+Drifts de cette campagne :
+
+- **L48** (livrable, _corrigé_) : `argocd-server` restait `0/1` — tous les
+  composants Argo CD en `CreateContainerConfigError`
+  (`secret "argocd-redis" not found`). Cause : l'initContainer `secret-init` de
+  `argocd-redis` **crée** ce Secret via l'**API K8s**, mais échouait (exit 20)
+  car la NetworkPolicy **préexistante**
+  `platform/network-policies/argocd/allow-egress.yaml` autorisait l'egress
+  apiserver via `to.ipBlock 0.0.0.0/0`. **Sous Cilium, un `ipBlock` EXCLUT les
+  entités réservées** (`host`/`kube-apiserver`) → l'apiserver (ClusterIP
+  `10.96.0.1:443` ET endpoint `:6443`) était injoignable. Correctif : egress
+  **sans `to:`** (idiome du dépôt, calque `dagster/allow-apiserver-egress`) +
+  ports 443 et 6443. Bug **latent** révélé par la 1re mise en service d'Argo CD
+  par le banc (avant : `kubectl` manuel sur un datapath différent). Vérifié :
+  `10.96.0.1:443` joignable, Secret créé, cascade résolue, tous pods `1/1`.
+- **L49** (harnais, _corrigé_) : un `all` relancé sur **socle en cache** (#219)
+  consignait dans `runs-history.yaml` une entrée « run complet » avec `total_s`
+  tronqué et `phases` partielles (`gitops: 12` seul) — **fausse preuve** pour le
+  garde-fou de fraîcheur (ADR 0042). Cause : `record_full_run` appelé
+  inconditionnellement, même sur cache hit (up/bootstrap/storage sautés, absents
+  de `PHASE_DURATIONS`). Correctif : ne consigner que les runs **from-scratch**
+  (flag `socle_built`) ; run sur cache → message, pas d'entrée. Fausse entrée
+  retirée.
+
+> **✅ Run from-scratch consigné (2026-06-09, commit `24cb7e5`).**
+> `NO_CACHE=1 run-phases.sh all` monté de zéro :
+> `up 169s → bootstrap 406s → storage-simple 13s → gitops 75s` (total **663s**,
+> profil local-path). Entrée appendée automatiquement dans
+> [`runs-history.yaml`](runs-history.yaml) — preuve ADR 0034/0042 (et validation
+> du correctif L49 : l'entrée est complète, pas tronquée).

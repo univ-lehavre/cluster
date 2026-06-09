@@ -1,0 +1,75 @@
+# code: language=ansible
+# Rôle platform-argocd (ADR 0022/0044) — pose Argo CD, le moteur GitOps
+# applicatif, depuis l'hôte qui pilote l'API (kubernetes.core).
+#
+# INFRA, pas applicatif : Argo CD ne se gère pas lui-même (anti-bootstrap-
+# circulaire, ADR 0022). Ce rôle traduit la séquence kubectl du README
+# (platform/argocd/README.md) en tâches idempotentes.
+#
+# Images : le bundle argocd.yaml épingle ses images par digest (ADR 0006). En
+# prod SANS Internet, elles doivent être mirrorées dans le registry interne
+# (ADR 0011) — hors de ce rôle (cf. platform-build-images). Sur un banc avec
+# egress, le pull direct fonctionne.
+- name: Deploy Argo CD (moteur GitOps applicatif)
+  tags: argocd
+  run_once: true
+  block:
+    # Namespace explicite (le bundle ne le crée pas).
+    - name: Ensure the argocd namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: '{{ argocd_namespace }}'
+
+    # --server-side OBLIGATOIRE : la CRD applicationsets.argoproj.io dépasse la
+    # limite d'annotation de l'apply client-side (validé banc, Run #11).
+    - name: Apply the Argo CD bundle (server-side)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ argocd_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argocd/argocd.yaml'
+        server_side_apply:
+          field_manager: ansible-platform-argocd
+          force_conflicts: true
+
+    # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
+    # allow ignoré). Ordre explicite via loop, pas un apply de dossier.
+    - name: Apply argocd network policies (ordered)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/network-policies/argocd/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-server-ingress.yaml
+        - allow-egress.yaml
+
+    # AppProject atlas : cadre le périmètre GitOps (sourceRepos surchargeable,
+    # ADR 0023/0044). Appliqué après les CRDs argoproj.io du bundle.
+    - name: Apply the atlas AppProject
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/argocd/appproject-atlas.yaml'
+
+    # Exposition UI (Gateway + HTTPRoute, TLS bordure cert-manager). Optionnel :
+    # exige les CRDs Gateway API + cert-manager (argocd_apply_gateway).
+    - name: Apply the Argo CD Gateway and HTTPRoute (UI exposure)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/argocd/gateway.yaml'
+      when: argocd_apply_gateway | bool
+
+    - name: Wait for the argocd-server deployment to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: argocd-server
+        namespace: '{{ argocd_namespace }}'
+      register: argocd_server_deploy
+      until: >-
+        argocd_server_deploy.resources | length > 0
+        and (argocd_server_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ argocd_ready_retries }}'
+      delay: '{{ argocd_ready_delay }}'

@@ -28,3 +28,12 @@
 # endpoint S3 ou une autre storageClass.
 # cnpg_storage_class: rook-ceph-block-replicated
 # cnpg_s3_endpoint: http://rook-ceph-rgw-datalake.rook-ceph:80
+
+# ─── platform-gitea (socle GitOps, ADR 0044) ─────────────────────────────────
+# storageClass du PVC de la forge Gitea. Banc atlas sans Ceph → local-path.
+# gitea_storage_class: local-path
+
+# ─── platform-argocd (socle GitOps, ADR 0022/0044) ───────────────────────────
+# Exposition UI Argo CD (Gateway + HTTPRoute) : exige cert-manager + CRDs
+# Gateway API. Sur un banc léger sans cert-manager, désactiver.
+# argocd_apply_gateway: false

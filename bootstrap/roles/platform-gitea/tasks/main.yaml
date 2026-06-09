@@ -1,0 +1,57 @@
+# code: language=ansible
+# Rôle platform-gitea (ADR 0044) — forge git légère intra-banc (air-gapped),
+# source des manifestes GitOps qu'Argo CD réconcilie sur le banc atlas.
+#
+# Un seul volet (cluster) : contrairement à platform-registry, Gitea ne
+# configure rien sur les nœuds (pas de containerd insecure-registry). Tout est
+# appliqué depuis l'hôte qui pilote l'API (kubernetes.core).
+#
+# INFRA, pas applicatif : Gitea doit converger AVANT qu'Argo CD réconcilie
+# (anti-bootstrap-circulaire, ADR 0022) — d'où Ansible, pas une `Application`.
+# L'init du dépôt (org + repo + seed atlas + webhook) est une étape de DONNÉES
+# post-bootstrap, hors de ce rôle (cf. harnais test/lima/, ADR 0044).
+- name: Deploy Gitea (git intra-banc air-gapped)
+  tags: gitea
+  run_once: true
+  block:
+    - name: Apply gitea namespace
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/gitea/namespace.yaml'
+
+    # PVC templé : storageClass paramétrable (ADR 0044), défaut prod.
+    - name: Apply gitea PVC (storageClass={{ gitea_storage_class }})
+      kubernetes.core.k8s:
+        state: present
+        template: gitea-pvc.yaml.j2
+
+    - name: Apply gitea deployment and service
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/gitea/{{ item }}'
+      loop:
+        - service.yaml
+        - deployment.yaml
+
+    # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
+    # allow ignoré). Ordre explicite via loop, pas un apply de dossier.
+    - name: Apply gitea network policies (ordered)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/network-policies/gitea/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-gitea.yaml
+
+    - name: Wait for gitea deployment to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: gitea
+        namespace: '{{ gitea_namespace }}'
+      register: gitea_deploy
+      until: >-
+        gitea_deploy.resources | length > 0
+        and (gitea_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ gitea_ready_retries }}'
+      delay: '{{ gitea_ready_delay }}'

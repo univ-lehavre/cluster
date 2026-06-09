@@ -21,6 +21,7 @@ de serveurs Debian.
 | [`etcd-fetch.yaml`](etcd-fetch.yaml)                 | Copie hors-nœud du dernier snapshot etcd (audit P1 #3)                              |
 | [`audit-log-baseline.yaml`](audit-log-baseline.yaml) | Initialise le journal d'audit-log sur des nœuds existants                           |
 | [`rollback.yaml`](rollback.yaml)                     | Rollback du bootstrap K8s (DESTRUCTIF — `-e confirm=yes`)                           |
+| [`gitops.yaml`](gitops.yaml)                         | Socle GitOps : Gitea (forge intra-banc) + Argo CD (moteur) — ADR 0022/0044          |
 | [`roles/`](roles/)                                   | Rôles Ansible utilisés par les playbooks                                            |
 
 ## Procédure complète

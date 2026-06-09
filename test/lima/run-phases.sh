@@ -18,6 +18,7 @@
 #   test/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
 #   test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman) + gate Ready
 #   test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage (#173/#148)
+#   test/lima/run-phases.sh gitops         # socle GitOps : Gitea + Argo CD via Ansible (gitops.yaml) + gate Ready (#230)
 #   test/lima/run-phases.sh monitoring     # observabilité (Prometheus + Grafana + Loki), profil selon WITH_CEPH
 #   test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
 #   WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
@@ -563,6 +564,44 @@ phase_dataops() {
     log "Consigner ce run dans test/lima/RESULTS.md (honnêteté des Runs, ADR 0023)."
 }
 
+# ── Phase gitops — socle GitOps : Gitea (forge) + Argo CD (moteur) ───────────
+# Déploie le socle GitOps via bootstrap/gitops.yaml (ADR 0022/0044) : Gitea
+# (forge git intra-banc air-gapped) puis Argo CD (moteur). INFRA, posée par
+# Ansible (anti-bootstrap-circulaire). Profil banc atlas = local-path (ADR 0044,
+# pas de Ceph). L'UI Argo CD via Gateway exige cert-manager + CRDs Gateway API ;
+# sur le banc léger sans cert-manager, on n'applique PAS le Gateway
+# (argocd_apply_gateway=false) — la réconciliation GitOps reste prouvable sans UI.
+#
+# L'INIT du dépôt Gitea (org + repo + seed atlas + webhook) est l'étape suivante
+# (test e2e, #231) — hors de cette phase qui ne fait que poser le socle.
+phase_gitops() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
+    log "Phase gitops — socle GitOps via Ansible (Gitea → Argo CD)"
+
+    # storageClass du PVC Gitea : local-path sur le banc atlas (ADR 0044).
+    # argocd_apply_gateway=false : pas de cert-manager garanti sur le banc léger.
+    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
+        "${REPO}/bootstrap/gitops.yaml" \
+        -e dataops_k8s_host=localhost \
+        -e gitea_storage_class=local-path \
+        -e argocd_apply_gateway=false \
+        || die "gitops.yaml : échec du déploiement du socle GitOps"
+    ok "socle GitOps déployé (Ansible) — Gitea + Argo CD Ready"
+
+    # GATE : les deux Deployments répondent Ready (le playbook a déjà ses propres
+    # waits ; on re-vérifie ici côté harnais, comme les autres phases). KUBECTL
+    # embarque déjà --kubeconfig (cf. en-tête du script).
+    "${KUBECTL[@]}" -n gitea rollout status deploy/gitea --timeout=120s \
+        || die "gitea : Deployment non Ready"
+    "${KUBECTL[@]}" -n argocd rollout status deploy/argocd-server --timeout=180s \
+        || die "argocd-server : Deployment non Ready"
+    ok "🎉 socle GitOps prêt — Gitea (forge) et Argo CD (moteur) Ready"
+
+    log "Suite (#231) : init du dépôt Gitea + Application atlas → réconciliation."
+}
+
 # ── Phase monitoring — observabilité (Prometheus + Grafana + Loki) ───────────
 # Déploie kube-prometheus-stack + Loki via bootstrap/monitoring.yaml (ADR
 # 0016/0036). Profil de stockage choisi selon le mode du banc :
@@ -808,6 +847,7 @@ case "${1:-}" in
     platform-prereqs) time_phase platform-prereqs phase_platform_prereqs ;;
     datalake) time_phase datalake phase_datalake ;;
     dataops) time_phase dataops phase_dataops ;;
+    gitops) time_phase gitops phase_gitops ;;
     monitoring) time_phase monitoring phase_monitoring ;;
     ceph) time_phase ceph phase_ceph ;;
     sc) time_phase sc phase_sc ;;
@@ -822,6 +862,7 @@ case "${1:-}" in
         # Cache du socle (#219) : on saute up+bootstrap(+ceph+sc) SI le socle en
         # cache est encore valable (VMs up, cluster Ready, contenu inchangé).
         # NO_CACHE=1 force le rebuild from-scratch (la PREUVE, ADR 0034).
+        socle_built=0 # 1 seulement si up/bootstrap/storage ont RÉELLEMENT tourné
         if metro_cache_valid "${profil}"; then
             ok "socle réutilisé depuis le cache (clé inchangée) — up/bootstrap sautés (#219)"
             log "ℹ️  Forcer un rebuild from-scratch (preuve ADR 0034) : NO_CACHE=1 $0 all"
@@ -838,9 +879,27 @@ case "${1:-}" in
                 log "ℹ️  Pour le stockage réel : WITH_CEPH=1 $0 all  (ou : $0 ceph && $0 sc)"
             fi
             metro_cache_save "${profil}" # socle bâti → réutilisable au prochain run
+            socle_built=1
         fi
-        # Consigne le run complété (date/tuple/durées + métriques) — ADR 0034/0042.
-        record_full_run "$(( $(date +%s) - run_start ))"
+        # Socle GitOps (Gitea + Argo CD) PAR-DESSUS le socle, hors cache (c'est de
+        # l'applicatif, pas le socle cluster). Profil banc atlas = local-path, donc
+        # uniquement en mode léger (ADR 0044 ; le mode Ceph cible d'autres preuves).
+        if [ "${WITH_CEPH:-0}" != 1 ]; then
+            time_phase gitops phase_gitops
+            log "🎉 Socle GitOps déployé : Gitea (forge) + Argo CD (moteur)."
+        fi
+        # Consigne le run dans runs-history.yaml UNIQUEMENT s'il est from-scratch
+        # (socle réellement bâti). Un run sur CACHE (#219) ne rejoue pas up/
+        # bootstrap/storage : ses PHASE_DURATIONS sont partiels (p. ex. `gitops`
+        # seul) — le consigner produirait une fausse preuve (total_s tronqué,
+        # phases manquantes) qui tromperait le garde-fou de fraîcheur (ADR 0042).
+        # Seul un run from-scratch est LA preuve (ADR 0034 ; cf. NO_CACHE=1).
+        if [ "${socle_built}" = 1 ]; then
+            record_full_run "$(( $(date +%s) - run_start ))"
+        else
+            log "ℹ️  Run sur cache (socle réutilisé) — NON consigné dans runs-history.yaml"
+            log "    (seul un run from-scratch est une preuve ADR 0034/0042 ; NO_CACHE=1 pour consigner)"
+        fi
         ;;
     status) phase_status ;;
     down) phase_down ;;

@@ -18,11 +18,21 @@ spec:
     de plateforme (Dagster, Marquez). Les addons d'infra restent gérés par
     Ansible (ADR 0022 — pas de bootstrap circulaire).
 
-  # (a) Dépôts source autorisés : le dépôt git du cluster uniquement.
+  # (a) Dépôts source autorisés.
+  #
+  # POINT DE SURCHARGE (ADR 0023/0044) — valeurs d'EXEMPLE GÉNÉRIQUES. Le dépôt
+  # réel d'un déploiement (le Gitea intra-banc d'atlas, ou un remote git
+  # spécifique) est une valeur PROPRE À CE DÉPLOIEMENT : elle n'est PAS gravée
+  # ici, elle SURCHARGE ce manifeste à l'application (config locale non
+  # versionnée — kustomize patch, sed/envsubst au déploiement, ou ré-apply d'une
+  # variante locale). Ne jamais committer ici l'URL réelle d'un atlas.
   sourceRepos:
+    # Dépôt du socle cluster (exemple ; un déploiement peut le retirer).
     - https://github.com/univ-lehavre/cluster.git
-    # Si Argo CD enregistre le remote en SSH, ajouter aussi :
-    #   - git@github.com:univ-lehavre/cluster.git
+    # Forge Gitea intra-banc (air-gapped, ADR 0044) : URL d'exemple générique du
+    # Service interne. Le déploiement atlas surcharge l'<org>/<repo> réel.
+    - http://gitea-http.gitea.svc.cluster.local/*
+    # Si Argo CD enregistre un remote en SSH, ajouter la forme git@… surchargée.
 
   # (b) Destinations : cluster local + les SEULS namespaces applicatifs.
   destinations:

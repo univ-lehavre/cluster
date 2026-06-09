@@ -20,6 +20,13 @@ indépendant de l'outil
 > site). Cf.
 > [ADR 0030](../docs/decisions/0030-nomenclature-bancs-topologies.md).
 
+## Les trois niveaux de tests
+
+Unitaire (bats, sans cluster), intégration (gates de phase), scénarios
+(comportement) : le **plan de tests** les recense ensemble, avec la couverture
+par couche et les lacunes à combler :
+[plan de tests](../docs/architecture/plan-de-tests.md).
+
 ## Quel profil pour quoi — fidélité vs vitesse (ADR 0035)
 
 Choisir selon **ce qu'on itère** et le **temps qu'on peut payer**. Le banc

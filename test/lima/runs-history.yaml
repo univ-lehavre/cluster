@@ -31,3 +31,17 @@ runs:
       cpu_core_s: 272
       ram_peak_mib: 7606
       ram_mean_mib: 7489
+  - id: 2026-06-09T08-local-path-24cb7e5
+    date: 2026-06-09T08:20:18Z
+    branche: feat/230-gitea-banc-atlas
+    commit: 24cb7e5
+    profil: local-path
+    topologie: multi-node-3
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 663
+    phases:
+      up: 169
+      bootstrap: 406
+      storage-simple: 13
+      gitops: 75

@@ -1,0 +1,42 @@
+# Gitea : Service ClusterIP :80 → conteneur :3000 (forge git intra-banc,
+# ADR 0044).
+#
+# Ingress ouvert sur 3000 sans restreindre la source : Argo CD repo-server clone
+# les dépôts, la bordure Gateway Cilium sert l'UI, et l'init du dépôt
+# (post-bootstrap) pousse le contenu atlas — sources multiples, on ne sur-
+# restreint pas (idiome du dépôt, cf. allow-registry ; le cluster est isolé,
+# ADR 0003).
+#
+# Egress (air-gapped, ADR 0044) : PAS d'Internet. Uniquement le webhook
+# Gitea → argocd-server (déclenchement réactif de la réconciliation sur push).
+# DNS couvert par allow-dns-egress. Gitea n'appelle pas l'API K8s → pas d'egress
+# 6443 (minimalisme default-deny, ADR 0019).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gitea
+  namespace: gitea
+spec:
+  podSelector:
+    matchLabels:
+      app: gitea
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # Webhook Gitea → argocd-server (port du POD, 8080 ; le Service mappe
+    # 80→8080). Déclenche la réconciliation Argo CD au push (ADR 0044).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argocd
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-server
+      ports:
+        - protocol: TCP
+          port: 8080

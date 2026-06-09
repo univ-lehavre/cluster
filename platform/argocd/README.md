@@ -5,12 +5,12 @@ Réconcilie en continu, depuis git, les manifestes **applicatifs** (apps
 Marquez). Décision et frontière :
 [ADR 0022](../../docs/decisions/0022-argocd-gitops-applicatif.md).
 
-| Fichier                                                                | Rôle                                                                               |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| [`argocd.yaml`](argocd.yaml)                                           | Bundle officiel v3.4.3 (3 CRDs+RBAC+Deploys), images par digest, `server.insecure` |
-| [`appproject-atlas.yaml`](appproject-atlas.yaml)                       | `AppProject atlas` cadrant citation-\*/dagster/marquez                             |
-| [`gateway.yaml`](gateway.yaml)                                         | `Gateway` + `HTTPRoute` d'exposition UI (TLS bordure cert-manager)                 |
-| [`_test/application-guestbook.yaml`](_test/application-guestbook.yaml) | `Application` guestbook de **test** (validation banc — jetable)                    |
+| Fichier                                                                | Rôle                                                                                            |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [`argocd.yaml`](argocd.yaml)                                           | Bundle officiel v3.4.3 (3 CRDs+RBAC+Deploys), images par digest, `server.insecure`              |
+| [`appproject-atlas.yaml`](appproject-atlas.yaml)                       | `AppProject atlas` cadrant citation-\*/dagster/marquez ; `sourceRepos` surchargeable (ADR 0044) |
+| [`gateway.yaml`](gateway.yaml)                                         | `Gateway` + `HTTPRoute` d'exposition UI (TLS bordure cert-manager)                              |
+| [`_test/application-guestbook.yaml`](_test/application-guestbook.yaml) | `Application` guestbook de **test** (validation banc — jetable)                                 |
 
 NetworkPolicies sous `platform/network-policies/argocd/`
 ([`00-default-deny.yaml`](../network-policies/argocd/00-default-deny.yaml) +
@@ -25,6 +25,14 @@ cert-manager, registry, Rook, Argo CD, opérateurs + CRDs) = Ansible ;
 **applicatif** (apps + instances stateful déclarées en `Application`) = Argo CD.
 
 ## Déploiement
+
+**Automatisé (Ansible, ADR 0022/0044)** : le rôle `platform-argocd` (via
+[`bootstrap/gitops.yaml`](../../bootstrap/gitops.yaml)) pose Argo CD + les
+NetworkPolicies + l'`AppProject` + (optionnel) le Gateway, en `--server-side`.
+Sur le banc Lima, c'est la phase `gitops`
+([`test/lima/run-phases.sh`](../../test/lima/run-phases.sh)). La séquence
+`kubectl` ci-dessous reste la **référence manuelle** (et ce que le rôle traduit)
+:
 
 ```bash
 # Pré-requis SANS Internet : mirrorer les 3 images dans le registry interne

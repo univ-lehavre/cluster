@@ -1,0 +1,12 @@
+# Nie tout le trafic (ingress + egress) pour tous les pods du namespace
+# `gitea`. Ré-ouvert par les `allow-*` de ce dossier.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: gitea
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

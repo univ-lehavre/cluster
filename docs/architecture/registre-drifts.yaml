@@ -646,3 +646,44 @@ drifts:
       absent → stdout vide). Métriques réelles obtenues (CPU 272 cœur·s, RAM pic
       7606 MiB).
     statut: corrige
+
+  - id: L48
+    campagne: 'socle GitOps Gitea + Argo CD (#230)'
+    portee: livrable
+    symptome: >-
+      `argocd-server` reste 0/1 ; tous les composants Argo CD en
+      `CreateContainerConfigError` (« secret "argocd-redis" not found »). Le pod
+      `argocd-redis` boucle en `Init:Error` (exit 20).
+    cause: >-
+      L'initContainer `secret-init` crée le Secret `argocd-redis` via l'API K8s,
+      mais la NetworkPolicy préexistante `platform/network-policies/argocd/allow-egress.yaml`
+      (`allow-apiserver-egress`) autorisait l'egress apiserver via
+      `to.ipBlock 0.0.0.0/0`. Sous Cilium, un `ipBlock` EXCLUT les entités
+      réservées (host/kube-apiserver) → apiserver (ClusterIP 10.96.0.1:443 ET
+      endpoint :6443) injoignable. Bug LATENT révélé par la 1re mise en service
+      d'Argo CD par le banc (avant : kubectl manuel, datapath différent).
+    correctif: >-
+      Réécrire `allow-apiserver-egress` SANS `to:` (idiome du dépôt pour
+      l'apiserver, calque `dagster/allow-apiserver-egress` ; une règle egress
+      sans `to` autorise les entités réservées Cilium) + ports 443 et 6443.
+      Validé banc : 10.96.0.1:443 joignable, Secret créé, 7 pods Argo CD 1/1.
+    statut: corrige
+
+  - id: L49
+    campagne: 'socle GitOps Gitea + Argo CD (#230)'
+    portee: harnais
+    symptome: >-
+      Un `run-phases.sh all` relancé sur un socle EN CACHE (#219) consignait dans
+      `runs-history.yaml` une entrée présentée comme run complet, mais avec un
+      `total_s` tronqué et des `phases` partielles (p. ex. `gitops: 12` seul) —
+      fausse preuve qui trompe le garde-fou de fraîcheur (ADR 0042).
+    cause: >-
+      `record_full_run` était appelé inconditionnellement en fin de `all`, même
+      après un cache hit. Or sur cache, up/bootstrap/storage sont sautés → absents
+      de `PHASE_DURATIONS` ; seules les phases hors-cache (gitops) y figurent.
+    correctif: >-
+      Ne consigner que les runs FROM-SCRATCH (flag `socle_built` : 1 seulement si
+      la branche else a rejoué up/bootstrap/storage). Run sur cache → message
+      explicite, PAS d'entrée. Seul un run from-scratch est une preuve (ADR
+      0034/0042 ; NO_CACHE=1 pour forcer). Fausse entrée a855ec8 retirée.
+    statut: corrige
