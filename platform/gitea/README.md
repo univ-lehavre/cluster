@@ -28,12 +28,13 @@ contenu atlas, enregistrer le webhook Gitea → Argo CD) est une étape de
 
 ## Manifestes
 
-| Fichier                                                        | Rôle                                                            |
-| -------------------------------------------------------------- | --------------------------------------------------------------- |
-| [`namespace.yaml`](namespace.yaml)                             | Namespace `gitea` (Pod Security `baseline`).                    |
-| [`persistent-volume-claim.yaml`](persistent-volume-claim.yaml) | PVC données (dépôts + SQLite). storageClass templé par le rôle. |
-| [`deployment.yaml`](deployment.yaml)                           | Pod Gitea **rootless** (uid 1000), durci, image par digest.     |
-| [`service.yaml`](service.yaml)                                 | Service ClusterIP `gitea-http` :80 → 3000.                      |
+| Fichier                                                        | Rôle                                                                               |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [`namespace.yaml`](namespace.yaml)                             | Namespace `gitea` (Pod Security `baseline`).                                       |
+| [`persistent-volume-claim.yaml`](persistent-volume-claim.yaml) | PVC données (dépôts + SQLite). storageClass templé par le rôle.                    |
+| [`deployment.yaml`](deployment.yaml)                           | Pod Gitea **rootless** (uid 1000), durci, image par digest.                        |
+| [`service.yaml`](service.yaml)                                 | Service ClusterIP `gitea-http` :80 → 3000.                                         |
+| [`gateway.yaml`](gateway.yaml)                                 | Exposition UI (Gateway Cilium + HTTPRoute, TLS cert-manager) — portail atlas #232. |
 
 NetworkPolicies sous default-deny
 ([`00-default-deny.yaml`](../network-policies/gitea/00-default-deny.yaml) +
