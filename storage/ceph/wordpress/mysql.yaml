@@ -71,6 +71,19 @@ spec:
                 secretKeyRef:
                   name: wordpress-secret
                   key: password
+            # Base + utilisateur applicatif créés à l'init MySQL : WordPress se
+            # connecte avec l'user `wordpress` (PAS root) sur la base `wordpress`.
+            # Sans ces 3 variables, MySQL ne crée que root → WordPress renvoie
+            # HTTP 500 bien que le pod soit Ready (révélé par le smoke HTTP).
+            - name: MYSQL_DATABASE
+              value: wordpress
+            - name: MYSQL_USER
+              value: wordpress
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wordpress-secret
+                  key: password
           ports:
             - containerPort: 3306
               name: mysql

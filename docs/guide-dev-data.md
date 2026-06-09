@@ -18,13 +18,15 @@ namespace autorisé par les NetworkPolicies (cf. chaque brique).
 
 ## Vue d'ensemble des points d'accès
 
-| Brique               | Service (intra-cluster)                      | Port | Auth (Secret)                     |
-| -------------------- | -------------------------------------------- | ---- | --------------------------------- |
-| PostgreSQL (CNPG)    | `pg-rw.postgres.svc.cluster.local` (primary) | 5432 | Secret du rôle (`pg-role-<rôle>`) |
-| PostgreSQL (replica) | `pg-ro.postgres.svc.cluster.local` (lecture) | 5432 | idem                              |
-| Marquez (lineage)    | `marquez.marquez.svc.cluster.local`          | 5000 | aucune (intra-cluster)            |
-| Registry d'images    | `registry:80` (sur les nœuds)                | 80   | aucune (HTTP interne, ADR 0011)   |
-| S3 datalake (RGW)    | `rook-ceph-rgw-datalake.rook-ceph`           | 80   | creds d'un `ObjectBucketClaim`    |
+| Brique               | Service (intra-cluster)                      | Port | Auth (Secret)                        |
+| -------------------- | -------------------------------------------- | ---- | ------------------------------------ |
+| PostgreSQL (CNPG)    | `pg-rw.postgres.svc.cluster.local` (primary) | 5432 | Secret du rôle (`pg-role-<rôle>`)    |
+| PostgreSQL (replica) | `pg-ro.postgres.svc.cluster.local` (lecture) | 5432 | idem                                 |
+| Marquez (lineage)    | `marquez.marquez.svc.cluster.local`          | 5000 | aucune (intra-cluster)               |
+| Registry d'images    | `registry:80` (sur les nœuds)                | 80   | aucune (HTTP interne, ADR 0011)      |
+| S3 datalake (RGW)    | `rook-ceph-rgw-datalake.rook-ceph`           | 80   | creds d'un `ObjectBucketClaim`       |
+| Gitea (forge GitOps) | `gitea-http.gitea.svc.cluster.local`         | 80   | Secret `gitea-admin` (mot de passe)  |
+| Argo CD (GitOps)     | `argocd-server.argocd.svc.cluster.local`     | 80   | Secret `argocd-initial-admin-secret` |
 
 Exposition **hors cluster** (UI) via le Gateway Cilium + TLS interne
 ([ADR 0020](decisions/0020-exposition-reseau-tout-cilium.md)/[0021](decisions/0021-cert-manager-ca-interne.md))
@@ -114,6 +116,39 @@ L'orchestrateur Dagster est livré **vide** (aucune code-location) : c'est le
 - **Brancher du code** : ajoutez une _code-location_ (workspace) pointant votre
   image — voir la doc `atlas`. Émettez le lineage via le sensor OpenLineage en
   pointant les variables ci-dessus.
+
+## Déployer depuis atlas — la boucle GitOps
+
+Vous ne déployez **pas** vos workflows avec `kubectl`. Le mécanisme
+([ADR 0044](decisions/0044-topologie-deploiement-banc-atlas.md)/[0045](decisions/0045-chemins-installation-banc-couches.md))
+est **pull-GitOps** :
+
+1. **Build + push** votre image (code-location/job) dans le **registry interne**
+   (`registry:80/...`, cf. section ci-dessous).
+2. **Commit + push** le manifeste qui la référence (`Application` Argo CD, ou
+   patch de workspace) dans le **dépôt Gitea intra-cluster** (la forge du banc ;
+   pas un GitHub externe — le cluster est isolé, ADR 0003).
+3. Un **webhook** Gitea → Argo CD déclenche la **réconciliation** : Argo CD
+   applique votre manifeste (`Synced/Healthy`).
+4. Le run s'exécute (`K8sRunLauncher`) et **émet du lineage** ingéré par
+   Marquez.
+
+> **Frontière (ADR 0022/0045).** Argo CD déploie **vos workflows**
+> (code-locations, assets, jobs), **jamais l'infra** : CNPG, Dagster, Marquez,
+> Argo CD lui-même sont montés par le socle (Ansible). Vous poussez le
+> _contenu_, le socle fournit le _contenant vide_. Référence machine-lisible :
+> [`contract/`](../contract/).
+
+**Observabilité de vos workloads** (le socle fournit les opérateurs ; vous les
+consommez en émettant des objets) :
+
+- **Métriques** : exposez un `ServiceMonitor`/`PodMonitor` → Prometheus scrape
+  automatiquement (kube-prometheus-stack).
+- **Logs** : écrivez sur stdout/stderr → Loki les collecte (DaemonSet), sans
+  action de votre part.
+- **TLS d'une UI** : annotez votre `Gateway`
+  `cert-manager.io/cluster-issuer: internal-ca` → certificat émis
+  automatiquement (cf. « Exposition réseau » plus bas).
 
 ## Images — registry interne
 

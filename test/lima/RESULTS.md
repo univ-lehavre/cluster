@@ -524,3 +524,51 @@ par le rôle Ansible `platform-argocd`, plus de `kubectl patch`) :
 > Le correctif « push vérifié » (commit de la campagne) échoue désormais
 > explicitement si un PUT/POST ne renvoie pas de commit, ce qui aurait rendu un
 > vrai défaut visible.
+
+## Banc atlas-ceph complet + portail UI — scénario 28 (#232, 2026-06-09)
+
+Run **from-scratch `atlas-ceph`** (socle Ceph + hardening + datalake +
+monitoring + gitops + dataops + gitops-seed) **réussi** : 3 nœuds Ready, chaîne
+GitOps → DataOps fonctionnelle (workflow `Completed`, lineage Marquez). Durées
+consignées dans `runs-history.yaml` (pic RAM 14,8 GiB / 36 alloués).
+
+Puis **exposition tout-Cilium prouvée de bout en bout** (objectif #232) — le
+scénario 28 a joué son rôle de révélateur : il a découvert que **les UI
+n'étaient PAS joignables** alors que le Gateway était posé. Deux bugs du
+**livrable** (pas du test) trouvés, corrigés dans le code, et **prouvés à
+chaud** (HTTP 200 via le Gateway) :
+
+| Vérification (à chaud, banc up)                        | Résultat                             |
+| ------------------------------------------------------ | ------------------------------------ |
+| GatewayClass `cilium` acceptée                         | ✅ `Accepted=True`                   |
+| Gateway argocd programmé + IP LB-IPAM                  | ✅ `192.168.104.240` (pool dérivé)   |
+| Service `cilium-gateway-argocd` type LoadBalancer + IP | ✅ `EXTERNAL-IP 192.168.104.240`     |
+| sonde HTTPS via Gateway (SNI `argocd.cluster.lan`)     | ✅ **HTTP 200** (backend HTTP:80 OK) |
+| **scénario 28**                                        | ✅ **PASS** (1 UI atteignable)       |
+
+Drifts révélés (détail : registre-drifts.yaml) :
+
+- **L55** (disque) : `VM_DISK=20 GiB` codé en dur → pression
+  **ephemeral-storage** en Ceph+dataops (évictions postgres/rgw/exporter, pas la
+  RAM). Fix : `VM_DISK` **dérive du profil** (40 GiB Ceph / 20 GiB léger ; qcow2
+  thin-provisionné) — même classe de bug que la RAM hardcodée (ADR 0046).
+- **L56** (exposition, **2 bugs**) : (1) `cni.sh` armait les features Cilium
+  mais **n'appliquait jamais** les CRs (GatewayClass + LB-IPAM pool + L2 policy)
+  ; (2) **ordre cassé** — l'operator Cilium vérifie les CRDs Gateway API **au
+  démarrage** (lancé par `cni.sh`), or elles étaient posées 7 min plus tard
+  (`platform-prereqs`) → contrôleur Gateway jamais armé. Fix : CRDs Gateway API
+  **avant** `cni.sh` + `cni.sh` applique les CRs **inline** (plage LB-IPAM +
+  interface L2 dérivées du réseau réel, ADR 0023). Bonus : les CRs ciblaient
+  l'ancien Vagrant (`192.168.67/eth1`), réalignés sur le banc Lima
+  (`192.168.104/eth0`).
+
+> **Bug du scénario 28 lui-même** (corrigé) : il sondait avec
+> `wget --header Host` busybox, qui **ne pose pas le SNI TLS**. Le Gateway Envoy
+> sélectionne le certificat par SNI → `Connection reset` (faux négatif) alors
+> que `curl --resolve host:443:IP` (SNI correct) renvoie **200**. Le scénario
+> utilise désormais `curl --resolve`.
+>
+> **À re-prouver par un run from-scratch** (ADR 0034) : les fixes L55/L56 ont
+> été validés **à chaud** sur le banc courant (diagnostic + restart operator) ;
+> le prochain run `atlas-ceph` doit reproduire le scénario 28 PASS
+> **nativement** (sans intervention) — c'est la vraie preuve (ADR 0046).

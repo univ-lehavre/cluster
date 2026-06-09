@@ -86,3 +86,27 @@ runs:
       cpu_core_s: 660
       ram_peak_mib: 9270
       ram_mean_mib: 5869
+  - id: 2026-06-09T15-ceph-809c139
+    date: 2026-06-09T15:47:22Z
+    branche: feat/232-contrat-uis-portail
+    commit: 809c139
+    profil: ceph
+    topologie: multi-node-3
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 2025
+    phases:
+      up: 226
+      bootstrap: 398
+      ceph: 203
+      sc: 6
+      hardening: 103
+      datalake: 91
+      monitoring: 170
+      gitops: 82
+      dataops: 743
+      gitops-seed: 2
+    metriques:
+      cpu_core_s: 1180
+      ram_peak_mib: 14796
+      ram_mean_mib: 10777

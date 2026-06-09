@@ -29,6 +29,7 @@
 #   test/lima/run-phases.sh atlas          # socle léger → monitoring → gitops → dataops (banc atlas, local-path)
 #   test/lima/run-phases.sh storage-real   # socle Ceph → datalake → smoke S3 (RGW) + montage WordPress (preuve stockage réel)
 #   test/lima/run-phases.sh cluster-dataops # socle Ceph → datalake → monitoring → dataops (chaîne DataOps sur Ceph)
+#   test/lima/run-phases.sh atlas-ceph     # banc atlas COMPLET sur Ceph : datalake → monitoring → gitops → dataops → gitops-seed + UI (#232)
 #   ── Axe orthogonal durcissement (#240) : combinable avec tout chemin ──
 #   WITH_HARDENING=1 test/lima/run-phases.sh atlas  # même chemin + secure.yml (audit,detection) après le socle
 #   test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
@@ -60,12 +61,25 @@ CP=cp1 # nœud control-plane (kubeconfig + cni.sh)
 # Port hôte du forward de l'API du control-plane (127.0.0.1:API_PORT → guest 6443).
 API_PORT=6443
 
-# Ressources par VM. 8 GiB (drift L28) : 5 GiB suffit au socle+Ceph, mais le
-# build arm64 de marquez-web (webpack/npm) sature et se fait OOM-killer (rc=137)
-# quand le nœud porte déjà k8s+Ceph+CNPG. 8 GiB laisse la marge du pic de build.
+# Ressources par VM. RAM et DISQUE DÉRIVENT du profil (ADR 0046 : pas de valeur
+# de profil codée en dur) :
+#   - mode Ceph (WITH_CEPH=1) : 12 GiB RAM — un nœud porte OSD/mon Ceph + k8s +
+#     CNPG + Dagster/Marquez + monitoring (chemin atlas-ceph). Pic mesuré ~9 GiB ;
+#     Ceph sensible à la pression mémoire (OSD lents → boot/HEALTH qui traînent).
+#   - mode léger (local-path) : 8 GiB RAM — suffit (drift L28 : pic de build
+#     marquez-web arm64) sans gaspiller (banc atlas léger).
+# 3×12 = 36 GiB sur un hôte 48 GiB : marge OK pour macOS. Surchargeable via VM_MEMORY.
+#
+# DISQUE : 20 GiB suffit en léger, mais le profil Ceph+dataops SATURE l'ephemeral-
+# storage à 20 GiB (évictions postgres/rgw/exporter sous le seuil ~2 GiB — drift
+# consigné). Ceph+dataops empile OSD + images applicatives + logs sur le rootfs.
+# → 40 GiB en mode Ceph (qcow2 thin-provisionné : n'occupe le disque hôte qu'à
+# l'usage réel). Surchargeable via VM_DISK.
 VM_CPUS=2
-VM_MEMORY=8GiB
-VM_DISK=20GiB
+VM_MEMORY_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 12GiB || echo 8GiB)
+VM_MEMORY=${VM_MEMORY:-${VM_MEMORY_DEFAULT}}
+VM_DISK_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 40GiB || echo 20GiB)
+VM_DISK=${VM_DISK:-${VM_DISK_DEFAULT}}
 
 # CRDs Gateway API (alignées sur Cilium 1.19.x — ADR 0006 ; cf. platform/cilium-expo).
 GWAPI_VERSION=1.4.1
@@ -316,7 +330,22 @@ phase_bootstrap() {
     ok "${CP} : IP user-v2 ${cp_ip}"
 
     bootstrap_node_sequence "${INVENTORY}" -e "control_plane_ip=${cp_ip}"
-    run_cni "${CP}"
+
+    # Exposition tout-Cilium (ADR 0020) : DÉRIVER la plage LB-IPAM et l'interface
+    # L2 du réseau user-v2 réel du banc (pas de valeur codée en dur — ADR 0023).
+    # Plage = .240-.250 du /24 des nœuds (hors DHCP) ; interface = NIC user-v2
+    # détecté côté invité (Lima ne garantit pas le nom selon les versions).
+    local lb_prefix l2_if
+    lb_prefix=${cp_ip%.*}                       # ex. 192.168.104.1 → 192.168.104
+    l2_if=$(vm_uservv2_iface "${CP}")
+    [ -n "${l2_if}" ] || die "${CP} : interface user-v2 introuvable"
+    ok "expo : LB-IPAM ${lb_prefix}.240-.250, L2 sur ${l2_if}"
+    # CRDs Gateway API AVANT Cilium (drift L56) : l'operator les vérifie au boot.
+    apply_gwapi_crds_in_vm "${CP}" "${GWAPI_VERSION}"
+    run_cni "${CP}" \
+        "LB_IPAM_RANGE_START=${lb_prefix}.240" \
+        "LB_IPAM_RANGE_STOP=${lb_prefix}.250" \
+        "L2_INTERFACE=${l2_if}"
     fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}"
 
     # GATE : tous les nœuds attendus (${#NODES[@]}) Ready.
@@ -342,16 +371,18 @@ phase_storage_simple() {
 
 # ── Phase platform-prereqs — pré-requis transverses de la couche plateforme ──
 # Pose ce dont les addons plateforme ont besoin et que le bootstrap nu n'installe
-# pas : (1) les CRDs Gateway API (cert-manager les exige car cni.sh active
-# gatewayAPI ; Cilium ne les embarque pas — ADR 0006/0020) ; (2) la config
-# containerd « insecure registry » sur chaque nœud pour le registry interne HTTP
-# (registry:80, ADR 0011) — sinon ImagePullBackOff « HTTP response to HTTPS
-# client » au pull des images applicatives.
+# pas : (1) les CRDs Gateway API — RÉAPPLIQUÉES ici par IDEMPOTENCE (la pose
+# PRIMAIRE est désormais au bootstrap, AVANT cni.sh : l'operator Cilium les exige
+# à son démarrage pour armer le contrôleur Gateway — drift L56, ADR 0006/0020) ;
+# (2) la config containerd « insecure registry » sur chaque nœud pour le registry
+# interne HTTP (registry:80, ADR 0011) — sinon ImagePullBackOff « HTTP response
+# to HTTPS client » au pull des images applicatives.
 phase_platform_prereqs() {
     preflight
     [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
 
-    log "Phase platform-prereqs — CRDs Gateway API (v${GWAPI_VERSION})"
+    # Réapplication idempotente (posées au bootstrap avant Cilium — drift L56).
+    log "Phase platform-prereqs — CRDs Gateway API (v${GWAPI_VERSION}, idempotent)"
     local base="https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v${GWAPI_VERSION}/config/crd/standard"
     local crd
     for crd in gatewayclasses gateways httproutes referencegrants grpcroutes; do
@@ -522,7 +553,11 @@ phase_smoke_s3() {
     preflight
     [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
     log "Phase smoke-s3 — PUT/GET/DELETE sur le RGW Ceph (scénario 06)"
-    KEEP_DATALAKE=1 bash "${REPO}/test/scenarios/06-object-store-smoke.sh" \
+    # KUBECONFIG exporté EN ABSOLU pour le scénario externe : il fait du kubectl
+    # qui lit l'env (pas le tableau KUBECTL du harnais) ; sans ça il tombe sur
+    # localhost:8080 (même piège que L50). Le scénario fait `cd` → chemin absolu.
+    KUBECONFIG="${KUBECONFIG_LOCAL}" KEEP_DATALAKE=1 \
+        bash "${REPO}/test/scenarios/06-object-store-smoke.sh" \
         || die "smoke-test S3 (RGW) en échec — voir la sortie ci-dessus"
     ok "smoke-test S3 réussi (PUT/GET/DELETE sur le RGW Ceph)"
 }
@@ -535,6 +570,13 @@ phase_wordpress() {
     preflight
     [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
     log "Phase wordpress — montage PVC bloc RWO sur la SC Ceph (storage/ceph/wordpress/)"
+    # Secret `wordpress-secret` (mot de passe MySQL) : NON versionné (ADR 0023) ;
+    # mysql.yaml/wordpress.yaml le référencent en secretKeyRef. Le banc le crée
+    # avec une valeur GÉNÉRIQUE de test (idempotent) — sans lui, les pods restent
+    # en CreateContainerConfigError (« secret wordpress-secret not found »).
+    "${KUBECTL[@]}" -n default create secret generic wordpress-secret \
+        --from-literal=password='banc-wordpress-example' \
+        --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - >/dev/null
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/wordpress/mysql.yaml"
     "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/wordpress/wordpress.yaml"
 
@@ -546,13 +588,38 @@ phase_wordpress() {
         || die "wordpress pas Ready : $("${KUBECTL[@]}" -n default describe pvc wp-pv-claim | tail -10)"
     ok "WordPress monté — PVC bloc RWO Bound + Pods Ready (preuve stockage bloc Ceph)"
 
-    # Cleanup : l'exemple n'a pas vocation à rester (le chemin prouve le montage,
-    # pas un service durable). KEEP_WORDPRESS=1 pour le conserver.
-    if [ "${KEEP_WORDPRESS:-0}" = 1 ]; then
-        log "ℹ️  KEEP_WORDPRESS=1 — WordPress conservé."
+    # SMOKE HTTP : Pod Ready ≠ application qui sert. On vérifie que WordPress
+    # RÉPOND via son Service (pod busybox éphémère → GET http://wordpress/). Une
+    # install neuve redirige (301/302) vers /wp-admin/install.php : c'est la PREUVE
+    # qu'il sert (PHP + lecture/écriture sur le PVC bloc Ceph). On accepte tout
+    # code < 400 (200/301/302) ; un timeout/5xx = échec.
+    log "  Smoke HTTP WordPress (GET http://wordpress/ via le Service)"
+    local wp_code
+    wp_code=$("${KUBECTL[@]}" -n default run wp-smoke-$$ --rm -i --restart=Never \
+        --image=busybox:1.36 --quiet --command -- \
+        wget -S -T 10 -qO /dev/null 'http://wordpress.default.svc.cluster.local/' 2>&1 \
+        | grep -oE 'HTTP/[0-9.]+ [0-9]+' | grep -oE '[0-9]+$' | head -1)
+    if [ -n "${wp_code}" ] && [ "${wp_code}" -lt 400 ]; then
+        ok "🎉 WordPress répond (HTTP ${wp_code}) — application servie sur stockage bloc Ceph"
     else
+        die "smoke WordPress : pas de réponse HTTP < 400 (obtenu '${wp_code:-aucune}')"
+    fi
+
+    # Cleanup COMPLET : l'exemple n'a pas vocation à rester (le chemin prouve le
+    # montage, pas un service durable). On supprime les workloads + Service ET les
+    # PVC bloc Ceph (sinon volumes RBD orphelins) + le Secret. KEEP_WORDPRESS=1
+    # conserve tout pour inspection.
+    if [ "${KEEP_WORDPRESS:-0}" = 1 ]; then
+        log "ℹ️  KEEP_WORDPRESS=1 — WordPress conservé (pods + PVC + secret)."
+    else
+        log "  Cleanup WordPress (workloads + PVC bloc Ceph + secret)"
         "${KUBECTL[@]}" delete -f "${REPO}/storage/ceph/wordpress/wordpress.yaml" --wait=false 2> /dev/null || true
         "${KUBECTL[@]}" delete -f "${REPO}/storage/ceph/wordpress/mysql.yaml" --wait=false 2> /dev/null || true
+        # PVC + Secret ne sont pas dans les manifestes delete -f ci-dessus (le PVC
+        # y est mais on force, et le Secret est créé par la phase, pas versionné).
+        "${KUBECTL[@]}" -n default delete pvc mysql-pv-claim wp-pv-claim --wait=false 2> /dev/null || true
+        "${KUBECTL[@]}" -n default delete secret wordpress-secret 2> /dev/null || true
+        ok "WordPress nettoyé — aucun volume RBD ni secret résiduel"
     fi
 }
 
@@ -678,13 +745,25 @@ phase_gitops() {
     [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
     log "Phase gitops — socle GitOps via Ansible (Gitea → Argo CD)"
 
-    # storageClass du PVC Gitea : local-path sur le banc atlas (ADR 0044).
-    # argocd_apply_gateway=false : pas de cert-manager garanti sur le banc léger.
+    # storageClass du PVC Gitea + exposition UI : SUIVENT le profil du banc
+    # (comme dataops/monitoring) — WITH_CEPH=1 ⇒ stockage Ceph (sinon le PVC
+    # demande local-path, absent en mode Ceph → Gitea Pending). En mode Ceph,
+    # cert-manager est présent (posé par dataops, prérequis Barman) → on peut
+    # exposer l'UI Argo CD via Gateway ; en léger, non (pas de cert-manager garanti).
+    local sc apply_gw
+    if [ "${WITH_CEPH:-0}" = 1 ]; then
+        sc=rook-ceph-block-replicated
+        apply_gw=true
+    else
+        sc=local-path
+        apply_gw=false
+    fi
+    log "  gitea_storage_class=${sc}, argocd_apply_gateway=${apply_gw}"
     KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
         "${REPO}/bootstrap/gitops.yaml" \
         -e dataops_k8s_host=localhost \
-        -e gitea_storage_class=local-path \
-        -e argocd_apply_gateway=false \
+        -e "gitea_storage_class=${sc}" \
+        -e "argocd_apply_gateway=${apply_gw}" \
         || die "gitops.yaml : échec du déploiement du socle GitOps"
     ok "socle GitOps déployé (Ansible) — Gitea + Argo CD Ready"
 
@@ -1107,6 +1186,29 @@ case "${1:-}" in
         time_phase monitoring phase_monitoring
         time_phase dataops phase_dataops
         log "🎉 Chemin 'cluster-dataops' (Ceph) : datalake → monitoring → dataops."
+        record_if_fresh "${run_start}"
+        ;;
+    # ── atlas-ceph : banc atlas COMPLET sur stockage réel (Ceph) + GitOps + UI. ──
+    # L'ordre est CODÉ (ne jamais enchaîner ces phases à la main) : le socle Ceph,
+    # puis datalake (RGW — requis par Loki/monitoring en mode Ceph ET par Barman),
+    # monitoring (observe la suite), gitops (Gitea+Argo CD, SC Ceph car WITH_CEPH),
+    # dataops (CNPG/Dagster/Marquez + build émetteur), enfin gitops-seed (pousse le
+    # workflow qui référence l'image émetteur buildée par dataops). C'est le banc
+    # sur lequel on vérifie les UI/portail (#232, scénario 28) en mode Ceph.
+    atlas-ceph)
+        TARGET="atlas-ceph"
+        WITH_CEPH=1
+        chemin_prelude
+        run_start=$(date +%s)
+        run_socle
+        run_hardening_if_requested
+        time_phase datalake phase_datalake
+        time_phase monitoring phase_monitoring
+        time_phase gitops phase_gitops
+        time_phase dataops phase_dataops
+        time_phase gitops-seed phase_gitops_seed
+        log "🎉 Chemin 'atlas-ceph' : Ceph → datalake → monitoring → gitops → dataops → gitops-seed."
+        log "ℹ️  UI exposées : vérifier via le scénario 28 (URLs via Gateway, #232)."
         record_if_fresh "${run_start}"
         ;;
     status) phase_status ;;

@@ -21,6 +21,27 @@ CILIUM_POD_CIDR="${CILIUM_POD_CIDR:-10.244.0.0/16}"
 CILIUM_CLUSTER_NAME="${CILIUM_CLUSTER_NAME:-}"
 CILIUM_CLUSTER_ID="${CILIUM_CLUSTER_ID:-}"
 
+# ── Exposition tout-Cilium (ADR 0020) — paramètres des CRs LB-IPAM + L2 ──────
+# Le script POSE les CRs (GatewayClass + CiliumLoadBalancerIPPool + L2 policy)
+# en plus d'armer les features Helm : sans eux, tout Gateway reste « Waiting for
+# controller » et aucun Service LoadBalancer n'obtient d'IP (révélé par le
+# scénario 28, #232). Les CRs sont générés INLINE (heredoc) car cni.sh tourne
+# DANS la VM sans le repo monté — platform/cilium-expo/*.yaml restent la
+# référence documentaire versionnée (même contenu, paramétré ici).
+#
+# Plage et interface DÉRIVÉES de l'environnement (ADR 0023 : pas de valeur d'un
+# banc concret en défaut versionné) — l'appelant injecte le concret :
+#   - banc Lima (run-phases.sh) : 192.168.104.240-.250 sur eth0 ;
+#   - prod (10.0.0.0/22) : plage réservée AVEC l'admin réseau.
+# Le pool DOIT être dans le même sous-réseau L2 que les nœuds (annonce = ARP) ;
+# l'interface est celle du réseau privé inter-nœuds. Défauts = réseau privé
+# d'exemple générique (10.0.0.0/22, cf. CLAUDE.md), à surcharger par terrain.
+CILIUM_EXPO_ENABLED="${CILIUM_EXPO_ENABLED:-1}"
+LB_IPAM_RANGE_START="${LB_IPAM_RANGE_START:-10.0.0.240}"
+LB_IPAM_RANGE_STOP="${LB_IPAM_RANGE_STOP:-10.0.0.250}"
+L2_INTERFACE="${L2_INTERFACE:-eth0}"
+GATEWAY_CLASS_NAME="${GATEWAY_CLASS_NAME:-cilium}"
+
 # --- Installer le CLI cilium (idempotent) ---------------------------------
 if command -v cilium > /dev/null 2>&1; then
   echo "cilium CLI déjà présent ($(command -v cilium)) — skip download."
@@ -139,6 +160,57 @@ else
   echo "✗ WireGuard configuré mais INACTIF dans le datapath (cilium encrypt status)." >&2
   echo "  Vérifier le support kernel (module 'wireguard') et les logs cilium-agent." >&2
   exit 1
+fi
+
+# ─── Exposition tout-Cilium : application des CRs (ADR 0020) ────────────────
+# Pose GatewayClass + CiliumLoadBalancerIPPool + CiliumL2AnnouncementPolicy.
+# APRÈS convergence Cilium (les CRDs/contrôleurs Gateway+LB-IPAM sont prêts).
+# Idempotent (kubectl apply). Sans ces CRs, les Gateway n'ont pas de contrôleur
+# et les Service LoadBalancer pas d'IP (#232, scénario 28).
+#
+# apiVersions (ADR 0020, alignées Cilium 1.19) — pièges :
+#   - CiliumLoadBalancerIPPool : cilium.io/v2 (PROMU en 1.19) ;
+#   - CiliumL2AnnouncementPolicy : cilium.io/v2alpha1 (RESTE alpha) ;
+#   - GatewayClass : gateway.networking.k8s.io/v1 (GA), controllerName EXACT
+#     io.cilium/gateway-controller.
+if [ "${CILIUM_EXPO_ENABLED}" = 1 ]; then
+  echo "Application des CRs d'exposition (GatewayClass + LB-IPAM + L2)…"
+  echo "  pool LB-IPAM ${LB_IPAM_RANGE_START}-${LB_IPAM_RANGE_STOP}, L2 sur ${L2_INTERFACE}, classe ${GATEWAY_CLASS_NAME}"
+  kubectl apply -f - <<EOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: ${GATEWAY_CLASS_NAME}
+spec:
+  controllerName: io.cilium/gateway-controller
+---
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: default-pool
+spec:
+  blocks:
+    - start: "${LB_IPAM_RANGE_START}"
+      stop: "${LB_IPAM_RANGE_STOP}"
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: default-l2
+spec:
+  serviceSelector:
+    matchLabels: {}
+  nodeSelector:
+    matchExpressions:
+      - key: node-role.kubernetes.io/control-plane
+        operator: DoesNotExist
+  interfaces:
+    - "^${L2_INTERFACE}\$"
+  loadBalancerIPs: true
+EOF
+  echo "✓ CRs d'exposition appliqués."
+else
+  echo "ℹ️  CILIUM_EXPO_ENABLED=0 — CRs d'exposition NON appliqués (Gateway/LB-IPAM inactifs)."
 fi
 
 # ─── Retrait de kube-proxy (ADR 0020) ──────────────────────────────────────

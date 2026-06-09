@@ -61,6 +61,9 @@ Accepted.
 - **Évolution** : ajouter une topologie = une ligne dans la table + (si buildée)
   un run consigné. `ha-3cp` et `multisite` sont nommés d'avance pour que les
   issues de cadrage (catalogue, terrain cloud) s'y réfèrent dès maintenant.
+  `ha-3cp` est désormais **défini** (3 CP dédiés + 3 workers, VIP kube-vip, etcd
+  quorum 2/3) par [ADR 0047](0047-topologie-ha-3cp-control-plane-dedie.md) ;
+  reste `cible` tant que le run de preuve n'est pas consigné.
 - **Lien** : outillage des bancs et fidélité de version
   ([ADR 0006](0006-matrice-de-versions-et-politique-de-bump.md)) ; multi-cluster
   paramétré ([ADR 0027](0027-bootstrap-parametre-multi-cluster.md)).

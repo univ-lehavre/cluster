@@ -14,11 +14,11 @@ prod, creds S3) n'y figure — celles-ci vivent en config locale non versionnée
 
 ## Artefacts
 
-| Fichier                                                              | Contenu                                                                     |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [`endpoints.example.yaml`](endpoints.example.yaml)                   | Services exposés : nom, namespace, port, protocole, FQDN interne, auth.     |
-| [`storage-classes.example.yaml`](storage-classes.example.yaml)       | StorageClasses **par profil** (Ceph / local-path) + la SC `default`.        |
-| [`namespaces-secrets.example.yaml`](namespaces-secrets.example.yaml) | Namespaces de destination + conventions de secrets (CNPG, dérivés, OBC S3). |
+| Fichier                                                              | Contenu                                                                                                                                                                                                             |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`endpoints.example.yaml`](endpoints.example.yaml)                   | Services exposés : nom, namespace, port, protocole, FQDN interne, auth. Les **UI** portent en plus `ui_hostname` (bordure) + `layer` (socle/monitoring/gitops/dataops) — consommés par le **portail atlas** (#232). |
+| [`storage-classes.example.yaml`](storage-classes.example.yaml)       | StorageClasses **par profil** (Ceph / local-path) + la SC `default`.                                                                                                                                                |
+| [`namespaces-secrets.example.yaml`](namespaces-secrets.example.yaml) | Namespaces de destination + conventions de secrets (CNPG, dérivés, OBC S3).                                                                                                                                         |
 
 ## Pour un développeur `atlas`
 

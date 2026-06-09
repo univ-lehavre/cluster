@@ -1,0 +1,52 @@
+# Exposition de l'UI Gitea via le Gateway Cilium + TLS interne (ADR 0020/0021,
+# portail atlas #232). Permet de consulter la forge (dépôts de workflows atlas)
+# depuis un navigateur. Même patron que platform/mailpit/gateway.yaml. Secret TLS
+# créé par cert-manager (gateway-shim, annotation cluster-issuer).
+#
+# Pré-requis : cert-manager + CRDs Gateway API. Sur le chemin atlas léger,
+# cert-manager arrive avec la phase dataops → poser ce Gateway APRÈS dataops
+# (cf. run-phases.sh, argocd_apply_gateway).
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gitea
+  namespace: gitea
+  annotations:
+    cert-manager.io/cluster-issuer: internal-ca
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: websecure
+      protocol: HTTPS
+      port: 443
+      hostname: gitea.cluster.lan # TODO admin réseau (placeholder .lan)
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gitea-server-tls # créé/renouvelé par cert-manager
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gitea
+  namespace: gitea
+spec:
+  parentRefs:
+    - name: gitea
+      namespace: gitea
+      sectionName: websecure
+  hostnames:
+    - gitea.cluster.lan # TODO admin réseau (placeholder .lan)
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: gitea-http
+          port: 80 # Service gitea-http:80 → pod 3000 (HTTP clair, TLS en bordure)

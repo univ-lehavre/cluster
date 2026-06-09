@@ -61,6 +61,7 @@ endpoints:
     port: 3000
     protocol: http
     auth: none
+    layer: dataops
     source: platform/marquez/marquez.yaml
     ui_hostname: marquez.cluster.lan # exemple générique (Gateway + cert-manager)
     note: UI de visualisation du lineage.
@@ -73,6 +74,7 @@ endpoints:
     port: 80
     protocol: http
     auth: none
+    layer: dataops
     source: platform/dagster/dagster.yaml
     ui_hostname: dagster.cluster.lan # exemple générique
     note: >-
@@ -119,3 +121,72 @@ endpoints:
     note: >-
       SeaweedFS — backing S3 LÉGER du banc rapide (ADR 0036). N'existe pas en
       prod : en mode Ceph, viser `s3-datalake-ceph`.
+
+  # ── UI de la plateforme (portail atlas, #232) ──────────────────────────────
+  # UI web exposées en bordure (Gateway Cilium + cert-manager). Le `layer`
+  # regroupe au portail (socle / monitoring / gitops / dataops). `auth` indique
+  # comment l'utilisateur récupère son accès : `none` (réseau privé, ADR 0003),
+  # `secret-admin` (mot de passe dans un Secret K8s à lire), `token` (jeton de
+  # ServiceAccount). Dagster/Marquez ont déjà leur entrée ci-dessus ; voici les
+  # UI restantes de la chaîne (cf. docs/guide-dev-data.md « déployer depuis atlas »).
+  - id: grafana-ui
+    service: kube-prometheus-stack-grafana
+    namespace: monitoring
+    fqdn: kube-prometheus-stack-grafana.monitoring.svc.cluster.local
+    port: 80
+    protocol: http
+    auth: secret-admin # Secret kube-prometheus-stack-grafana (clé admin-password)
+    layer: monitoring
+    ui_hostname: grafana.cluster.lan # exemple générique (Gateway + cert-manager)
+    source: platform/kube-prometheus-stack/gateway.yaml
+    note: Tableaux de bord métriques (Prometheus datasource).
+
+  - id: mailpit-ui
+    service: mailpit
+    namespace: mailpit
+    fqdn: mailpit.mailpit.svc.cluster.local
+    port: 8025
+    protocol: http
+    auth: none # intra-cluster / réseau privé
+    layer: monitoring
+    ui_hostname: mailpit.cluster.lan # exemple générique
+    source: platform/mailpit/gateway.yaml
+    note: Boîte mail de test (capture les alertes/notifications du banc).
+
+  - id: argocd-ui
+    service: argocd-server
+    namespace: argocd
+    fqdn: argocd-server.argocd.svc.cluster.local
+    port: 80
+    protocol: http
+    auth: secret-admin # Secret argocd-initial-admin-secret (clé password)
+    layer: gitops
+    ui_hostname: argocd.cluster.lan # exemple générique
+    source: platform/argocd/gateway.yaml
+    note: >-
+      UI GitOps (état des Application, sync/health). CLI gRPC via Gateway non
+      fonctionnel en l'état (finding #26) ; UI/REST OK.
+
+  - id: gitea-ui
+    service: gitea-http
+    namespace: gitea
+    fqdn: gitea-http.gitea.svc.cluster.local
+    port: 80
+    protocol: http
+    auth: secret-admin # Secret gitea-admin (créé à l'init du dépôt, clé password)
+    layer: gitops
+    ui_hostname: gitea.cluster.lan # exemple générique (Gateway à poser, #232)
+    source: platform/gitea/service.yaml
+    note: Forge git intra-banc (air-gapped) — source des workflows atlas (ADR 0044).
+
+  - id: k8s-dashboard-ui
+    service: kubernetes-dashboard
+    namespace: kubernetes-dashboard
+    fqdn: kubernetes-dashboard.kubernetes-dashboard.svc.cluster.local
+    port: 443
+    protocol: https
+    auth: token # jeton du ServiceAccount admin-user (kubectl create token), ADR 0010
+    layer: socle
+    ui_hostname: dashboard.cluster.lan # exemple générique (Gateway à poser, #232)
+    source: platform/k8s-dashboard/
+    note: Tableau de bord Kubernetes (cluster-admin, ADR 0010).

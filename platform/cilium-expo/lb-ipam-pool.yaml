@@ -1,4 +1,11 @@
-# Exposition tout-Cilium (ADR 0020) — LB-IPAM.
+# Exposition tout-Cilium (ADR 0020) — LB-IPAM. RÉFÉRENCE DOCUMENTAIRE.
+#
+# ⚠️ Source d'exécution = bootstrap/cni.sh (génère ce CR INLINE, paramétré par
+# l'environnement : LB_IPAM_RANGE_START/STOP). cni.sh tourne DANS la VM sans le
+# repo monté → il ne peut pas `kubectl apply -f` ce fichier. Ce YAML reste la
+# référence versionnée (forme du CR, apiVersion, pièges) ; les VALEURS de plage
+# sont dérivées du terrain par cni.sh (banc Lima : .240-.250 du /24 des nœuds ;
+# prod : plage réservée avec l'admin réseau). Garder les deux ALIGNÉS.
 #
 # CiliumLoadBalancerIPPool : pool d'IP attribuées aux Service type=LoadBalancer
 # (dont celui créé par le Gateway de bordure). Remplace l'IPAddressPool MetalLB.
@@ -8,19 +15,14 @@
 # ce type ; ne pas confondre avec CiliumL2AnnouncementPolicy qui RESTE v2alpha1).
 #
 # Le pool DOIT être dans le même sous-réseau L2 que les nœuds (l'annonce est de
-# l'ARP). Banc Vagrant : 192.168.67.0/24, IP .240-.250 hors plage DHCP host-only.
-# PROD (10.0.0.0/22) : TODO — plage à réserver AVEC l'admin réseau (aucune IP
-# prod attribuée à l'aveugle : collision possible sur un /22 partagé). Ajouter
-# alors un second block (ou un pool dédié) une fois la réservation confirmée.
+# l'ARP). Valeur d'exemple GÉNÉRIQUE ci-dessous (réseau privé 10.0.0.0/22,
+# CLAUDE.md/ADR 0023) ; le concret est injecté par terrain (cf. cni.sh).
 apiVersion: cilium.io/v2
 kind: CiliumLoadBalancerIPPool
 metadata:
-  name: banc-vagrant-pool
+  name: default-pool
 spec:
-  # TODO prod (ADR 0020) — ajouter un second block après arbitrage admin réseau
-  # (plage libre de 10.0.0.0/22), p. ex. { start: "10.0.0.X", stop: "10.0.0.Y" }.
-  # Aucune IP prod réservée à l'aveugle : collision possible sur un /22 partagé.
   blocks:
     # Plage explicite .240-.250 (un /29 ne couvrirait que .240-.247).
-    - start: '192.168.67.240'
-      stop: '192.168.67.250'
+    - start: '10.0.0.240'
+      stop: '10.0.0.250'

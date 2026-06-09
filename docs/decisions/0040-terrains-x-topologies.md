@@ -77,13 +77,18 @@ Conséquences de cadrage :
    donc bien plus bas que le banc Ceph actuel — le run dira combien de RAM/CP
    avant instabilité du quorum etcd ; on inscrira la valeur ici.
 
-   Prérequis technique de `ha-3cp` non encore outillé : un **endpoint flottant**
-   (VIP type kube-vip en local / le **Load Balancer** Free Tier en cloud) devant
-   les 3 CP — aujourd'hui `control_plane_endpoint` pointe le seul cp1 via
-   `/etc/hosts`, ce qui ne survit pas à la perte de cp1. Tant que ce prérequis
-   n'est pas levé, `ha-3cp` reste `cible`. La sélection topologie × palier sera
-   un **outillage dédié** (l'ancien `TOPO`, limité à la variation du nombre de
-   nœuds, a été abandonné).
+   Prérequis technique de `ha-3cp` : un **endpoint flottant** (VIP) devant les 3
+   CP — aujourd'hui `control_plane_endpoint` pointe le seul cp1 via
+   `/etc/hosts`, ce qui ne survit pas à la perte de cp1. Le **mécanisme est
+   désormais tranché** par
+   [ADR 0047](0047-topologie-ha-3cp-control-plane-dedie.md) : **kube-vip en pod
+   statique** en local (amorçage avant Cilium → pas d'œuf-poule), **Load
+   Balancer** Free Tier en cloud. `ha-3cp` y est aussi **défini** comme 3 CP
+   **dédiés** + 3 workers (≠ hyperconvergé), banc en **local-path d'abord** (la
+   mécanique HA avant Ceph). Il reste `cible` tant que l'outillage (rôle
+   kube-vip, banc 6 VMs) et le run de preuve ne sont pas faits. La sélection
+   topologie × palier sera un **outillage dédié** (l'ancien `TOPO`, limité à la
+   variation du nombre de nœuds, a été abandonné).
 
 3. **`x86` ne se teste QUE sur bare-metal.** L'unique terrain x86 est
    **`x86/baremetal/multi-node-4`** (cible **prod**, 4 nœuds, ADR 0009). Tous

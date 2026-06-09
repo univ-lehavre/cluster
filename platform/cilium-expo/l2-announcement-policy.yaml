@@ -1,4 +1,9 @@
-# Exposition tout-Cilium (ADR 0020) — annonce L2 (ARP).
+# Exposition tout-Cilium (ADR 0020) — annonce L2 (ARP). RÉFÉRENCE DOCUMENTAIRE.
+#
+# ⚠️ Source d'exécution = bootstrap/cni.sh (génère ce CR INLINE, interface
+# paramétrée par L2_INTERFACE). Ce YAML reste la référence versionnée ; les
+# VALEURS (interface) sont dérivées du terrain par cni.sh (banc Lima : eth0,
+# unique NIC ; Vagrant historique : eth1 = privé inter-VM). Garder ALIGNÉS.
 #
 # CiliumL2AnnouncementPolicy : un nœud élu (lease) répond aux requêtes ARP pour
 # les IP du pool LB-IPAM, les rendant joignables sur le LAN. Remplace le
@@ -14,7 +19,7 @@
 apiVersion: cilium.io/v2alpha1
 kind: CiliumL2AnnouncementPolicy
 metadata:
-  name: banc-vagrant-l2
+  name: default-l2
 spec:
   # Vide → tous les Service type=LoadBalancer éligibles (dont le Gateway).
   serviceSelector:
@@ -26,11 +31,11 @@ spec:
     matchExpressions:
       - key: node-role.kubernetes.io/control-plane
         operator: DoesNotExist
-  # Interface d'annonce. Banc Vagrant/VirtualBox : eth0 = NAT, eth1 = réseau
-  # privé inter-VM (cf. test/multi-node, kubelet --node-ip sur eth1). On annonce
-  # STRICTEMENT sur eth1 (regex ancrée) — jamais sur le NAT. La valeur est une
-  # liste de regex ; adapter en prod si l'interface porte un autre nom.
+  # Interface d'annonce (regex ancrée). Valeur d'exemple générique : eth0 (NIC
+  # du réseau privé inter-nœuds). Dérivée du terrain par cni.sh (L2_INTERFACE) :
+  # banc Lima = eth0 (NIC unique) ; Vagrant historique = eth1 (privé inter-VM,
+  # eth0 étant le NAT). NE JAMAIS annoncer sur une interface NAT.
   interfaces:
-    - '^eth1$'
+    - '^eth0$'
   # Annoncer les IP de type LoadBalancer (issues du pool LB-IPAM).
   loadBalancerIPs: true

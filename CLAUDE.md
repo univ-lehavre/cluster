@@ -58,6 +58,15 @@ Détail et justification :
   ansible-lint, jscpd, bats) ; `pnpm docs:build` (VitePress, échoue sur lien
   mort) ; jobs CI séparés non couverts par `pnpm lint` : **markdownlint** et
   **trivy** — les reproduire localement avant de pousser.
+- **Banc : corriger le CODE, pas l'état** (ADR
+  [0046](docs/decisions/0046-corriger-le-code-pas-l-etat.md)/[0034](docs/decisions/0034-validation-e2e-from-scratch.md)).
+  `kubectl patch`/`apply` manuel = **diagnostic uniquement** ; tout correctif
+  repart dans le code versionné (manifeste/rôle/harnais) puis est **re-prouvé
+  par un run**. Le banc se monte par un **chemin nommé codé**
+  (`test/lima/run-phases.sh <chemin>`, ADR 0045), **jamais** en enchaînant des
+  phases à la main — si un enchaînement manque, **coder le chemin**. Une valeur
+  de profil (storageClass…) se **dérive** de `WITH_CEPH`/`WITH_HARDENING`,
+  jamais codée en dur.
 - **Décisions structurantes** via **ADR** (format Nygard léger), jamais en
   bullets dans un TODO. Index : `docs/decisions/README.md`.
 - **Images** épinglées par **digest d'index multi-arch** (ADR 0006) — vérifier

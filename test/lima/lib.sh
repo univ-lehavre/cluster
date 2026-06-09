@@ -272,6 +272,23 @@ run_cni() {
     vm_sh "${vm}" env "$@" bash -s < "${REPO}/bootstrap/cni.sh"
 }
 
+# Pose les CRDs Gateway API AVANT cni.sh (drift L56). L'operator Cilium vérifie
+# ces CRDs UNE SEULE FOIS à son démarrage (lancé par cni.sh) : si elles manquent,
+# il désarme définitivement le contrôleur Gateway (« Required GatewayAPI resources
+# are not found »), et tout Gateway reste « Waiting for controller » même après
+# apparition tardive des CRDs. La dépendance est réelle (Gateway API → contrôleur
+# Cilium-gateway), donc on la pose dans la VM (kubectl + kubeconfig local du CP)
+# avant Cilium. Version épinglée (ADR 0006). Idempotent (kubectl apply).
+apply_gwapi_crds_in_vm() {
+    local vm=$1 version=$2 crd
+    log "  CRDs Gateway API v${version} (avant Cilium, sur ${vm})"
+    local base="https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v${version}/config/crd/standard"
+    for crd in gatewayclasses gateways httproutes referencegrants grpcroutes; do
+        vm_sh "${vm}" kubectl apply -f "${base}/gateway.networking.k8s.io_${crd}.yaml" > /dev/null \
+            || die "échec apply CRD Gateway API ${crd} dans ${vm} (réseau ?)"
+    done
+}
+
 # Exporte le kubeconfig d'un nœud control-plane vers l'hôte. L'API est jointe via
 # le portForward Lima (127.0.0.1:<api_port>), l'IP user-v2 n'étant pas routable
 # depuis le Mac. Le certificat de l'API porte le SAN `cluster-api` → on pose

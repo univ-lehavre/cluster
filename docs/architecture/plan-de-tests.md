@@ -116,6 +116,33 @@ l'init du dépôt Gitea est faite par la phase `gitops-seed`
 ([`test/lima/gitea-init.sh`](../../test/lima/gitea-init.sh)). Implémentation :
 [issue #231](https://github.com/univ-lehavre/cluster/issues/231).
 
+## Couverture par profil de banc — ce que le banc `atlas` ne peut pas jouer
+
+Le banc **`atlas`** (léger : K8s + Cilium + **local-path** + monitoring +
+gitops + dataops/SeaweedFS) couvre **10 scénarios** : le **27** (cœur atlas) +
+**10, 11, 12, 17, 18** (sécurité pod/réseau, indépendants du stockage) + **23,
+24, 25, 26** (lineage + observabilité). Les autres **ne sont pas un défaut
+d'atlas** : ils valident le **socle/stockage/sécurité de la plateforme**, pas
+l'usage atlas. Ils exigent une capacité qu'`atlas` (par conception) ne monte pas
+:
+
+| Capacité manquante au banc `atlas`                      | Scénarios bloqués      | Monté par                           |
+| ------------------------------------------------------- | ---------------------- | ----------------------------------- |
+| **Stockage Ceph réel** (RGW, réplication ×3, OSDs)      | 01, 05, 06, 08         | `WITH_CEPH=1` (`storage-real`)      |
+| **Résilience perte de nœud + santé Ceph**               | 03, 04, 07, 19, 20, 21 | `WITH_CEPH=1` (Ceph tient en WARN)  |
+| **Durcissement hôte** (sshd/auditd/fail2ban, SSH nœuds) | 13, 14, 15, 16, 22     | `WITH_HARDENING=1` (#240) + SSH     |
+| **Restauration etcd** (procédure SSH sur le CP)         | 09                     | accès SSH control-plane + `etcdctl` |
+
+Conséquence : couvrir **toute** la matrice exige le banc **`storage-real`**
+(Ceph) monté avec **`WITH_HARDENING=1`** — sur le banc _cluster_, pas _atlas_.
+C'est la doctrine ADR 0045 §6 : chaque famille est **scellée par le chemin qui
+monte le banc requis**, à la cadence du garde-fou de fraîcheur (#244).
+
+```bash
+# Banc complet (Ceph + durcissement) → débloque les scénarios 01–22 :
+WITH_CEPH=1 WITH_HARDENING=1 NO_CACHE=1 test/lima/run-phases.sh storage-real
+```
+
 ## Voir aussi
 
 - [Chemins d'installation (ADR 0045)](../decisions/0045-chemins-installation-banc-couches.md)

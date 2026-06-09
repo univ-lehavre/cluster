@@ -59,7 +59,7 @@ assert_banc() {
 # shellcheck disable=SC2329 # invoqué via trap EXIT
 cleanup() {
     [ "$KEEP" = "1" ] && { log "KEEP=1 — IP $ATTACKER_IP laissée bannie (unban manuel)"; return; }
-    log "Cleanup — unban de l'IP factice $ATTACKER_IP…"
+    log "Cleanup - unban de l'IP factice $ATTACKER_IP"
     target_ssh "sudo fail2ban-client set sshd unbanip $ATTACKER_IP >/dev/null 2>&1 || true" 2>/dev/null || true
 }
 trap cleanup EXIT

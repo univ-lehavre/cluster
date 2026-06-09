@@ -779,3 +779,55 @@ drifts:
       workloads Dagster root relève de #234. Validé : Job Complete + lineage
       Marquez, scénario 27 PASS.
     statut: corrige
+
+  - id: L55
+    campagne: 'banc atlas-ceph complet (#232)'
+    portee: harnais
+    symptome: >-
+      En cours de run atlas-ceph (Ceph + dataops complet), des pods sont Evicted
+      puis laissés en Error/ContainerStatusUnknown (postgres pg-1/pg-3,
+      rook-ceph-rgw-datalake, node-exporter, crashcollector). Kubernetes recrée
+      systématiquement un remplaçant Running — la chaîne reste fonctionnelle
+      (workflow Completed) — mais les tombstones polluent l'état.
+    cause: >-
+      Pression ephemeral-storage (PAS la RAM : MemoryPressure=False sur tous les
+      nœuds). VM_DISK=20 GiB codé en dur, identique léger et Ceph. Or Ceph+dataops
+      empile sur le rootfs : OSD, images applicatives (CNPG, Dagster, Marquez,
+      monitoring), logs → le disque éphémère passe sous le seuil kubelet (~2 GiB)
+      et déclenche des évictions en cascade. Valeur de disque non dérivée du
+      profil (même classe de bug que la RAM hardcodée, ADR 0046).
+    correctif: >-
+      VM_DISK DÉRIVE du profil (ADR 0046) : 40 GiB en mode Ceph (WITH_CEPH=1),
+      20 GiB en léger. Le qcow2 Lima est thin-provisionné → n'occupe le disque
+      hôte qu'à l'usage réel. Re-preuve from-scratch atlas-ceph différée → issue
+      #251 (ADR 0034). Tombstones du run courant nettoyés (kubectl delete pod
+      --field-selector status.phase=Failed).
+    statut: corrige
+
+  - id: L56
+    campagne: 'portail UI — exposition tout-Cilium (#232, scénario 28)'
+    portee: code
+    symptome: >-
+      Aucune UI joignable via le Gateway. Le Gateway argocd reste PROGRAMMED=Unknown
+      « Waiting for controller », la GatewayClass cilium reste Accepted=Unknown, et
+      AUCUN Service type=LoadBalancer n'obtient d'IP. Le scénario 28 ne trouve
+      qu'une HTTPRoute et ne peut sonder aucune UI.
+    cause: >-
+      DEUX bugs cumulés. (1) bootstrap/cni.sh arme les FEATURES Cilium
+      (gatewayAPI/l2/LB-IPAM via Helm) mais N'APPLIQUE JAMAIS les CRs
+      platform/cilium-expo/ (GatewayClass + CiliumLoadBalancerIPPool +
+      CiliumL2AnnouncementPolicy) — personne ne les pose. (2) Ordre cassé : l'operator
+      Cilium vérifie les CRDs Gateway API UNE FOIS au démarrage (lancé par cni.sh)
+      et conclut « Required GatewayAPI resources are not found » ; les CRDs sont
+      posées ~7 min plus tard (phase platform-prereqs) → le contrôleur Gateway
+      n'est jamais armé, même après apparition des CRDs. Bonus : les CRs de
+      platform/cilium-expo/ ciblaient l'ancien banc Vagrant (192.168.67/eth1),
+      inadaptés au banc Lima (192.168.104/eth0).
+    correctif: >-
+      (1) cni.sh applique les CRs inline (heredoc), plage LB-IPAM + interface L2
+      paramétrées par env (LB_IPAM_RANGE_START/STOP, L2_INTERFACE) dérivées du
+      réseau réel par run-phases.sh (ADR 0023) ; (2) poser les CRDs Gateway API
+      AVANT cni.sh (dépendance réelle Gateway-API → Cilium-gateway). Validé À
+      CHAUD (HTTP 200 via Gateway, scénario 28 PASS). Re-preuve from-scratch
+      différée → issue #251 (ADR 0034/0046).
+    statut: en-cours
