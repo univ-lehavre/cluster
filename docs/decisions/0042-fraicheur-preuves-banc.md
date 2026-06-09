@@ -69,3 +69,11 @@ l'historique des runs daté (`runs-history.yaml`) dont elle dépend.
 - **Dépendance** : nécessite l'historique des runs daté ; à séquencer après lui.
 - **Anti-faux-positif** : seuil hebdomadaire + variable, pour que l'alerte reste
   un signal utile et non un bruit permanent qu'on finit par ignorer.
+- **Seuil par chemin (à venir, ADR 0045 §6)** : ce cadrage pose **un** seuil
+  global. La matrice de couverture de
+  l'[ADR 0045](0045-chemins-installation-banc-couches.md) §6 distingue des
+  cadences **par chemin** (`atlas` 7 j, `storage-real` 30 j, `cluster-dataops`
+  90 j) : un run `atlas` frais ne doit plus masquer un `storage-real` périmé. Le
+  garde-fou devra donc lire le **dernier run par `TARGET`** dans
+  `runs-history.yaml` et comparer chacun à **sa** cadence — évolution à porter
+  quand le garde-fou sera implémenté.

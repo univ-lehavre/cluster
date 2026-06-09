@@ -17,6 +17,9 @@
 #   test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
 #   test/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
 #   test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman) + gate Ready
+#   test/lima/run-phases.sh smoke-s3       # smoke S3 PUT/GET/DELETE sur le RGW Ceph (scénario 06)
+#   test/lima/run-phases.sh wordpress      # montage WordPress : PVC bloc RWO Ceph Bound + Pod Ready
+#   test/lima/run-phases.sh hardening      # durcissement hôte (secure.yml, tags audit,detection — #240)
 #   test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage (#173/#148)
 #   test/lima/run-phases.sh gitops         # socle GitOps : Gitea + Argo CD via Ansible (gitops.yaml) + gate Ready (#230)
 #   test/lima/run-phases.sh gitops-seed    # init dépôt Gitea : org/repo + workflow jouet + webhook + Application atlas (#231)
@@ -24,9 +27,10 @@
 #   ── Chemins d'installation nommés (ADR 0045) ──
 #   test/lima/run-phases.sh socle          # up → bootstrap → stockage (smoke rapide)
 #   test/lima/run-phases.sh atlas          # socle léger → monitoring → gitops → dataops (banc atlas, local-path)
-#   test/lima/run-phases.sh cluster        # socle Ceph → datalake → monitoring → dataops (preuve stockage réel)
-#   test/lima/run-phases.sh all            # alias : 'atlas' (léger) | socle Ceph si WITH_CEPH=1
-#   WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
+#   test/lima/run-phases.sh storage-real   # socle Ceph → datalake → smoke S3 (RGW) + montage WordPress (preuve stockage réel)
+#   test/lima/run-phases.sh cluster-dataops # socle Ceph → datalake → monitoring → dataops (chaîne DataOps sur Ceph)
+#   ── Axe orthogonal durcissement (#240) : combinable avec tout chemin ──
+#   WITH_HARDENING=1 test/lima/run-phases.sh atlas  # même chemin + secure.yml (audit,detection) après le socle
 #   test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
 #   test/lima/run-phases.sh status         # état du banc : VMs, nœuds, phases, UIs, dernier run (#149)
 #   test/lima/run-phases.sh down           # détruit les VMs + disques nommés
@@ -134,7 +138,7 @@ time_phase() {
 
 # Consigne le run complet dans l'historique versionné (#216) et, si Prometheus
 # est déployé, y joint les métriques de coût échantillonnées (#217). Appelé en
-# fin de run `all` réussi. <total_s> = durée cumulée ; <profil> dérivé de WITH_CEPH.
+# fin d'un run de chemin réussi. <total_s> = durée cumulée ; <profil> dérivé de WITH_CEPH.
 record_full_run() {
     local total=$1 profil block
     profil=$(metro_profil "${WITH_CEPH:-0}")
@@ -509,6 +513,91 @@ phase_datalake() {
     ok "RGW datalake Ready (cible S3 des backups Barman)"
 }
 
+# ── Phase smoke-s3 — preuve objet : PUT/GET/DELETE réel sur le RGW Ceph ───────
+# Réutilise le scénario 06 (wrapper port-forward + smoke-test.sh datalake), seul
+# garant que l'objet S3 fonctionne *vraiment* (pas seulement le Deployment Ready).
+# KEEP_DATALAKE=1 : le datalake est posé par la phase `datalake`, on ne le détruit
+# pas en sortie. Mode Ceph uniquement, à lancer après `datalake`.
+phase_smoke_s3() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    log "Phase smoke-s3 — PUT/GET/DELETE sur le RGW Ceph (scénario 06)"
+    KEEP_DATALAKE=1 bash "${REPO}/test/scenarios/06-object-store-smoke.sh" \
+        || die "smoke-test S3 (RGW) en échec — voir la sortie ci-dessus"
+    ok "smoke-test S3 réussi (PUT/GET/DELETE sur le RGW Ceph)"
+}
+
+# ── Phase wordpress — preuve bloc : PVC RWO Ceph Bound + Pod Ready ────────────
+# Monte l'exemple WordPress (storage/ceph/wordpress/) : MySQL + WordPress, chacun
+# un PVC `ReadWriteOnce` sur la StorageClass bloc Ceph `rook-ceph-block-replicated`.
+# GATE : les deux Deployments rollout et les PVC sont Bound. Mode Ceph uniquement.
+phase_wordpress() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    log "Phase wordpress — montage PVC bloc RWO sur la SC Ceph (storage/ceph/wordpress/)"
+    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/wordpress/mysql.yaml"
+    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/wordpress/wordpress.yaml"
+
+    # GATE : les Deployments deviennent disponibles (PVC RWO Bound + Pod Ready).
+    log "  Attente du rollout MySQL + WordPress (max 5 min)"
+    "${KUBECTL[@]}" -n default rollout status deploy/wordpress-mysql --timeout=300s \
+        || die "wordpress-mysql pas Ready : $("${KUBECTL[@]}" -n default describe pvc mysql-pv-claim | tail -10)"
+    "${KUBECTL[@]}" -n default rollout status deploy/wordpress --timeout=300s \
+        || die "wordpress pas Ready : $("${KUBECTL[@]}" -n default describe pvc wp-pv-claim | tail -10)"
+    ok "WordPress monté — PVC bloc RWO Bound + Pods Ready (preuve stockage bloc Ceph)"
+
+    # Cleanup : l'exemple n'a pas vocation à rester (le chemin prouve le montage,
+    # pas un service durable). KEEP_WORDPRESS=1 pour le conserver.
+    if [ "${KEEP_WORDPRESS:-0}" = 1 ]; then
+        log "ℹ️  KEEP_WORDPRESS=1 — WordPress conservé."
+    else
+        "${KUBECTL[@]}" delete -f "${REPO}/storage/ceph/wordpress/wordpress.yaml" --wait=false 2> /dev/null || true
+        "${KUBECTL[@]}" delete -f "${REPO}/storage/ceph/wordpress/mysql.yaml" --wait=false 2> /dev/null || true
+    fi
+}
+
+# ── Phase hardening — axe ORTHOGONAL de durcissement hôte (ADR 0045 §3, #240) ─
+# Le durcissement est un second axe, indépendant du stockage : activable sur
+# N'IMPORTE QUEL chemin via WITH_HARDENING=1 (modèle WITH_CEPH). Applique
+# bootstrap/security/secure.yml (durcissement opt-in par tags) sur l'inventaire
+# du banc. Tags banc par défaut : `audit,detection` (auditd + fail2ban — ce qui
+# rend jouable le scénario 16 au lieu de skip) ; surchargeable par HARDENING_TAGS.
+# On EXCLUT volontairement `os` (full-upgrade + reboot) et `network` (UFW, coupe
+# le réseau K8s) — destructifs pour un banc éphémère.
+# Invoquée après bootstrap (l'hôte est joignable), avant/après les briques k8s.
+phase_hardening() {
+    preflight
+    [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
+    local tags="${HARDENING_TAGS:-audit,detection}"
+    log "Phase hardening — durcissement hôte via secure.yml (tags: ${tags})"
+
+    # Le rôle `settings` (tag always) ASSERT que 5 variables d'env sont définies
+    # et non vides (MAIL_ROOT_REDIRECT, HOST_USER, PASSWORD_EXPIRATION,
+    # PUBLIC_SSH_KEY, MAIL_SMARTHOST). On source d'abord un éventuel `.env`
+    # gitignoré (surcharge locale, pattern ADR 0023), puis on fournit des
+    # DÉFAUTS d'exemple génériques pour le banc — `audit,detection` ne les
+    # consomme pas (pas de mail/compte/ssh touchés), mais l'assert les exige.
+    local env_file="${REPO}/bootstrap/security/.env"
+    if [ -f "${env_file}" ]; then
+        log "  source ${env_file} (surcharge locale)"
+        set -a
+        # shellcheck disable=SC1090
+        . "${env_file}"
+        set +a
+    fi
+    export MAIL_ROOT_REDIRECT="${MAIL_ROOT_REDIRECT:-root@example.org}"
+    export HOST_USER="${HOST_USER:-bob}"
+    export PASSWORD_EXPIRATION="${PASSWORD_EXPIRATION:-42}"
+    export PUBLIC_SSH_KEY="${PUBLIC_SSH_KEY:-~/.ssh/exemple.pub}"
+    export MAIL_SMARTHOST="${MAIL_SMARTHOST:-[mailpit.example.org]:1025}"
+
+    ansible-playbook -i "${INVENTORY}" \
+        "${REPO}/bootstrap/security/secure.yml" \
+        --tags "${tags}" \
+        || die "secure.yml : échec du durcissement (tags=${tags})"
+    ok "durcissement appliqué (tags ${tags}) — scénarios 10–16 jouables"
+}
+
 # ── Phase dataops — chaîne DataOps assemblée via Ansible (#173) ───────────────
 # Déploie la chaîne (registry → cert-manager → CNPG+Barman → build → Dagster →
 # Marquez) avec le playbook Ansible idempotent bootstrap/dataops.yaml (ADR 0033),
@@ -844,8 +933,8 @@ status_last_run() {
     f=$(metro_history_file)
     printf '\n  \033[1mDernier run consigné\033[0m\n'
     if [ ! -f "${f}" ] || ! grep -q '^[[:space:]]*- id:' "${f}" 2>/dev/null; then
-        # shellcheck disable=SC2016  # `all` est un libellé littéral, pas une expansion
-        printf '    \033[2maucun (lancer un run `all` pour en consigner un)\033[0m\n'
+        # shellcheck disable=SC2016  # `atlas` est un libellé littéral, pas une expansion
+        printf '    \033[2maucun (lancer un chemin, p.ex. `atlas`, pour en consigner un)\033[0m\n'
         return 0
     fi
     last=$(grep -E '^[[:space:]]*- id:' "${f}" | tail -1 | sed -E 's/.*- id:[[:space:]]*//')
@@ -870,11 +959,12 @@ phase_down() {
 }
 
 # ── Chemins d'installation (ADR 0045) ───────────────────────────────────────
-# Trois chemins nommés, du plus court au plus complet. Chacun monte d'abord le
+# Quatre chemins nommés, du plus court au plus complet. Chacun monte d'abord le
 # SOCLE (up → bootstrap → stockage, avec cache #219), puis ses couches
 # applicatives. L'observabilité (monitoring) est posée TÔT (avant gitops/dataops)
 # pour capter leur démarrage, et fournit le backing S3 SeaweedFS que dataops
-# consomme en mode léger. `all` est conservé comme alias (selon WITH_CEPH).
+# consomme en mode léger. Axe orthogonal : WITH_HARDENING=1 durcit l'hôte sur
+# n'importe quel chemin (#240). L'agrégat `all` est supprimé (ADR 0045 §3).
 #
 # Variable globale `SOCLE_BUILT` (0/1) : posée par run_socle, lue à la fin pour
 # ne consigner QUE les runs from-scratch (drift L49).
@@ -888,7 +978,7 @@ run_socle() {
     SOCLE_BUILT=0
     if metro_cache_valid "${profil}"; then
         ok "socle réutilisé depuis le cache (clé inchangée) — up/bootstrap sautés (#219)"
-        log "ℹ️  Forcer un rebuild from-scratch (preuve ADR 0034) : NO_CACHE=1 $0 ${TARGET:-all}"
+        log "ℹ️  Forcer un rebuild from-scratch (preuve ADR 0034) : NO_CACHE=1 $0 ${TARGET:-atlas}"
         return 0
     fi
     time_phase up phase_up
@@ -923,6 +1013,17 @@ chemin_prelude() {
     : > "${PHASE_DURATIONS}" # repart d'un relevé propre pour CE run
 }
 
+# Axe ORTHOGONAL durcissement (#240, ADR 0045 §3) : applique le hardening hôte si
+# WITH_HARDENING=1, sur N'IMPORTE QUEL chemin, juste après le socle (hôte prêt).
+# No-op sinon. Le verdict (durci/non) est reflété dans le suffixe de TARGET pour
+# que le run consigné distingue les deux variantes (preuve par chemin, ADR 0042).
+run_hardening_if_requested() {
+    if [ "${WITH_HARDENING:-0}" = 1 ]; then
+        time_phase hardening phase_hardening
+        TARGET="${TARGET}+hardening"
+    fi
+}
+
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 case "${1:-}" in
     up) time_phase up phase_up ;;
@@ -930,6 +1031,9 @@ case "${1:-}" in
     storage-simple) time_phase storage-simple phase_storage_simple ;;
     platform-prereqs) time_phase platform-prereqs phase_platform_prereqs ;;
     datalake) time_phase datalake phase_datalake ;;
+    smoke-s3) time_phase smoke-s3 phase_smoke_s3 ;;
+    wordpress) time_phase wordpress phase_wordpress ;;
+    hardening) time_phase hardening phase_hardening ;;
     dataops) time_phase dataops phase_dataops ;;
     gitops) time_phase gitops phase_gitops ;;
     gitops-seed) time_phase gitops-seed phase_gitops_seed ;;
@@ -943,6 +1047,7 @@ case "${1:-}" in
         chemin_prelude
         run_start=$(date +%s)
         run_socle
+        run_hardening_if_requested
         log "🎉 Chemin 'socle' : socle monté (profil $(metro_profil "${WITH_CEPH:-0}"))."
         record_if_fresh "${run_start}"
         ;;
@@ -954,11 +1059,12 @@ case "${1:-}" in
     atlas)
         TARGET=atlas
         if [ "${WITH_CEPH:-0}" = 1 ]; then
-            die "chemin 'atlas' = profil local-path (ADR 0044) ; ne pas combiner avec WITH_CEPH=1 (utiliser 'cluster')"
+            die "chemin 'atlas' = profil local-path (ADR 0044) ; ne pas combiner avec WITH_CEPH=1 (utiliser 'storage-real'/'cluster-dataops')"
         fi
         chemin_prelude
         run_start=$(date +%s)
         run_socle
+        run_hardening_if_requested
         time_phase monitoring phase_monitoring
         time_phase gitops phase_gitops
         time_phase dataops phase_dataops
@@ -970,38 +1076,37 @@ case "${1:-}" in
         log "ℹ️  Preuve e2e des workflows atlas par GitOps : scénario 27 (#231)."
         record_if_fresh "${run_start}"
         ;;
-    # ── cluster : socle Ceph → datalake → monitoring → dataops (ADR 0045). ────
-    # Preuve stockage réel : Ceph + RGW. Pas de GitOps dans ce chemin.
-    cluster)
-        TARGET=cluster
+    # ── storage-real : socle Ceph → datalake → smoke S3 + WordPress (ADR 0045). ─
+    # Preuve du STOCKAGE réel (bloc RWO + objet S3/RGW), PAS la chaîne applicative.
+    # Banc Ceph qui porte aussi les scénarios 01–22 (résilience/sécu/chaos).
+    storage-real)
+        TARGET="storage-real"
         WITH_CEPH=1
         chemin_prelude
         run_start=$(date +%s)
         run_socle
+        run_hardening_if_requested
+        time_phase datalake phase_datalake
+        time_phase smoke-s3 phase_smoke_s3
+        time_phase wordpress phase_wordpress
+        log "🎉 Chemin 'storage-real' (Ceph) : datalake → smoke S3 (RGW) → montage WordPress."
+        log "ℹ️  Scénarios 01–22 jouables sur ce banc monté (ADR 0045 §4)."
+        record_if_fresh "${run_start}"
+        ;;
+    # ── cluster-dataops : socle Ceph → datalake → monitoring → dataops (ADR 0045). ─
+    # Chaîne DataOps complète sur stockage réel (confirme atlas en mode Ceph).
+    # Pas de GitOps dans ce chemin.
+    cluster-dataops)
+        TARGET="cluster-dataops"
+        WITH_CEPH=1
+        chemin_prelude
+        run_start=$(date +%s)
+        run_socle
+        run_hardening_if_requested
         time_phase datalake phase_datalake
         time_phase monitoring phase_monitoring
         time_phase dataops phase_dataops
-        log "🎉 Chemin 'cluster' (Ceph) : datalake → monitoring → dataops."
-        record_if_fresh "${run_start}"
-        ;;
-    # ── all : alias de compatibilité (ADR 0045). ─────────────────────────────
-    # WITH_CEPH=1 → comportement historique (socle Ceph) ; sinon → chemin 'atlas'.
-    all)
-        chemin_prelude
-        run_start=$(date +%s)
-        if [ "${WITH_CEPH:-0}" = 1 ]; then
-            TARGET=all
-            run_socle
-            log "🎉 'all' (mode Ceph) : socle monté. (Chemin nommé : 'cluster' pour datalake/dataops.)"
-        else
-            TARGET=atlas
-            run_socle
-            time_phase monitoring phase_monitoring
-            time_phase gitops phase_gitops
-            time_phase dataops phase_dataops
-            time_phase gitops-seed phase_gitops_seed
-            log "🎉 'all' (mode léger) = chemin 'atlas' : monitoring → gitops → dataops → gitops-seed."
-        fi
+        log "🎉 Chemin 'cluster-dataops' (Ceph) : datalake → monitoring → dataops."
         record_if_fresh "${run_start}"
         ;;
     status) phase_status ;;

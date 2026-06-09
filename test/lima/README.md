@@ -71,30 +71,55 @@ test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide), gate P
 test/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde), gate HEALTH_OK
 test/lima/run-phases.sh sc             # StorageClasses Ceph, gate PVC Bound
 test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman), gate Ready
+test/lima/run-phases.sh smoke-s3       # smoke S3 PUT/GET/DELETE sur le RGW Ceph (scénario 06)
+test/lima/run-phases.sh wordpress      # montage WordPress : PVC bloc RWO Ceph Bound + Pod Ready
+test/lima/run-phases.sh hardening      # durcissement hôte (secure.yml, tags audit,detection — #240)
 test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage
 test/lima/run-phases.sh monitoring     # observabilité (Prometheus + Grafana + Loki)
-test/lima/run-phases.sh all            # RAPIDE : up → bootstrap → storage-simple
-WITH_CEPH=1 test/lima/run-phases.sh all  # COMPLET : ajoute ceph → sc (~15 min)
 test/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
 test/lima/run-phases.sh status         # état du banc : VMs, nœuds, phases, UIs, dernier run
 test/lima/run-phases.sh down           # détruit VMs + disques nommés
+```
+
+### Chemins d'installation nommés (ADR 0045)
+
+Quatre chemins, chacun avec une **intention de preuve distincte** (l'agrégat
+`all` est supprimé) :
+
+```bash
+test/lima/run-phases.sh socle           # up → bootstrap → stockage (smoke rapide)
+test/lima/run-phases.sh atlas           # léger : socle → monitoring → gitops → dataops (banc atlas)
+test/lima/run-phases.sh storage-real    # Ceph : socle → datalake → smoke S3 + WordPress (stockage réel)
+test/lima/run-phases.sh cluster-dataops # Ceph : socle → datalake → monitoring → dataops (DataOps sur Ceph)
+```
+
+**Axe orthogonal durcissement (`WITH_HARDENING=1`, #240).** Combinable avec
+n'importe quel chemin : insère la phase `hardening` après le socle (applique
+`bootstrap/security/secure.yml`, tags `audit,detection` par défaut —
+surchargeables par `HARDENING_TAGS`). Débloque les scénarios 10–16
+(durcissement, fail2ban) qui _skippent_ sinon. Le run consigné porte alors le
+suffixe `+hardening`. Surcharge locale possible via `bootstrap/security/.env`.
+
+```bash
+WITH_HARDENING=1 test/lima/run-phases.sh storage-real   # banc Ceph durci (audit + fail2ban)
+HARDENING_TAGS=audit,detection,smart WITH_HARDENING=1 test/lima/run-phases.sh atlas
 ```
 
 ## Métrologie, cache & fraîcheur des runs
 
 Le banc s'instrumente lui-même (`metrology.sh`) — pas de saisie manuelle.
 
-- **Historique des runs** (`runs-history.yaml`, versionné) : chaque run `all`
-  complété y **append** une entrée datée (id, date ISO UTC, branche, commit,
-  profil, topologie, arch, hôte, durées par phase). C'est la **preuve datée**
-  qu'exploite le garde-fou de fraîcheur
+- **Historique des runs** (`runs-history.yaml`, versionné) : chaque run de
+  chemin complété y **append** une entrée datée (id, date ISO UTC, branche,
+  commit, profil, topologie, arch, hôte, durées par phase). C'est la **preuve
+  datée** qu'exploite le garde-fou de fraîcheur
   ([ADR 0042](../../docs/decisions/0042-fraicheur-preuves-banc.md)) — la date
   vit dans le **contenu** (le checkout CI ne préserve pas le mtime).
 - **Métriques de coût** (si `monitoring` déployé) : l'entrée porte un bloc
   `metriques` échantillonné depuis **Prometheus** sur la fenêtre du run —
   `cpu_core_s` (cumul CPU×temps), `ram_peak_mib`, `ram_mean_mib`. Best-effort :
   `?` si Prometheus est absent (banc rapide).
-- **Cache du socle** (`#219`) : un run `all` **saute**
+- **Cache du socle** (`#219`) : un run de chemin **saute**
   `up`+`bootstrap`(+`ceph`+`sc`) si le socle en cache est encore valable — VMs
   up, cluster Ready, **et contenu inchangé** (clé `socle:<profil>:<hash>` sur
   les rôles/manifestes/versions). Tout changement du socle invalide le cache.
@@ -108,7 +133,7 @@ Le banc s'instrumente lui-même (`metrology.sh`) — pas de saisie manuelle.
   issue de rappel — **non bloquant** pour les PR (ADR 0042).
 
 ```bash
-NO_CACHE=1 WITH_CEPH=1 test/lima/run-phases.sh all   # run-preuve from-scratch (ADR 0034)
+NO_CACHE=1 test/lima/run-phases.sh storage-real      # run-preuve from-scratch (ADR 0034)
 test/lima/run-phases.sh status                       # dont le dernier run consigné
 SEUIL_JOURS=7 test/lima/check-freshness.sh           # garde-fou fraîcheur (local)
 ```
@@ -117,13 +142,11 @@ SEUIL_JOURS=7 test/lima/check-freshness.sh           # garde-fou fraîcheur (loc
 
 Valide la chaîne DataOps **portée en Ansible** (`bootstrap/dataops.yaml`,
 ADR 0033) de bout en bout, sur le banc en **mode Ceph** (le RGW est la cible S3
-des backups Barman). Séquence :
+des backups Barman) — c'est le chemin nommé `cluster-dataops` (ADR 0045) :
 
 ```bash
-WITH_CEPH=1 test/lima/run-phases.sh all   # up → bootstrap → ceph → sc
-test/lima/run-phases.sh datalake          # RGW datalake (CephObjectStore)
-test/lima/run-phases.sh dataops           # registry → cert-manager → CNPG →
-                                          # build images → Dagster → Marquez + lineage
+test/lima/run-phases.sh cluster-dataops   # socle Ceph → datalake → monitoring →
+                                          # dataops (CNPG → Dagster → Marquez + lineage)
 ```
 
 Le playbook pilote l'API **depuis l'hôte** (`dataops_k8s_host=localhost`, via le
