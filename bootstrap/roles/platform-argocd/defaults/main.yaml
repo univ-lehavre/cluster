@@ -1,0 +1,24 @@
+---
+# Valeurs par défaut du rôle platform-argocd (GitOps applicatif, ADR 0022).
+#
+# Argo CD est de l'INFRA, géré par Ansible/kubectl — PAS par lui-même
+# (anti-bootstrap-circulaire, ADR 0022). Ce rôle pose le moteur ; l'applicatif
+# (Application atlas) est réconcilié ensuite par Argo CD lui-même.
+#
+# Défaut = valeur PROD (ADR 0023/0033). Versions figées dans le bundle
+# platform/argocd/argocd.yaml (images par digest, ADR 0006).
+
+# Chemin du dépôt côté poste de contrôle (manifestes lus localement, appliqués).
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+# Namespace d'Argo CD.
+argocd_namespace: argocd
+
+# Appliquer aussi le Gateway/HTTPRoute d'exposition de l'UI ? Exige les CRDs
+# Gateway API (posées par platform-registry/cluster) ET cert-manager (TLS de
+# bordure). Sur un banc qui n'a ni l'un ni l'autre, surcharger à false.
+argocd_apply_gateway: true
+
+# Timeouts du gate Ready (alignés sur les autres rôles plateforme).
+argocd_ready_retries: 60
+argocd_ready_delay: 5

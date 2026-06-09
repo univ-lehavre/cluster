@@ -26,6 +26,14 @@ cert-manager, registry, Rook, Argo CD, opérateurs + CRDs) = Ansible ;
 
 ## Déploiement
 
+**Automatisé (Ansible, ADR 0022/0044)** : le rôle `platform-argocd` (via
+[`bootstrap/gitops.yaml`](../../bootstrap/gitops.yaml)) pose Argo CD + les
+NetworkPolicies + l'`AppProject` + (optionnel) le Gateway, en `--server-side`.
+Sur le banc Lima, c'est la phase `gitops`
+([`test/lima/run-phases.sh`](../../test/lima/run-phases.sh)). La séquence
+`kubectl` ci-dessous reste la **référence manuelle** (et ce que le rôle traduit)
+:
+
 ```bash
 # Pré-requis SANS Internet : mirrorer les 3 images dans le registry interne
 # (quay.io/argoproj/argocd, ghcr.io/dexidp/dex, .../redis) — ADR 0011 — sinon

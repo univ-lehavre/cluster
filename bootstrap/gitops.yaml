@@ -1,0 +1,57 @@
+# code: language=ansible
+# Orchestrateur du socle GitOps (ADR 0022/0044), à lancer APRÈS le bootstrap
+# Kubernetes et les prérequis plateforme (CRDs Gateway API, cert-manager pour
+# l'exposition UI). Deux briques d'INFRA, dans l'ordre des dépendances :
+#   - Gitea : forge git intra-banc (air-gapped) — source des manifestes que
+#     réconcilie Argo CD (ADR 0044). Posée AVANT Argo CD.
+#   - Argo CD : moteur GitOps applicatif (ADR 0022). Réconcilie ensuite
+#     l'applicatif atlas depuis Gitea.
+#
+# INFRA, pas applicatif (anti-bootstrap-circulaire, ADR 0022) : ces deux briques
+# convergent par Ansible/kubectl, jamais par une `Application` Argo CD.
+#
+# L'INIT du dépôt Gitea (org + repo + seed atlas + webhook → Argo CD) est une
+# étape de DONNÉES post-bootstrap, portée par le harnais test/lima/ (ADR 0044) —
+# hors de ce playbook.
+#
+# HÔTE D'EXÉCUTION k8s (`dataops_k8s_host`, défaut localhost) : comme dataops.yaml,
+# les tâches kubernetes.core ciblent l'API via le KUBECONFIG de l'exécuteur.
+#
+# Surcharges par topologie : group_vars d'inventaire non versionné
+# (cf. bootstrap/group_vars/dataops.example.yaml). Défauts de rôle = prod.
+
+- name: Socle GitOps — Gitea (forge) puis Argo CD (moteur)
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
+  gather_facts: false
+  # SSL_CERT_FILE (drift L23) : voir dataops.yaml — le Python d'Ansible peut ne
+  # pas utiliser le CA système pour les requêtes HTTPS du module k8s.
+  environment:
+    SSL_CERT_FILE: '{{ dataops_ca_bundle | default(omit) }}'
+  pre_tasks:
+    # kubernetes.core exige la lib Python `kubernetes` ; certifi fournit le CA.
+    - name: Ensure the Python client libraries are present
+      ansible.builtin.pip:
+        name:
+          - kubernetes
+          - certifi
+        state: present
+    # Résout le bundle CA avec le MÊME interpréteur que les modules Ansible.
+    - name: Resolve the certifi CA bundle path
+      ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import certifi; print(certifi.where())'"
+      register: gitops_certifi
+      changed_when: false
+    - name: Set the CA bundle for HTTPS requests
+      ansible.builtin.set_fact:
+        dataops_ca_bundle: '{{ gitops_certifi.stdout | trim }}'
+  tasks:
+    # Gitea AVANT Argo CD : la forge doit répondre pour qu'Argo CD ait une
+    # source à réconcilier (et que l'init du dépôt, post-bootstrap, puisse pousser).
+    - name: Forge git intra-banc (Gitea, air-gapped)
+      ansible.builtin.import_role:
+        name: platform-gitea
+      tags: gitea
+
+    - name: Moteur GitOps applicatif (Argo CD)
+      ansible.builtin.import_role:
+        name: platform-argocd
+      tags: argocd
