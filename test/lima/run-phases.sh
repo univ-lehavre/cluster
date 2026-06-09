@@ -61,11 +61,14 @@ CP=cp1 # nœud control-plane (kubeconfig + cni.sh)
 # Port hôte du forward de l'API du control-plane (127.0.0.1:API_PORT → guest 6443).
 API_PORT=6443
 
-# Ressources par VM. 8 GiB (drift L28) : 5 GiB suffit au socle+Ceph, mais le
-# build arm64 de marquez-web (webpack/npm) sature et se fait OOM-killer (rc=137)
-# quand le nœud porte déjà k8s+Ceph+CNPG. 8 GiB laisse la marge du pic de build.
+# Ressources par VM. Historique : 5 GiB OK socle seul ; 8 GiB pour le pic de
+# build arm64 marquez-web (drift L28). Porté à 12 GiB pour le banc COMPLET en
+# mode Ceph (chemin atlas-ceph) : un nœud porte alors OSD/mon Ceph + k8s + CNPG +
+# Dagster/Marquez + monitoring simultanément — pic mesuré ~9 GiB/cluster et Ceph
+# est sensible à la pression mémoire (OSD lents → boot/HEALTH qui traînent).
+# 3×12 = 36 GiB sur un hôte 48 GiB : marge confortable pour macOS.
 VM_CPUS=2
-VM_MEMORY=8GiB
+VM_MEMORY=12GiB
 VM_DISK=20GiB
 
 # CRDs Gateway API (alignées sur Cilium 1.19.x — ADR 0006 ; cf. platform/cilium-expo).
