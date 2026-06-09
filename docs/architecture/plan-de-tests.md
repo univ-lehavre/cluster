@@ -25,23 +25,24 @@ parsing), testable **sans cluster**
 ([ADR 0017](../decisions/0017-langage-des-scripts.md)). shellcheck valide la
 syntaxe ; bats valide le **comportement**.
 
-| Fichier                                                      | Couvre                                                      | `@test` |
-| ------------------------------------------------------------ | ----------------------------------------------------------- | ------- |
-| [`state-classify.bats`](../../test/unit/state-classify.bats) | classification d'état de `state.sh` (couche bootstrap/hôte) | 18      |
-| [`dataops-assert.bats`](../../test/unit/dataops-assert.bats) | run Dagster + ingest Marquez (couche dataops)               | 16      |
-| [`metrology.bats`](../../test/unit/metrology.bats)           | métrologie/historique du banc (harnais)                     | 24      |
+| Fichier                                                      | Couvre                                                       | `@test` |
+| ------------------------------------------------------------ | ------------------------------------------------------------ | ------- |
+| [`state-classify.bats`](../../test/unit/state-classify.bats) | classification d'état de `state.sh` (couche bootstrap/hôte)  | 18      |
+| [`dataops-assert.bats`](../../test/unit/dataops-assert.bats) | run Dagster + ingest Marquez (couche dataops)                | 16      |
+| [`metrology.bats`](../../test/unit/metrology.bats)           | métrologie/historique du banc (harnais)                      | 24      |
+| [`gitops-assert.bats`](../../test/unit/gitops-assert.bats)   | statut Argo CD + déclenchement webhook (couche gitops, #231) | 9       |
 
 ### Densification visée (couches sans assertion pure)
 
 Plusieurs couches n'ont **que** des gates impératifs, sans fonction de décision
 pure extraite ni bats. À densifier (logique testable hors cluster) :
 
-| Couche / domaine   | Logique extractible candidate                                     | Statut      |
-| ------------------ | ----------------------------------------------------------------- | ----------- |
-| `gitops` (Argo CD) | classer un statut Argo (`Synced/Healthy` vs dégradé) en ok/ko     | **à créer** |
-| `gitops` (webhook) | parser la réponse Gitea/Argo du déclenchement webhook             | **à créer** |
-| stockage (PVC)     | classer une phase de PVC (`Bound`/`Pending`) — aujourd'hui inline | **à créer** |
-| monitoring         | au-delà de la métrologie : classer un statut de target Prometheus | **à créer** |
+| Couche / domaine   | Logique extractible candidate                                     | Statut                        |
+| ------------------ | ----------------------------------------------------------------- | ----------------------------- |
+| `gitops` (Argo CD) | classer un statut Argo (`Synced/Healthy` vs dégradé) en ok/ko     | ✅ `classify_argocd_app`      |
+| `gitops` (webhook) | détecter qu'un push a déclenché une nouvelle réconciliation       | ✅ `classify_webhook_trigger` |
+| stockage (PVC)     | classer une phase de PVC (`Bound`/`Pending`) — aujourd'hui inline | **à créer**                   |
+| monitoring         | au-delà de la métrologie : classer un statut de target Prometheus | **à créer**                   |
 
 > Règle (ADR 0045) : **toute nouvelle couche ajoute son gate, et une assertion
 > pure si la décision est non triviale.** La densification ci-dessus rattrape la
@@ -75,13 +76,13 @@ gate/assertion par couche, et leur regroupement en **chemins d'installation**
 ([ADR 0025](../decisions/0025-securite-active-chaos-attaques-controlees.md),
 [ADR 0042](../decisions/0042-fraicheur-preuves-banc.md)) :
 
-| Plage  | Famille                                                                                                                          |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| 01–09  | Stockage, résilience, restauration etcd                                                                                          |
-| 10–15  | Durcissement (pod, hôte, réseau, etcd)                                                                                           |
-| 16–22  | Sécurité active (offensif D/A/R, chaos)                                                                                          |
-| 23–26  | Intégration DataOps + observabilité                                                                                              |
-| **27** | **e2e GitOps → workflows atlas** (push Gitea → Argo CD déploie les workflows → run Dagster + lineage) — **à implémenter (#231)** |
+| Plage  | Famille                                                                                                                                            |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01–09  | Stockage, résilience, restauration etcd                                                                                                            |
+| 10–15  | Durcissement (pod, hôte, réseau, etcd)                                                                                                             |
+| 16–22  | Sécurité active (offensif D/A/R, chaos)                                                                                                            |
+| 23–26  | Intégration DataOps + observabilité                                                                                                                |
+| **27** | **e2e GitOps → workflows atlas** (push Gitea → Argo CD déploie les workflows → run Dagster + lineage) — implémenté (#231), preuve banc à consigner |
 
 ### Scénario 27 — workflows atlas déployés par GitOps
 
@@ -100,7 +101,10 @@ phase `dataops` a posé l'infra (orchestrateurs vides). Étapes (chacune un gate
 4. un **run Dagster réel** s'exécute et **émet du lineage ingéré par Marquez**
    (réutilise la logique de `dataops-assert.bats`).
 
-Implémentation :
+Le contenu poussé (workflow jouet d'exemple générique) vit dans
+[`test/lima/atlas-workflow-sample/`](../../test/lima/atlas-workflow-sample/) ;
+l'init du dépôt Gitea est faite par la phase `gitops-seed`
+([`test/lima/gitea-init.sh`](../../test/lima/gitea-init.sh)). Implémentation :
 [issue #231](https://github.com/univ-lehavre/cluster/issues/231).
 
 ## Voir aussi

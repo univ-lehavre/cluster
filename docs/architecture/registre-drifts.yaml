@@ -704,3 +704,78 @@ drifts:
       Résoudre KUBECONFIG en chemin ABSOLU AVANT le `cd` (si défini et relatif).
       Validé : ONLY=24 avec KUBECONFIG relatif passe (Prometheus 22 targets UP).
     statut: corrige
+
+  - id: L51
+    campagne: 'scénario 27 GitOps → workflows atlas (#231)'
+    portee: livrable
+    symptome: >-
+      L'Application Argo CD `atlas-workflows` reste InvalidSpecError :
+      « application repo http://gitea-http…/atlas/workflows.git is not permitted
+      in project 'atlas' », alors que le sourceRepos autorise
+      `http://gitea-http…/*`.
+    cause: >-
+      Le glob `*` d'Argo CD dans sourceRepos ne traverse PAS les `/` : `/*` matche
+      `…/atlas` (un segment) mais pas `…/atlas/workflows.git` (deux segments).
+    correctif: >-
+      sourceRepos `…/**` (double étoile, récursif) dans appproject-atlas.yaml.
+      Validé banc : Application acceptée (passe à ComparisonError puis Synced).
+    statut: corrige
+
+  - id: L52
+    campagne: 'scénario 27 GitOps → workflows atlas (#231)'
+    portee: livrable
+    symptome: >-
+      Application bloquée ComparisonError « dial tcp …:8081 i/o timeout » :
+      l'application-controller ne joint pas le repo-server (génération de
+      manifeste impossible).
+    cause: >-
+      Sous default-deny, le bundle Argo CD ouvre l'INGRESS de repo-server/redis
+      mais rien n'autorise l'EGRESS des appelants (controller/server) vers
+      repo-server:8081 / redis:6379 (trafic INTERNE à argocd).
+    correctif: >-
+      NetworkPolicy `allow-argocd-internal-egress` (podSelector {} → podSelector
+      {} intra-ns, ports 8081/8084/6379/8080/5556/5557) dans allow-egress.yaml.
+    statut: corrige
+
+  - id: L53
+    campagne: 'scénario 27 GitOps → workflows atlas (#231)'
+    portee: livrable
+    symptome: >-
+      repo-server : « failed to list refs: Get http://gitea-http…/atlas/
+      workflows.git/info/refs : context deadline exceeded » — clone du dépôt
+      Gitea impossible.
+    cause: >-
+      DEUX causes cumulées. (1) `allow-reposerver-egress` autorise le port git via
+      `to.ipBlock 0.0.0.0/0` ; sous Cilium un ipBlock EXCLUT les IPs des pods du
+      cluster (même piège que L48) → Gitea injoignable. (2) Même avec un
+      namespaceSelector vers gitea, ouvrir le port 80 (du Service) ne suffit PAS :
+      sous Cilium, la NetworkPolicy egress filtre le port du POD de destination
+      APRÈS DNAT du Service (gitea écoute 3000, le Service mappe 80→3000) — un
+      egress limité à 80 reste bloqué. Symptôme trompeur car un fix appliqué « à
+      chaud » lors d'une session antérieure avait paru fonctionner (faux positif).
+    correctif: >-
+      NetworkPolicy `allow-reposerver-gitea-egress` ciblant le namespace gitea
+      par namespaceSelector, ports 3000 (cible réelle du pod après DNAT) ET 80
+      (robustesse). Validé banc : repo-server clone, Application Synced/Healthy,
+      scénario 27 PASS + 9 scénarios pertinents PASS (10/10).
+    statut: corrige
+
+  - id: L54
+    campagne: 'scénario 27 GitOps → workflows atlas (#231)'
+    portee: harnais
+    symptome: >-
+      Le workflow jouet (Job) échoue : OSError/PermissionError Read-only file
+      system puis Permission denied sur `/opt/dagster/app/.tmp_dagster_home…` —
+      `dagster asset materialize` ne peut pas créer son DAGSTER_HOME temporaire.
+    cause: >-
+      Le workflow jouet portait un securityContext durci (readOnlyRootFilesystem
+      + runAsNonRoot/uid 1000), alors que `dagster asset materialize` écrit dans
+      son cwd (/opt/dagster/app, propriété root). L'émetteur de référence
+      `dataops_chain_emit_and_verify` tourne SANS securityContext (root) et
+      fonctionne.
+    correctif: >-
+      Aligner le workflow jouet sur l'émetteur de référence : retirer le
+      durcissement securityContext (garder drop ALL). Le durcissement global des
+      workloads Dagster root relève de #234. Validé : Job Complete + lineage
+      Marquez, scénario 27 PASS.
+    statut: corrige

@@ -159,13 +159,19 @@ misconfigurations:
   # Le chart Dagster ne durcit pas ses workloads en amont (orchestrateur de data
   # pipelines, image officielle non distroless). Findings inhérents au rendu.
   - id: KSV-0014 # rootfs read-only : le webserver/daemon Dagster écrivent leur
-    # état/logs locaux ; le chart amont ne pose pas readOnlyRootFilesystem.
+    # état/logs locaux ; le chart amont ne pose pas readOnlyRootFilesystem. Idem
+    # le workflow jouet (#231) : `dagster asset materialize` crée son DAGSTER_HOME
+    # dans le cwd → rootfs writable requis (drift L54, aligné sur l'émetteur de
+    # référence). Durcissement global des workloads Dagster root = #234.
     paths:
       - 'platform/dagster/dagster.yaml'
+      - 'test/lima/atlas-workflow-sample/workflow-job.yaml'
   - id: KSV-0118 # securityContext par défaut sur les workloads du chart amont
-    # (webserver/daemon) — non durci en amont.
+    # (webserver/daemon) — non durci en amont. Idem le workflow jouet (#231) qui
+    # tourne en root comme l'émetteur de référence (Dagster l'exige ; #234).
     paths:
       - 'platform/dagster/dagster.yaml'
+      - 'test/lima/atlas-workflow-sample/workflow-job.yaml'
   - id: KSV-0109 # ConfigMap référençant des paramètres de connexion : la config
     # Dagster (dagster.yaml interne) référence l'hôte/le nom de la base Postgres ;
     # le mot de passe reste dans un Secret dédié (dagster-pg-auth), pas le ConfigMap.

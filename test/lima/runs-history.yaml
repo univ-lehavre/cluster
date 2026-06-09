@@ -65,3 +65,24 @@ runs:
       cpu_core_s: 655
       ram_peak_mib: 9191
       ram_mean_mib: 5891
+  - id: 2026-06-09T12-local-path-554d41d
+    date: 2026-06-09T12:42:23Z
+    branche: feat/231-scenario27-gitops-dataops
+    commit: 554d41d
+    profil: local-path
+    topologie: multi-node-3
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 1519
+    phases:
+      up: 223
+      bootstrap: 389
+      storage-simple: 11
+      monitoring: 179
+      gitops: 70
+      dataops: 645
+      gitops-seed: 2
+    metriques:
+      cpu_core_s: 660
+      ram_peak_mib: 9270
+      ram_mean_mib: 5869

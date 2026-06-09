@@ -19,6 +19,7 @@
 #   test/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman) + gate Ready
 #   test/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage (#173/#148)
 #   test/lima/run-phases.sh gitops         # socle GitOps : Gitea + Argo CD via Ansible (gitops.yaml) + gate Ready (#230)
+#   test/lima/run-phases.sh gitops-seed    # init dépôt Gitea : org/repo + workflow jouet + webhook + Application atlas (#231)
 #   test/lima/run-phases.sh monitoring     # observabilité (Prometheus + Grafana + Loki), profil selon WITH_CEPH
 #   ── Chemins d'installation nommés (ADR 0045) ──
 #   test/lima/run-phases.sh socle          # up → bootstrap → stockage (smoke rapide)
@@ -607,7 +608,28 @@ phase_gitops() {
         || die "argocd-server : Deployment non Ready"
     ok "🎉 socle GitOps prêt — Gitea (forge) et Argo CD (moteur) Ready"
 
-    log "Suite (#231) : init du dépôt Gitea + Application atlas → réconciliation."
+    log "Suite : phase 'gitops-seed' (init dépôt Gitea + webhook + Application atlas)."
+}
+
+# ── Phase gitops-seed — init du dépôt Gitea (DONNÉES, post-bootstrap) ─────────
+# Crée l'admin/org/repo Gitea, pousse le workflow atlas jouet, pose le webhook
+# Gitea → Argo CD + le secret partagé, et l'Application atlas-workflows (#231,
+# ADR 0044/0045). Étape de DONNÉES (pas d'infra : Gitea est déjà posé par gitops).
+# Pré-requis : phase `gitops` (Gitea + Argo CD) + `dataops` (image émetteur).
+phase_gitops_seed() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    "${KUBECTL[@]}" -n gitea get deploy gitea >/dev/null 2>&1 \
+        || die "Gitea absent — lancer la phase 'gitops' d'abord"
+    log "Phase gitops-seed — init du dépôt Gitea + webhook + Application atlas"
+    # Sourcé (pas exécuté) pour hériter du TABLEAU KUBECTL ; le garde
+    # BASH_SOURCE != $0 dans gitea-init.sh empêche son auto-exécution, on appelle
+    # `main` explicitement.
+    # shellcheck source=test/lima/gitea-init.sh
+    . "${HERE}/gitea-init.sh"
+    main || die "gitea-init : init du dépôt Gitea échouée"
+    ok "🎉 dépôt Gitea initialisé — Application atlas-workflows posée (réconciliation Argo CD)"
+    log "Preuve e2e : test/scenarios/27-gitops-workflow-deploy.sh"
 }
 
 # ── Phase monitoring — observabilité (Prometheus + Grafana + Loki) ───────────
@@ -910,6 +932,7 @@ case "${1:-}" in
     datalake) time_phase datalake phase_datalake ;;
     dataops) time_phase dataops phase_dataops ;;
     gitops) time_phase gitops phase_gitops ;;
+    gitops-seed) time_phase gitops-seed phase_gitops_seed ;;
     monitoring) time_phase monitoring phase_monitoring ;;
     ceph) time_phase ceph phase_ceph ;;
     sc) time_phase sc phase_sc ;;
@@ -939,8 +962,12 @@ case "${1:-}" in
         time_phase monitoring phase_monitoring
         time_phase gitops phase_gitops
         time_phase dataops phase_dataops
-        log "🎉 Chemin 'atlas' : monitoring → gitops → dataops (infra DataOps vide)."
-        log "ℹ️  Workflows atlas par GitOps : scénario 27 (#231)."
+        # gitops-seed APRÈS dataops : l'init pousse un workflow qui référence
+        # l'image émetteur (buildée par dataops) et cible le ns dagster (monté
+        # par dataops). Argo CD réconcilie ensuite le workflow depuis Gitea.
+        time_phase gitops-seed phase_gitops_seed
+        log "🎉 Chemin 'atlas' : monitoring → gitops → dataops → gitops-seed."
+        log "ℹ️  Preuve e2e des workflows atlas par GitOps : scénario 27 (#231)."
         record_if_fresh "${run_start}"
         ;;
     # ── cluster : socle Ceph → datalake → monitoring → dataops (ADR 0045). ────
@@ -972,7 +999,8 @@ case "${1:-}" in
             time_phase monitoring phase_monitoring
             time_phase gitops phase_gitops
             time_phase dataops phase_dataops
-            log "🎉 'all' (mode léger) = chemin 'atlas' : monitoring → gitops → dataops."
+            time_phase gitops-seed phase_gitops_seed
+            log "🎉 'all' (mode léger) = chemin 'atlas' : monitoring → gitops → dataops → gitops-seed."
         fi
         record_if_fresh "${run_start}"
         ;;

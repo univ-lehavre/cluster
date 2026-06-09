@@ -1,0 +1,28 @@
+# Application Argo CD d'EXEMPLE (ADR 0023) — réconcilie le dépôt de workflows
+# atlas hébergé dans Gitea. Le `repoURL` réel est une valeur de DÉPLOIEMENT
+# (URL Gitea intra-banc) : l'init (gitea-init.sh) génère l'Application effective
+# en y injectant le repoURL réel ; ce fichier documente la forme attendue.
+#
+# Rattachée à l'AppProject `atlas` (sourceRepos surchargeable, #230). Argo CD
+# déploie le CONTENU de ce dépôt (le workflow), pas l'infra DataOps (ADR 0045).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: atlas-workflows
+  namespace: argocd
+spec:
+  project: atlas
+  source:
+    # Exemple générique — surchargé par l'init avec l'URL Gitea réelle du banc.
+    repoURL: http://gitea-http.gitea.svc.cluster.local/atlas/workflows.git
+    targetRevision: main
+    path: .
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dagster
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

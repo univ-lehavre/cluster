@@ -1,0 +1,50 @@
+# Workflow atlas JOUET (scénario 27, #231) — substitut générique du contenu
+# qu'atlas pousse dans Gitea. Argo CD réconcilie CE manifeste (un workflow), pas
+# l'infra DataOps (ADR 0022/0045 : CNPG/Dagster/Marquez montés par Ansible).
+#
+# Le Job matérialise un asset Dagster trivial → émet START/COMPLETE OpenLineage
+# vers Marquez. Réutilise l'image émetteur buildée par la phase `dataops`
+# (registry:80/dagster-openlineage-emit:dev). C'est la MÊME preuve que
+# dataops_chain_emit_and_verify, mais livrée PAR GITOPS (push → Argo CD), pas par
+# un kubectl apply direct.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: atlas-workflow-sample
+  namespace: dagster
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    atlas.workflow/sample: 'true'
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        atlas.workflow/sample: 'true'
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: emit
+          image: registry:80/dagster-openlineage-emit:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OPENLINEAGE_URL
+              value: 'http://marquez.marquez.svc.cluster.local:5000'
+            - name: OPENLINEAGE_ENDPOINT
+              value: 'api/v1/lineage'
+            - name: OPENLINEAGE_NAMESPACE
+              value: 'dagster'
+          command: ['dagster', 'asset', 'materialize', '--select', '*', '-m', 'toy_assets']
+          # PAS de durcissement securityContext ici (drift L54) : `dagster asset
+          # materialize` écrit un DAGSTER_HOME temporaire dans son cwd
+          # (/opt/dagster/app, propriété root de l'image) → exige rootfs writable
+          # ET l'uid root de l'image. ALIGNÉ sur l'émetteur de référence
+          # `dataops_chain_emit_and_verify` (run-phases.sh) qui tourne SANS
+          # securityContext et FONCTIONNE. Le durcissement des workloads Dagster
+          # root (image + Jobs) est le sujet de #234 — traité globalement là, pas
+          # divergé ici (ce workflow jouet imite ce qu'atlas poussera).
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]

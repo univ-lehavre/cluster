@@ -73,3 +73,44 @@
         and (argocd_server_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ argocd_ready_retries }}'
       delay: '{{ argocd_ready_delay }}'
+
+  # Rollback AU PLUS PRÈS (ADR 0036 #236) : un apply k8s est DÉCLARATIF/idempotent
+  # — un « rollback » qui supprimerait Argo CD serait contre-productif (on veut
+  # réparer, pas tout défaire, et un re-run reprend là où ça a cassé). Le rescue
+  # utile ici est DIAGNOSTIQUE : capturer l'état réel (pods non prêts, derniers
+  # events) et échouer avec un message actionnable, plutôt qu'un « until » muet.
+  rescue:
+    - name: Collect argocd pods state (diagnostic)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: '{{ argocd_namespace }}'
+      register: argocd_pods_diag
+      run_once: true
+
+    - name: Report not-ready argocd pods
+      ansible.builtin.debug:
+        msg: >-
+          Argo CD non convergé. Pods non prêts :
+          {{ argocd_pods_diag.resources
+             | rejectattr('status.phase', 'equalto', 'Running')
+             | map(attribute='metadata.name') | list }}.
+          Causes fréquentes (drifts connus) : egress apiserver (L48), egress
+          interne controller→repo-server:8081 / redis (L52), egress
+          repo-server→gitea (L53). Diagnostic : kubectl -n {{ argocd_namespace }}
+          get pods ; kubectl -n {{ argocd_namespace }} get events --sort-by=.lastTimestamp.
+      run_once: true
+
+    - name: Fail with an actionable message
+      ansible.builtin.fail:
+        msg: >-
+          Déploiement Argo CD échoué (voir le diagnostic ci-dessus). Le re-run du
+          rôle est idempotent et reprend la convergence — corriger d'abord la
+          cause réseau/manifeste signalée.
+
+  always:
+    - name: Argo CD deployment outcome (état final)
+      ansible.builtin.debug:
+        msg: >-
+          platform-argocd terminé. Vérifier l'état applicatif :
+          kubectl -n {{ argocd_namespace }} get applications.
+      run_once: true

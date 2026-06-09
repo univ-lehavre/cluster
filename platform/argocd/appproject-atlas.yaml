@@ -31,7 +31,11 @@ spec:
     - https://github.com/univ-lehavre/cluster.git
     # Forge Gitea intra-banc (air-gapped, ADR 0044) : URL d'exemple générique du
     # Service interne. Le déploiement atlas surcharge l'<org>/<repo> réel.
-    - http://gitea-http.gitea.svc.cluster.local/*
+    # `/**` (et PAS `/*`) : le glob Argo CD `*` ne traverse PAS les `/` — `/*`
+    # matche `…/atlas` mais pas `…/atlas/workflows.git` (deux segments) → l'app
+    # était rejetée « repo not permitted in project » (drift L51). `/**` couvre
+    # récursivement org/repo.
+    - http://gitea-http.gitea.svc.cluster.local/**
     # Si Argo CD enregistre un remote en SSH, ajouter la forme git@… surchargée.
 
   # (b) Destinations : cluster local + les SEULS namespaces applicatifs.

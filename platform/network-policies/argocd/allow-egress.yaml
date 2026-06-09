@@ -60,3 +60,69 @@ spec:
           port: 443 # Service ClusterIP kubernetes.default (10.96.0.1:443)
         - protocol: TCP
           port: 6443 # endpoint réel du control-plane kubeadm
+---
+# Communication INTERNE entre composants Argo CD (drift L52). Sous default-deny,
+# l'application-controller / server doivent joindre repo-server (8081) et redis
+# (6379) ; le bundle officiel ouvre l'INGRESS de ces pods, mais pas l'EGRESS des
+# appelants → controller → repo-server:8081 tombait en i/o timeout (manifeste
+# jamais généré, Application bloquée). On ouvre l'egress intra-namespace par
+# podSelector → podSelector (pas d'ipBlock : Cilium exclut les pods cluster du
+# CIDR world, cf. L48). podSelector {} : s'applique à tous les pods argocd.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-argocd-internal-egress
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: {} # tout pod argocd → tout pod argocd (même namespace)
+      ports:
+        - protocol: TCP
+          port: 8081 # repo-server (gRPC GenerateManifest)
+        - protocol: TCP
+          port: 8084 # repo-server (metrics)
+        - protocol: TCP
+          port: 6379 # redis
+        - protocol: TCP
+          port: 8080 # server / application-controller
+        - protocol: TCP
+          port: 5556 # dex (http)
+        - protocol: TCP
+          port: 5557 # dex (grpc)
+---
+# repo-server -> Gitea intra-banc (drift L53). repo-server clone le dépôt de
+# workflows atlas hébergé par Gitea (ADR 0044). L'egress générique
+# (`allow-reposerver-egress`, ipBlock 0.0.0.0/0) NE couvre PAS Gitea : sous
+# Cilium, un `ipBlock` EXCLUT les IPs des pods du cluster (même piège que L48).
+# On autorise donc explicitement le namespace gitea.
+#
+# PORT 3000, PAS 80 : sous Cilium, la NetworkPolicy egress filtre le port du POD
+# de destination APRÈS traduction du Service (le Service gitea-http:80 est DNATé
+# vers le pod:3000). Ouvrir 80 laissait le trafic bloqué (clone → context
+# deadline exceeded) car le paquet vise 3000. On ouvre les deux pour robustesse
+# (80 si un jour le client vise le Service avant DNAT, 3000 = cible réelle pod).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-reposerver-gitea-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gitea
+      ports:
+        - protocol: TCP
+          port: 3000 # port du POD gitea (cible réelle après DNAT du Service)
+        - protocol: TCP
+          port: 80 # Service gitea-http (robustesse selon le datapath)
