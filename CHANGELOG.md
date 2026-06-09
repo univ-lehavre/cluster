@@ -14,6 +14,39 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.31.0](https://github.com/univ-lehavre/cluster/compare/v2.30.0...v2.31.0) (2026-06-09)
+
+
+### Features
+
+* **dataops:** contrat d'interface cluster→atlas (ADR 0043 + artefacts) ([45ae288](https://github.com/univ-lehavre/cluster/commit/45ae2880bcee4505021d581168b275cdd466b406))
+* **dataops:** contrat d'interface cluster→atlas (ADR 0043 + artefacts) ([7caddb0](https://github.com/univ-lehavre/cluster/commit/7caddb0324252f0ab9c62027f50533ae3b66bb37))
+* **test:** métrologie du banc Lima — historique, métriques, cache, status ([6c0abe7](https://github.com/univ-lehavre/cluster/commit/6c0abe715f896faac85c459338f8956e54cf94a2))
+* **test:** métrologie du banc Lima — historique, métriques, cache, status & garde-fou fraîcheur ([bd45f14](https://github.com/univ-lehavre/cluster/commit/bd45f147374d63082062e1d9a6062d5564e09805))
+
+
+### Bug Fixes
+
+* **adr-0023:** génériser la plage prod résiduelle 10.67.2.0/22 ([bf9181e](https://github.com/univ-lehavre/cluster/commit/bf9181e6064c96e1a94bcc3863c2dedf18fb5167))
+* **banc:** charge bootstrap/ansible.cfg via ANSIBLE_CONFIG (drift L46) + registre L45/L46 ([43758d9](https://github.com/univ-lehavre/cluster/commit/43758d9468307904c1c030d019013c088fa34020))
+
+
+### Refactor
+
+* **bootstrap:** migration ansible_facts.* (échéance ansible-core 2.24) ([69ef9d0](https://github.com/univ-lehavre/cluster/commit/69ef9d02fd0799de8d9519aff8f33fe601e39ed7))
+* **bootstrap:** migre les facts top-level vers ansible_facts.* (échéance core 2.24, fix L45) ([125cba2](https://github.com/univ-lehavre/cluster/commit/125cba2950e1b31788c1e69a0f409529f2b012e6))
+
+
+### Documentation
+
+* **adr:** 0041 gouvernance & complétude DataOps (cadrage infra/métier/pratique) ([017e504](https://github.com/univ-lehavre/cluster/commit/017e504b784da196ddb4125221f9ea762a522801))
+* **adr:** 0041 gouvernance & complétude DataOps (cadrage) ([deae350](https://github.com/univ-lehavre/cluster/commit/deae350ebba0118961a78d915073aefc89d7e94f))
+* **adr:** 0041 retire les références marché/freelance (généricité ADR 0023) ([31e0e09](https://github.com/univ-lehavre/cluster/commit/31e0e09e102f3f3f650caa7e288b992bac421007))
+* **adr:** 0042 fraîcheur des preuves de banc (garde-fou CI non bloquant) ([3e29a49](https://github.com/univ-lehavre/cluster/commit/3e29a49cb4db866abe59c53747ec5e426a932d1a))
+* **adr:** 0042 fraîcheur des preuves de banc (garde-fou CI) ([c049465](https://github.com/univ-lehavre/cluster/commit/c049465e78abb29057589131fe6d6c4fac025251))
+* migre l'historique des drifts L1-L40 dans registre-drifts.yaml ([f323a94](https://github.com/univ-lehavre/cluster/commit/f323a94373cdb3767e9654c67e49ad46f6517833))
+* **test:** consigne le run de métrologie + drift L47 (honnêteté des Runs) ([fe0bc60](https://github.com/univ-lehavre/cluster/commit/fe0bc600e01c0816662e5311cfe3929b63115507))
+
 ## [2.30.0](https://github.com/univ-lehavre/cluster/compare/v2.29.3...v2.30.0) (2026-06-08)
 
 
