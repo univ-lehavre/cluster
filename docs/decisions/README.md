@@ -65,3 +65,4 @@ Format léger inspiré de Michael Nygard :
 | 0043 | [Contrat d'interface cluster → atlas (endpoints, SC, secrets)](0043-contrat-interface-cluster-atlas.md)            | Accepted |
 | 0044 | [Topologie du banc atlas (socle consommé, Gitea intra-banc)](0044-topologie-deploiement-banc-atlas.md)             | Accepted |
 | 0045 | [Chemins d'installation du banc : couches, dépendances, tests associés](0045-chemins-installation-banc-couches.md) | Accepted |
+| 0046 | [Corriger le code d'installation, pas l'état du cluster](0046-corriger-le-code-pas-l-etat.md)                      | Accepted |
