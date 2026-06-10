@@ -14,6 +14,68 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.32.0](https://github.com/univ-lehavre/cluster/compare/v2.31.0...v2.32.0) (2026-06-10)
+
+
+### Features
+
+* **argocd:** rôle Ansible platform-argocd + playbook gitops ([#230](https://github.com/univ-lehavre/cluster/issues/230)) ([b6ef6f6](https://github.com/univ-lehavre/cluster/commit/b6ef6f678da4c1c25c8c835b51bfae79f8a55f8d))
+* **argocd:** sourceRepos de l'AppProject atlas surchargeable ([#230](https://github.com/univ-lehavre/cluster/issues/230)) ([c91bd7c](https://github.com/univ-lehavre/cluster/commit/c91bd7cf396f98e2a939dd54088902b51dbe21ae))
+* **atlas:** portail UI (contrat) + couverture banc + preuves storage-real ([#232](https://github.com/univ-lehavre/cluster/issues/232)) ([e6c8b5b](https://github.com/univ-lehavre/cluster/commit/e6c8b5b2fcf9fd4eb1814883d568e35669115749))
+* **gitea:** brique forge git intra-banc air-gapped ([#230](https://github.com/univ-lehavre/cluster/issues/230)) ([50c48a6](https://github.com/univ-lehavre/cluster/commit/50c48a692355733b46c7f5bf7ff8df87aedf6ec8))
+* **gitea:** exposer l'UI via Gateway Cilium + TLS (portail atlas [#232](https://github.com/univ-lehavre/cluster/issues/232) A.2) ([079a34e](https://github.com/univ-lehavre/cluster/commit/079a34e7c23dde1c3e2043faab5dcfb0640c5cd3))
+* **gitea:** socle GitOps intra-banc (Gitea + Argo CD) sans Ceph ([#230](https://github.com/univ-lehavre/cluster/issues/230)) ([2353a66](https://github.com/univ-lehavre/cluster/commit/2353a66d048523e913bf01d786721616cecd92a9))
+* **test:** axe hardening + chemins storage-real/cluster-dataops (ADR 0045, [#240](https://github.com/univ-lehavre/cluster/issues/240)) ([5d1e914](https://github.com/univ-lehavre/cluster/commit/5d1e914f5ad17c276240b832ad20ff43ee8ba934))
+* **test:** axe hardening + chemins storage-real/cluster-dataops (ADR 0045, [#240](https://github.com/univ-lehavre/cluster/issues/240)) ([9dd6661](https://github.com/univ-lehavre/cluster/commit/9dd6661748e1bf9e67896b3afe7b75f3dd9eaf2e))
+* **test:** chaîne GitOps → workflows atlas prouvée (scénario 27, [#231](https://github.com/univ-lehavre/cluster/issues/231)) ([ad57e1b](https://github.com/univ-lehavre/cluster/commit/ad57e1b63825baf43633ef4b12d7a717dd821c05))
+* **test:** chemin atlas-ceph + gitops dérive la SC de WITH_CEPH (ADR 0045/0046) ([7ae5907](https://github.com/univ-lehavre/cluster/commit/7ae5907fdda0e568746cd44ae7f73e78d52e5984))
+* **test:** chemins d'installation nommés socle/atlas/cluster (ADR 0045, [#237](https://github.com/univ-lehavre/cluster/issues/237)) ([ec877db](https://github.com/univ-lehavre/cluster/commit/ec877dbc094504edefd706748bdfa777bfd765b2))
+* **test:** chemins d'installation nommés socle/atlas/cluster (ADR 0045, [#237](https://github.com/univ-lehavre/cluster/issues/237)) ([ceeec24](https://github.com/univ-lehavre/cluster/commit/ceeec241c36774e4b3eb137b6e5ee52cb341a607))
+* **test:** phase banc gitops (Gitea + Argo CD) sans Ceph ([#230](https://github.com/univ-lehavre/cluster/issues/230)) ([24dfc9a](https://github.com/univ-lehavre/cluster/commit/24dfc9a6391dac40d74b0830565c815191f89916))
+* **test:** scénario 27 GitOps → workflows atlas + init dépôt Gitea ([#231](https://github.com/univ-lehavre/cluster/issues/231)) ([b8b12b0](https://github.com/univ-lehavre/cluster/commit/b8b12b0cfe90959c5576115fcaa57b3de3fa47d2))
+* **test:** scénario 28 — atteignabilité des UI via le Gateway ([#232](https://github.com/univ-lehavre/cluster/issues/232)) ([f929ce8](https://github.com/univ-lehavre/cluster/commit/f929ce876e2065f522b9430536ead04a9e77ccee))
+* **test:** smoke HTTP WordPress dans la phase wordpress (preuve appli servie) ([a4ae0ca](https://github.com/univ-lehavre/cluster/commit/a4ae0ca32c9b557a0fd00ee108e1e11c65b77ede))
+
+
+### Bug Fixes
+
+* **argocd:** drifts GitOps banc atlas L51-L54 + rollback rescue platform-argocd ([#231](https://github.com/univ-lehavre/cluster/issues/231)) ([6e52f67](https://github.com/univ-lehavre/cluster/commit/6e52f67385cb480d50fa28c357db0d3688e8f0d6))
+* **argocd:** egress apiserver sans ipBlock (entité réservée Cilium) ([#230](https://github.com/univ-lehavre/cluster/issues/230)) ([a855ec8](https://github.com/univ-lehavre/cluster/commit/a855ec8c4c2be6afd125ea896739693665f0c185))
+* **argocd:** egress repo-server→gitea sur port 3000 (pod), pas 80 (L53 corrigé) ([7abc83e](https://github.com/univ-lehavre/cluster/commit/7abc83e1b3578f3d05ab2913883164e6a4602259))
+* **ci:** trivy allowlist workflow jouet (KSV-0014/0118) + lien README sample ([#231](https://github.com/univ-lehavre/cluster/issues/231)) ([5fbc113](https://github.com/univ-lehavre/cluster/commit/5fbc113d8f547a8a8f50a656829a0093c5f28a0b))
+* **expo:** cni.sh pose les CRs cilium + crds gateway api avant cilium ([#232](https://github.com/univ-lehavre/cluster/issues/232)) ([1433e76](https://github.com/univ-lehavre/cluster/commit/1433e76f83e4df6b445434bd53a6ec82176b7be1))
+* **scenarios:** caractère parasite après $ATTACKER_IP dans le scénario 22 ([809c139](https://github.com/univ-lehavre/cluster/commit/809c13991514fa1a4512e49874dd4cb1cbbb7f4d))
+* **test:** 12 GiB/VM pour le banc complet en mode Ceph (vs 8) ([61b82ab](https://github.com/univ-lehavre/cluster/commit/61b82abe6ca6dd8765a739d13f333803e13c68d8))
+* **test:** exporter le kubeconfig absolu pour le scénario smoke-s3 (drift L50-like) ([58b5bc1](https://github.com/univ-lehavre/cluster/commit/58b5bc148cd2bd5dc4b7ff888f0b7c02ca82f880))
+* **test:** la RAM des VM dérive de WITH_CEPH (12 Ceph / 8 léger) ([ae69e2a](https://github.com/univ-lehavre/cluster/commit/ae69e2a8e30edb73f1312c1a42e98e62ce35066c))
+* **test:** ne consigner que les runs from-scratch dans runs-history ([#230](https://github.com/univ-lehavre/cluster/issues/230)) ([c553eb5](https://github.com/univ-lehavre/cluster/commit/c553eb5891af873e2977c9658ad4c0d175a3c8cf))
+* **test:** scénario 27 prouvé sur banc — push trigger + attente nouvelle révision ([#231](https://github.com/univ-lehavre/cluster/issues/231)) ([7fa52e6](https://github.com/univ-lehavre/cluster/commit/7fa52e6ba45ca5ed69b2a39d5ce45a885879a747))
+* **wordpress:** créer base+user MySQL + secret au banc (smoke HTTP 302 prouvé) ([af25542](https://github.com/univ-lehavre/cluster/commit/af2554211b782beca2cb7c975935d6600d2a3529))
+
+
+### Documentation
+
+* **adr:** accepte l'ADR 0045 (chemins d'installation du banc) ([24cb7e5](https://github.com/univ-lehavre/cluster/commit/24cb7e51e8e4b8d3c68f06b18e37917de84758fd))
+* **adr:** chemin atlas inclut dataops ; Argo CD déploie les workflows, pas l'infra (ADR 0045) ([d6b8e0b](https://github.com/univ-lehavre/cluster/commit/d6b8e0bd66e25ffeac7ba1c5d2d1b9366119a2c9))
+* **adr:** chemins d'installation du banc, couches et tests associés (ADR 0045) ([ae7411d](https://github.com/univ-lehavre/cluster/commit/ae7411d6a6b16218a851b7c6bceea55c30a4641e))
+* **adr:** corriger le code d'installation, pas l'état du cluster (ADR 0046) ([ed8c72b](https://github.com/univ-lehavre/cluster/commit/ed8c72b06061c1ae80003184a5e5abc63038c042))
+* **adr:** ha-3cp = control plane dédié, vip kube-vip, etcd 2/3 (0047) ([c99c10a](https://github.com/univ-lehavre/cluster/commit/c99c10a629d986569006ac2f856346fe7fe92c24))
+* **adr:** topologie de déploiement du banc atlas (ADR 0044) ([dc91f06](https://github.com/univ-lehavre/cluster/commit/dc91f062354a0630e86699d46d1565e53e59154f))
+* **adr:** topologie de déploiement du banc atlas (ADR 0044) ([1f93bc5](https://github.com/univ-lehavre/cluster/commit/1f93bc58a960b88988f82e1f134314becfe8f279))
+* **composants:** présente chaque techno de la pile (rôle, raison d'être) ([ec5c1c8](https://github.com/univ-lehavre/cluster/commit/ec5c1c8702d5b77ab3df98720ba8bdf4d8326e1e))
+* **guide-data:** explique le travail en local sur multi-node-3 / atlas ([037cdf9](https://github.com/univ-lehavre/cluster/commit/037cdf97b4ec6b42a0547a040c1c37923cdec4d0))
+* **guide:** section « déployer depuis atlas » (GitOps) + endpoints Gitea/Argo CD ([#232](https://github.com/univ-lehavre/cluster/issues/232) A.3) ([836e7d4](https://github.com/univ-lehavre/cluster/commit/836e7d40ecadeb3307e3e9c2059a3846b9b4d8e4))
+* pile technologique (composants.md) + guide travail local atlas + run 2026-06-10 ([6b025b8](https://github.com/univ-lehavre/cluster/commit/6b025b8cc8dafb67b3ba181198f62679ce58d8ac))
+* **test:** aligne test/README sur les chemins storage-real/cluster-dataops (ADR 0045, [#237](https://github.com/univ-lehavre/cluster/issues/237)) ([0fa827c](https://github.com/univ-lehavre/cluster/commit/0fa827cbfe48df7f08aedc322279588868051571))
+* **test:** consigne le run atlas du 2026-06-10 + drifts L57/L58 ([#252](https://github.com/univ-lehavre/cluster/issues/252)) ([76e193c](https://github.com/univ-lehavre/cluster/commit/76e193cd99a6da5d8c90473e8e18d124681e8c91))
+* **test:** consigne le scénario 27 prouvé + drifts L51-L54 ([#231](https://github.com/univ-lehavre/cluster/issues/231)) ([94a4f9b](https://github.com/univ-lehavre/cluster/commit/94a4f9b083f4983aef094add796ac10d71bf9aa2))
+* **test:** consigne run atlas-ceph + scénario 28 + drifts L55/L56 ([#232](https://github.com/univ-lehavre/cluster/issues/232)) ([66dfe11](https://github.com/univ-lehavre/cluster/commit/66dfe11647707de455602bf390fca7dc9fef2da7))
+* **test:** consigne scénario 27 prouvé + drifts L51-L54 ([#231](https://github.com/univ-lehavre/cluster/issues/231)) ([554d41d](https://github.com/univ-lehavre/cluster/commit/554d41dd3f77255e459272d5ceabb4d0b825d3ff))
+* **test:** lie les drifts L55/L56 à l'issue [#251](https://github.com/univ-lehavre/cluster/issues/251) (re-preuve from-scratch) ([0d479a1](https://github.com/univ-lehavre/cluster/commit/0d479a1ffb349bedfbf0ad26eb33f7f85d04a85a))
+* **test:** mapping couverture par profil de banc (ce qu'atlas ne peut jouer) ([a0659b9](https://github.com/univ-lehavre/cluster/commit/a0659b99a28e5b58d94f64c2f61cbbbfdce6c316))
+* **test:** plan de tests 3 niveaux + scénario 27 GitOps→DataOps (ADR 0045) ([fd07453](https://github.com/univ-lehavre/cluster/commit/fd07453d2621f6df38b39b6085af3384053650b0))
+* **test:** précise la cause racine de L53 (port pod 3000 sous Cilium) ([611edb9](https://github.com/univ-lehavre/cluster/commit/611edb9edae20c4bf33a9f0d65e8a9a21c670a97))
+
 ## [2.31.0](https://github.com/univ-lehavre/cluster/compare/v2.30.0...v2.31.0) (2026-06-09)
 
 
