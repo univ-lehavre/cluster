@@ -1,0 +1,30 @@
+---
+# Valeurs par défaut du rôle ceph-pre-install (pré-vol Ceph, drift L6).
+#
+# Le déploiement Rook-Ceph (storage/ceph/cluster.yaml) suppose, sur chaque nœud
+# de stockage, des PRÉ-REQUIS OS/matériel que le bootstrap k8s nu ne garantit pas
+# et que `checks.yaml` (kubeadm) ne couvre pas. Sans eux, l'échec survient TARD,
+# au `cluster.yaml`, avec un message obscur (« binary lvm does not exist »,
+# OSD-prepare CrashLoop — drift L6 du banc). Ce rôle transforme ces échecs
+# différés en asserts CLAIRS au pré-vol.
+#
+# Valeurs d'EXEMPLE GÉNÉRIQUES (ADR 0023) alignées sur le matériel cible
+# (ADR 0008/0009) : 12 HDD SAS data + 1 NVMe block.db par nœud. Surcharger par
+# l'inventaire (group_vars/host_vars) si le parc diffère.
+
+# block.db BlueStore sur disque non-rotationnel (cluster.yaml: metadataDevice).
+# Vide ⇒ pas de metadataDevice ⇒ pas d'exigence LVM (on saute le check lvm2).
+ceph_block_device: nvme1n1
+
+# Glob shell des disques data bruts (HDD) attendus sur un nœud de stockage.
+ceph_data_device_glob: /dev/sd[a-z]
+
+# Nombre minimal de disques data bruts attendus par nœud de stockage.
+ceph_min_hdd: 12
+
+# Sur quels hôtes exécuter le pré-vol Ceph. Défaut = `cloud` (TOUS les nœuds) :
+# le cluster.yaml prod pose `useAllNodes: true` + `useAllDevices: true`, donc
+# CHAQUE nœud disposant de disques bruts héberge des OSD — y compris le
+# control-plane dans la topologie 4 nœuds identiques (ADR 0009). Surcharger
+# (ex. `workers`) si la topologie réserve le control-plane sans OSD.
+ceph_storage_hosts_group: cloud

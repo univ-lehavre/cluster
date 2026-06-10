@@ -1,0 +1,25 @@
+# code: language=ansible
+# Pré-vol Rook-Ceph (drift L6, ADR 0008/0009) — À LANCER AVANT storage/ceph/.
+#
+# `checks.yaml` couvre les prérequis kubeadm (OS, RAM/CPU, swap, UUID) mais PAS
+# les prérequis Ceph : lvm2 (mode LVM dès qu'un metadataDevice/block.db est
+# utilisé), présence du NVMe block.db, et nombre de disques data bruts. Sans ce
+# pré-vol, l'échec survient tard, au `cluster.yaml`, avec un message obscur
+# (OSD-prepare CrashLoop « binary lvm does not exist »). Ici on le signale tôt et
+# clairement — et on installe lvm2 (idempotent).
+#
+# Usage (prod, après bootstrap k8s, avant storage/ceph/cluster.yaml) :
+#   ansible-playbook -i ./hosts.yaml ./ceph-checks.yaml
+# Surcharges éventuelles (parc différent du matériel cible ADR 0008/0009) :
+#   -e ceph_block_device=nvme0n1 -e ceph_min_hdd=8 -e 'ceph_data_device_glob=/dev/sd[a-h]'
+#   -e ceph_storage_hosts_group=workers   # si le control-plane n'a pas d'OSD
+- name: Ceph pre-flight checks
+  hosts: "{{ ceph_storage_hosts_group | default('cloud') }}"
+  pre_tasks:
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: ceph-checks.yaml
+  roles:
+    - ceph-pre-install

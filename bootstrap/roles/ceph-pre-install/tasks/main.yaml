@@ -1,0 +1,71 @@
+# code: language=ansible
+# Rôle ceph-pre-install — pré-vol Rook-Ceph (drift L6, ADR 0008/0009).
+#
+# Vérifie/prépare, sur chaque nœud de STOCKAGE, ce que le déploiement Ceph
+# (storage/ceph/cluster.yaml) suppose et que le bootstrap k8s ne garantit pas :
+#   1. lvm2 présent (ceph-volume passe en mode LVM dès qu'un metadataDevice est
+#      utilisé — sans le binaire `lvm`, OSD-prepare CrashLoop « binary lvm does
+#      not exist » : drift L6 du banc) ;
+#   2. le NVMe block.db existe (sinon le BlueStore n'a pas de cible block.db) ;
+#   3. assez de disques data BRUTS sont présents (capacité OSD attendue).
+#
+# On INSTALLE lvm2 (effet de bord assumé, idempotent) mais on n'invente AUCUN
+# disque : un disque manquant = échec matériel, signalé tôt et clairement.
+- name: Ceph pre-flight on storage nodes
+  become: true
+  become_method: ansible.builtin.sudo
+  block:
+    # ── 1. lvm2 (requis dès qu'un metadataDevice/block.db est utilisé) ────────
+    - name: Ensure lvm2 is installed when a block.db metadataDevice is used
+      ansible.builtin.apt:
+        name: lvm2
+        state: present
+      when: ceph_block_device | length > 0
+
+    # ── 2. NVMe block.db présent (BlueStore le découpe par OSD) ───────────────
+    - name: Check the block.db NVMe device is present
+      ansible.builtin.stat:
+        path: '/dev/{{ ceph_block_device }}'
+      register: ceph_blockdb_stat
+      when: ceph_block_device | length > 0
+
+    - name: Assert the block.db NVMe device exists
+      ansible.builtin.assert:
+        that: ceph_blockdb_stat.stat.exists | default(false)
+        fail_msg: >-
+          {{ ansible_facts.hostname }} : périphérique block.db
+          /dev/{{ ceph_block_device }} ABSENT. Le cluster.yaml l'attend comme
+          metadataDevice (block.db BlueStore). Vérifier le matériel (NVMe), ou
+          surcharger ceph_block_device (vide = pas de block.db séparé).
+      when: ceph_block_device | length > 0
+
+    # ── 3. disques data bruts en nombre suffisant ─────────────────────────────
+    # Compte les block-devices distincts couverts par le glob (sans partitions :
+    # Rook consomme des disques BRUTS). lsblk -dn liste les disques, pas les
+    # partitions. On résout le glob côté shell puis on garde les périphériques
+    # réellement présents.
+    - name: Count the raw data disks matching the expected glob
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          n=0
+          for d in {{ ceph_data_device_glob }}; do
+            [ -b "$d" ] && n=$((n + 1))
+          done
+          echo "$n"
+        executable: /bin/bash
+      register: ceph_data_disks
+      changed_when: false
+
+    - name: Assert enough raw data disks are present
+      ansible.builtin.assert:
+        that: ceph_data_disks.stdout | int >= ceph_min_hdd | int
+        fail_msg: >-
+          {{ ansible_facts.hostname }} : {{ ceph_data_disks.stdout }} disque(s)
+          data brut(s) détecté(s) via {{ ceph_data_device_glob }}, alors que
+          {{ ceph_min_hdd }} sont attendus (capacité OSD, ADR 0008/0009).
+          Vérifier le matériel/câblage, ou surcharger ceph_min_hdd /
+          ceph_data_device_glob si le parc diffère.
+        success_msg: >-
+          {{ ansible_facts.hostname }} : {{ ceph_data_disks.stdout }} disque(s)
+          data brut(s) — OK (>= {{ ceph_min_hdd }}).

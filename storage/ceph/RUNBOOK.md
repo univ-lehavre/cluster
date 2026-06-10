@@ -25,6 +25,22 @@ rook-discover-7psxb                   1/1     Running   0          53s
 
 ## Création du cluster
 
+> **Pré-vol matériel/OS (recommandé)** — avant de créer le cluster, lancer le
+> pré-vol Ceph qui vérifie sur chaque nœud de stockage : `lvm2` présent (requis
+> par `ceph-volume` dès qu'un `metadataDevice`/block.db est utilisé — sinon
+> OSD-prepare CrashLoop « binary lvm does not exist »), présence du NVMe
+> block.db, et nombre de disques data bruts. Il **installe `lvm2`** (idempotent)
+> et échoue CLAIREMENT si un disque manque, au lieu de laisser le `cluster.yaml`
+> échouer tard et obscurément (drift L6) :
+>
+> ```bash
+> ansible-playbook -i ./hosts.yaml ../../bootstrap/ceph-checks.yaml
+> # Parc différent du matériel cible (ADR 0008/0009) ? surcharger :
+> #   -e ceph_block_device=nvme0n1 -e ceph_min_hdd=8 -e 'ceph_data_device_glob=/dev/sd[a-h]'
+> ```
+
+Et, en cas de rebuild :
+
 > **Pré-requis critique (rebuild / réinstallation)** — avant
 > `kubectl create -f cluster.yaml`, vérifier que **les 4 nœuds** ont bien
 > `/var/lib/rook` **et leurs disques data effacés**. Un reliquat d'un cluster
