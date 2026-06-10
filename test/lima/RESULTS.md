@@ -595,3 +595,82 @@ mais des **trous de périmètre** du chemin, suivis dans l'**issue #252**
 > on les consigne tels quels — manques de périmètre à corriger **dans le code**
 > (#252) puis à **re-prouver par un run** (ADR 0034/0046), jamais par un
 > `kubectl apply` laissé en l'état.
+
+## Egress Internet du ns `dagster` prouvé — snapshot OpenAlex (#256, 2026-06-10)
+
+Run **`atlas`** (`local-path`, `multi-node-3` arm64). La phase `dataops` exécute
+désormais la **preuve egress Internet** (`dataops_egress_internet_check`) après
+la preuve lineage : un `curl https://1.1.1.1` depuis un pod éphémère du ns
+`dagster`, **avec** puis **sans** la NP `allow-internet-egress` (#256), pour
+montrer que la policy — et elle seule — ouvre la sortie 443 sous default-deny
+(ADR 0019). Indispensable au sync du snapshot OpenAlex
+(`aws s3 sync … --no-sign-request`).
+
+| Test                                      | Attendu  | Obtenu             |
+| ----------------------------------------- | -------- | ------------------ |
+| sortie 443 **avec** la NP                 | aboutit  | ✅ `301`           |
+| sortie 443 **sans** la NP (NP retirée)    | bloquée  | ✅ `000` (timeout) |
+| NP réappliquée après le test (reconverge) | présente | ✅ (trap RETURN)   |
+
+Verdict du harnais :
+`ok|Egress : flux Internet ouvert par la NP (avec=301, sans=bloqué)`. La NP est
+**correcte** ; le default-deny mord bien sans elle.
+
+### Drift rencontré et correctif (L59)
+
+| #   | Symptôme                                                                  | Cause                                                                                                                                                                                                                      | Correctif                                                                                                                                                          |
+| --- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| L59 | 1er run : `avec=000000, sans=000000` → faux échec « ça passe sans la NP » | la probe faisait `curl -w '%{http_code}' … 2>/dev/null \|\| printf '000'` ; quand l'egress est bloqué, curl imprime **déjà** `000` ET sort en erreur → le `\|\|` ajoutait un **second** `000` (= `000000`), verdict faussé | retirer le fallback `\|\| printf 000` (curl émet déjà `000`) + **normaliser** la sortie à « 3 chiffres sinon `000` » ; re-prouvé sur banc (`avec=301`, `sans=000`) |
+
+> **Diagnostic d'abord, correctif dans le code (ADR 0046).** Le `000000` a été
+> reproduit à la main sur le banc (probe manuelle = `301` avec la NP → la policy
+> n'était PAS en cause), la cause isolée dans la fonction `egress_probe_code`,
+> le correctif porté dans `run-phases.sh` (code versionné), puis **re-prouvé par
+> un run** — jamais corrigé par un `kubectl`/patch laissé en l'état.
+
+## Chemin atlas opérationnel pour atlas — scénarios 27/28 + metrics-server (#252/#256, 2026-06-10)
+
+Objectif : **le chemin `atlas` doit livrer un banc consommable par les
+développements du dépôt `atlas`**. Vérifié sur le banc `atlas` (`local-path`,
+`multi-node-3` arm64) en jouant les scénarios d'intégration en mode **STRICT**
+(d'abord sur un banc complété à la main, puis **re-prouvé from-scratch** — cf.
+sous-section dédiée plus bas) :
+
+| Preuve                                      | Résultat                                                                           |
+| ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **metrics-server** (`phase_metrics_server`) | ✅ APIService `Available:True`, `kubectl top nodes` opérant (#252, L58)            |
+| **Scénario 27** (`STRICT_GITOPS=1`)         | ✅ push Gitea → webhook → Argo CD `Synced/Healthy` → run Dagster → lineage Marquez |
+| **Scénario 28** (`STRICT_UI=1`)             | ✅ 5 UI via Gateway : argocd 200, dagster 200, gitea 403, marquez 200, grafana 302 |
+
+Corrections de fond apportées au chemin (code versionné) :
+
+- **metrics-server** désormais posé nativement par le chemin `atlas` (palier 1,
+  avant `monitoring`) — plus de `kubectl apply` manuel (#252).
+- **NP `allow-internet-egress`** ajoutée à la loop du rôle `platform-dagster` :
+  elle existait dans le repo mais n'était PAS posée from-scratch → le sync
+  OpenAlex serait resté coupé (#256).
+- **Disques bruts conditionnés à Ceph** dans `phase_up` (#235) : le banc léger
+  ne crée plus que le disque OS.
+
+### Re-preuve from-scratch (run `atlas` léger neuf, 2026-06-10)
+
+Un run **`atlas` from-scratch** (VMs détruites + remontées) a levé les réserves
+ci-dessus — vérifié sur le banc neuf, sans complétion manuelle (hors Gateways,
+posés par `access.sh`, ce qui est le flux d'accès dev normal) :
+
+| Vérifié from-scratch                              | Preuve                                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| NP `allow-internet-egress` posée **par le rôle**  | ✅ `netpol/allow-internet-egress` présente (créée 08:26, bootstrap)            |
+| `metrics-server` natif dans le chemin             | ✅ deploy créé 08:10, `kubectl top nodes` opérant                              |
+| **#235** — VMs **sans** disque brut en local-path | ✅ nœuds : `vda` (OS) + `vdb` (cidata Lima iso9660) seuls, aucun `vdc/vdd/vde` |
+| Scénario 27 (`STRICT_GITOPS`) sur banc neuf       | ✅ push → Argo CD Synced/Healthy → run Dagster → lineage Marquez               |
+| Scénario 28 (`STRICT_UI`) sur banc neuf           | ✅ 5 UI via Gateway (200/200/403/200/302)                                      |
+
+> **Réserve restante (ADR 0034/0046) — deb822_repository NON prouvé par ce
+> run.** Ce run a démarré le bootstrap (08:08 UTC) **avant** le commit de
+> migration `apt_repository → deb822_repository` (08:12 UTC). Preuve directe sur
+> la VM : `/etc/apt/sources.list.d/` contient des `*.list` (ancien format
+> `apt_repository`), **pas** des `*.sources` (format deb822). La migration
+> deb822 reste donc **à re-prouver par un PROCHAIN bootstrap from-scratch**.
+> Tout le reste de cette entrée (NP egress, metrics-server, #235, scénarios
+> 27/28) **est** prouvé par ce run.

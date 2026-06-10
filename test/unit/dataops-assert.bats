@@ -73,6 +73,41 @@ setup() {
     [[ "$output" == skip\|* ]]
 }
 
+# ─── classify_egress_probe ─────────────────────────────────────────────────
+
+@test "classify_egress_probe avec abouti + sans bloqué → ok (la NP ouvre le flux)" {
+    run classify_egress_probe 403 000
+    [[ "$output" == ok\|* ]]
+    [[ "$output" == *"sans=bloqué"* ]]
+}
+
+@test "classify_egress_probe 200 avec / 000 sans → ok" {
+    run classify_egress_probe 200 000
+    [[ "$output" == ok\|* ]]
+}
+
+@test "classify_egress_probe avec=000 → fail (la NP n'ouvre pas)" {
+    run classify_egress_probe 000 000
+    [[ "$output" == fail\|* ]]
+}
+
+@test "classify_egress_probe abouti des DEUX côtés → fail (default-deny ne mord pas)" {
+    run classify_egress_probe 403 403
+    [[ "$output" == fail\|* ]]
+    [[ "$output" == *"sans la NP"* ]]
+}
+
+@test "classify_egress_probe avec abouti / sans non mesuré → ok (allow atteste, deny non prouvé)" {
+    run classify_egress_probe 200 ""
+    [[ "$output" == ok\|* ]]
+    [[ "$output" == *"non mesuré"* ]]
+}
+
+@test "classify_egress_probe avec vide → skip (probe non exécutée)" {
+    run classify_egress_probe "" ""
+    [[ "$output" == skip\|* ]]
+}
+
 # ─── parse_ol_job_count ────────────────────────────────────────────────────
 
 @test "parse_ol_job_count totalCount nominal" {

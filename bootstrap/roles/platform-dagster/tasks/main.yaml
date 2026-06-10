@@ -13,7 +13,10 @@
         src: '{{ platform_repo_dir }}/platform/dagster/namespace.yaml'
 
     # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
-    # allow ignoré). allow-marquez-egress = fix drift L19 (egress dagster→marquez).
+    # allow ignoré). allow-marquez-egress = fix drift L19 (egress dagster→marquez) ;
+    # allow-internet-egress = sortie 443/80 pour le sync d'un snapshot ouvert
+    # (OpenAlex, aws s3 sync --no-sign-request), sans quoi l'ingestion atlas est
+    # coupée par le default-deny (#256).
     - name: Apply Dagster network policies (default-deny first)
       kubernetes.core.k8s:
         state: present
@@ -27,6 +30,7 @@
         - allow-postgres-egress.yaml
         - allow-registry-egress.yaml
         - allow-marquez-egress.yaml
+        - allow-internet-egress.yaml
         - allow-webserver-ingress.yaml
 
     # Secret dérivé : lit le mot de passe du rôle CNPG `dagster` (source de

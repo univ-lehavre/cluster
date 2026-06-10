@@ -1,0 +1,36 @@
+# Egress Internet (HTTPS/HTTP sortant) pour les run workers Dagster qui
+# synchronisent un snapshot de données ouvert depuis un store objet public
+# (ex. `aws s3 sync s3://<bucket-public> … --no-sign-request`, AWS Open Data).
+# Sans ce flux, le sync timeout sous default-deny (ADR 0019) : le ns `dagster`
+# n'a d'egress que vers DNS / api-server / Postgres / registry / Marquez.
+#
+# Idiome du dépôt : `ipBlock: 0.0.0.0/0` RESTREINT PAR PORTS (calque
+# argocd/allow-reposerver-egress, cf. ../argocd/allow-egress.yaml). On NE filtre
+# PAS par plages IP du fournisseur S3 : sous Cilium un `ipBlock` exclut déjà les
+# entités réservées et les pods du cluster, et les plages publiques d'AWS
+# (ip-ranges.json) ont un churn régulier → maintenance pénible pour un gain de
+# surface marginal sur un egress déjà borné aux ports 443/80. La borne de
+# sécurité ici, ce sont les PORTS + le fait que seul le ns `dagster` la porte.
+#
+# podSelector {} : les run workers (K8sRunLauncher) sont des pods éphémères dont
+# les labels dépendent de la code-location atlas (non maîtrisés ici) ; on suit
+# donc l'idiome des autres egress du ns (registry/marquez/postgres), tous en
+# podSelector {}. La portée reste le seul ns `dagster`.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internet-egress
+  namespace: dagster
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443 # HTTPS (endpoints S3 du store objet public)
+        - protocol: TCP
+          port: 80 # HTTP (redirections / endpoints en clair éventuels)

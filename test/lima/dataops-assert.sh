@@ -78,6 +78,45 @@ classify_marquez_ingest() {
     fi
 }
 
+# classify_egress_probe WITH_NP_CODE WITHOUT_NP_CODE
+#   Verdict sur la PREUVE de l'egress Internet du ns `dagster` (NP
+#   allow-internet-egress, #256). On ne mocke PAS S3 : un mock intra-cluster
+#   n'emprunte pas la règle testée (sous Cilium un `ipBlock` exclut les pods du
+#   cluster). On probe donc une VRAIE sortie vers une IP publique sur 443, dans
+#   les deux états :
+#     - WITH_NP_CODE    : code HTTP curl AVEC la NP appliquée (doit ABOUTIR).
+#     - WITHOUT_NP_CODE : code curl SANS la NP (default-deny doit MORDRE → "000").
+#   Un code curl "000" = pas de réponse (timeout/connexion refusée) ; tout code
+#   HTTP (2xx/3xx/4xx — même un 403 de S3) prouve que la connexion sortante a
+#   abouti (c'est le FLUX réseau qu'on valide, pas une autorisation applicative).
+#   Verdicts :
+#     - WITH abouti (≠000) ET WITHOUT bloqué (=000) → ok (la NP, et ELLE SEULE, ouvre le flux)
+#     - WITH "000"                                  → fail (la NP n'ouvre pas l'egress)
+#     - WITH abouti mais WITHOUT abouti aussi       → fail (ça passe SANS la NP : default-deny ne mord pas)
+#     - WITH vide / non collecté                    → skip (probe non exécutée)
+classify_egress_probe() {
+    local with=${1:-} without=${2:-}
+    [ -n "$with" ] || { printf 'skip|Egress : probe non exécutée (code AVEC-NP vide)\n'; return; }
+    if [ "$with" = "000" ]; then
+        printf 'fail|Egress : la NP n'\''ouvre PAS la sortie Internet (curl=000 avec la policy)\n'
+        return
+    fi
+    # WITH a abouti. Reste à confirmer que c'est bien la NP qui l'autorise.
+    case "$without" in
+        000)
+            printf 'ok|Egress : flux Internet ouvert par la NP (avec=%s, sans=bloqué)\n' "$with"
+            ;;
+        "")
+            # On n'a pas mesuré l'état SANS la NP : on atteste l'allow, sans
+            # prouver le deny (moins fort, mais pas un échec).
+            printf 'ok|Egress : sortie Internet aboutie (avec=%s ; deny sans-NP non mesuré)\n' "$with"
+            ;;
+        *)
+            printf 'fail|Egress : la sortie aboutit AUSSI sans la NP (avec=%s, sans=%s) — default-deny ne mord pas\n' "$with" "$without"
+            ;;
+    esac
+}
+
 # parse_ol_job_count JSON
 #   Extrait le nombre de jobs d'une réponse Marquez GET /api/v1/namespaces/<ns>/jobs
 #   (objet {"jobs":[...], "totalCount":N}). Pur (python3). Renvoie un entier sur

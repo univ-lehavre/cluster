@@ -164,7 +164,11 @@ metro_record_run() {
             printf '      %s: %s\n' "${name}" "${sec}"
         done < "${phases_tsv}"
         # Bloc métriques Prometheus (#217), rendu par metro_sample_prometheus.
-        [ -n "${METRO_METRICS_BLOCK:-}" ] && printf '%s' "${METRO_METRICS_BLOCK}"
+        # `printf '%s\n'` : la substitution $(...) qui a capturé METRO_METRICS_BLOCK
+        # a STRIPPÉ le newline final → sans ce \n, le fichier finit sans newline
+        # (yamllint: new-line-at-end-of-file). Le \n est sans effet si le bloc est
+        # vide (cas banc sans Prometheus) car la garde -n l'exclut.
+        [ -n "${METRO_METRICS_BLOCK:-}" ] && printf '%s\n' "${METRO_METRICS_BLOCK}"
     } >> "${f}"
 
     ok "run consigné dans $(basename "${f}") : ${id} (${profil}, $(metro_fmt_dur "${total}"))"

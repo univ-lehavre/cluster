@@ -131,3 +131,25 @@ runs:
       cpu_core_s: 631
       ram_peak_mib: 9318
       ram_mean_mib: 5939
+  - id: 2026-06-10T08-local-path-a395fe2
+    date: 2026-06-10T08:26:35Z
+    branche: feat/dagster-egress-internet-openalex
+    commit: a395fe2
+    profil: local-path
+    topologie: multi-node-3
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 1549
+    phases:
+      up: 161
+      bootstrap: 400
+      storage-simple: 12
+      metrics-server: 29
+      monitoring: 198
+      gitops: 81
+      dataops: 666
+      gitops-seed: 2
+    metriques:
+      cpu_core_s: 664
+      ram_peak_mib: 9340
+      ram_mean_mib: 6087

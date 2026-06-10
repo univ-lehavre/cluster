@@ -52,6 +52,17 @@ ensuite.
 > n'a pas besoin d'allow explicite. Idem health/readiness probes (kubelet →
 > pod), exemptées par Cilium.
 
+### Egress Internet (rare, borné par ports)
+
+Deux policies seulement ouvrent un egress vers `0.0.0.0/0`, et **restreint par
+ports** (jamais en grand) : `argocd/allow-egress.yaml` (repo-server → git,
+443/22/80…) et `dagster/allow-internet-egress.yaml` (run workers → store objet
+public pour le sync d'un snapshot de données ouvert, 443/80 — cf.
+[issue #256](https://github.com/univ-lehavre/cluster/issues/256)). On **ne
+filtre pas par plages IP** du fournisseur : sous Cilium un `ipBlock` exclut déjà
+les entités réservées/pods du cluster, et les plages publiques (AWS
+`ip-ranges.json`) ont un churn régulier — la borne, ce sont les ports.
+
 ## Application
 
 ```bash

@@ -10,6 +10,7 @@
           - ca-certificates
           - curl
           - gpg
+          - python3-debian # requis par deb822_repository (ajout du dépôt ci-dessous)
         state: present
 
     - name: Ensure the APT keyrings directory exists
@@ -27,10 +28,20 @@
         executable: /bin/bash
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
+    # deb822_repository remplace apt_repository (déprécié, retiré en
+    # ansible-core 2.25). Dépôt « flat » pkgs.k8s.io : suite '/' sans component.
     - name: Add kubernetes repository
-      ansible.builtin.apt_repository:
-        repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.34/deb/ /'
+      ansible.builtin.deb822_repository:
+        name: kubernetes
+        types: [deb]
+        uris: https://pkgs.k8s.io/core:/stable:/v1.34/deb/
+        suites: ['/']
+        signed_by: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         state: present
+        enabled: true
+
+    - name: Update apt cache after adding the kubernetes repository
+      ansible.builtin.apt:
         update_cache: true
 
     # cri-tools fournit `crictl`, requis par etcd-snapshot.sh (snapshot etcd

@@ -29,6 +29,10 @@
   become: true
   when: k8s_upgrade_repo_minor | default('') | length > 0
   block:
+    - name: S'assurer de python3-debian (requis par deb822_repository)
+      ansible.builtin.apt:
+        name: python3-debian
+        state: present
     - name: Mettre à jour la clé du dépôt Kubernetes (mineure cible)
       ansible.builtin.get_url:
         url: 'https://pkgs.k8s.io/core:/stable:/{{ k8s_upgrade_repo_minor }}/deb/Release.key'
@@ -40,11 +44,20 @@
       args:
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg.new
       changed_when: true
+    # deb822_repository remplace apt_repository (déprécié, retiré en
+    # ansible-core 2.25). name=kubernetes → /etc/apt/sources.list.d/kubernetes.sources.
     - name: Pointer le dépôt apt sur la mineure cible
-      ansible.builtin.apt_repository:
-        repo: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ k8s_upgrade_repo_minor }}/deb/ /'
-        filename: kubernetes
+      ansible.builtin.deb822_repository:
+        name: kubernetes
+        types: [deb]
+        uris: 'https://pkgs.k8s.io/core:/stable:/{{ k8s_upgrade_repo_minor }}/deb/'
+        suites: ['/']
+        signed_by: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         state: present
+        enabled: true
+
+    - name: Mettre à jour le cache apt après bascule du dépôt
+      ansible.builtin.apt:
         update_cache: true
 
 # kubeadm doit être upgradé en premier (il pilote l'upgrade).

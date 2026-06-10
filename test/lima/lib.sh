@@ -171,16 +171,19 @@ lima_render_node() {
 }
 
 # Démarre une VM Lima (la crée au premier appel). Idempotent.
+# `--yes` (= --tty=false) : harnais automatisé → PAS de prompt « Proceed with the
+# current configuration? [y/N] » à la création (Lima le pose dès que stdout est un
+# terminal). Sans lui, un `run-phases.sh` lancé à la main bloque sur la question.
 lima_start_node() {
     local vm=$1 cfg=$2
     if vm_running "${vm}"; then
         ok "VM Lima '${vm}' déjà démarrée"
     elif vm_exists "${vm}"; then
         log "Démarrage de la VM Lima '${vm}' (déjà créée)"
-        limactl start "${vm}"
+        limactl start --yes "${vm}"
     else
         log "Création + démarrage de la VM Lima '${vm}'"
-        limactl start --name "${vm}" "${cfg}"
+        limactl start --yes --name "${vm}" "${cfg}"
     fi
 }
 

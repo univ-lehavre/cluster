@@ -125,9 +125,52 @@ L'orchestrateur Dagster est livré **vide** (aucune code-location) : c'est le
   câblé via le Secret dérivé `dagster-pg-auth`).
 - **Exécution** : `K8sRunLauncher` — chaque run devient un Job Kubernetes.
 - **UI** : `https://dagster.cluster.lan` (Gateway, placeholder).
-- **Brancher du code** : ajoutez une _code-location_ (workspace) pointant votre
-  image — voir la doc `atlas`. Émettez le lineage via le sensor OpenLineage en
-  pointant les variables ci-dessus.
+
+### Brancher une code-location externe
+
+Le socle monte un ConfigMap `dagster-workspace` (clé `workspace.yaml`) avec
+`load_from: []` — **zéro location** : un orchestrateur sans code-location doit
+quand même recevoir un workspace, sinon le webserver/daemon échouent (« No
+arguments given », validé sur banc #167). Pour brancher votre code, **deux
+objets à pousser depuis `atlas`** (GitOps, jamais `kubectl apply` — frontière
+ADR 0022) :
+
+1. **Un Deployment + Service gRPC** dans le ns `dagster`, qui sert votre image
+   de code-location (le serveur gRPC Dagster,
+   `dagster api grpc -h 0.0.0.0 -p 4000 -m <votre_module>`). Référencez votre
+   image en `registry:80/<repo>:<tag>` et injectez-y `OPENLINEAGE_URL` (cf.
+   table ci-dessus) pour que vos runs émettent le lineage.
+2. **Le branchement dans le workspace** : `load_from` doit lister votre serveur
+   gRPC. Le ConfigMap `dagster-workspace` est porté par le socle ; surchargez-le
+   par un **patch GitOps** (kustomize/Argo CD) plutôt que de le réécrire :
+
+   ```yaml
+   # workspace.yaml côté code-location (exemple générique) :
+   load_from:
+     - grpc_server:
+         host: <votre-code-location>.dagster.svc.cluster.local
+         port: 4000
+         location_name: <votre-code-location>
+   ```
+
+   Le webserver et le daemon lisent ce workspace par
+   `-w /workspace/workspace.yaml` (déjà câblé) ; après réconciliation Argo CD,
+   la location apparaît dans l'UI.
+
+Émettez le lineage via le sensor OpenLineage en pointant les variables
+ci-dessus.
+
+> **Accès Internet sortant (sync d'un snapshot ouvert).** Sous default-deny (ADR
+> 0019), le ns `dagster` n'a d'egress que vers DNS / api-server / Postgres /
+> registry / Marquez. Un run qui **synchronise un snapshot de données ouvert**
+> depuis un store objet public (p. ex.
+> `aws s3 sync s3://<bucket-public> … --no-sign-request`, AWS Open Data) a
+> besoin d'un egress Internet : le socle le fournit par
+> [`allow-internet-egress.yaml`](../platform/network-policies/dagster/allow-internet-egress.yaml)
+> (ports 443/80, `0.0.0.0/0` restreint par ports — idiome
+> `allow-reposerver-egress`). Côté `atlas`, **bornez le volume** par config (un
+> sous-dossier `updated_date`, pas le snapshot complet) : c'est une décision
+> métier, pas d'infra.
 
 ## Déployer depuis atlas — la boucle GitOps
 
@@ -256,12 +299,10 @@ déclenche une réconciliation. État du banc et UIs disponibles :
 test/lima/run-phases.sh status   # VMs, nœuds, phases franchies, UIs, dernier run
 ```
 
-> **`kubectl top` (usage CPU/mémoire).** Le chemin `atlas` ne déploie **pas**
-> metrics-server (palier 1, ADR [0016](decisions/0016-observabilite.md)) :
-> `kubectl top nodes` renvoie alors « Metrics API not available ». Pour
-> l'activer : `kubectl apply -f platform/metrics-server/metrics-server.yaml`,
-> puis `kubectl top nodes` / `kubectl top pods -A`. (Prometheus, lui, est déjà
-> là et collecte ces mêmes métriques par une autre voie.)
+> **`kubectl top` (usage CPU/mémoire).** Le chemin `atlas` pose désormais
+> **metrics-server** (palier 1, ADR [0016](decisions/0016-observabilite.md),
+> #252) : `kubectl top nodes` / `kubectl top pods -A` sont opérants sans étape
+> manuelle. (Prometheus, lui, collecte ces mêmes métriques par une autre voie.)
 
 Ces noms (`atlas`, `workflows`, `atlas-admin`) sont des **exemples génériques**
 surchargeables par l'environnement (`GITEA_ORG`, `GITEA_REPO`,
