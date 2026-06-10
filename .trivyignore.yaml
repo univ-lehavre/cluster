@@ -128,8 +128,13 @@ misconfigurations:
   - id: KSV-0041 # « manage secrets » : Loki lit le Secret de config (creds S3).
     paths:
       - 'platform/loki/loki.yaml'
-  - id: KSV-0047 # privilege escalation depuis le node : Promtail (DaemonSet) lit
-    # les logs des conteneurs sur chaque nœud (/var/log/pods) — fonction de l'agent.
+  - id: KSV-0047 # Promtail (DaemonSet) lit les logs des conteneurs sur chaque
+    # nœud via les hostPath /var/log/pods + /var/lib/docker/containers. root REQUIS
+    # (re-vérifié #234, pas « fidélité amont ») : ces fichiers sont root:root aux
+    # permissions restrictives ; un UID non-root ne peut pas les lire, et `fsGroup`
+    # ne s'applique PAS aux hostPath. Le conteneur est durci au maximum compatible
+    # (drop ALL caps, allowPrivilegeEscalation:false, readOnlyRootFilesystem). Le
+    # non-root reste à prouver sur banc si un jour les perms des logs le permettent.
     paths:
       - 'platform/loki/promtail.yaml'
 

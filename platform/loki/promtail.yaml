@@ -203,6 +203,16 @@ spec:
       serviceAccountName: promtail
       automountServiceAccountToken: true
       enableServiceLinks: true
+      # root REQUIS, pas « fidélité amont » (#234) : Promtail lit les logs des
+      # conteneurs via les hostPath /var/log/pods et /var/lib/docker/containers.
+      # Ces fichiers appartiennent à root:root sur le nœud (écrits par le kubelet/
+      # runtime) avec des permissions restrictives ; un UID non-root ne peut pas
+      # les lire. `fsGroup` NE corrige PAS ce cas : il ne s'applique QU'aux volumes
+      # à propriété gérée (PVC/emptyDir…), JAMAIS aux hostPath. Sans accès en
+      # lecture aux logs, l'agent collecte du vide silencieusement. Le conteneur
+      # est par ailleurs durci au maximum compatible (cf. securityContext du
+      # conteneur : drop ALL caps, no-privilege-escalation, rootfs read-only).
+      # Trade-off acté KSV-0047 dans .trivyignore.yaml.
       securityContext:
         runAsGroup: 0
         runAsUser: 0
