@@ -164,5 +164,5 @@ d’environnement du fichier privé `.env` soient bien obfusquées dans le fichi
 public `.env-example` :
 
 ```bash
-perl ./blur-env.pl
+python3 ./blur_env.py
 ```

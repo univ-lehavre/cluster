@@ -139,20 +139,20 @@ n'ont pas été reportées dans la Priorité 8. Ci-dessous les omissions
 > suppression d'un `CephObjectStore` (ordre OBC→store) tracée au RUNBOOK Ceph
 > (PR #83, cf. RESULTS #19).
 
-| Réf source           | Recommandation absente du plan                                                                     |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `02-tests:125`       | Runner agrégé `run-all.sh` (tableau PASS/FAIL, HEALTH_OK entre scénarios destructifs)              |
-| `02-tests:110`       | `ansible-playbook --syntax-check` en CI                                                            |
-| `02-tests:90`        | Scénario 03 ne teste pas la **continuité des I/O** (PVC+pod en écriture pendant downtime)          |
-| `02-tests:100`       | Scénarios légers `09-registry-push-pull` / `10-rstudio-smoke`                                      |
-| `03-lint:68`         | Templates `.sh.j2` (etcd-backup) et script `.pl` (`blur-env.pl`) échappent au lint                 |
-| `06-securite:64`     | **Vérif d'exposition NodePort/LoadBalancer dans `state.sh`** — perdue car noyée dans #20 (reporté) |
-| `08-operabilite:128` | Section **capacité Ceph** au RUNBOOK (`ceph df`, ajout d'OSD, GC PVC registry)                     |
-| `08-operabilite:113` | **SPOF applicatifs** mono-réplica (registry/rstudio/wordpress) non tracés                          |
-| `11-oss:104`         | Annotations Tailscale **orphelines** (registry/rstudio) à documenter sans l'operator               |
-| `11-oss:116`         | Headscale comme repli OSS dans l'ADR 0003 « À revoir si »                                          |
-| `07-gouvernance:89`  | 3ᵉ CHANGELOG (`bootstrap/security/CHANGELOG.md`, Changesets) à geler/supprimer                     |
-| `06-securite:141`    | Audit-log Ansible sans non-répudiation → documenter + sshd `LogLevel VERBOSE`                      |
+| Réf source           | Recommandation absente du plan                                                                                             |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `02-tests:125`       | Runner agrégé `run-all.sh` (tableau PASS/FAIL, HEALTH_OK entre scénarios destructifs)                                      |
+| `02-tests:110`       | `ansible-playbook --syntax-check` en CI                                                                                    |
+| `02-tests:90`        | Scénario 03 ne teste pas la **continuité des I/O** (PVC+pod en écriture pendant downtime)                                  |
+| `02-tests:100`       | Scénarios légers `09-registry-push-pull` / `10-rstudio-smoke`                                                              |
+| `03-lint:68`         | Templates `.sh.j2` (etcd-backup) échappent au lint (le script `.pl` `blur-env` a été porté en Python lint+testé, ADR 0049) |
+| `06-securite:64`     | **Vérif d'exposition NodePort/LoadBalancer dans `state.sh`** — perdue car noyée dans #20 (reporté)                         |
+| `08-operabilite:128` | Section **capacité Ceph** au RUNBOOK (`ceph df`, ajout d'OSD, GC PVC registry)                                             |
+| `08-operabilite:113` | **SPOF applicatifs** mono-réplica (registry/rstudio/wordpress) non tracés                                                  |
+| `11-oss:104`         | Annotations Tailscale **orphelines** (registry/rstudio) à documenter sans l'operator                                       |
+| `11-oss:116`         | Headscale comme repli OSS dans l'ADR 0003 « À revoir si »                                                                  |
+| `07-gouvernance:89`  | 3ᵉ CHANGELOG (`bootstrap/security/CHANGELOG.md`, Changesets) à geler/supprimer                                             |
+| `06-securite:141`    | Audit-log Ansible sans non-répudiation → documenter + sshd `LogLevel VERBOSE`                                              |
 
 ### Omissions cosmétiques/mineures — [2026-06-01]
 

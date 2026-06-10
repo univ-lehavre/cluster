@@ -65,14 +65,17 @@ markdownlint, link-checker).
 - **Recommandation** : factoriser dans un unique `scripts/kubeconform.sh` appelé
   par les trois.
 
-### Mineur — Templates `.sh.j2` et scripts `.pl` échappent au lint
+### Mineur — Templates `.sh.j2` échappent au lint
 
-- **Fichier** : `bootstrap/roles/etcd-backup/templates/etcd-snapshot.sh.j2`,
-  `bootstrap/security/blur-env.pl`
+- **Fichier** : `bootstrap/roles/etcd-backup/templates/etcd-snapshot.sh.j2`
 - **Constat** : `lint:shell` ne cible que `*.sh` ; un bug shell dans le template
   du job de backup etcd ne serait détecté par aucun linter.
 - **Recommandation** : shellcheck sur le rendu du template (via la validation
-  Ansible) ; documenter ou linter le `.pl` (`perl -c` / perlcritic).
+  Ansible).
+
+> **Résolu (ADR 0049)** : le script `bootstrap/security/blur-env.pl` (Perl, hors
+> lint) a été porté en `bootstrap/security/blur_env.py` — couvert par `ruff`
+> (`lint:python`) et `unittest` (`tests/test_blur_env.py`).
 
 ### Mineur — `.yamllint.yaml` incompatible avec ansible-lint (fix-mode désactivé)
 
