@@ -8,6 +8,7 @@ composant…).
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | [`demarrage.md`](demarrage.md)           | Par où commencer (public, prérequis, parcours 1→5)                                              |
 | [`guide-dev-data.md`](guide-dev-data.md) | Consommer la plateforme depuis son code (contrat d'interface : endpoints, secrets, paramétrage) |
+| [`composants.md`](composants.md)         | La pile technologique brique par brique (rôle et raison d'être de chaque techno)                |
 | [`glossaire.md`](glossaire.md)           | Définitions des termes techniques en langage simple                                             |
 | [`architecture/`](architecture/)         | Vues d'ensemble (exposition réseau, validation banc)                                            |
 | [`decisions/`](decisions/)               | ADR — pourquoi chaque choix de conception (Nygard)                                              |
