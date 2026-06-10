@@ -632,9 +632,9 @@ Verdict du harnais :
 
 Objectif : **le chemin `atlas` doit livrer un banc consommable par les
 développements du dépôt `atlas`**. Vérifié sur le banc `atlas` (`local-path`,
-`multi-node-3` arm64) en complétant l'état (`gitops-seed` + Gateways via
-`access.sh --no-hosts`), puis en jouant les scénarios d'intégration en mode
-**STRICT** :
+`multi-node-3` arm64) en jouant les scénarios d'intégration en mode **STRICT**
+(d'abord sur un banc complété à la main, puis **re-prouvé from-scratch** — cf.
+sous-section dédiée plus bas) :
 
 | Preuve                                      | Résultat                                                                           |
 | ------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -652,12 +652,25 @@ Corrections de fond apportées au chemin (code versionné) :
 - **Disques bruts conditionnés à Ceph** dans `phase_up` (#235) : le banc léger
   ne crée plus que le disque OS.
 
-> **Réserve d'honnêteté (ADR 0034/0046) — à re-prouver from-scratch.** Sur ce
-> run, la NP egress et `metrics-server` ont été observés sur un banc dont l'état
-> avait été **complété à la main** (l'Application, les Gateways, et la NP egress
-> posés hors `bootstrap`). Trois choses ne sont donc PAS encore prouvées par un
-> run **from-scratch** : (a) que le rôle `platform-dagster` pose bien
-> `allow-internet-egress` tout seul ; (b) l'enchaînement complet du chemin avec
-> `metrics-server` à sa place ; (c) le `phase_up` léger #235 (VMs **sans**
-> disque brut). À couvrir par un `run-phases.sh atlas` (léger) **et** un
-> `WITH_CEPH=1 … all` from-scratch, runs consignés ici.
+### Re-preuve from-scratch (run `atlas` léger neuf, 2026-06-10)
+
+Un run **`atlas` from-scratch** (VMs détruites + remontées) a levé les réserves
+ci-dessus — vérifié sur le banc neuf, sans complétion manuelle (hors Gateways,
+posés par `access.sh`, ce qui est le flux d'accès dev normal) :
+
+| Vérifié from-scratch                              | Preuve                                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| NP `allow-internet-egress` posée **par le rôle**  | ✅ `netpol/allow-internet-egress` présente (créée 08:26, bootstrap)            |
+| `metrics-server` natif dans le chemin             | ✅ deploy créé 08:10, `kubectl top nodes` opérant                              |
+| **#235** — VMs **sans** disque brut en local-path | ✅ nœuds : `vda` (OS) + `vdb` (cidata Lima iso9660) seuls, aucun `vdc/vdd/vde` |
+| Scénario 27 (`STRICT_GITOPS`) sur banc neuf       | ✅ push → Argo CD Synced/Healthy → run Dagster → lineage Marquez               |
+| Scénario 28 (`STRICT_UI`) sur banc neuf           | ✅ 5 UI via Gateway (200/200/403/200/302)                                      |
+
+> **Réserve restante (ADR 0034/0046) — deb822_repository NON prouvé par ce
+> run.** Ce run a démarré le bootstrap (08:08 UTC) **avant** le commit de
+> migration `apt_repository → deb822_repository` (08:12 UTC). Preuve directe sur
+> la VM : `/etc/apt/sources.list.d/` contient des `*.list` (ancien format
+> `apt_repository`), **pas** des `*.sources` (format deb822). La migration
+> deb822 reste donc **à re-prouver par un PROCHAIN bootstrap from-scratch**.
+> Tout le reste de cette entrée (NP egress, metrics-server, #235, scénarios
+> 27/28) **est** prouvé par ce run.
