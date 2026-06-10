@@ -595,3 +595,35 @@ mais des **trous de périmètre** du chemin, suivis dans l'**issue #252**
 > on les consigne tels quels — manques de périmètre à corriger **dans le code**
 > (#252) puis à **re-prouver par un run** (ADR 0034/0046), jamais par un
 > `kubectl apply` laissé en l'état.
+
+## Egress Internet du ns `dagster` prouvé — snapshot OpenAlex (#256, 2026-06-10)
+
+Run **`atlas`** (`local-path`, `multi-node-3` arm64). La phase `dataops` exécute
+désormais la **preuve egress Internet** (`dataops_egress_internet_check`) après
+la preuve lineage : un `curl https://1.1.1.1` depuis un pod éphémère du ns
+`dagster`, **avec** puis **sans** la NP `allow-internet-egress` (#256), pour
+montrer que la policy — et elle seule — ouvre la sortie 443 sous default-deny
+(ADR 0019). Indispensable au sync du snapshot OpenAlex
+(`aws s3 sync … --no-sign-request`).
+
+| Test                                      | Attendu  | Obtenu             |
+| ----------------------------------------- | -------- | ------------------ |
+| sortie 443 **avec** la NP                 | aboutit  | ✅ `301`           |
+| sortie 443 **sans** la NP (NP retirée)    | bloquée  | ✅ `000` (timeout) |
+| NP réappliquée après le test (reconverge) | présente | ✅ (trap RETURN)   |
+
+Verdict du harnais :
+`ok|Egress : flux Internet ouvert par la NP (avec=301, sans=bloqué)`. La NP est
+**correcte** ; le default-deny mord bien sans elle.
+
+### Drift rencontré et correctif (L59)
+
+| #   | Symptôme                                                                  | Cause                                                                                                                                                                                                                      | Correctif                                                                                                                                                          |
+| --- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| L59 | 1er run : `avec=000000, sans=000000` → faux échec « ça passe sans la NP » | la probe faisait `curl -w '%{http_code}' … 2>/dev/null \|\| printf '000'` ; quand l'egress est bloqué, curl imprime **déjà** `000` ET sort en erreur → le `\|\|` ajoutait un **second** `000` (= `000000`), verdict faussé | retirer le fallback `\|\| printf 000` (curl émet déjà `000`) + **normaliser** la sortie à « 3 chiffres sinon `000` » ; re-prouvé sur banc (`avec=301`, `sans=000`) |
+
+> **Diagnostic d'abord, correctif dans le code (ADR 0046).** Le `000000` a été
+> reproduit à la main sur le banc (probe manuelle = `301` avec la NP → la policy
+> n'était PAS en cause), la cause isolée dans la fonction `egress_probe_code`,
+> le correctif porté dans `run-phases.sh` (code versionné), puis **re-prouvé par
+> un run** — jamais corrigé par un `kubectl`/patch laissé en l'état.
