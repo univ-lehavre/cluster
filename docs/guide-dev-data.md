@@ -299,12 +299,10 @@ déclenche une réconciliation. État du banc et UIs disponibles :
 test/lima/run-phases.sh status   # VMs, nœuds, phases franchies, UIs, dernier run
 ```
 
-> **`kubectl top` (usage CPU/mémoire).** Le chemin `atlas` ne déploie **pas**
-> metrics-server (palier 1, ADR [0016](decisions/0016-observabilite.md)) :
-> `kubectl top nodes` renvoie alors « Metrics API not available ». Pour
-> l'activer : `kubectl apply -f platform/metrics-server/metrics-server.yaml`,
-> puis `kubectl top nodes` / `kubectl top pods -A`. (Prometheus, lui, est déjà
-> là et collecte ces mêmes métriques par une autre voie.)
+> **`kubectl top` (usage CPU/mémoire).** Le chemin `atlas` pose désormais
+> **metrics-server** (palier 1, ADR [0016](decisions/0016-observabilite.md),
+> #252) : `kubectl top nodes` / `kubectl top pods -A` sont opérants sans étape
+> manuelle. (Prometheus, lui, collecte ces mêmes métriques par une autre voie.)
 
 Ces noms (`atlas`, `workflows`, `atlas-admin`) sont des **exemples génériques**
 surchargeables par l'environnement (`GITEA_ORG`, `GITEA_REPO`,
