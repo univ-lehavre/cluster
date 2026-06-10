@@ -58,7 +58,9 @@ test/scenarios/
 ├── 24-prometheus-scrape.sh           ← OBS : Prometheus scrape + Grafana up (#158)
 ├── 25-prometheusrule-alerte.sh       ← OBS : PrometheusRule → alerte firing (#158)
 ├── 26-loki-logql.sh                  ← OBS : Loki round-trip push → LogQL (ADR 0036, #186)
-└── 27-gitops-workflow-deploy.sh      ← INTÉGRATION : push Gitea → Argo CD → workflows atlas → lineage (#231)
+├── 27-gitops-workflow-deploy.sh      ← INTÉGRATION : push Gitea → Argo CD → workflows atlas → lineage (#231)
+├── 28-ui-reachable.sh                 ← PORTAIL : UIs joignables via le Gateway Cilium + TLS (#232)
+└── 29-codelocation-externe.sh        ← INTÉGRATION : code-location externe (image+job) → run → lineage+S3 (#264)
 ```
 
 Chaque script :

@@ -674,3 +674,55 @@ posés par `access.sh`, ce qui est le flux d'accès dev normal) :
 > deb822 reste donc **à re-prouver par un PROCHAIN bootstrap from-scratch**.
 > Tout le reste de cette entrée (NP egress, metrics-server, #235, scénarios
 > 27/28) **est** prouvé par ce run.
+
+## DataOps consommé par atlas : SeaweedFS débloqué + harnais code-location externe (#264, 2026-06-10)
+
+Le dépôt `atlas` (première code-location `citation-dagster`, sync OpenAlex par
+rclone) a remonté deux points **infra** (issue #264). Les deux résolus et
+prouvés sur le banc `atlas` léger.
+
+### Volet 1 — « lenteur rclone » : la vraie cause était SeaweedFS, pas l'egress
+
+Diagnostic par mesures **isolées** depuis un pod du ns `dagster` (915 Ko) :
+
+| Segment                              | Mesure             | Verdict                          |
+| ------------------------------------ | ------------------ | -------------------------------- |
+| Download S3 public (egress Internet) | **1 s**            | jamais en cause (egress #256 OK) |
+| Upload vers SeaweedFS (S3 interne)   | **timeout > 90 s** | **le goulot**                    |
+
+Cause racine (logs SeaweedFS) :
+`volume_growth: create volume, created 0: Not enough data nodes found` /
+`topo failed to pick 1 from 0 node candidates`. Le data node était **saturé**
+(`Max:13, Volumes:13, Free:0`) : `-volume.max=0` plafonnait le nombre de volumes
+trop bas → toute écriture d'une **nouvelle collection** (datalake,
+`cnpg-backups`, Loki) restait bloquée en TCP retries (d'où le `rc=0` _lent_ de
+plusieurs minutes observé par atlas). **Pas** de throttling pod, **pas** de MTU,
+**pas** d'egress.
+
+Fix CODE (`platform/seaweedfs/seaweedfs.yaml`) : `-volume.max=100` (au lieu
+de 0)
+
+- `-master.volumeSizeLimitMB=1024`. **Re-prouvé** (phase `monitoring` Ansible,
+  ADR 0046) : `Max:100, Free:80` → upload 915 Ko **= 1 s** (de >90 s à 1 s).
+  Ajout aussi de la NetworkPolicy `allow-s3-egress` (ns `dagster` → S3 interne
+  8333/RGW 80-8080), posée par le rôle `platform-dagster`.
+
+### Volet 2 — harnais E2E paramétrable pour code-location externe
+
+Nouveau `test/scenarios/29-codelocation-externe.sh` : généralise
+`dataops_chain_emit_and_verify` (asset jouet) en scénario **paramétrable** — le
+cluster fournit le « comment valider » (location chargée ? job exposé ? run
+SUCCESS ? aval reçu ?), le consommateur fournit le « contenu » (image/location/
+job/runConfig). Run lancé par **GraphQL `launchRun`** (le chemin réel de l'UI),
+pas un Job synthétique. Frontière ADR 0022/0045 respectée.
+
+**Prouvé** avec la code-location atlas RÉELLE (`citation`/`ingestion_job`),
+**bornée** comme atlas (`sample_size: 1`, `partition: updated_date=2016-06-24`,
+`entities: [works]`) :
+
+```text
+✓ location chargée → ✓ job présent → ✓ run lancé (GraphQL) → ✓ run SUCCESS (14 s) → ✓ lineage Marquez
+```
+
+Le harnais a aussi attrapé un runConfig invalide (`RunConfigValidationInvalid`
+remonté) avant correction — preuve qu'il valide bien le schéma du job.
