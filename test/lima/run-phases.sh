@@ -507,16 +507,32 @@ _fault_compensation() {
 _fault_redeploy() {
     local target=$1 pb=() inject_desc gate_pred first_rc second_rc verdict
     case "${target}" in
-        # CRI keyring : tronque le keyring k8s (marqueur menteur) → re-jeu kubeadm.yaml.
-        # AVANT le fix, le re-jeu n'aurait pas réparé ; APRÈS, il re-valide+converge.
+        # CRI keyring : cas d'IDEMPOTENCE-RÉPARATRICE (≠ « 1er échoue / 2e
+        # réussit »). On simule un arrêt PENDANT l'écriture du keyring (keyring
+        # tronqué, marqueur .valid jamais posé — l'arrêt réel survient avant le
+        # touch). Avec le CODE CORRIGÉ : l'absence de .valid fait re-jouer la
+        # tâche dearmor → keyring re-téléchargé + validé en UN run. Le verdict est
+        # la GATE (keyring valide + dépôt OK), pas classify_redeploy_recovery (il
+        # n'y a pas d'échec à reprendre, le fix répare au 1er run). AVEC L'ANCIEN
+        # code (creates: = le keyring lui-même), le re-jeu aurait SAUTÉ la tâche
+        # → keyring resté tronqué → apt update BADSIG : c'est le bug corrigé.
         cri-keyring)
-            pb=(kubeadm)
-            inject_desc="truncate keyring k8s sur ${CP}"
+            log "Phase bootstrap-fault — REPRISE cri-keyring (truncate keyring sur ${CP}, idempotence réparatrice)"
             vm_sh "${CP}" sudo truncate -s0 /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
                 || die "bootstrap-fault cri-keyring : échec truncate keyring"
-            # le marqueur .valid doit aussi sauter, sinon le re-jeu croit acquis.
             vm_sh "${CP}" sudo rm -f /etc/apt/keyrings/.kubernetes-apt-keyring.valid || true
-            gate_pred=cri_keyring_ok ;;
+            log "  run kubeadm.yaml — DOIT re-valider le keyring (pas de compensation)"
+            _fault_play kubeadm; first_rc=$?
+            log "  run : rc=${first_rc}"
+            if [ "${first_rc}" != 0 ]; then
+                die "cri-keyring : le run a échoué (rc=${first_rc}) — le keyring n'a pas été réparé"
+            fi
+            if retry 60 5 cri_keyring_ok; then
+                ok "Reprise prouvée (ADR 0050 classe a, idempotence réparatrice) : keyring tronqué → re-validé en un run, dépôt k8s OK"
+            else
+                die "cri-keyring : keyring non réparé après le run (gate cri_keyring_ok)"
+            fi
+            return 0 ;;
         # CNPG : SC bidon au 1er run → PVC Pending → gate santé expire → échec ;
         # re-jeu avec la vraie SC (dérivée de WITH_CEPH) → Cluster healthy.
         cnpg-sc)
