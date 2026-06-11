@@ -72,6 +72,38 @@
         group: root
         mode: '0600'
 
+    # ── LV etcd vierge : retirer le lost+found avant l'init (préflight kubeadm) ──
+    # /var/lib/etcd est un LV ext4 dédié (lv_etcd, RUNBOOK) : mkfs.ext4 y laisse un
+    # `lost+found` qui fait échouer le préflight `DirAvailable--var-lib-etcd` de
+    # `kubeadm init`. On le retire — mais UNIQUEMENT si la LV est prouvée VIERGE
+    # (lost+found est son SEUL contenu). SÛRETÉ (re-bootstrap d'un nœud où etcd
+    # tournait, ADR 0046/0050) : on `find` tout SAUF lost+found ; si quoi que ce
+    # soit subsiste (member/snap/wal/ ou autre), on ne supprime RIEN et kubeadm
+    # échoue franchement au préflight (incident NON masqué — jamais de
+    # `--ignore-preflight-errors` qui désarmerait le garde-fou face à de vraies
+    # données etcd). Idempotent : une fois etcd initialisé, /var/lib/etcd n'est
+    # plus vide → matched != 0 → no-op définitif. Inerte sur les bancs (pas de LV
+    # etcd dédiée → pas de lost+found ; find sur un path absent : 0 match, no-op).
+    # Control-plane uniquement : ce rôle ne tourne que sur le groupe `control` —
+    # le lost+found des LV etcd inutilisées des workers est sans effet (le join ne
+    # préflighte pas /var/lib/etcd).
+    - name: Detect a pristine etcd LV (anything other than lost+found)
+      become: true
+      ansible.builtin.find:
+        paths: /var/lib/etcd
+        excludes: 'lost+found'
+        hidden: true
+        file_type: any
+      register: etcd_dir_entries
+      changed_when: false
+
+    - name: Remove the ext4 lost+found on a pristine etcd LV (preflight kubeadm)
+      become: true
+      ansible.builtin.file:
+        path: /var/lib/etcd/lost+found
+        state: absent
+      when: etcd_dir_entries.matched == 0
+
     - name: Initialize the control plane
       become: true
       become_method: ansible.builtin.sudo

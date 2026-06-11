@@ -135,17 +135,40 @@ toute autoconfiguration échoue : il faut configurer l’IP **manuellement**.
 
 Le défaut d’usine (`/home` = 404 G, `/var` = 9 G) étouffe `/var`, qui héberge
 `containerd`, les logs, `/var/lib/rook` et `/var/lib/etcd`. On repartitionne
-donc le disque de boot ainsi (control plane `cp1`) :
+donc le disque de boot. **Tous les nœuds reçoivent le MÊME layout** (recette
+d’installation unique, moins d’erreurs manuelles ; un nœud peut être promu
+control plane sans repartitionner — cf. évolution HA,
+[ADR 0002](../docs/decisions/0002-control-plane-unique-avec-endpoint.md)). La
+seule LV dont l’usage diffère est `lv_etcd`, détaillée sous le tableau.
 
-| Partition / LV | Taille   | Montage         | FS    | Rôle                                                                |
-| -------------- | -------- | --------------- | ----- | ------------------------------------------------------------------- |
-| ESP            | 512 MiB  | `/boot/efi`     | FAT32 | amorçage EFI                                                        |
-| `boot`         | 1 GiB    | `/boot`         | ext4  | noyaux + initramfs (marge Debian 13)                                |
-| `lv_root`      | 40 GiB   | `/`             | ext4  | OS, `/usr`, paquets                                                 |
-| `lv_etcd`      | 10 GiB   | `/var/lib/etcd` | ext4  | isole etcd (control plane) : I/O dédiées, protégé d’un `/var` plein |
-| `lv_var`       | ~360 GiB | `/var`          | ext4  | `containerd`, `kubelet`, `/var/log`, `/var/lib/rook` (mon)          |
-| (libre)        | ~30 GiB  | —               | —     | extents LVM libres : snapshots / marge                              |
-| swap           | —        | —               | —     | **aucun** (Kubernetes refuse le swap actif)                         |
+| Partition / LV | Taille   | Montage         | FS    | Rôle                                                                  |
+| -------------- | -------- | --------------- | ----- | --------------------------------------------------------------------- |
+| ESP            | 512 MiB  | `/boot/efi`     | FAT32 | amorçage EFI                                                          |
+| `boot`         | 1 GiB    | `/boot`         | ext4  | noyaux + initramfs (marge Debian 13)                                  |
+| `lv_root`      | 40 GiB   | `/`             | ext4  | OS, `/usr`, paquets                                                   |
+| `lv_etcd`      | 10 GiB   | `/var/lib/etcd` | ext4  | isole etcd : I/O dédiées, protégé d’un `/var` plein — voir ci-dessous |
+| `lv_var`       | ~360 GiB | `/var`          | ext4  | `containerd`, `kubelet`, `/var/log`, `/var/lib/rook` (mon)            |
+| (libre)        | ~30 GiB  | —               | —     | extents LVM libres : snapshots / marge                                |
+| swap           | —        | —               | —     | **aucun** (Kubernetes refuse le swap actif)                           |
+
+> **`lv_etcd` selon le rôle du nœud :**
+>
+> - **Control plane (`cp1`)** : `lv_etcd` **héberge etcd** (la base d’état du
+>   cluster). Indispensable : isole les I/O d’etcd et le protège d’un `/var`
+>   saturé par containerd/logs/rook.
+> - **Workers (`node1-3`)** : etcd ne tourne **pas** sur les workers →
+>   `/var/lib/etcd` y reste **vide**. La LV est donc **inutilisée**, mais on la
+>   **crée quand même** (recette identique partout) : promotion HA future sans
+>   repartitionnement, et moins d’erreurs à l’install. Les ~9 Go immobilisés
+>   sont négligeables face aux 12 × 5,5 To Ceph. Variante acceptable si l’espace
+>   est compté : ne pas créer `lv_etcd` sur un worker et réaffecter ses 10 Go à
+>   `lv_var` — au prix de l’uniformité.
+>
+> ⚠️ Sur les nœuds **control plane**, `lv_etcd` est une LV ext4 fraîchement
+> formatée : elle contient un répertoire `lost+found` qui fait échouer le
+> préflight `kubeadm init` (`[ERROR DirAvailable--var-lib-etcd]: not empty`). Le
+> rôle `k8s-initialization` retire ce `lost+found` **avant** l’init (uniquement
+> si la LV est vierge — jamais sur un etcd peuplé). Rien à faire à la main.
 
 Procédure dans l’installateur Debian (partitionnement **manuel**) :
 
@@ -175,9 +198,10 @@ Procédure dans l’installateur Debian (partitionnement **manuel**) :
 `/tmp` est déjà monté en **tmpfs** par défaut sur Debian 13 (systemd ≥ 256
 active `tmp.mount` d’office) — rien à faire en post-installation.
 
-> **Workers `node1-3`** : layout identique, sauf que `lv_etcd` est inutile (pas
-> de control plane) → réaffecter ses 10 Go à `var`, ou conserver la même recette
-> pour l’uniformité (la LV reste alors simplement inutilisée).
+> **Workers `node1-3`** : appliquer **exactement la même recette** (mêmes LV,
+> mêmes tailles, VG nommé d’après le nœud — `node1-vg`…). `lv_etcd` y est créée
+> mais reste inutilisée (cf. encadré « `lv_etcd` selon le rôle du nœud »
+> ci-dessus). Ne pas la supprimer, sauf contrainte d’espace explicite.
 
 ### Configuration réseau
 
