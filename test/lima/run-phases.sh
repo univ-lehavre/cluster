@@ -12,7 +12,7 @@
 # Usage :
 #   test/lima/run-phases.sh up             # VMs + (si WITH_CEPH=1) disques bruts + gate vd* (#235)
 #   test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate 3 nœuds Ready
-#   BANC_JETABLE=1 [FAULT_TARGET=init|join] test/lima/run-phases.sh bootstrap-fault # arrêt injecté : preuve du rescue (ADR 0050/0052 §5) — DESTRUCTIF
+#   BANC_JETABLE=1 [FAULT_TARGET=join|init] test/lima/run-phases.sh bootstrap-fault # arrêt injecté : preuve du rescue (ADR 0050/0052 §5) — DESTRUCTIF (défaut join : cluster survit ; init détruit le CP)
 #   test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
 #   test/lima/run-phases.sh metrics-server # Metrics API (kubectl top) + gate APIService Available (#252)
 #   test/lima/run-phases.sh platform-prereqs # CRDs Gateway API + containerd insecure-registry
@@ -408,12 +408,18 @@ phase_bootstrap() {
 # MÊME chemin RÉUSSIT. Le verdict passe par la fonction PURE classify_compensation
 # (testée bats, test/unit/bootstrap-fault.bats) — symétrique de run_ansible_phase.
 #
-# DESTRUCTIF : la faute injectée casse un control-plane/worker SAIN. À ne lancer
-# que sur un banc JETABLE (garde BANC_JETABLE=1). Mode déterministe (ADR 0052 §3) :
-# on retire le marqueur `creates:` d'une étape DÉJÀ acquise puis on rejoue → le
-# rôle re-tente `kubeadm init/join` sur un demi-état réel → le rescue compense.
+# DESTRUCTIF : la faute injectée casse un nœud SAIN. À ne lancer que sur un banc
+# JETABLE (garde BANC_JETABLE=1). Mode déterministe (ADR 0052 §3) : on retire le
+# marqueur `creates:` d'une étape DÉJÀ acquise puis on rejoue → le rôle re-tente
+# `kubeadm init/join` sur un demi-état réel → le rescue compense.
 #
-# Cible via FAULT_TARGET : `init` (control-plane, défaut) ou `join` (1er worker).
+# Cible via FAULT_TARGET :
+#   - `join` (1er worker, DÉFAUT) : le rescue `kubeadm reset` ne touche QUE le
+#     worker → le control-plane et le cluster SURVIVENT, le kubeconfig banc reste
+#     valide. Mode RECOMMANDÉ (preuve fidèle du rescue sans détruire le cluster).
+#   - `init` (control-plane) : le rescue `kubeadm reset` DÉTRUIT etcd/le cluster ;
+#     le re-jeu reconstruit tout, mais le kubeconfig banc devient invalide et les
+#     phases suivantes cassent → réserver à un banc qu'on accepte de perdre.
 phase_bootstrap_fault() {
     preflight
     [ "${BANC_JETABLE:-0}" = 1 ] || die "phase bootstrap-fault DESTRUCTIVE (casse un nœud sain) — exiger BANC_JETABLE=1 sur un banc jetable"
@@ -421,7 +427,7 @@ phase_bootstrap_fault() {
     # shellcheck source=test/lima/bootstrap-fault-assert.sh
     . "${HERE}/bootstrap-fault-assert.sh"
 
-    local target="${FAULT_TARGET:-init}" pb vm marker home
+    local target="${FAULT_TARGET:-join}" pb vm marker home
     case "${target}" in
         init)
             pb=initialisation; vm="${CP}"

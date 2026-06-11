@@ -21,12 +21,31 @@
         timeout: 30
 
     - name: Join the cluster
-      ansible.builtin.shell: "{{ hostvars[groups['control'][0]].join_command }} >> node-joined.log"
+      # Le CHECKPOINT (node-joined.log) est écrit en tâche SÉPARÉE, APRÈS le
+      # succès de `kubeadm join` — PAS via `>> node-joined.log` qui créerait le
+      # marqueur même si join ÉCHOUE en cours (la redirection crée le fichier
+      # avant l'exécution). Un marqueur menteur ferait sauter le re-jeu après un
+      # rescue → kubelet resterait arrêté, nœud NotReady (constaté en arrêt
+      # injecté). `creates:` garde l'idempotence : un join déjà acquis ne re-tente
+      # pas. Le rescue, lui, supprime ce marqueur pour forcer un vrai re-jeu.
+      ansible.builtin.command: "{{ hostvars[groups['control'][0]].join_command }}"
       args:
         # Home de l'utilisateur connecté (≠ /home/debian codé en dur) : existe sur
         # les nœuds réels / Vagrant (debian) ET sur le banc Lima (/home/lima.guest).
         chdir: '{{ ansible_facts.env.HOME }}'
         creates: node-joined.log
+      register: join_result
+
+    # CHECKPOINT écrit APRÈS le join : on n'arrive ici que si la tâche précédente
+    # n'a pas échoué (sinon le rescue a pris la main). `creates:` rend le tout
+    # idempotent ; la copie est idempotente (même contenu → changed=0 au rejeu
+    # une fois le marqueur figé). On fige le contenu (pas d'horodatage) pour ne
+    # pas casser l'idempotence du rejeu.
+    - name: Record the join checkpoint (after a successful join)
+      ansible.builtin.copy:
+        content: "node joined\n"
+        dest: '{{ ansible_facts.env.HOME }}/node-joined.log'
+        mode: '0644'
 
   # ── Reprise après incident (ADR 0050 cas (b)) ──────────────────────────────
   rescue:
@@ -45,6 +64,16 @@
       register: join_reset
       changed_when: "'cleaned up' in join_reset.stdout or join_reset.rc == 0"
       failed_when: false
+    # Retire le CHECKPOINT : sans ça, un marqueur node-joined.log résiduel (d'un
+    # ancien run, ou laissé par une version qui le créait trop tôt) ferait SAUTER
+    # `kubeadm join` au re-jeu via `creates:` → le worker resté reset (kubelet
+    # arrêté) ne re-joindrait jamais, NotReady. Le rescue doit rendre le re-jeu
+    # effectif. (Désormais le marqueur n'est écrit qu'après un join réussi, mais
+    # on nettoie quand même — défense en profondeur, idempotent.)
+    - name: Remove the stale join checkpoint so the re-run actually re-joins
+      ansible.builtin.file:
+        path: '{{ ansible_facts.env.HOME }}/node-joined.log'
+        state: absent
     - name: Fail with an actionable message after compensation
       ansible.builtin.fail:
         msg: >-
