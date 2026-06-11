@@ -48,6 +48,12 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "${HERE}/lib.sh"
 # shellcheck source=test/lima/metrology.sh
 . "${HERE}/metrology.sh"
+# Lib PARTAGÉE du HEALTHCHECK cluster — MÊME source que bootstrap/state.sh. Les
+# classify_* y sont PURES ; le banc collecte via "${KUBECTL[@]}" (kubectl
+# --kubeconfig explicite, cible toujours sûre → pas de garde-fou de cible ici,
+# ADR 0053) puis classe. Testée par test/unit/health-classify.bats.
+# shellcheck source=bootstrap/lib/health-classify.sh
+. "${REPO}/bootstrap/lib/health-classify.sh"
 
 # ── Table des nœuds (noms génériques — ADR 0023) ─────────────────────────────
 # "nom:rôle". Topologie `multi-node-3` : 1 control-plane + 2 workers = quorum mon
@@ -1123,6 +1129,26 @@ phase_status() {
     status_probe "DataOps (Dagster+Marquez)" "dataops_present"
     status_probe "monitoring (Prometheus)" "prometheus_present"
 
+    # Santé par composante (verdicts de la lib pure health-classify.sh, partagée
+    # avec bootstrap/state.sh). Le banc collecte via "${KUBECTL[@]}" (cible sûre)
+    # puis classe. Best-effort : une brique absente → skip (·), pas une erreur.
+    printf '\n  \033[1mSanté des composantes\033[0m\n'
+    # Collectes best-effort : `|| true` IMPÉRATIF sous set -e — un `kubectl get`
+    # sur une ressource/ns absent sort rc≠0 et tuerait l'affectation. La brique
+    # absente vaut alors vide → classify_* rend skip (·), pas une erreur.
+    local nr rn osd_up sc d_web m_api
+    nr=$("${KUBECTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 != "Ready" {print $1}' | tr '\n' ' ' || true)
+    rn=$("${KUBECTL[@]}" get nodes --no-headers 2>/dev/null | grep -cw Ready || true)
+    status_health "nœuds" "$(classify_nodes_ready "${nr}" "${rn}")"
+    osd_up=$(toolbox_ceph osd stat 2>/dev/null | grep -oE '[0-9]+ up' | grep -oE '^[0-9]+' || true)
+    status_health "Ceph OSD" "$(classify_ceph_osd "${osd_up:-}" "${OSD_EXPECTED}")"
+    sc=$("${KUBECTL[@]}" get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
+    status_health "StorageClass défaut" "$(classify_sc_default "${sc}")"
+    d_web=$("${KUBECTL[@]}" -n dagster get deploy dagster-dagster-webserver -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
+    status_health "Dagster webserver" "$(classify_deploy_ready "Dagster webserver" "${d_web:-}" "$([ -n "${d_web}" ] && echo 1 || echo '')")"
+    m_api=$("${KUBECTL[@]}" -n marquez get deploy marquez -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
+    status_health "Marquez API" "$(classify_deploy_ready "Marquez API" "${m_api:-}" "$([ -n "${m_api}" ] && echo 1 || echo '')")"
+
     # 3. Liens vers les UIs exposées (port-forward suggéré, pas lancé).
     printf '\n  \033[1mAccès UIs\033[0m (port-forward à lancer si besoin)\n'
     status_ui "API K8s" "https://127.0.0.1:${API_PORT}" ""
@@ -1146,6 +1172,17 @@ status_probe() {
     else
         printf '    \033[2m·\033[0m %s\n' "${label}"
     fi
+}
+
+# Affiche le verdict "STATUS|message" d'un classify_* (lib health-classify) :
+# ✓ ok / ✗ fail / · skip. L'appelant collecte (kubectl) puis classe.
+status_health() {
+    local label=$1 verdict=$2 status=${2%%|*} msg=${2#*|}
+    case "${status}" in
+        ok)   printf '    \033[32m✓\033[0m %s — %s\n' "${label}" "${msg}" ;;
+        fail) printf '    \033[31m✗\033[0m %s — %s\n' "${label}" "${msg}" ;;
+        *)    printf '    \033[2m·\033[0m %s — %s\n' "${label}" "${msg}" ;;
+    esac
 }
 
 # Prédicats de présence (best-effort, lecture seule) pour le status.
