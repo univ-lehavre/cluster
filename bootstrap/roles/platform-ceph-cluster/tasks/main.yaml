@@ -138,10 +138,22 @@
       register: ceph_cluster_status
       changed_when: false
       vars:
-        ceph_status: '{{ ceph_cluster_status.resources[0].status.ceph | default({}) }}'
+        ceph_cr: '{{ ceph_cluster_status.resources[0] | default({}) }}'
+        ceph_status: '{{ ceph_cr.status.ceph | default({}) }}'
         ceph_health_codes: '{{ ceph_status.details | default({}) | list }}'
+      # On exige AUSSI phase=Ready ET generation==observedGeneration : Rook
+      # continue de réconcilier le spec du CR pendant ~30 s après que HEALTH_OK +
+      # OSD up sont atteints (phase encore « Progressing »). Si la gate se
+      # contentait de la santé, le 1er passage se terminerait sur un CR PAS encore
+      # figé → un rejeu immédiat (run_ansible_phase) verrait un champ de spec
+      # bouger → faux « changed=1 » transitoire (constaté Run #14 + atlas-ceph).
+      # generation==observedGeneration = Rook a digéré le spec → l'apply SSA au
+      # rejeu est alors stable. C'est une LECTURE (changed_when:false préservé).
       until: >-
         ceph_cluster_status.resources | length > 0
+        and (ceph_cr.status.phase | default('')) == 'Ready'
+        and (ceph_cr.metadata.generation | default(-1))
+            == (ceph_cr.status.observedGeneration | default(-2))
         and (
           (ceph_status.health | default('')) == 'HEALTH_OK'
           or (
