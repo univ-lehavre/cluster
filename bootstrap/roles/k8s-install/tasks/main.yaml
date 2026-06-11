@@ -19,14 +19,33 @@
         state: directory
         mode: '0755'
 
-    - name: Get kubernetes keyrings
+    # Clé du dépôt téléchargée vers un fichier TEMPORAIRE d'abord (get_url
+    # idempotent), PAS dans un pipe curl|gpg dont l'échec laisserait un keyring
+    # tronqué (cf. ci-dessous).
+    - name: Get the kubernetes Release key
+      ansible.builtin.get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key
+        dest: /tmp/k8s-release.key
+        mode: '0644'
+
+    # Dé-armoricer en keyring binaire, PUIS valider (gpg --show-keys parse le
+    # fichier), PUIS poser un marqueur DISTINCT (.valid). Anti « marqueur menteur »
+    # (#236, même classe que le bug node-joined.log) : le `creates:` ne pointe PAS
+    # le keyring écrit par la commande — sinon un keyring tronqué par un arrêt en
+    # plein dearmor serait considéré « acquis » et le re-jeu le sauterait, laissant
+    # `apt update` en échec BADSIG sans réparation. Le marqueur n'est posé
+    # QU'APRÈS validation réussie → un keyring partiel n'a pas de .valid → le
+    # re-jeu le ré-écrit et converge.
+    - name: Dearmor and validate the kubernetes apt keyring
       ansible.builtin.shell: >-
         set -o pipefail &&
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key
-        | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/k8s-release.key &&
+        gpg --show-keys /etc/apt/keyrings/kubernetes-apt-keyring.gpg &&
+        touch /etc/apt/keyrings/.kubernetes-apt-keyring.valid
       args:
         executable: /bin/bash
-        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        creates: /etc/apt/keyrings/.kubernetes-apt-keyring.valid
+      changed_when: true
 
     # deb822_repository remplace apt_repository (déprécié, retiré en
     # ansible-core 2.25). Dépôt « flat » pkgs.k8s.io : suite '/' sans component.

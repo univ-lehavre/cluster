@@ -57,3 +57,33 @@ classify_compensation() {
     fi
     printf 'ok|Reprise prouvée (ADR 0050) : 1er run échoué → kubeadm reset compensé → re-jeu vert du même chemin\n'
 }
+
+# classify_redeploy_recovery FIRST_RC SECOND_RC [SECOND_CHANGED]
+#   Verdict de reprise pour une étape de CLASSE (a) — apply déclaratif idempotent
+#   (kubernetes.core.k8s, opérateur réconciliateur), PAS un effet de bord non
+#   idempotent. Ici la reprise ne passe PAS par une compensation (kubeadm reset) :
+#   une faute injectée fait échouer le 1er run, et le SIMPLE RE-JEU reconverge
+#   (ADR 0050 cas (a)). NE JAMAIS exiger de reset (ce serait un faux-échec, donc
+#   une preuve malhonnête — ADR 0052). Pendant pour run_ansible_phase de
+#   classify_compensation, mais sans le volet « reset tracé ».
+#   Conditions :
+#     1. le 1er run ÉCHOUE  (FIRST_RC ≠ 0)        — la faute a bien pris,
+#     2. le re-jeu RÉUSSIT  (SECOND_RC = 0)       — le chemin reconverge seul,
+#     3. (si mesuré) le re-jeu est IDEMPOTENT (SECOND_CHANGED = 0).
+#   PUR.
+classify_redeploy_recovery() {
+    local first_rc=${1:-} second_rc=${2:-} second_changed=${3:-}
+    if [ "${first_rc}" = "0" ]; then
+        printf 'fail|Faute non prise : le 1er run a RÉUSSI (rc=0) — la reprise n'\''est pas exercée\n'
+        return 0
+    fi
+    if [ "${second_rc}" != "0" ]; then
+        printf 'fail|Reprise échouée : le re-jeu a ÉCHOUÉ (rc=%s) — le chemin ne reconverge pas\n' "${second_rc}"
+        return 0
+    fi
+    case "${second_changed}" in
+        0)        printf 'ok|Reprise prouvée (ADR 0050 classe a) : 1er run échoué → re-jeu vert sans compensation, idempotent (changed=0)\n' ;;
+        '' | '?') printf 'ok|Reprise prouvée (ADR 0050 classe a) : 1er run échoué → re-jeu vert sans compensation (idempotence non mesurée)\n' ;;
+        *)        printf 'fail|Re-jeu vert mais NON idempotent : %s tâche(s) changed au 2e passage (ADR 0051)\n' "${second_changed}" ;;
+    esac
+}

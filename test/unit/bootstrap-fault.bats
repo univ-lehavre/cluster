@@ -70,3 +70,42 @@ setup() {
     [[ "$output" == fail\|* ]]
     [[ "$output" == *"non prise"* ]]
 }
+
+# ─── classify_redeploy_recovery (reprise classe (a), sans compensation) ──────
+
+@test "classify_redeploy_recovery : 1er échoue + 2e réussit + idempotent → ok" {
+    run classify_redeploy_recovery 1 0 0
+    [ "$status" -eq 0 ]
+    [[ "$output" == ok\|* ]]
+    [[ "$output" == *"classe a"* ]]
+}
+
+@test "classify_redeploy_recovery : idempotence non mesurée (changed vide) → ok" {
+    run classify_redeploy_recovery 1 0 ""
+    [[ "$output" == ok\|* ]]
+    [[ "$output" == *"non mesurée"* ]]
+}
+
+@test "classify_redeploy_recovery : 1er réussit (faute non prise) → fail" {
+    run classify_redeploy_recovery 0 0 0
+    [[ "$output" == fail\|* ]]
+    [[ "$output" == *"non prise"* ]]
+}
+
+@test "classify_redeploy_recovery : re-jeu échoue → fail" {
+    run classify_redeploy_recovery 1 2 ""
+    [[ "$output" == fail\|* ]]
+    [[ "$output" == *"reconverge"* ]]
+}
+
+@test "classify_redeploy_recovery : re-jeu vert mais non idempotent → fail" {
+    run classify_redeploy_recovery 1 0 3
+    [[ "$output" == fail\|* ]]
+    [[ "$output" == *"NON idempotent"* ]]
+}
+
+@test "classify_redeploy_recovery : ordre — 1er=0 prime" {
+    run classify_redeploy_recovery 0 1 5
+    [[ "$output" == fail\|* ]]
+    [[ "$output" == *"non prise"* ]]
+}

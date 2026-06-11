@@ -12,7 +12,7 @@
 # Usage :
 #   test/lima/run-phases.sh up             # VMs + (si WITH_CEPH=1) disques bruts + gate vd* (#235)
 #   test/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate 3 nœuds Ready
-#   BANC_JETABLE=1 [FAULT_TARGET=join|init] test/lima/run-phases.sh bootstrap-fault # arrêt injecté : preuve du rescue (ADR 0050/0052 §5) — DESTRUCTIF (défaut join : cluster survit ; init détruit le CP)
+#   BANC_JETABLE=1 [FAULT_TARGET=join|init|cri-keyring|cnpg-sc|argocd-netpol|addon] test/lima/run-phases.sh bootstrap-fault # arrêt injecté : preuve de reprise (ADR 0050/0052 §5) — DESTRUCTIF. compensation (join/init) ou reprise classe a (cri-keyring/cnpg-sc/argocd-netpol/addon)
 #   test/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
 #   test/lima/run-phases.sh metrics-server # Metrics API (kubectl top) + gate APIService Available (#252)
 #   test/lima/run-phases.sh platform-prereqs # CRDs Gateway API + containerd insecure-registry
@@ -420,6 +420,18 @@ phase_bootstrap() {
 #   - `init` (control-plane) : le rescue `kubeadm reset` DÉTRUIT etcd/le cluster ;
 #     le re-jeu reconstruit tout, mais le kubeconfig banc devient invalide et les
 #     phases suivantes cassent → réserver à un banc qu'on accepte de perdre.
+# Joue un playbook depuis l'hôte (kubeconfig banc), renvoie son rc sur $1 (nameref
+# via echo) — wrapper set+e/set -e pour capturer un échec sans planter le harnais.
+_fault_play() {
+    local pb=$1; shift
+    set +e
+    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
+        "${REPO}/bootstrap/${pb}.yaml" "$@"
+    local rc=$?
+    set -e
+    return "${rc}"
+}
+
 phase_bootstrap_fault() {
     preflight
     [ "${BANC_JETABLE:-0}" = 1 ] || die "phase bootstrap-fault DESTRUCTIVE (casse un nœud sain) — exiger BANC_JETABLE=1 sur un banc jetable"
@@ -427,16 +439,31 @@ phase_bootstrap_fault() {
     # shellcheck source=test/lima/bootstrap-fault-assert.sh
     . "${HERE}/bootstrap-fault-assert.sh"
 
-    local target="${FAULT_TARGET:-join}" pb vm marker home
+    # DEUX familles d'arrêt injecté (doctrine ADR 0050) :
+    #  - COMPENSATION (init|join) : étape à effet de bord NON idempotent → le 1er
+    #    run échoue, le rescue COMPENSE (kubeadm reset), le re-jeu repart propre.
+    #    Verdict classify_compensation (exige le reset tracé).
+    #  - REPRISE classe (a) (cri-keyring|cnpg-sc|argocd-netpol|addon) : apply
+    #    déclaratif / opérateur idempotent → le 1er run échoue, le SIMPLE RE-JEU
+    #    reconverge SANS compensation. Verdict classify_redeploy_recovery (n'exige
+    #    AUCUN reset — l'exiger serait un faux-échec, malhonnêteté ADR 0052).
+    local target="${FAULT_TARGET:-join}"
+    case "${target}" in
+        init | join) _fault_compensation "${target}" ;;
+        cri-keyring | cnpg-sc | argocd-netpol | addon) _fault_redeploy "${target}" ;;
+        *) die "FAULT_TARGET inconnu : ${target} (init|join|cri-keyring|cnpg-sc|argocd-netpol|addon)" ;;
+    esac
+}
+
+# Famille COMPENSATION (init|join) — preuve du rescue compensateur (ADR 0052 §5).
+_fault_compensation() {
+    local target=$1 pb vm marker home entry
     case "${target}" in
         init)
             pb=initialisation; vm="${CP}"
-            # admin.conf : marqueur de l'init acquis (chemin absolu, root).
             marker=/etc/kubernetes/admin.conf ;;
         join)
             pb=join-workers
-            # 1er worker de l'inventaire (≠ control). node-joined.log est en $HOME.
-            local entry
             for entry in "${NODES[@]}"; do
                 [ "${entry##*:}" = control ] || { vm="${entry%%:*}"; break; }
             done
@@ -445,21 +472,15 @@ phase_bootstrap_fault() {
             # shellcheck disable=SC2016
             home=$(vm_sh "${vm}" sh -c 'echo "$HOME"' | tr -d '\r')
             marker="${home}/node-joined.log" ;;
-        *) die "FAULT_TARGET inconnu : ${target} (init|join)" ;;
     esac
 
-    log "Phase bootstrap-fault — arrêt injecté sur '${target}' (${vm}), preuve du rescue ADR 0050"
-
-    # 1. INJECTION : retirer le marqueur de l'étape acquise → le block va re-tenter
-    #    `kubeadm init/join` sur un nœud déjà initialisé (demi-état réel).
-    log "  injection : rm ${marker} sur ${vm} (l'étape ${target} va re-tenter sur un demi-état)"
+    log "Phase bootstrap-fault — arrêt injecté COMPENSATION sur '${target}' (${vm}), rescue ADR 0050"
+    log "  injection : rm ${marker} sur ${vm} (l'étape ${target} re-tente sur un demi-état)"
     vm_sh "${vm}" sudo rm -f "${marker}" \
         || die "bootstrap-fault : échec de la suppression du marqueur ${marker}"
 
-    # 2. 1er RUN : doit ÉCHOUER (kubeadm refuse l'état partiel) et le rescue doit
-    #    COMPENSER (kubeadm reset). On capture rc + sortie SANS planter set -e.
     log "  1er run ${pb}.yaml — DOIT échouer puis compenser (kubeadm reset)"
-    local out1 first_rc reset_seen
+    local out1 first_rc reset_seen second_rc verdict
     set +e
     out1=$(KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
         "${REPO}/bootstrap/${pb}.yaml" 2>&1)
@@ -469,23 +490,86 @@ phase_bootstrap_fault() {
     reset_seen=$(printf '%s\n' "${out1}" | parse_kubeadm_reset)
     log "  1er run : rc=${first_rc}, compensation tracée=${reset_seen}"
 
-    # 3. RE-JEU du MÊME chemin : après compensation, le nœud est propre → succès.
     log "  re-jeu ${pb}.yaml — DOIT réussir (le chemin repart propre)"
-    local second_rc
-    set +e
-    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
-        "${REPO}/bootstrap/${pb}.yaml"
-    second_rc=$?
-    set -e
+    _fault_play "${pb}"; second_rc=$?
 
-    # 4. VERDICT (fonction pure, ADR 0052 §5).
-    local verdict
     verdict=$(classify_compensation "${first_rc}" "${reset_seen}" "${second_rc}")
     case "${verdict%%|*}" in
         ok) ok "${verdict#*|}" ;;
         *) die "${verdict#*|}" ;;
     esac
 }
+
+# Famille REPRISE classe (a) (cri-keyring|cnpg-sc|argocd-netpol|addon) — preuve
+# qu'une étape idempotente (apply/opérateur) reconverge par SIMPLE RE-JEU après
+# une faute, SANS compensation (ADR 0050 cas a / 0052 §5). Verdict
+# classify_redeploy_recovery (1er échoue → re-jeu vert, n'exige aucun reset).
+_fault_redeploy() {
+    local target=$1 pb=() inject_desc gate_pred first_rc second_rc verdict
+    case "${target}" in
+        # CRI keyring : tronque le keyring k8s (marqueur menteur) → re-jeu kubeadm.yaml.
+        # AVANT le fix, le re-jeu n'aurait pas réparé ; APRÈS, il re-valide+converge.
+        cri-keyring)
+            pb=(kubeadm)
+            inject_desc="truncate keyring k8s sur ${CP}"
+            vm_sh "${CP}" sudo truncate -s0 /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+                || die "bootstrap-fault cri-keyring : échec truncate keyring"
+            # le marqueur .valid doit aussi sauter, sinon le re-jeu croit acquis.
+            vm_sh "${CP}" sudo rm -f /etc/apt/keyrings/.kubernetes-apt-keyring.valid || true
+            gate_pred=cri_keyring_ok ;;
+        # CNPG : SC bidon au 1er run → PVC Pending → gate santé expire → échec ;
+        # re-jeu avec la vraie SC (dérivée de WITH_CEPH) → Cluster healthy.
+        cnpg-sc)
+            local good_sc; good_sc=$(ceph_default_sc_or_localpath)
+            log "Phase bootstrap-fault — REPRISE cnpg-sc (SC bidon → ${good_sc})"
+            log "  1er run dataops.yaml -e cnpg_storage_class=does-not-exist — DOIT échouer"
+            _fault_play dataops -e cnpg_storage_class=does-not-exist; first_rc=$?
+            log "  1er run : rc=${first_rc}"
+            log "  re-jeu dataops.yaml -e cnpg_storage_class=${good_sc} — DOIT converger"
+            _fault_play dataops -e "cnpg_storage_class=${good_sc}"; second_rc=$?
+            verdict=$(classify_redeploy_recovery "${first_rc}" "${second_rc}" "")
+            case "${verdict%%|*}" in ok) ok "${verdict#*|}" ;; *) die "${verdict#*|}" ;; esac
+            return 0 ;;
+        # argocd : supprime une NetworkPolicy allow pendant la convergence →
+        # argocd-server jamais Ready → le rescue DIAGNOSTIQUE existant se déclenche.
+        argocd-netpol)
+            inject_desc="delete netpol allow-server-ingress (argocd)"
+            "${KUBECTL[@]}" -n argocd delete networkpolicy allow-server-ingress --ignore-not-found >/dev/null 2>&1 || true
+            pb=(gitops)
+            gate_pred=argocd_server_ready ;;
+        # addon générique : supprime le Deployment metrics-server pendant le wait.
+        addon)
+            inject_desc="delete deploy metrics-server"
+            "${KUBECTL[@]}" -n kube-system delete deploy metrics-server --ignore-not-found >/dev/null 2>&1 || true
+            pb=(metrics-server)
+            gate_pred=metrics_server_ready ;;
+    esac
+
+    log "Phase bootstrap-fault — arrêt injecté REPRISE sur '${target}' : ${inject_desc}"
+    log "  1er run ${pb[0]}.yaml après injection — peut échouer (faute prise)"
+    _fault_play "${pb[0]}"; first_rc=$?
+    log "  1er run : rc=${first_rc}"
+    log "  re-jeu ${pb[0]}.yaml — DOIT reconverger (sans compensation)"
+    _fault_play "${pb[0]}"; second_rc=$?
+
+    verdict=$(classify_redeploy_recovery "${first_rc}" "${second_rc}" "")
+    case "${verdict%%|*}" in ok) ok "${verdict#*|}" ;; *) die "${verdict#*|}" ;; esac
+    # Gate finale d'état (au-delà du rc) : la composante visée est saine.
+    if [ -n "${gate_pred:-}" ]; then
+        if retry 120 10 "${gate_pred}"; then
+            ok "gate de reprise OK (${gate_pred})"
+        else
+            die "gate de reprise ÉCHOUÉE (${gate_pred}) — reconvergence incomplète"
+        fi
+    fi
+}
+
+# Prédicats de gate de reprise (lecture seule).
+cri_keyring_ok() { vm_sh "${CP}" sh -c 'sudo gpg --show-keys /etc/apt/keyrings/kubernetes-apt-keyring.gpg >/dev/null 2>&1 && sudo apt-cache policy kubeadm 2>/dev/null | grep -q pkgs.k8s.io'; }
+argocd_server_ready() { [ "$("${KUBECTL[@]}" -n argocd get deploy argocd-server -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = 1 ]; }
+metrics_server_ready() { [ "$("${KUBECTL[@]}" -n kube-system get deploy metrics-server -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = 1 ]; }
+# SC par défaut selon le profil (Ceph → block-replicated ; léger → local-path).
+ceph_default_sc_or_localpath() { [ "${WITH_CEPH:-0}" = 1 ] && echo rook-ceph-block-replicated || echo local-path; }
 
 # ── Phase storage-simple — local-path-provisioner (mode rapide, sans Ceph) ───
 # Provisionneur de stockage simple (PVC sur disque local du nœud) pour itérer

@@ -124,3 +124,61 @@
       kubernetes.core.k8s:
         state: present
         src: '{{ platform_repo_dir }}/platform/cloudnative-pg/backup.yaml'
+
+  # Rescue DIAGNOSTIQUE (ADR 0050, issue #236) — calqué sur platform-argocd. CNPG
+  # est un OPÉRATEUR réconciliateur : un apply k8s est déclaratif/idempotent, un
+  # « rollback » qui supprimerait le Cluster/les PVC/le bucket serait destructeur
+  # et contre-productif (on veut réparer, pas défaire ; un re-run reprend). Les
+  # gates (operator Ready, puis « Cluster in healthy state ») sont des `until`
+  # MUETS à long horizon : ce rescue transforme un timeout aveugle en message
+  # actionnable, en OBSERVANT l'état réel. AUCUN delete (frontière ADR 0050).
+  rescue:
+    - name: Collect the pg Cluster status (diagnostic)
+      kubernetes.core.k8s_info:
+        api_version: postgresql.cnpg.io/v1
+        kind: Cluster
+        name: pg
+        namespace: '{{ cnpg_namespace }}'
+      register: cnpg_cluster_diag
+      run_once: true
+
+    - name: Collect the postgres pods state (diagnostic)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: '{{ cnpg_namespace }}'
+        label_selectors:
+          - cnpg.io/cluster=pg
+      register: cnpg_pods_diag
+      run_once: true
+
+    - name: Report CNPG convergence failure (état + causes connues)
+      ansible.builtin.debug:
+        msg: >-
+          CloudNativePG non convergé. Phase Cluster :
+          {{ (cnpg_cluster_diag.resources[0].status.phase
+              | default('(Cluster absent)')) }}.
+          Pods non Running :
+          {{ cnpg_pods_diag.resources
+             | rejectattr('status.phase', 'equalto', 'Running')
+             | map(attribute='metadata.name') | list }}.
+          Causes fréquentes : StorageClass introuvable (PVC pg-1 Pending →
+          vérifier cnpg_storage_class) ; bucket/credentials Barman (backup) ;
+          image operator non pull (egress). Diagnostic :
+          kubectl -n {{ cnpg_namespace }} get cluster,pods,pvc ;
+          kubectl -n {{ cnpg_namespace }} get events --sort-by=.lastTimestamp.
+      run_once: true
+
+    - name: Fail with an actionable message
+      ansible.builtin.fail:
+        msg: >-
+          Déploiement CloudNativePG échoué (voir le diagnostic ci-dessus). Le
+          re-run du rôle est idempotent et reprend la convergence — corriger
+          d'abord la cause signalée (souvent la StorageClass).
+
+  always:
+    - name: CNPG deployment outcome (état final)
+      ansible.builtin.debug:
+        msg: >-
+          platform-cnpg terminé. Vérifier :
+          kubectl -n {{ cnpg_namespace }} get cluster pg.
+      run_once: true

@@ -86,10 +86,25 @@
             ACCESS_KEY_ID: '{{ s3b_access_key }}'
             ACCESS_SECRET_KEY: '{{ s3b_secret_key }}'
 
+    # Un Job est IMMUTABLE : re-`apply` d'un Job déjà Complete dont le template a
+    # bougé échoue (« field is immutable »). On lit donc l'état AVANT d'appliquer
+    # et on ne (ré)applique QUE s'il n'a pas déjà réussi (#236, idempotence). Si
+    # le Job a été GC par ttlSecondsAfterFinished, k8s_info ne le voit plus →
+    # l'apply le recrée proprement.
+    - name: Check whether the bucket Job already succeeded
+      kubernetes.core.k8s_info:
+        kind: Job
+        name: '{{ s3b_name }}-init-buckets'
+        namespace: '{{ s3b_namespace }}'
+      register: s3b_job_existing
+
     - name: Create the S3 bucket(s) on SeaweedFS (mb Job)
       kubernetes.core.k8s:
         state: present
         template: s3-init-buckets.yaml.j2
+      when: >-
+        s3b_job_existing.resources | length == 0
+        or (s3b_job_existing.resources[0].status.succeeded | default(0)) < 1
 
     - name: Wait for the bucket Job to complete
       kubernetes.core.k8s_info:

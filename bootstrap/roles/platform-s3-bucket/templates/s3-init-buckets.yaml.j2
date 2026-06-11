@@ -7,6 +7,12 @@ metadata:
   namespace: {{ s3b_namespace }}
 spec:
   backoffLimit: 6
+  # Un Job est IMMUTABLE : re-`apply` d'un Job déjà Complete dont le template a
+  # bougé échoue (« field is immutable »). ttlSecondsAfterFinished fait nettoyer
+  # le Job par le contrôleur après succès → le re-jeu recrée proprement, pas de
+  # conflit d'immutabilité (#236, hygiène d'idempotence). 600 s = marge de lecture
+  # des logs avant GC. Le rôle gère aussi la non-ré-application si déjà Complete.
+  ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
