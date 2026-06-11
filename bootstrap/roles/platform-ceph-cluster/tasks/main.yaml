@@ -4,14 +4,16 @@
 # santé RÉELLE (HEALTH_OK ET le bon nombre d'OSD up, pas « vert à 0 OSD »).
 #
 # Manifestes VENDORED figés appliqués via kubernetes.core.k8s ; les surcharges
-# de topologie (metadataDevice, mémoire OSD) sont des PATCHs strategic-merge
-# ciblés (JAMAIS un .j2 du rendu, ADR 0049). L'undigest arm64 reste côté harnais
-# (ceph_cluster_src pointe une copie dé-épinglée sur le banc).
+# de topologie (metadataDevice, mémoire OSD) sont FUSIONNÉES dans le manifeste
+# avant l'apply (combine recursive, JAMAIS un .j2 du rendu, ADR 0049) — pas un
+# patch séparé qui se battrait avec l'apply (cf. commentaire idempotence infra).
+# L'undigest arm64 reste côté harnais (ceph_cluster_src = copie dé-épinglée).
 #
 # IDEMPOTENCE (gate run_ansible_phase, rejeu changed=0, ADR 0052) :
-#  - CRs Rook mutés par l'operator → SSA + field_manager dédié + force_conflicts ;
-#  - tâches de GATE = LECTURES (ceph status) → changed_when: false obligatoire,
-#    sinon le rejeu somme des changed=true parasites (modèle ceph-pre-install).
+#  - CR Rook muté par l'operator → SSA + field_manager dédié + force_conflicts +
+#    hidden_fields managedFields ; surcharges fusionnées (1 seule tâche d'apply) ;
+#  - tâches de GATE = LECTURES (k8s_info du status) → changed_when: false
+#    obligatoire, sinon le rejeu somme des changed=true parasites.
 - name: Deploy Rook-Ceph cluster
   run_once: true
   block:
@@ -122,8 +124,11 @@
     #   - .status.ceph.versions.osd      = dict {version: nb de daemons OSD} →
     #     la SOMME des valeurs = nombre d'OSD (== ceph_osd_expected attendu).
     # changed_when:false IMPÉRATIF (lecture, sinon casse le gate d'idempotence).
-    # On tolère HEALTH_OK strict (le status agrège déjà ; un WARN transitoire de
-    # démarrage se résorbe avant que le status passe OK).
+    # Santé acceptée : HEALTH_OK, OU un HEALTH_WARN dont le SEUL motif est le crash
+    # récent et bénin d'un module mgr (RECENT_MGR_MODULE_CRASH) — race de démarrage
+    # du module prometheus observée sur banc, qui se rétablit seule. Le détail des
+    # checks est lu dans .status.ceph.details (dict {CODE: {...}}), pas via un exec
+    # toolbox. On exige aussi le bon nombre d'OSD (versions.osd = {version: nb}).
     - name: Wait for the CephCluster to be healthy (HEALTH_OK + expected OSDs)
       kubernetes.core.k8s_info:
         api_version: ceph.rook.io/v1
@@ -132,10 +137,19 @@
         namespace: rook-ceph
       register: ceph_cluster_status
       changed_when: false
+      vars:
+        ceph_status: '{{ ceph_cluster_status.resources[0].status.ceph | default({}) }}'
+        ceph_health_codes: '{{ ceph_status.details | default({}) | list }}'
       until: >-
         ceph_cluster_status.resources | length > 0
-        and (ceph_cluster_status.resources[0].status.ceph.health | default('')) == 'HEALTH_OK'
-        and (ceph_cluster_status.resources[0].status.ceph.versions.osd | default({})
+        and (
+          (ceph_status.health | default('')) == 'HEALTH_OK'
+          or (
+            (ceph_status.health | default('')) == 'HEALTH_WARN'
+            and (ceph_health_codes | difference(['RECENT_MGR_MODULE_CRASH']) | length) == 0
+          )
+        )
+        and (ceph_status.versions.osd | default({})
              | dict2items | map(attribute='value') | map('int') | sum)
             == (ceph_osd_expected | int)
       retries: '{{ ceph_health_retries }}'
