@@ -154,8 +154,9 @@ cilium status --wait --wait-duration 3m || \
 # datapath (pas seulement présent en config). Échoue le script sinon — un
 # durcissement silencieusement inactif est pire qu'un échec visible.
 echo "Vérification du chiffrement WireGuard…"
-if cilium encrypt status 2>/dev/null | grep -qi 'wireguard'; then
-  echo "✓ WireGuard actif : $(cilium encrypt status 2>/dev/null | head -1)"
+encrypt_status=$(cilium encrypt status 2>/dev/null || true)
+if printf '%s\n' "$encrypt_status" | grep -qi 'wireguard'; then
+  echo "✓ WireGuard actif : $(printf '%s\n' "$encrypt_status" | head -n1)"
 else
   echo "✗ WireGuard configuré mais INACTIF dans le datapath (cilium encrypt status)." >&2
   echo "  Vérifier le support kernel (module 'wireguard') et les logs cilium-agent." >&2
@@ -234,11 +235,18 @@ for _ in $(seq 1 36); do
   # exec sur un pod Running explicite (pas `ds/cilium` qui peut viser un pod
   # en cours de redémarrage). On tolère l'absence momentanée de pod prêt.
   pod=$(kubectl -n kube-system get pods -l k8s-app=cilium \
-        --field-selector=status.phase=Running -o name 2>/dev/null | head -1)
-  if [ -n "$pod" ] && kubectl -n kube-system exec "$pod" -- cilium-dbg status 2>/dev/null \
-      | grep -qiE 'KubeProxyReplacement:[[:space:]]+True'; then
-    kpr_ready=true
-    break
+        --field-selector=status.phase=Running -o name 2>/dev/null | head -n1 || true)
+  # On CAPTURE la sortie AVANT de grep — surtout pas `cmd | grep -q` : grep -q
+  # ferme le pipe au 1er match, `cilium-dbg status` reçoit alors SIGPIPE (rc 141)
+  # que `set -o pipefail` propage et que `set -e` transforme en mort du script
+  # (run sain tué en plein « Attente KubeProxyReplacement »). La capture évite ce
+  # pipe fragile ; `|| true` tolère l'exec en échec (pod en cours de redémarrage).
+  if [ -n "$pod" ]; then
+    kpr_status=$(kubectl -n kube-system exec "$pod" -- cilium-dbg status 2>/dev/null || true)
+    if printf '%s\n' "$kpr_status" | grep -qiE 'KubeProxyReplacement:[[:space:]]+True'; then
+      kpr_ready=true
+      break
+    fi
   fi
   sleep 5
 done
