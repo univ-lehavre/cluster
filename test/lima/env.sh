@@ -29,19 +29,39 @@ else B=''; C=''; D=''; N=''; fi
 # Noms des VMs Lima du banc (celles qui existent réellement).
 lima_hosts() { limactl list --format '{{.Name}}' 2>/dev/null | grep -E '^(cp|node)[0-9]+$' || true; }
 
-# Mode `export` : imprime juste la ligne d'export KUBECONFIG (pour `eval`).
+# Mode `export` : imprime la ligne d'export KUBECONFIG du BANC (pour `eval`).
+# Vecteur d'armement de la cible ambiante (ADR 0053 (d)) : il ANNONCE sur stderr
+# ce qu'il charge, et AVERTIT si un inventaire prod coexiste (le shell pointera
+# alors le banc — danger pour un kubectl/state.sh visant la prod).
 if [ "${1:-}" = export ]; then
     printf 'export KUBECONFIG=%q\n' "${KUBECONFIG_LOCAL}"
+    printf '# env.sh : KUBECONFIG → banc Lima (%s)\n' "${KUBECONFIG_LOCAL}" >&2
+    if [ -f "${REPO}/bootstrap/hosts.yaml" ]; then
+        printf '# ⚠ inventaire prod présent : ce shell pointe désormais le BANC, pas la prod (ADR 0053).\n' >&2
+    fi
     exit 0
 fi
 
-# Détection du contexte.
+# Détection du contexte. CESSE DE DEVINER quand les deux cibles coexistent
+# (ADR 0053 (d)) : auto-détecter UNIQUEMENT si une seule est plausible ; si un
+# banc Lima est up ET un inventaire prod existe, l'intention n'est pas déductible
+# de l'état du shell → on REFUSE et on exige lima|prod explicite. La friction est
+# ciblée sur le seul cas dangereux ; le poste mono-cible reste ergonomique.
 mode="${1:-auto}"
+has_lima=""; [ -n "$(lima_hosts)" ] && has_lima=1
+has_prod=""; [ -f "${REPO}/bootstrap/hosts.yaml" ] && has_prod=1
 if [ "${mode}" = auto ]; then
-    if [ -n "$(lima_hosts)" ]; then mode=lima; else mode=prod; fi
+    if [ -n "${has_lima}" ] && [ -n "${has_prod}" ]; then
+        printf '\n%sBanc Lima ET inventaire prod coexistent — cible AMBIGUË (ADR 0053).%s\n' "${B}" "${N}" >&2
+        printf '  Préciser la cible : %stest/lima/env.sh lima%s  ou  %stest/lima/env.sh prod%s\n' \
+            "${C}" "${N}" "${C}" "${N}" >&2
+        exit 2
+    elif [ -n "${has_lima}" ]; then mode=lima
+    else mode=prod
+    fi
 fi
 
-printf '\n%sContexte détecté : %s%s%s\n' "${B}" "${C}" "${mode}" "${N}"
+printf '\n%sContexte : %s%s%s\n' "${B}" "${C}" "${mode}" "${N}"
 
 if [ "${mode}" = lima ]; then
     hosts=$(lima_hosts | tr '\n' ' ')

@@ -67,14 +67,23 @@ Le banc Lima est l'environnement de validation e2e
 Ansible **converge** l'état ; il ne **reporte** pas. Le diagnostic vit donc en
 shell ([ADR 0049](decisions/0049-doctrine-choix-outil-par-action.md)).
 
-| Pour…                                                                 | Commande                              | Détails                                                                                          |
-| --------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| **Dériver ton contexte** (hôtes courants + commandes prêtes à copier) | `test/lima/env.sh`                    | banc Lima ou prod ; voir « Prérequis & contexte » ci-dessus                                      |
-| État des **nœuds** face à l'état attendu (drift + prochaine étape)    | `bootstrap/state.sh <hôte…>`          | SSH ; hôtes **requis** (cf. `env.sh`) ; verdicts purs testés (`bootstrap/lib/state-classify.sh`) |
-| Tableau de bord du **durcissement** (preuves observables par hôte)    | `bootstrap/security/report.sh`        | [bootstrap/security/](../bootstrap/security/README.md)                                           |
-| Vérifier l'**épinglage des images** par digest d'index multi-arch     | `scripts/audit-image-digests.sh`      | invariant [ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)                 |
-| Vérifier la **fraîcheur des preuves** de banc (par chemin)            | `test/lima/check-freshness.sh`        | [ADR 0042](decisions/0042-fraicheur-preuves-banc.md)                                             |
-| Détecter les pages Markdown **orphelines**                            | `python3 scripts/check_md_orphans.py` | [ADR 0029](decisions/0029-markdown-atteignable-doc.md)                                           |
+| Pour…                                                                 | Commande                              | Détails                                                                                                             |
+| --------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Dériver ton contexte** (hôtes courants + commandes prêtes à copier) | `test/lima/env.sh`                    | banc Lima ou prod ; voir « Prérequis & contexte » ci-dessus                                                         |
+| État des **nœuds + composantes cluster** (drift + prochaine étape)    | `bootstrap/state.sh <hôte…>`          | SSH + kubectl ; hôtes **requis** (cf. `env.sh`) ; verdicts purs testés (`state-classify.sh` + `health-classify.sh`) |
+| Tableau de bord du **durcissement** (preuves observables par hôte)    | `bootstrap/security/report.sh`        | [bootstrap/security/](../bootstrap/security/README.md)                                                              |
+| Vérifier l'**épinglage des images** par digest d'index multi-arch     | `scripts/audit-image-digests.sh`      | invariant [ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)                                    |
+| Vérifier la **fraîcheur des preuves** de banc (par chemin)            | `test/lima/check-freshness.sh`        | [ADR 0042](decisions/0042-fraicheur-preuves-banc.md)                                                                |
+| Détecter les pages Markdown **orphelines**                            | `python3 scripts/check_md_orphans.py` | [ADR 0029](decisions/0029-markdown-atteignable-doc.md)                                                              |
+
+> **Garde-fou de cible (`EXPECT_CLUSTER`)** — les couches **cluster** de
+> `state.sh` (Cilium, Rook-Ceph, StorageClasses, plateforme) auditent le
+> `KUBECONFIG` ambiant. Pour qu'elles ne vérifient pas le banc en croyant viser
+> la prod ([ADR 0053](decisions/0053-isolation-multi-cible-banc-prod.md)), elles
+> **refusent** tout verdict (skip « cible non confirmée ») tant que
+> `EXPECT_CLUSTER` n'est pas posée — l'empreinte du cluster visé (affichée par
+> la 1ʳᵉ couche kubectl) ou une étiquette libre (`prod`/`lima`). Les couches
+> **nœuds** (SSH) ne sont pas concernées.
 
 ## Tests end-to-end
 

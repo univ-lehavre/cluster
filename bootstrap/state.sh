@@ -12,6 +12,17 @@
 #   USER_REMOTE      utilisateur SSH                (défaut: debian)
 #   SSH_OPTS         options ssh additionnelles     (défaut: vide)
 #   NO_COLOR=1       désactive les couleurs ANSI
+#   EXPECT_CLUSTER   garde-fou de cible (ADR 0053 issue P1) — confirme quel
+#                    cluster les couches kubectl auditent. Valeur attendue :
+#                    l'empreinte rendue par cluster_fingerprint() (sha256/12 du
+#                    CA du contexte courant, ou du server: en fallback), OU une
+#                    étiquette libre (ex. `prod`, `lima`) comme confirmation
+#                    consciente. ABSENTE → les couches cluster (CNI, Rook-Ceph,
+#                    StorageClasses, plateforme…) refusent tout verdict ok/fail
+#                    et passent en skip bruyant « cible non confirmée ». Évite
+#                    d'auditer le banc en croyant auditer la prod (kubectl nu →
+#                    KUBECONFIG ambiant). L'empreinte prod est une config LOCALE
+#                    non versionnée (ADR 0023) — jamais codée en dur ici.
 #
 # Codes de sortie :
 #   0 — tout est conforme
@@ -68,6 +79,44 @@ kubectl_ready() {
     command -v kubectl >/dev/null 2>&1 && kubectl version --request-timeout=3s >/dev/null 2>&1
 }
 
+# ─── Garde-fou de cible (ADR 0053 issue P1) ────────────────────────────────
+# kubectl_q/kubectl_ready visent le KUBECONFIG AMBIANT (kubectl nu, sans
+# --kubeconfig). Risque : auditer le banc en croyant auditer la prod. On exige
+# donc que l'opérateur confirme la cible via EXPECT_CLUSTER, comparé à une
+# empreinte stable du cluster ambiant. La comparaison pure vit dans la lib
+# (classify_target_match) ; le calcul d'empreinte (qui FAIT du kubectl) ici.
+_sha12() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -c1-12; }
+
+# Empreinte STABLE du cluster pointé par le contexte courant : CA inline du
+# cluster (champ inhérent au cluster, pas au KUBECONFIG) → sha256/12 ; fallback
+# sur le server: endpoint si le CA est référencé par fichier. printf (pas echo)
+# pour ne pas injecter de newline qui ferait varier l'empreinte.
+cluster_fingerprint() {
+    local ca server
+    ca=$(kubectl config view --raw --minify \
+        -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' 2>/dev/null)
+    if [ -n "$ca" ]; then printf '%s' "$ca" | _sha12; return 0; fi
+    server=$(kubectl config view --raw --minify \
+        -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null)
+    [ -n "$server" ] && printf '%s' "$server" | _sha12
+    return 0
+}
+
+# Verdict du garde-fou MÉMOÏSÉ : cluster_fingerprint (donc kubectl) n'est appelé
+# qu'UNE fois ; le verdict de cible n'est affiché qu'UNE fois (couche 4).
+_TARGET_VERDICT=""
+target_verdict() {
+    [ -n "$_TARGET_VERDICT" ] || \
+        _TARGET_VERDICT=$(classify_target_match "${EXPECT_CLUSTER:-}" "$(cluster_fingerprint)")
+    printf '%s' "$_TARGET_VERDICT"
+}
+
+# Prédicat des couches CLUSTER : kubectl joignable ET cible confirmée (ok).
+cluster_target_ready() {
+    kubectl_ready || return 1
+    case "$(target_verdict)" in ok\|*) return 0 ;; *) return 1 ;; esac
+}
+
 mark() {
     # mark ok|fail|skip "label" ["remedy"]
     local status=$1 label=$2 remedy=${3:-}
@@ -87,6 +136,11 @@ section() { printf '\n%s── %s ──%s\n' "$B" "$1" "$N"; }
 # Fonctions PURES de classification (testées par bats — test/unit/state-classify.bats).
 # shellcheck source=lib/state-classify.sh disable=SC1091
 . "$(dirname "${BASH_SOURCE[0]}")/lib/state-classify.sh"
+
+# Lib PARTAGÉE du HEALTHCHECK cluster (verdicts kubectl + garde-fou de cible
+# ADR 0053). Testée par test/unit/health-classify.bats.
+# shellcheck source=lib/health-classify.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/lib/health-classify.sh"
 
 # mark_classified "STATUS|message" ["remedy"]
 #   Pont entre la sortie des fonctions classify_* et `mark`. Découpe le verdict
@@ -422,122 +476,78 @@ section "CNI Cilium (kubectl)"
 if ! kubectl_ready; then
     mark skip "kubectl indisponible (binaire absent ou cluster injoignable)"
 else
-    if [ "$(kubectl_q -n kube-system get deploy cilium-operator -o jsonpath='{.status.readyReplicas}')" = "1" ]; then
-        mark ok "cilium-operator Ready"
-    else
-        mark fail "cilium-operator non Ready" "scp bootstrap/cni.sh control:/tmp && ssh control 'bash /tmp/cni.sh'"
-    fi
+    # Garde-fou de cible (ADR 0053 P1) — affiché UNE seule fois, ici en tête de la
+    # 1re couche kubectl. ok → on audite ; skip bruyant → toutes les couches
+    # cluster suivantes passeront en skip (cible non confirmée / divergente).
+    ctx=$(kubectl config current-context 2>/dev/null || echo '?')
+    mark_classified "$(target_verdict)" \
+        "export EXPECT_CLUSTER=<empreinte|prod|lima> (cf. en-tête state.sh)" \
+        "contexte ambiant « ${ctx} » — "
 
-    desired=$(kubectl_q -n kube-system get ds cilium -o jsonpath='{.status.desiredNumberScheduled}')
-    ready=$(kubectl_q -n kube-system get ds cilium -o jsonpath='{.status.numberReady}')
-    if [ -n "$desired" ] && [ "$desired" = "$ready" ] && [ "$desired" != "0" ]; then
-        mark ok "cilium DaemonSet : ${ready}/${desired} agents Ready"
-    else
-        mark fail "cilium DaemonSet : ${ready:-0}/${desired:-?} agents Ready" \
-                  "kubectl -n kube-system describe ds cilium"
-    fi
+    if cluster_target_ready; then
+        op_ready=$(kubectl_q -n kube-system get deploy cilium-operator -o jsonpath='{.status.readyReplicas}')
+        mark_classified "$(classify_cilium_operator "$op_ready")" \
+            "scp bootstrap/cni.sh control:/tmp && ssh control 'bash /tmp/cni.sh'"
 
-    not_ready=$(kubectl_q get nodes --no-headers | awk '$2 != "Ready" {print $1}' | tr '\n' ' ')
-    if [ -z "$not_ready" ]; then
+        desired=$(kubectl_q -n kube-system get ds cilium -o jsonpath='{.status.desiredNumberScheduled}')
+        ready=$(kubectl_q -n kube-system get ds cilium -o jsonpath='{.status.numberReady}')
+        mark_classified "$(classify_cilium_daemonset "$ready" "$desired")" \
+            "kubectl -n kube-system describe ds cilium"
+
+        not_ready=$(kubectl_q get nodes --no-headers | awk '$2 != "Ready" {print $1}' | tr '\n' ' ')
         ready_n=$(kubectl_q get nodes --no-headers | wc -l | tr -d ' ')
-        mark ok "tous les nœuds Ready (${ready_n})"
-    else
-        mark fail "nœuds non Ready : $not_ready" "kubectl describe node $not_ready"
-    fi
+        mark_classified "$(classify_nodes_ready "$not_ready" "$ready_n")" \
+            "kubectl describe node $not_ready"
 
-    cilium_cidr=$(kubectl_q -n kube-system get cm cilium-config -o jsonpath='{.data.cluster-pool-ipv4-cidr}')
-    if [ "$cilium_cidr" = "10.244.0.0/16" ]; then
-        mark ok "pod CIDR Cilium = 10.244.0.0/16 (disjoint nœuds)"
-    elif [ -z "$cilium_cidr" ]; then
-        mark skip "pod CIDR Cilium non lisible"
-    else
-        mark fail "pod CIDR = $cilium_cidr (attendu 10.244.0.0/16)" \
-                  "réinstaller cilium avec --set ipam.operator.clusterPoolIPv4PodCIDRList=10.244.0.0/16"
+        cilium_cidr=$(kubectl_q -n kube-system get cm cilium-config -o jsonpath='{.data.cluster-pool-ipv4-cidr}')
+        mark_classified "$(classify_pod_cidr "$cilium_cidr")" \
+            "réinstaller cilium avec --set ipam.operator.clusterPoolIPv4PodCIDRList=10.244.0.0/16"
     fi
 fi
 
 # ─── Couche 5 — Rook-Ceph (cluster-level) ──────────────────────────────────
 section "Rook-Ceph (kubectl)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "Rook-Ceph : non audité (garde-fou de cible / kubectl indisponible)"
 else
-    if [ "$(kubectl_q -n rook-ceph get deploy rook-ceph-operator -o jsonpath='{.status.readyReplicas}')" = "1" ]; then
-        mark ok "rook-ceph-operator Ready"
-    else
-        mark fail "rook-ceph-operator non Ready" \
-                  "kubectl create -f storage/ceph/crds.yaml -f storage/ceph/common.yaml -f storage/ceph/operator.yaml"
-    fi
+    op_ready=$(kubectl_q -n rook-ceph get deploy rook-ceph-operator -o jsonpath='{.status.readyReplicas}')
+    mark_classified "$(classify_ceph_operator "$op_ready")" \
+        "kubectl create -f storage/ceph/crds.yaml -f storage/ceph/common.yaml -f storage/ceph/operator.yaml"
 
     health=$(kubectl_q -n rook-ceph get cephcluster -o jsonpath='{.items[0].status.ceph.health}')
-    case "$health" in
-        HEALTH_OK)
-            mark ok "CephCluster HEALTH_OK"
-            ;;
-        HEALTH_WARN)
-            mark fail "CephCluster HEALTH_WARN" \
-                      "kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status"
-            ;;
-        HEALTH_ERR)
-            mark fail "CephCluster HEALTH_ERR" \
-                      "kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status"
-            ;;
-        *)
-            mark skip "CephCluster non créé (kubectl create -f storage/ceph/cluster.yaml)"
-            ;;
-    esac
+    mark_classified "$(classify_ceph_health "$health")" \
+        "kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status"
 
     osd_up=$(kubectl_q -n rook-ceph get pods -l app=rook-ceph-osd --no-headers | grep -c Running || true)
     osd_total=$(kubectl_q -n rook-ceph get pods -l app=rook-ceph-osd --no-headers | wc -l | tr -d ' ')
-    if [ "$osd_total" -gt 0 ] && [ "$osd_up" = "$osd_total" ]; then
-        mark ok "${osd_up}/${osd_total} OSD Running"
-    elif [ "$osd_total" = "0" ]; then
-        mark skip "pas encore d'OSD (CephCluster pas appliqué)"
-    else
-        mark fail "${osd_up}/${osd_total} OSD Running" \
-                  "kubectl -n rook-ceph get pods -l app=rook-ceph-osd"
-    fi
+    mark_classified "$(classify_ceph_osd "$osd_up" "$osd_total")" \
+        "kubectl -n rook-ceph get pods -l app=rook-ceph-osd"
 fi
 
 # ─── Couche 6 — StorageClasses et PVC applicatives (cluster-level) ─────────
 section "StorageClasses et PVC (kubectl)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "StorageClasses/PVC : non audité (garde-fou de cible / kubectl indisponible)"
 else
     default_sc=$(kubectl_q get storageclass | awk '/\(default\)/ {print $1; exit}')
-    if [ "$default_sc" = "rook-ceph-block-replicated" ]; then
-        mark ok "StorageClass par défaut = rook-ceph-block-replicated"
-    elif [ -z "$default_sc" ]; then
-        mark fail "aucune StorageClass par défaut" \
-                  "kubectl apply -f storage/ceph/storageClass/block-replicated.yaml"
-    else
-        mark fail "défaut = $default_sc (attendu rook-ceph-block-replicated)" \
-                  "kubectl annotate sc $default_sc storageclass.kubernetes.io/is-default-class-"
-    fi
+    mark_classified "$(classify_sc_default "$default_sc")" \
+        "kubectl apply -f storage/ceph/storageClass/block-replicated.yaml"
 
     not_bound=$(kubectl_q get pvc --all-namespaces --no-headers | awk '$3 != "Bound" {print $1"/"$2}' | tr '\n' ' ')
     total_pvc=$(kubectl_q get pvc --all-namespaces --no-headers | wc -l | tr -d ' ')
-    if [ "$total_pvc" = "0" ]; then
-        mark skip "aucune PVC créée"
-    elif [ -z "$not_bound" ]; then
-        mark ok "${total_pvc} PVC Bound"
-    else
-        mark fail "PVC non Bound : $not_bound" "kubectl describe pvc ${not_bound%% *}"
-    fi
+    mark_classified "$(classify_pvc_bound "$not_bound" "$total_pvc")" \
+        "kubectl describe pvc ${not_bound%% *}"
 
     # PVC applicatives qui devraient être sur la classe par défaut (réplicat ×3)
     apps_on_ec=$(kubectl_q get pvc --all-namespaces -o jsonpath='{range .items[?(@.spec.storageClassName=="rook-ceph-block-ec")]}{.metadata.namespace}/{.metadata.name} {end}')
-    if [ -z "$apps_on_ec" ]; then
-        mark ok "aucune PVC applicative résiduelle sur rook-ceph-block-ec"
-    else
-        mark fail "PVC encore sur rook-ceph-block-ec : $apps_on_ec" \
-                  "éditer la PVC pour passer storageClassName: rook-ceph-block-replicated (ou recréer)"
-    fi
+    mark_classified "$(classify_pvc_no_ec "$apps_on_ec")" \
+        "éditer la PVC pour passer storageClassName: rook-ceph-block-replicated (ou recréer)"
 fi
 
 # ─── Couche 7 — Plateforme (registry + dashboard) ──────────────────────────
 section "Plateforme (registry + Kubernetes Dashboard)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "Plateforme : non audité (garde-fou de cible / kubectl indisponible)"
 else
     # ── Container registry ───────────────────────────────────────────────
     if kubectl_q get ns registry >/dev/null 2>&1; then
@@ -619,8 +629,8 @@ fi
 # INTERNE (pas ACME, cluster non exposé). On vérifie le déploiement et que la
 # chaîne d'émetteurs est prête. Skip propre tant que l'addon n'est pas déployé.
 section "TLS de bordure (cert-manager)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "non audité (garde-fou de cible / kubectl indisponible)"
 elif ! kubectl_q get ns cert-manager >/dev/null 2>&1; then
     mark skip "cert-manager : namespace absent (kubectl apply -f platform/cert-manager/cert-manager.yaml)"
 else
@@ -655,8 +665,8 @@ fi
 # Monitoring runtime : Prometheus/Alertmanager/Grafana + Loki (logs). Skip propre
 # tant que l'addon n'est pas déployé.
 section "Observabilité (monitoring — ADR 0016 palier 2)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "non audité (garde-fou de cible / kubectl indisponible)"
 elif ! kubectl_q get ns monitoring >/dev/null 2>&1; then
     mark skip "monitoring : namespace absent (kubectl apply -f platform/kube-prometheus-stack/)"
 else
@@ -699,8 +709,8 @@ fi
 # Postgres HA managé par CNPG, deux bases (event log Dagster + index pgvector),
 # sauvegardes vers S3 (plugin Barman). Skip propre tant que l'addon est absent.
 section "PostgreSQL managé (CloudNativePG — ADR 0024)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "non audité (garde-fou de cible / kubectl indisponible)"
 elif ! kubectl_q get ns cnpg-system >/dev/null 2>&1; then
     mark skip "CNPG : operator absent (kubectl apply --server-side -f platform/cloudnative-pg/operator.yaml)"
 else
@@ -750,8 +760,8 @@ fi
 # Orchestrateur DataOps : webserver + daemon, event log dans CloudNativePG.
 # Skip propre tant que l'addon n'est pas déployé.
 section "Orchestration (Dagster — ADR 0026)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "non audité (garde-fou de cible / kubectl indisponible)"
 elif ! kubectl_q get ns dagster >/dev/null 2>&1; then
     mark skip "Dagster : namespace absent (kubectl apply -f platform/dagster/)"
 else
@@ -776,8 +786,8 @@ fi
 # Store de lineage : API Marquez + UI web, store dans CloudNativePG (base marquez,
 # migrations Flyway). Skip propre tant que l'addon n'est pas déployé.
 section "Orchestration OpenLineage (Marquez — ADR 0028)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "non audité (garde-fou de cible / kubectl indisponible)"
 elif ! kubectl_q get ns marquez >/dev/null 2>&1; then
     mark skip "Marquez : namespace absent (kubectl apply -f platform/marquez/)"
 else
@@ -809,8 +819,8 @@ fi
 #     de l'exposition tout-Cilium (ADR 0020). Le principe #25 reste : services
 #     applicatifs en ClusterIP, exposition SEULEMENT via la bordure Gateway.
 section "Exposition réseau (Services NodePort / LoadBalancer)"
-if ! kubectl_ready; then
-    mark skip "kubectl indisponible"
+if ! cluster_target_ready; then
+    mark skip "non audité (garde-fou de cible / kubectl indisponible)"
 else
     # Allowlist : `ns/nom` des Service portés par un Gateway (bordure ADR 0020).
     gw_svcs=$(kubectl_q get svc -A -l gateway.networking.k8s.io/gateway-name \
