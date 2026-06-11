@@ -8,6 +8,11 @@
 - name: Deploy Ceph datalake (RGW object store)
   run_once: true
   block:
+    # CephObjectStore = CR Rook DENSIFIÉ par l'operator après création (defaults
+    # du spec) → generation N→N+1 → faux « changed » au rejeu immédiat, même
+    # mécanisme que CephCluster/CephFilesystem. hidden_fields:[managedFields,
+    # status] retire ce bruit du diff ; on boucle ensuite jusqu'à changed=0 pour
+    # absorber la densification résiduelle avant de finir (idempotence rejeu).
     - name: Apply the CephObjectStore (server-side)
       kubernetes.core.k8s:
         state: present
@@ -15,6 +20,14 @@
         server_side_apply:
           field_manager: ansible-ceph-datalake
           force_conflicts: true
+        hidden_fields:
+          - metadata.managedFields
+          - status
+      register: ceph_objstore_apply
+      until: not ceph_objstore_apply.changed
+      retries: '{{ ceph_rgw_ready_retries }}'
+      delay: '{{ ceph_rgw_ready_delay }}'
+      changed_when: false
 
     - name: Apply the datalake bucket StorageClass
       kubernetes.core.k8s:
