@@ -52,6 +52,7 @@ export default defineConfig({
     nav: [
       { text: 'Accueil', link: '/' },
       { text: 'Par où commencer', link: '/docs/demarrage' },
+      { text: 'Boîte à outils', link: '/docs/outils' },
       { text: 'Guide dev data', link: '/docs/guide-dev-data' },
       { text: 'Dev atlas', link: '/docs/dev-atlas' },
       { text: 'Glossaire', link: '/docs/glossaire' },
@@ -64,6 +65,7 @@ export default defineConfig({
         items: [
           { text: 'Accueil', link: '/' },
           { text: 'Par où commencer', link: '/docs/demarrage' },
+          { text: 'Boîte à outils (scripts)', link: '/docs/outils' },
           { text: 'Guide du développeur data', link: '/docs/guide-dev-data' },
           { text: 'Développeur atlas (point d’entrée)', link: '/docs/dev-atlas' },
           { text: 'Glossaire', link: '/docs/glossaire' },

@@ -18,6 +18,10 @@ est resté **diffus** : une dizaine d'ADR l'invoquent par un angle, aucun ne le
   [0051](0051-options-natives-ansible.md) — valeurs **génériques
   surchargeables**, aucune constante de déploiement en dur (le code marche pour
   tout déploiement).
+- [ADR 0050](0050-modele-reprise-role-ansible.md) — un rôle à effet de bord non
+  idempotent porte un **chemin de reprise** (`rescue:`) qui ramène à un état
+  re-jouable : la reproductibilité doit survivre à une **faute** en cours de
+  run.
 
 Faute de chapeau, le principe se perd dans les cas limites. Ces deux derniers
 jours l'ont montré en pratique : un run sur un banc **complété à la main** (NP
@@ -81,6 +85,24 @@ entrée ; `RESULTS.md` date et situe ses runs. La fraîcheur
 résultat reproductible mais **périmé** (le code a divergé depuis) doit être
 rejoué.
 
+### 5. Reprise prouvée par faute injectée
+
+Symétrique de la règle 2 : si l'idempotence (rejeu **sans** faute → `changed=0`)
+prouve qu'un rôle convergent ne diverge pas, alors un chemin de **reprise**
+(`rescue:` d'un rôle à effet de bord non idempotent — `kubeadm init`/`join`,
+[ADR 0050](0050-modele-reprise-role-ansible.md)) ne « compte » que s'il a été
+**exercé par une vraie faute**. Un `rescue:` jamais déclenché est du code non
+testé : on ne sait pas reproduire la reprise qu'il prétend offrir. La preuve est
+un **arrêt injecté** au protocole opposable, dans cet ordre : le 1er run
+**échoue** (la faute a pris), la **compensation est tracée** (`kubeadm reset`
+dans la sortie — le `rescue` a joué), puis le **re-jeu du même chemin nommé**
+([ADR 0045](0045-chemins-installation-banc-couches.md)) **réussit**. Tout écart
+invalide la preuve (faute non prise, demi-état laissé sans compensation, reprise
+insuffisante). C'est le pendant, pour la reprise, du gate `run_ansible_phase` :
+la fonction pure `classify_compensation` (`test/lima/bootstrap-fault-assert.sh`,
+testée hors banc) rend ce verdict, comme `classify_idempotence` rend celui de la
+règle 2.
+
 ## Statut
 
 Accepted. Principe-chapeau : ne remplace ni n'invalide aucun ADR ; il les
@@ -92,8 +114,9 @@ Accepted. Principe-chapeau : ne remplace ni n'invalide aucun ADR ; il les
   reproductible ») au lieu de quatre arguments épars. Les revues, la
   consignation et la CI s'y réfèrent.
 - **Prix à payer** : prouver coûte plus que constater — un rejeu d'idempotence
-  en plus, un run from-scratch là où un état bricolé « marchait », la discipline
-  de consigner le commit. C'est le coût de la confiance, assumé (esprit
+  en plus, un **arrêt injecté** pour exercer chaque chemin de reprise, un run
+  from-scratch là où un état bricolé « marchait », la discipline de consigner le
+  commit. C'est le coût de la confiance, assumé (esprit
   [ADR 0034](0034-validation-e2e-from-scratch.md)).
 - **Honnêteté des Runs** (déjà en vigueur,
   [ADR 0023](0023-plateforme-exemple-generique.md)) : on ne réécrit pas un

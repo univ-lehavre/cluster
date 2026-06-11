@@ -1,0 +1,110 @@
+# Boîte à outils — quels scripts lancer, et pour quoi
+
+Catalogue des scripts **opérables** du dépôt (hors playbooks Ansible, qui sont
+joués par l'orchestrateur de banc ou décrits dans les RUNBOOK). Doctrine du
+choix d'outil : [ADR 0049](decisions/0049-doctrine-choix-outil-par-action.md) —
+Ansible **converge l'état durable** ; le shell/Python porte l'**orchestration**,
+le **diagnostic en lecture seule**, l'**accès**, les **tests** et les actes que
+Ansible ne peut pas faire (poule/œuf, sans dépôt, destructif conscient).
+
+> Les chemins sont relatifs à la racine du dépôt. Chaque script documente son
+> usage précis dans son en-tête (`head -20 <script>`). Les valeurs montrées ici
+> sont génériques ([ADR 0023](decisions/0023-plateforme-exemple-generique.md)) —
+> surcharger avec les vraies valeurs de votre déploiement (config locale).
+
+## Prérequis & contexte — « quels sont MES hôtes ? »
+
+Plusieurs scripts (`bootstrap/state.sh`, `bootstrap/security/report.sh`…)
+attendent une **liste d'hôtes** ou un **kubeconfig**. Or, par conception
+([ADR 0023](decisions/0023-plateforme-exemple-generique.md)), le dépôt **ne
+contient pas** tes vrais hôtes : ils vivent en config locale **gitignorée**.
+
+| Tu cherches…             | Où ça vit                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| Hôtes **prod**           | `bootstrap/hosts.yaml` (gitignoré ; copié de `bootstrap/hosts.example.yaml`) |
+| Hôtes **banc Lima**      | les VMs réelles — `limactl list` (noms `cp1`, `node1`…)                      |
+| `kubeconfig` du **banc** | `test/lima/.work/kubeconfig` (généré par `run-phases.sh`)                    |
+
+**Le plus simple — laisse `env.sh` dériver ton contexte et t'imprimer les
+commandes exactes à copier** (hôtes courants + invocation `state.sh` par nœud +
+export du kubeconfig), sans rien deviner :
+
+```bash
+test/lima/env.sh                    # auto-détecte (banc Lima ou prod)
+eval "$(test/lima/env.sh export)"   # exporte KUBECONFIG du banc dans ton shell
+```
+
+Exemple de ce qu'il imprime sur un banc Lima à 3 nœuds :
+l'`USER_REMOTE=lima SSH_OPTS='-F ~/.lima/cp1/ssh.config' bootstrap/state.sh cp1`
+prêt à coller, pour chaque nœud. En prod, il lit `bootstrap/hosts.yaml` et te
+donne `bootstrap/state.sh <tes-nœuds>`.
+
+## Monter et piloter un banc de test (local)
+
+Le banc Lima est l'environnement de validation e2e
+([ADR 0034](decisions/0034-validation-e2e-from-scratch.md)). Tout passe par un
+**orchestrateur unique** :
+
+| Pour…                                               | Commande                                                         | Détails                                                                                  |
+| --------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Monter le banc par étapes (gate par phase)          | `test/lima/run-phases.sh <phase>`                                | [test/lima/README.md](../test/lima/README.md)                                            |
+| Monter un **chemin nommé** complet                  | `test/lima/run-phases.sh socle\|atlas\|atlas-ceph\|storage-real` | [ADR 0045](decisions/0045-chemins-installation-banc-couches.md)                          |
+| Voir l'état du banc (VMs, nœuds, phases, UIs)       | `test/lima/run-phases.sh status`                                 | lecture seule                                                                            |
+| (Ré)exporter le kubeconfig du banc                  | `test/lima/run-phases.sh kubeconfig`                             |                                                                                          |
+| Détruire le banc (VMs + disques)                    | `test/lima/run-phases.sh down`                                   | destructif                                                                               |
+| Prouver une **reprise après faute** (arrêt injecté) | `BANC_JETABLE=1 test/lima/run-phases.sh bootstrap-fault`         | [ADR 0050](decisions/0050-modele-reprise-role-ansible.md) — **destructif**, banc jetable |
+
+## Accès développeur
+
+| Pour…                                                                                         | Commande                                                                    | Détails                                               |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Rendre le banc consommable depuis l'hôte (URLs `*.cluster.lan` cliquables + secrets + `.env`) | `test/lima/access.sh`                                                       | [ADR 0048](decisions/0048-acces-local-developpeur.md) |
+| Premier accès SSH à des nœuds Debian fraîchement installés (poule/œuf avant Ansible)          | `bootstrap/first-access.sh`                                                 | prérequis d'Ansible                                   |
+| Identifiants / gestion du dashboard Kubernetes                                                | `platform/k8s-dashboard/manage.sh`, `platform/k8s-dashboard/credentials.sh` |                                                       |
+
+## Diagnostic & reporting (lecture seule)
+
+Ansible **converge** l'état ; il ne **reporte** pas. Le diagnostic vit donc en
+shell ([ADR 0049](decisions/0049-doctrine-choix-outil-par-action.md)).
+
+| Pour…                                                                 | Commande                              | Détails                                                                                          |
+| --------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **Dériver ton contexte** (hôtes courants + commandes prêtes à copier) | `test/lima/env.sh`                    | banc Lima ou prod ; voir « Prérequis & contexte » ci-dessus                                      |
+| État des **nœuds** face à l'état attendu (drift + prochaine étape)    | `bootstrap/state.sh <hôte…>`          | SSH ; hôtes **requis** (cf. `env.sh`) ; verdicts purs testés (`bootstrap/lib/state-classify.sh`) |
+| Tableau de bord du **durcissement** (preuves observables par hôte)    | `bootstrap/security/report.sh`        | [bootstrap/security/](../bootstrap/security/README.md)                                           |
+| Vérifier l'**épinglage des images** par digest d'index multi-arch     | `scripts/audit-image-digests.sh`      | invariant [ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)                 |
+| Vérifier la **fraîcheur des preuves** de banc (par chemin)            | `test/lima/check-freshness.sh`        | [ADR 0042](decisions/0042-fraicheur-preuves-banc.md)                                             |
+| Détecter les pages Markdown **orphelines**                            | `python3 scripts/check_md_orphans.py` | [ADR 0029](decisions/0029-markdown-atteignable-doc.md)                                           |
+
+## Tests end-to-end
+
+| Pour…                                                                     | Commande                                             | Détails                                                 |
+| ------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| Lancer **tous** les scénarios e2e (PASS/FAIL récapitulé)                  | `test/scenarios/run-all.sh`                          | [test/scenarios/README.md](../test/scenarios/README.md) |
+| Lancer **un** scénario (résilience, sécurité active, DataOps, GitOps, UI) | `test/scenarios/NN-*.sh`                             | scénarios 01→29                                         |
+| Smoke S3 réel (PUT/GET/DELETE) sur le RGW Ceph                            | `storage/ceph/storageClass/datalake/smoke-test.sh`   |                                                         |
+| Tests des **fonctions pures** (bash)                                      | `pnpm test:shell` (bats)                             | `test/unit/`                                            |
+| Spike de latence Cluster Mesh (jetable)                                   | `test/spikes/clustermesh-latency/{up,probe,down}.sh` |                                                         |
+
+## Convergence hors Ansible (cas particuliers assumés)
+
+Ces actes ne passent **pas** par Ansible, par nécessité
+([ADR 0049](decisions/0049-doctrine-choix-outil-par-action.md)) :
+
+| Pour…                                          | Commande                                      | Pourquoi pas Ansible                                                                          |
+| ---------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Poser Cilium (CNI) dans la VM                  | `bootstrap/cni.sh` (joué par l'orchestrateur) | tourne **dans** la VM, sans le dépôt                                                          |
+| Wipe destructif des disques avant rebuild Ceph | `storage/ceph/cleanup.sh`                     | destructif, lancé **consciemment**                                                            |
+| Seed du dépôt Gitea (org/repo/workflow)        | `test/lima/gitea-init.sh`                     | **données**, pas convergence ([ADR 0044](decisions/0044-topologie-deploiement-banc-atlas.md)) |
+| Anonymiser un `.env` en `.env-example`         | `python3 bootstrap/security/blur_env.py`      | texte/regex pur → Python                                                                      |
+
+## Validation avant de pousser
+
+| Pour…                                                                               | Commande          |
+| ----------------------------------------------------------------------------------- | ----------------- |
+| Lint complet (format, yamllint, shellcheck, kubeconform, ansible-lint, jscpd, bats) | `pnpm lint`       |
+| Construire la doc (échoue sur lien mort)                                            | `pnpm docs:build` |
+
+> **markdownlint** et **trivy** sont des jobs CI séparés non couverts par
+> `pnpm lint` — les reproduire localement avant de pousser
+> ([CONTRIBUTING.md](../CONTRIBUTING.md)).
