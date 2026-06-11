@@ -14,6 +14,62 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.33.0](https://github.com/univ-lehavre/cluster/compare/v2.32.0...v2.33.0) (2026-06-11)
+
+
+### Features
+
+* **ansible:** options natives hors-banc + règle « pas de constante en dur » (ADR 0051/0023) ([ce193f2](https://github.com/univ-lehavre/cluster/commit/ce193f236271c97def2b51def2806def2c19d20b))
+* **banc:** accès dev atlas en une commande (access.sh) + page récap + ADR 0048 ([7b6158f](https://github.com/univ-lehavre/cluster/commit/7b6158fbfc35d1aa9b71e03c91b3625669d3ff4a))
+* **banc:** access.sh — accès dev en une commande (URLs, secrets, .env atlas) ([4d738c3](https://github.com/univ-lehavre/cluster/commit/4d738c3356506b273f9f85258d8bfaa2e6121ca1))
+* **banc:** garde-fou de fraîcheur par chemin ([#244](https://github.com/univ-lehavre/cluster/issues/244)) ([6f5bb50](https://github.com/univ-lehavre/cluster/commit/6f5bb50c9c5b37a31ab96f8512ad112d761332e3))
+* **banc:** garde-fou de fraîcheur PAR CHEMIN (ADR 0045 §6) ([7723187](https://github.com/univ-lehavre/cluster/commit/77231873a14c26532c13c9790d8117298b9ea38f)), closes [#244](https://github.com/univ-lehavre/cluster/issues/244)
+* **banc:** metrics-server natif ([#252](https://github.com/univ-lehavre/cluster/issues/252)) + disques bruts conditionnels Ceph ([#235](https://github.com/univ-lehavre/cluster/issues/235)) ([76ef61b](https://github.com/univ-lehavre/cluster/commit/76ef61b96b3b46502352efc9bf8ca431e1fbdcb1))
+* **banc:** porter local-path en rôle Ansible (StorageClass default) ([#262](https://github.com/univ-lehavre/cluster/issues/262)) ([3d5fa83](https://github.com/univ-lehavre/cluster/commit/3d5fa837a0b6b82a0f61e1712a2fc1b620328158))
+* **banc:** porter metrics-server + local-path en rôles Ansible + gate idempotence ([#262](https://github.com/univ-lehavre/cluster/issues/262)/[#265](https://github.com/univ-lehavre/cluster/issues/265)) ([6e32d13](https://github.com/univ-lehavre/cluster/commit/6e32d1368bd2a4cdc0d5b472cea7a40ee17dae6e))
+* **banc:** porter metrics-server en rôle Ansible + gate idempotence ([#262](https://github.com/univ-lehavre/cluster/issues/262)/[#265](https://github.com/univ-lehavre/cluster/issues/265)) ([5a09e18](https://github.com/univ-lehavre/cluster/commit/5a09e1828078b8b4fcf5119d8fc21ebabaeede18))
+* **bootstrap:** pré-vol Ceph (lvm2 + disques bruts) — drift L6 en assert clair ([b07f8ac](https://github.com/univ-lehavre/cluster/commit/b07f8ace013d70374b10ed965c58581b8a51fea0))
+* **bootstrap:** pré-vol Ceph (lvm2 + disques) — drift L6 en assert clair ([15bd75d](https://github.com/univ-lehavre/cluster/commit/15bd75d89fdf1b40445f51edc93f686cb94cc472))
+* **contract:** patron .env consommable par atlas (généré par access.sh) ([b8a65e5](https://github.com/univ-lehavre/cluster/commit/b8a65e567a9a2ff13bb51b062ca275fcbb3b9c1b))
+* **netpol:** egress internet pour le sync d'un snapshot ouvert (dagster) ([353a0d0](https://github.com/univ-lehavre/cluster/commit/353a0d04e50c3e6b5066be964050e913b79b3901)), closes [#256](https://github.com/univ-lehavre/cluster/issues/256)
+* **netpol:** egress internet pour le sync du snapshot openalex (dagster) ([f187e82](https://github.com/univ-lehavre/cluster/commit/f187e82e54166f678e8915262c28ca6d7631f3ea))
+* **test:** métrologie par nœud dans runs-history ([#241](https://github.com/univ-lehavre/cluster/issues/241)) ([cd7a3e1](https://github.com/univ-lehavre/cluster/commit/cd7a3e1dabc07712f1e1117e50339947148b3cd8))
+* **test:** métrologie par nœud dans runs-history ([#241](https://github.com/univ-lehavre/cluster/issues/241)) ([92484f7](https://github.com/univ-lehavre/cluster/commit/92484f7e677ad100a8fb81f974b0ea3d27e9672f))
+* **test:** scénario 29 — harnais E2E paramétrable pour code-location externe ([#264](https://github.com/univ-lehavre/cluster/issues/264)) ([f894198](https://github.com/univ-lehavre/cluster/commit/f894198b55fd56222cb87df03a4a3fa9a1eb2605))
+
+
+### Bug Fixes
+
+* **banc:** limactl start --yes — pas de prompt à la création de VM ([0ac5f8a](https://github.com/univ-lehavre/cluster/commit/0ac5f8a48ccb68d1333a53a1b4486444f69c1d61))
+* **banc:** newline final dans runs-history.yaml (métriques [#217](https://github.com/univ-lehavre/cluster/issues/217)) ([5a99d18](https://github.com/univ-lehavre/cluster/commit/5a99d18ca0aab365f7fa66943ab05f1467f24f5a))
+* **banc:** probe egress — supprimer le double 000 (curl émet déjà 000) ([7e5b223](https://github.com/univ-lehavre/cluster/commit/7e5b2235662488accd4b02fcd5f2e3c77e16da78)), closes [#256](https://github.com/univ-lehavre/cluster/issues/256)
+* **bootstrap:** apt_repository → deb822_repository (déprécié en ansible-core 2.25) ([a395fe2](https://github.com/univ-lehavre/cluster/commit/a395fe2b87ea8490eb05c6bc95c46277e321f584))
+* **ci:** shellcheck disable SC1083 sur le KEEP Jinja du template etcd ([33cf7ec](https://github.com/univ-lehavre/cluster/commit/33cf7ec98a221e7ec988e71defec21c9e5fea3f1))
+* **dagster:** poser allow-internet-egress depuis le rôle (sync OpenAlex) ([7ccd56d](https://github.com/univ-lehavre/cluster/commit/7ccd56d945618e7ad049e147f6e0dff3a3448d96)), closes [#256](https://github.com/univ-lehavre/cluster/issues/256)
+* **dataops:** débloquer SeaweedFS (volume.max) + harnais E2E code-location externe ([#264](https://github.com/univ-lehavre/cluster/issues/264)) ([7132ded](https://github.com/univ-lehavre/cluster/commit/7132ded9b2a7a1b5d751dea93f63e82ed78f9229))
+* **seaweedfs:** débloquer les écritures S3 (volume.max) + NP s3-egress dagster ([#264](https://github.com/univ-lehavre/cluster/issues/264)) ([1ee2d90](https://github.com/univ-lehavre/cluster/commit/1ee2d901027399812ba02a6605e70c3f07c1a817))
+
+
+### Refactor
+
+* **secu:** porter blur-env.pl en Python (ADR 0049, Perl en sursis) ([176759d](https://github.com/univ-lehavre/cluster/commit/176759db3b18d4091f3b96634ea47577b88bab2c)), closes [#262](https://github.com/univ-lehavre/cluster/issues/262)
+
+
+### Documentation
+
+* **adr:** acter cilium-expo + CRDs Gateway API comme exception cni.sh (0049) ([23d1b25](https://github.com/univ-lehavre/cluster/commit/23d1b25941117f202ade26420048be97e956b634)), closes [#262](https://github.com/univ-lehavre/cluster/issues/262)
+* **adr:** doctrine du choix d'outil + options natives + blur_env Python (0049/0050/0051) ([c043d3b](https://github.com/univ-lehavre/cluster/commit/c043d3b80dd5139761e3e4056acf788b1c41ac8d))
+* **adr:** doctrine du choix d'outil par action (0049/0050/0051) ([58d96f0](https://github.com/univ-lehavre/cluster/commit/58d96f01db3d4d5e11596a077354d90126833184))
+* **adr:** seuil par chemin implémenté (0042 amendé, 0045 §6) ([f7502e0](https://github.com/univ-lehavre/cluster/commit/f7502e0491e1ebfee830a1448438377ad2d2146f)), closes [#244](https://github.com/univ-lehavre/cluster/issues/244)
+* **atlas:** page récap dev-atlas + ADR 0048 + guide réécrit autour d'access.sh ([716915a](https://github.com/univ-lehavre/cluster/commit/716915a3eded78785ed41f9070e574e5af8581b3))
+* **banc:** consigner le chemin atlas opérationnel (27/28 + metrics-server) ([2cd5d59](https://github.com/univ-lehavre/cluster/commit/2cd5d5917a7e98d7cd480aa9d912b46bcab425c2))
+* **banc:** consigner le run preuve egress internet dagster ([#256](https://github.com/univ-lehavre/cluster/issues/256)) ([5438244](https://github.com/univ-lehavre/cluster/commit/5438244d75ff847e7ab54bdb34b700acd203a55d))
+* **banc:** re-preuve from-scratch du chemin atlas (27/28, egress, [#235](https://github.com/univ-lehavre/cluster/issues/235)) ([198e915](https://github.com/univ-lehavre/cluster/commit/198e9157627e2a30fbb3439d67ca146518886877))
+* **dataops:** branchement code-location dagster + note egress internet ([a778ede](https://github.com/univ-lehavre/cluster/commit/a778edef8b2a4cd25380476a5048a908c9757712)), closes [#256](https://github.com/univ-lehavre/cluster/issues/256)
+* **dataops:** kubectl top opérant sur le chemin atlas ([#252](https://github.com/univ-lehavre/cluster/issues/252)) ([906f9e0](https://github.com/univ-lehavre/cluster/commit/906f9e0153a6ce7e5a413abed790d4319f2732fc))
+* **secu:** re-justifier le root de Promtail ([#234](https://github.com/univ-lehavre/cluster/issues/234)) ([319d1a0](https://github.com/univ-lehavre/cluster/commit/319d1a04b51a6991a3500c0e0e54ba9657f6b611))
+* **secu:** re-justifier le root de Promtail par une raison technique ([#234](https://github.com/univ-lehavre/cluster/issues/234)) ([8be3a2f](https://github.com/univ-lehavre/cluster/commit/8be3a2f40da2657842b848b57b4d5ea97fac2217))
+
 ## [2.32.0](https://github.com/univ-lehavre/cluster/compare/v2.31.0...v2.32.0) (2026-06-10)
 
 
