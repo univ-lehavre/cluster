@@ -68,10 +68,22 @@
     # rouvre le diff → la tâche redevient changed. Defaults = prod (ADR 0023) ;
     # le banc surcharge ceph_metadata_device/ceph_osd_memory_request en -e.
     #
-    # `hidden_fields: [metadata.managedFields]` : le SSA réécrit managedFields
-    # (ownership entre field managers), non masqué par défaut → bruit qui ferait
-    # un faux `changed`. On masque CE champ (et lui seul) du diff, jamais un champ
-    # de spec. (hidden_fields : kubernetes.core >= 3.0.0 ; dépôt épinglé 6.4.0.)
+    # `hidden_fields` retire du DIFF d'idempotence deux champs qui appartiennent à
+    # l'operator / au SSA, JAMAIS au spec désiré que le rôle déclare :
+    #  - metadata.managedFields : réécrit par le SSA (ownership entre field
+    #    managers) → bruit qui ferait un faux `changed`.
+    #  - status : Rook patche .status (health, versions.osd, conditions) EN CONTINU
+    #    après phase=Ready. Le module kubernetes.core compare l'objet ENTIER
+    #    (existing avant apply vs instance après apply, status inclus) ; comme
+    #    run_ansible_phase REJOUE immédiatement, .status a bougé entre les deux
+    #    lectures → recursive_diff non vide → faux `changed=1` TRANSITOIRE (constaté
+    #    Run #14, atlas-ceph). Ce n'est PAS une bump generation/resourceVersion (le
+    #    module les ignore déjà) — d'où l'inefficacité d'une gate durcie sur
+    #    generation==observedGeneration. Masquer .status tue le faux changed PAR
+    #    CONSTRUCTION (pas un pari de timing), déterministe (ADR 0052 §3).
+    # FIDÉLITÉ (ADR 0051) : on ne masque QUE managedFields + status ; le diff porte
+    # toujours sur TOUT le .spec désiré → un vrai changement (digest, metadataDevice,
+    # mémoire OSD) rouvre le `changed`. (hidden_fields : kubernetes.core >= 3.0.0.)
     - name: Load the frozen CephCluster manifest
       ansible.builtin.set_fact:
         ceph_cluster_manifest: "{{ lookup('file', ceph_cluster_src) | from_yaml }}"
@@ -93,6 +105,7 @@
           force_conflicts: true
         hidden_fields:
           - metadata.managedFields
+          - status
 
     - name: Apply the Rook toolbox
       kubernetes.core.k8s:
@@ -141,19 +154,14 @@
         ceph_cr: '{{ ceph_cluster_status.resources[0] | default({}) }}'
         ceph_status: '{{ ceph_cr.status.ceph | default({}) }}'
         ceph_health_codes: '{{ ceph_status.details | default({}) | list }}'
-      # On exige AUSSI phase=Ready ET generation==observedGeneration : Rook
-      # continue de réconcilier le spec du CR pendant ~30 s après que HEALTH_OK +
-      # OSD up sont atteints (phase encore « Progressing »). Si la gate se
-      # contentait de la santé, le 1er passage se terminerait sur un CR PAS encore
-      # figé → un rejeu immédiat (run_ansible_phase) verrait un champ de spec
-      # bouger → faux « changed=1 » transitoire (constaté Run #14 + atlas-ceph).
-      # generation==observedGeneration = Rook a digéré le spec → l'apply SSA au
-      # rejeu est alors stable. C'est une LECTURE (changed_when:false préservé).
+      # On exige AUSSI phase=Ready (le CR a convergé selon Rook), en plus de la
+      # santé Ceph. NB : l'idempotence du rejeu n'est PAS assurée par cette gate
+      # mais par `hidden_fields: [status]` sur l'apply (le faux changed transitoire
+      # venait d'un diff .status, pas d'une réconciliation de spec — cf. la tâche
+      # Apply ci-dessus). C'est une LECTURE (changed_when:false préservé).
       until: >-
         ceph_cluster_status.resources | length > 0
         and (ceph_cr.status.phase | default('')) == 'Ready'
-        and (ceph_cr.metadata.generation | default(-1))
-            == (ceph_cr.status.observedGeneration | default(-2))
         and (
           (ceph_status.health | default('')) == 'HEALTH_OK'
           or (
