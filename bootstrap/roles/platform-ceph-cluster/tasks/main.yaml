@@ -155,10 +155,7 @@
         ceph_status: '{{ ceph_cr.status.ceph | default({}) }}'
         ceph_health_codes: '{{ ceph_status.details | default({}) | list }}'
       # On exige AUSSI phase=Ready (le CR a convergé selon Rook), en plus de la
-      # santé Ceph. NB : l'idempotence du rejeu n'est PAS assurée par cette gate
-      # mais par `hidden_fields: [status]` sur l'apply (le faux changed transitoire
-      # venait d'un diff .status, pas d'une réconciliation de spec — cf. la tâche
-      # Apply ci-dessus). C'est une LECTURE (changed_when:false préservé).
+      # santé Ceph. C'est une LECTURE (changed_when:false préservé).
       until: >-
         ceph_cluster_status.resources | length > 0
         and (ceph_cr.status.phase | default('')) == 'Ready'
@@ -174,3 +171,39 @@
             == (ceph_osd_expected | int)
       retries: '{{ ceph_health_retries }}'
       delay: '{{ ceph_health_delay }}'
+
+    # ── Stabilisation de la generation (idempotence) ────────────────────────────
+    # CAUSE RACINE du faux « changed=1 » au rejeu, ENFIN capturée par --diff (Run
+    # #14, atlas-ceph ×3) : quand on applique un CephCluster au spec MINIMAL,
+    # l'admission Rook le DENSIFIE avec ses défauts (cephVersion.allowUnsupported,
+    # storage.allowDeviceClassUpdate, healthCheck.*.disabled, interval 1m0s→60s…) —
+    # ce qui INCRÉMENTE metadata.generation. Si le 1er passage se termine AVANT que
+    # Rook ait fini de densifier (phase=Ready mais generation encore en train de
+    # bouger), un rejeu immédiat (run_ansible_phase) re-densifie → generation N→N+1
+    # → VRAI changed (pas du bruit status/managedFields : ce sont des champs de
+    # SPEC ajoutés par Rook). Une fois la generation FIGÉE, tout apply est
+    # changed=0 (prouvé). On attend donc que generation NE BOUGE PLUS : 2 lectures
+    # consécutives (espacées de ceph_health_delay) avec la MÊME generation = Rook a
+    # fini de densifier → le rejeu sera idempotent. LECTURE (changed_when:false).
+    # On boucle un APPLY SSA jusqu'à ce qu'il soit lui-même changed=0 : tant que
+    # Rook densifie encore le spec, l'apply re-modifie le CR (changed=true) ; dès
+    # que la densification est figée, l'apply est changed=0. C'est LE signal direct
+    # d'idempotence (on teste exactement l'opération du rejeu). check_mode:false +
+    # changed_when basé sur le résultat de l'apply ; on reboucle via until tant que
+    # changed. NB : cet apply EST idempotent une fois stable (re-jeu run_ansible_phase
+    # → changed=0) ; ici on ABSORBE juste la densification résiduelle avant de finir.
+    - name: Stabilise the CephCluster spec (absorb Rook defaulting before declaring done)
+      kubernetes.core.k8s:
+        state: present
+        definition: '{{ ceph_cluster_desired }}'
+        server_side_apply:
+          field_manager: ansible-ceph-cluster
+          force_conflicts: true
+        hidden_fields:
+          - metadata.managedFields
+          - status
+      register: ceph_stabilise
+      until: not ceph_stabilise.changed
+      retries: '{{ ceph_health_retries }}'
+      delay: '{{ ceph_health_delay }}'
+      changed_when: false
