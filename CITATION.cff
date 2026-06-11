@@ -26,7 +26,7 @@ keywords:
   - ansible
   - hyperconvergence
 license: MIT
-version: 2.6.1
+version: 2.33.0
 date-released: '2026-06-01'
-# Renseigner un DOI (ex. Zenodo) pour une citation pérenne :
-# doi: '10.5281/zenodo.XXXXXXX'
+# DOI Zenodo pour une citation pérenne (concept DOI, toutes versions) :
+doi: '10.5281/zenodo.20287209'
