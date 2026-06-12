@@ -224,4 +224,4 @@ gates par étape sont décrits dans
 changement de cette nature doit passer par le banc ([`test/`](test/)) avant la
 prod**. Le _pourquoi_ de chaque choix structurant est tracé dans les
 [ADR](docs/decisions/). Le reste-à-faire priorisé vit dans
-[`docs/audit/12-plan-action.md`](docs/audit/12-plan-action.md).
+[`docs/audit/2026-05-29/12-plan-action.md`](docs/audit/2026-05-29/12-plan-action.md).

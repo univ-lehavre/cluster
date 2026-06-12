@@ -20,7 +20,7 @@ matériel** (perte d'un disque, d'un nœud), mais **pas** :
 Aggravant : la StorageClass bloc par défaut est en `reclaimPolicy: Delete` et le
 datalake en `preservePoolsOnDelete: false` — un `delete` de PVC ou de
 `CephObjectStore` est aujourd'hui **irréversible** (cf. audit
-[08-operabilite](../audit/08-operabilite.md)).
+[08-operabilite](../audit/2026-05-29/08-operabilite.md)).
 
 ## Décision
 

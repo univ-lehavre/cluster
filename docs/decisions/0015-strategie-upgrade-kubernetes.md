@@ -2,12 +2,12 @@
 
 ## Contexte
 
-L'audit ([08-operabilite](../audit/08-operabilite.md)) relève l'absence de
-stratégie d'upgrade Kubernetes formalisée : le dépôt sait **installer**
-(bootstrap greenfield) mais pas **monter de version** un cluster en service. Or
-K8s publie une mineure tous les ~4 mois et chaque mineure n'est supportée que
-~14 mois → il faut une procédure répétable, sinon le cluster dérive hors
-support.
+L'audit ([08-operabilite](../audit/2026-05-29/08-operabilite.md)) relève
+l'absence de stratégie d'upgrade Kubernetes formalisée : le dépôt sait
+**installer** (bootstrap greenfield) mais pas **monter de version** un cluster
+en service. Or K8s publie une mineure tous les ~4 mois et chaque mineure n'est
+supportée que ~14 mois → il faut une procédure répétable, sinon le cluster
+dérive hors support.
 
 Deux voies possibles :
 

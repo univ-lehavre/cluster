@@ -90,10 +90,10 @@ lineage, qualité, contrats, propriété/PII**. **Seul le lineage est livré**
   : convention versionnée dans `atlas`, vérifiée en CI / à l'exécution.
 
 > **Trou RGPD prioritaire** : l'audit
-> [`08-operabilite.md`](../audit/08-operabilite.md) note que le datalake
-> provisionne des buckets de **corpus de réseaux sociaux** (source de données
-> ouverte, générisée — ADR 0023) porteurs de données personnelles, alors que
-> [ADR 0003](0003-pas-de-chiffrement-ceph-tailscale.md)/
+> [`08-operabilite.md`](../audit/2026-05-29/08-operabilite.md) note que le
+> datalake provisionne des buckets de **corpus de réseaux sociaux** (source de
+> données ouverte, générisée — ADR 0023) porteurs de données personnelles, alors
+> que [ADR 0003](0003-pas-de-chiffrement-ceph-tailscale.md)/
 > [0011](0011-registry-http-sans-auth.md)/[0012](0012-rstudio-disable-auth.md)
 > reposent sur « pas de PII », **sans politique de rétention / minimisation /
 > base légale**. La qualification (référent DPO) de ces datasets est le

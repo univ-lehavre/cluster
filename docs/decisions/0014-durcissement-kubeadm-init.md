@@ -5,8 +5,8 @@
 Le control plane est initialisé par
 [`k8s-initialization`](../../bootstrap/roles/k8s-initialization/tasks/main.yaml)
 avec un `kubeadm init` **en ligne de commande** (sans `--config`). L'audit P6
-([06-securite](../audit/06-securite.md), item #21) relève trois manques au
-niveau du plan de contrôle, qu'**aucun ADR ne couvrait** jusqu'ici :
+([06-securite](../audit/2026-05-29/06-securite.md), item #21) relève trois
+manques au niveau du plan de contrôle, qu'**aucun ADR ne couvrait** jusqu'ici :
 
 1. **Aucune audit-policy API server** : les appels à l'API ne sont pas
    journalisés (qui a fait quoi sur le cluster).

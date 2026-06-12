@@ -232,10 +232,10 @@ Deux choix de cadrage relient cette démarche au fil rouge du modèle de menace 
   bout en bout (mail capté par Mailpit) ;
 - **la détection comportementale runtime est différée** : ni Falco ni Tetragon
   pour l'instant (cf.
-  [note runtime/admission](../audit/note-runtime-admission.md)), un ADR dédié
-  tranchera. C'est cohérent avec la prudence opérationnelle d'un cluster
-  mono-admin non-HA — on n'ajoute pas un sous-système stateful sans décision
-  arbitrée.
+  [note runtime/admission](../audit/2026-05-29/note-runtime-admission.md)), un
+  ADR dédié tranchera. C'est cohérent avec la prudence opérationnelle d'un
+  cluster mono-admin non-HA — on n'ajoute pas un sous-système stateful sans
+  décision arbitrée.
 
 Comme tous les ADR de cette vue, 0025 **se soumet au modèle de menace de 0003**
 : les techniques offensives ne valent que sur un **banc isolé jetable**, jamais

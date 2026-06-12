@@ -5,8 +5,9 @@
 > sur chaque ligne modifiée). État du dépôt à la **v2.12.2**.
 
 Suivi de la mise en œuvre du plan d'audit
-([`docs/audit/12-plan-action.md`](docs/audit/12-plan-action.md)) et des écarts
-constatés entre ce plan et les audits thématiques détaillés (01→11).
+([`docs/audit/2026-05-29/12-plan-action.md`](docs/audit/2026-05-29/12-plan-action.md))
+et des écarts constatés entre ce plan et les audits thématiques détaillés
+(01→11).
 
 Légende : ✅ fait · 🔲 à faire · ⏸️ reporté · ❓ à vérifier finement.
 

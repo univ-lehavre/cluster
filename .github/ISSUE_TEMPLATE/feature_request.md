@@ -12,7 +12,7 @@ assignees: ''
 
 ## Proposition
 
-<!-- Solution envisagée. Lier l'item d'audit (docs/audit/12-plan-action.md) ou
+<!-- Solution envisagée. Lier l'item d'audit (docs/audit/2026-05-29/12-plan-action.md) ou
      le STATUS.md si applicable. -->
 
 ## Alternatives envisagées

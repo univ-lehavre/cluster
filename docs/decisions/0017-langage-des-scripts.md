@@ -9,12 +9,12 @@
 
 ## Contexte
 
-L'audit ([09-langage-scripts](../audit/09-langage-scripts.md)) a remis en cause
-le choix de **bash** pour les ~890 LOC de scripts du dépôt (`state.sh`,
-`run-phases.sh`, scénarios, `cni.sh`, helpers). Verdict de l'audit : bash est le
-**bon outil** ici (orchestration de CLIs : kubectl, ceph, vagrant, ssh), mais le
-choix n'était formalisé nulle part → un contributeur pourrait réécrire en Go ou
-Python « pour faire mieux », à perte.
+L'audit ([09-langage-scripts](../audit/2026-05-29/09-langage-scripts.md)) a
+remis en cause le choix de **bash** pour les ~890 LOC de scripts du dépôt
+(`state.sh`, `run-phases.sh`, scénarios, `cni.sh`, helpers). Verdict de l'audit
+: bash est le **bon outil** ici (orchestration de CLIs : kubectl, ceph, vagrant,
+ssh), mais le choix n'était formalisé nulle part → un contributeur pourrait
+réécrire en Go ou Python « pour faire mieux », à perte.
 
 ## Décision
 

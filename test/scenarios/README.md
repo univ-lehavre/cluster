@@ -195,8 +195,9 @@ Chaque script :
 >   `STRICT_ALERT=1` le fait échouer si la chaîne est absente (CI post-#131).
 >
 > **Détection runtime différée** : aucun Falco/Tetragon (cf.
-> [note runtime/admission](../../docs/audit/note-runtime-admission.md), ADR 0025
-> §4) — l'alerte sur un comportement adverse _dans_ un pod n'est pas couverte.
+> [note runtime/admission](../../docs/audit/2026-05-29/note-runtime-admission.md),
+> ADR 0025 §4) — l'alerte sur un comportement adverse _dans_ un pod n'est pas
+> couverte.
 >
 > Lancer (banc) : `KUBECONFIG=… bash test/scenarios/17-pod-evasion-psa.sh`
 > (kubectl-only) ;
@@ -342,7 +343,8 @@ Mailpit/Mailgun) :
 
 La **détection comportementale runtime** (shell dans un pod, exec inattendu)
 n'est **pas** couverte : le choix Falco/Tetragon est **différé** (ADR 0025 §4,
-cf. [note runtime/admission](../../docs/audit/note-runtime-admission.md)).
+cf.
+[note runtime/admission](../../docs/audit/2026-05-29/note-runtime-admission.md)).
 
 ## Exécution
 

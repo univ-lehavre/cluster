@@ -374,11 +374,12 @@ passe.
   L'hypothèse « VirtioSCSI ⇒ `vd*` » des drifts 0a/0b et de `run-phases.sh`
   était fausse. Le Run #2 avait d'ailleurs déjà observé `sd*` (cf. table
   topologie).
-- **À noter** : l'audit du 2026-05-29 ([02-tests.md](../docs/audit/02-tests.md))
-  avait le diagnostic **à l'envers** — il qualifiait les commentaires `sd*` de
-  vestige obsolète « contredit par le code VirtIO `vd*` ». C'est l'inverse : le
-  code `vd*` était la régression, les commentaires `sd*` (et le drift 0b ligne
-  76, « `/dev/sde` ») avaient raison.
+- **À noter** : l'audit du 2026-05-29
+  ([02-tests.md](../docs/audit/2026-05-29/02-tests.md)) avait le diagnostic **à
+  l'envers** — il qualifiait les commentaires `sd*` de vestige obsolète «
+  contredit par le code VirtIO `vd*` ». C'est l'inverse : le code `vd*` était la
+  régression, les commentaires `sd*` (et le drift 0b ligne 76, « `/dev/sde` »)
+  avaient raison.
 - **Correctif appliqué** : `run-phases.sh` repasse sur `sd*` partout (gate
   `^sdb`, `CEPH_HDD_GLOB=/sys/block/sd[b-z]`, `CEPH_BLOCK_DEVICE=sde`,
   `metadataDevice: 'sde'`, `DATA_DEVICE_GLOB=/dev/sd[b-z]`,

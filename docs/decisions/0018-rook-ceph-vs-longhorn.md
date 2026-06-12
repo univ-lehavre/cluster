@@ -2,9 +2,9 @@
 
 ## Contexte
 
-L'audit ([11-logiciels-oss](../audit/11-logiciels-oss.md)) note que le choix de
-**Rook-Ceph** comme couche de stockage n'est tracé par aucun ADR, alors que
-c'est l'un des composants les plus lourds et structurants du cluster.
+L'audit ([11-logiciels-oss](../audit/2026-05-29/11-logiciels-oss.md)) note que
+le choix de **Rook-Ceph** comme couche de stockage n'est tracé par aucun ADR,
+alors que c'est l'un des composants les plus lourds et structurants du cluster.
 L'alternative naturelle dans l'écosystème Kubernetes est **Longhorn** (stockage
 bloc distribué, plus léger).
 

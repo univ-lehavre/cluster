@@ -8,8 +8,9 @@ restent colocalisés avec le code et sont **surfacés via le sidebar**
 (ADR, vue d'architecture, README de brique, page de plan) soit committé **sans
 jamais être relié** : il existe sur GitHub mais reste invisible sur le site
 publié — une page orpheline. L'audit documentation
-([`docs/audit/04-documentation.md`](../audit/04-documentation.md)) avait déjà
-relevé ce risque ; il se matérialise à chaque ajout de page non câblée.
+([`docs/audit/04-documentation.md`](../audit/2026-05-29/04-documentation.md))
+avait déjà relevé ce risque ; il se matérialise à chaque ajout de page non
+câblée.
 
 VitePress vérifie les **liens morts** (`ignoreDeadLinks` ciblé) mais **pas
 l'inverse** : il ne signale pas une page qui n'est la cible d'aucun lien. La

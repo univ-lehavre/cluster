@@ -2,9 +2,9 @@
 
 ## Contexte
 
-L'audit ([08-operabilite](../audit/08-operabilite.md)) classe « aucune
-observabilité runtime » en constat **majeur** : pas de metrics-server (donc
-`kubectl top` et HPA inopérants), pas de Prometheus/Grafana/alerting, et
+L'audit ([08-operabilite](../audit/2026-05-29/08-operabilite.md)) classe «
+aucune observabilité runtime » en constat **majeur** : pas de metrics-server
+(donc `kubectl top` et HPA inopérants), pas de Prometheus/Grafana/alerting, et
 `monitoring.enabled: false` côté Ceph. La détection de panne reposait
 entièrement sur l'exécution **manuelle** de
 [`state.sh`](../../bootstrap/state.sh) par l'unique admin. Aucun ADR ne couvrait

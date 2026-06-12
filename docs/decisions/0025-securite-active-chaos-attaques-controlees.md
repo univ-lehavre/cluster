@@ -33,7 +33,7 @@ Une reconnaissance de la posture sécurité a établi deux manques structurels :
    pas** les détecteurs sur une destination d'alerte. Et il n'existe **aucune
    détection comportementale runtime** (shell dans un pod, exec inattendu,
    montage sensible) : ni Falco ni Tetragon, comme le constate la
-   [note runtime/admission](../audit/note-runtime-admission.md).
+   [note runtime/admission](../audit/2026-05-29/note-runtime-admission.md).
 
 Le modèle de menace reste celui rappelé par
 [ADR 0003](0003-pas-de-chiffrement-ceph-tailscale.md) et
@@ -122,10 +122,10 @@ dans une plage de banc, contexte kube `lima-*`/`*-banc`, ou `BANC=1` explicite).
 
 L'ajout d'une détection comportementale runtime (**Falco** ou **Tetragon**)
 **n'est pas tranché ici**. La
-[note runtime/admission](../audit/note-runtime-admission.md) en pose les termes
-(Tetragon plaide par cohérence eBPF/Cilium ; à comparer sérieusement à Falco) et
-conclut « hors V1 ». Cet ADR **acte la démarche** D/A/R et **borne** son
-périmètre actuel à la détection **hôte** (fail2ban/auditd) et **Kubernetes**
+[note runtime/admission](../audit/2026-05-29/note-runtime-admission.md) en pose
+les termes (Tetragon plaide par cohérence eBPF/Cilium ; à comparer sérieusement
+à Falco) et conclut « hors V1 ». Cet ADR **acte la démarche** D/A/R et **borne**
+son périmètre actuel à la détection **hôte** (fail2ban/auditd) et **Kubernetes**
 (admission/NetworkPolicy) ; le choix d'un agent runtime fera l'objet d'un **ADR
 dédié** quand l'axe sera priorisé. En conséquence, le maillon **`[A]` alerte
 runtime** des scénarios offensifs est documenté comme **`N/A` aujourd'hui**
@@ -179,8 +179,9 @@ Accepted (2026-06-04).
 
 **Déployer Falco/Tetragon maintenant pour alerter sur le runtime.** Écarté : +1
 sous-système stateful à opérer sur un cluster **non-HA mono-admin**, sans
-décision d'outil arbitrée (cf. [note](../audit/note-runtime-admission.md)). On
-**diffère** le choix à un ADR dédié plutôt que de l'enterrer dans celui-ci.
+décision d'outil arbitrée (cf.
+[note](../audit/2026-05-29/note-runtime-admission.md)). On **diffère** le choix
+à un ADR dédié plutôt que de l'enterrer dans celui-ci.
 
 **Lancer les scénarios offensifs/chaos sur la topologie réelle « pour être sûr
 ».** Écarté **catégoriquement** : c'est précisément ce que les garde-fous

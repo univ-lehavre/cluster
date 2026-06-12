@@ -27,11 +27,11 @@ CI.
   (statique, pas de composant runtime). **Complémentaire de Trivy**, pas
   redondant : Trivy détecte des _misconfig connues_ (catalogue KSV) ; Kyverno
   applique _nos_ règles (« toute image épinglée par digest » —
-  [ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md) ; «
-  pas de Service LoadBalancer hors Gateway de bordure » —
-  [ADR 0020](../decisions/0020-exposition-reseau-tout-cilium.md), exactement la
-  règle déjà codée à la main dans `state.sh` couche 7b). C'est le candidat « en
-  CI » le plus défendable.
+  [ADR 0006](../../decisions/0006-matrice-de-versions-et-politique-de-bump.md) ;
+  « pas de Service LoadBalancer hors Gateway de bordure » —
+  [ADR 0020](../../decisions/0020-exposition-reseau-tout-cilium.md), exactement
+  la règle déjà codée à la main dans `state.sh` couche 7b). C'est le candidat «
+  en CI » le plus défendable.
 - **En admission (sur le cluster).** Kyverno comme webhook qui refuse les
   manifestes non conformes. Utile, mais : (a) c'est un **déploiement**, pas « la
   CI » ; (b) **recoupe le plan 7.2** (vérification de signature d'images, où
