@@ -14,6 +14,55 @@ pnpm release:dry   # aperçu
 pnpm release       # bump + tag + commit
 ```
 
+## [2.34.0](https://github.com/univ-lehavre/cluster/compare/v2.33.0...v2.34.0) (2026-06-12)
+
+
+### Features
+
+* **bootstrap:** finaliser [#236](https://github.com/univ-lehavre/cluster/issues/236) — reprise classe (a) + hygiène d'idempotence ([071c586](https://github.com/univ-lehavre/cluster/commit/071c5863b6e27a6ef60a6ff33236d70cb5b4ead7))
+* **bootstrap:** garde-fous inventaire + contextes kubeconfig non homonymes (ADR 0053, [#272](https://github.com/univ-lehavre/cluster/issues/272)) ([daefbc2](https://github.com/univ-lehavre/cluster/commit/daefbc27d18b3a25028509e1285fbabe369686c5))
+* **bootstrap:** reprise après faute injectée sur init/join (ADR 0050, [#236](https://github.com/univ-lehavre/cluster/issues/236)) ([cca8675](https://github.com/univ-lehavre/cluster/commit/cca8675e9309bd75e5e7377d7b328212cb2647f7))
+* **ceph:** porter le déploiement Rook-Ceph en rôles ansible ([6e729ec](https://github.com/univ-lehavre/cluster/commit/6e729ec5d85d9edefa67e9afee8e731e3caa39fa))
+* **cnpg:** générer les secrets de rôles pg via ansible (source surchargeable) ([f52b617](https://github.com/univ-lehavre/cluster/commit/f52b617117b9deaca7be8820ed78f3e786179a1a))
+* **cnpg:** générer les secrets de rôles pg via ansible (source surchargeable) ([f6eb7c4](https://github.com/univ-lehavre/cluster/commit/f6eb7c48a1c4a2f6de0da9614dc4ad6fc1b11344))
+* **contract:** garde-fou statique contrat→platform ([#271](https://github.com/univ-lehavre/cluster/issues/271) phase 3, ADR 0043) ([a693e61](https://github.com/univ-lehavre/cluster/commit/a693e618b855caa02b76620ac49de86aeb4f94fc))
+* **platform:** rescue diagnostique gitea/marquez/dagster (ADR 0050, [#236](https://github.com/univ-lehavre/cluster/issues/236)) ([87a417b](https://github.com/univ-lehavre/cluster/commit/87a417bcb885d49363a0461626c853562900a829))
+* **rollback:** câbler rollback par phase + primitives kubectl (ADR 0054, [#274](https://github.com/univ-lehavre/cluster/issues/274) lot 2) ([236815f](https://github.com/univ-lehavre/cluster/commit/236815fb3c589d90d85df0a23706658ec5855c84))
+* **rollback:** primitives pures du rollback par phase (ADR 0054, [#274](https://github.com/univ-lehavre/cluster/issues/274) lot 1) ([c6d2bd9](https://github.com/univ-lehavre/cluster/commit/c6d2bd91e0ab14119bc022b053a4c4cd9662c134))
+* **state:** healthcheck cluster en lib pure + garde-fou de cible (ADR 0053, [#272](https://github.com/univ-lehavre/cluster/issues/272)) ([f5ec2a2](https://github.com/univ-lehavre/cluster/commit/f5ec2a2f8286647954cf3a3d0771ff065b82da69))
+* **status:** câbler phase_status sur la lib partagée health-classify ([2ca98fa](https://github.com/univ-lehavre/cluster/commit/2ca98fa6bac0f555c8a17fd2ae89bc761cfa96c2))
+
+
+### Bug Fixes
+
+* **bootstrap-fault:** nom NP argocd réel + good_sc détecté du cluster ([#236](https://github.com/univ-lehavre/cluster/issues/236)) ([4edc599](https://github.com/univ-lehavre/cluster/commit/4edc599b1f4e7c2d16a6f0c00bcc8564fda58895))
+* **bootstrap:** cri-keyring = idempotence réparatrice, pas reprise après échec ([7058711](https://github.com/univ-lehavre/cluster/commit/705871177ca892c2736252d7c4f53ca305d774f9))
+* **bootstrap:** rescue join — marqueur honnête + nettoyage (révélé par arrêt injecté) ([380d754](https://github.com/univ-lehavre/cluster/commit/380d7544d2375c71d469ddd5559a8beaeb691c5a))
+* **ceph:** gate attend la réconciliation Rook (phase Ready + observedGeneration) ([8ec2a5e](https://github.com/univ-lehavre/cluster/commit/8ec2a5eda87dd322a37f1782e06f363ebf360f15))
+* **ceph:** idempotence datalake — stabiliser le CephObjectStore (densification Rook) ([9aca131](https://github.com/univ-lehavre/cluster/commit/9aca1315ad3f51225a42f411a7740bc6dc3b28aa))
+* **ceph:** idempotence SC — stabiliser les CR Rook (block pools + CephFS) ([1780d5f](https://github.com/univ-lehavre/cluster/commit/1780d5f3b79ba6b8257d7984828f654db0e0bb29))
+* **ceph:** masquer .status du diff d'idempotence (vraie cause du faux changed) ([cc0a5bb](https://github.com/univ-lehavre/cluster/commit/cc0a5bb7d21fb9b7cbcaadcbe88bb0de97aa10e7))
+* **ceph:** stabiliser le spec (densification Rook) avant de finir — vraie cause idempotence ([b632d47](https://github.com/univ-lehavre/cluster/commit/b632d472eda18c50ce3ad34c7f67afdce1a4a304))
+* **ceph:** tolérer HEALTH_WARN bénin (RECENT_MGR_MODULE_CRASH) dans la gate ([e8b0a60](https://github.com/univ-lehavre/cluster/commit/e8b0a60fa3a629f6b8b09e179a3c46cb06688643))
+* **citation:** version réelle (2.33.0) + DOI Zenodo ([#271](https://github.com/univ-lehavre/cluster/issues/271) phase 0) ([c242d13](https://github.com/univ-lehavre/cluster/commit/c242d13b8e6b960033714870242ed1466bdf8067))
+* **cni:** éviter le SIGPIPE qui tue cni.sh pendant l'attente KubeProxyReplacement ([c64553f](https://github.com/univ-lehavre/cluster/commit/c64553f1d0ca589f986e934c93d790aee018b890))
+* **k8s-init:** retirer le lost+found d'une LV etcd vierge avant kubeadm init ([9f6edf4](https://github.com/univ-lehavre/cluster/commit/9f6edf49f70f61932f93c642ed39403ab0186220))
+* **k8s-init:** retirer le lost+found d'une LV etcd vierge avant kubeadm init ([ca11adb](https://github.com/univ-lehavre/cluster/commit/ca11adbea055cac9c1837e3ef09f00a22c91de8e))
+
+
+### Documentation
+
+* **adr:** ADR 0055 ha-3cp hyperconvergé (3 CP sur 4 nœuds) + amender ADR 0002 ([0038fc2](https://github.com/univ-lehavre/cluster/commit/0038fc20bebc8aa530534b4e8003f423e677ec5b))
+* **adr:** ajouter adr 0055 ha-3cp hyperconvergé + amender adr 0002 ([abfd053](https://github.com/univ-lehavre/cluster/commit/abfd053d52f91ec301f3e9c2a79042dc46023531))
+* **adr:** isolation multi-cible banc/prod + boîte à outils (0053, [#272](https://github.com/univ-lehavre/cluster/issues/272)) ([2b72533](https://github.com/univ-lehavre/cluster/commit/2b72533f7aabf81b2665261b39f1425561922c2a))
+* **adr:** reproductibilité des résultats — principe-chapeau (0052) ([f6d3bee](https://github.com/univ-lehavre/cluster/commit/f6d3bee1dca01eb59bdfadaa17e11617e8006221))
+* **adr:** reproductibilité des résultats — principe-chapeau (0052) ([65a19ac](https://github.com/univ-lehavre/cluster/commit/65a19ac7deeb881b02f5f9240f771e5755d2e112))
+* **adr:** rollback par phase sur le banc (ADR 0054 + plan + [#274](https://github.com/univ-lehavre/cluster/issues/274)) ([7560daf](https://github.com/univ-lehavre/cluster/commit/7560dafb1d53d416427081bc87c55b00d4b763ce))
+* renvoyer au principe-chapeau reproductibilité (0052) dans CLAUDE.md ([b74163e](https://github.com/univ-lehavre/cluster/commit/b74163eac02db3de16c7fc03a6dfb79727190bb9))
+* **results:** run [#14](https://github.com/univ-lehavre/cluster/issues/14) — portage Ceph from-scratch, avec réserves (ADR 0052) ([20989c9](https://github.com/univ-lehavre/cluster/commit/20989c9fbc2d50654bb946322a77a70256fd4d57))
+* **results:** run [#15](https://github.com/univ-lehavre/cluster/issues/15) — atlas-ceph from-scratch complet + rollback de phase prouvé ([24f8151](https://github.com/univ-lehavre/cluster/commit/24f815141502783a8aa909395dd9764a31dfcddc))
+* **runbook:** clarifier les volumes par nœud (lv_etcd cp vs workers) ([623ef63](https://github.com/univ-lehavre/cluster/commit/623ef637a314cdf1667bbe4bb2d685a64dabf99a))
+
 ## [2.33.0](https://github.com/univ-lehavre/cluster/compare/v2.32.0...v2.33.0) (2026-06-11)
 
 
