@@ -75,3 +75,4 @@ Format léger inspiré de Michael Nygard :
 | 0053 | [Isolation multi-cible : banc Lima et prod sur le même poste](0053-isolation-multi-cible-banc-prod.md)                       | Accepted           |
 | 0054 | [Rollback par phase sur le banc (désinstallation ciblée, jetable)](0054-rollback-par-phase-banc.md)                          | Accepted           |
 | 0055 | [`ha-3cp` hyperconvergé : 3 control planes sur 4 nœuds, promotion in-place](0055-ha-3cp-hyperconverge-promotion-in-place.md) | Proposed           |
+| 0056 | [Modèle déclaratif unifié des topologies (un fichier décrit, Ansible converge)](0056-modele-declaratif-topologies.md)        | Proposed           |
