@@ -89,9 +89,9 @@ Configurée côté GitHub (non versionnable, documentée ici pour mémoire) :
 - À chaque push sur `main` :
   [release-please](https://github.com/googleapis/release-please) ouvre (ou met à
   jour) une PR de release qui bumpe `package.json` et `CHANGELOG.md` d'après les
-  Conventional Commits. **L'auto-merge (squash) est activé sur cette PR dès sa
-  création** : GitHub la fusionne automatiquement quand les checks requis sont
-  verts, ce qui pousse le tag `vX.Y.Z` et publie une
+  Conventional Commits. **L'auto-merge est activé sur cette PR dès sa création**
+  : GitHub la fusionne automatiquement quand les checks requis sont verts, ce
+  qui pousse le tag `vX.Y.Z` et publie une
   [GitHub Release](https://github.com/univ-lehavre/cluster/releases). →
   Publication **100 % automatique** ; aucune version flottante en main, chaque
   tag lié à un set de commits validé par la CI.

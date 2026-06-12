@@ -101,9 +101,12 @@ pnpm format         # applique Prettier
 pnpm lint           # vérifie format + yaml + shell
 pnpm lint:k8s       # valide les manifests via kubeconform
 pnpm lint:ansible   # lint les playbooks Ansible
-pnpm release        # bump version + met à jour CHANGELOG + crée tag git
-pnpm release:dry    # aperçu de la prochaine release sans rien modifier
 ```
+
+> **Release** : automatisée par
+> [release-please](https://github.com/googleapis/release-please) (cron quotidien
+> → PR `chore(main): release vX.Y.Z`). Rien à lancer en local ; merger la PR de
+> release publie la version.
 
 ## Workflow de PR
 
@@ -117,30 +120,28 @@ pnpm release:dry    # aperçu de la prochaine release sans rien modifier
 - Ne pas pousser directement sur `main` — le hook `no-direct-push-to-main`
   l'interdit ; passer par une PR.
 
-### Merge & traçabilité (squash)
+### Merge & traçabilité (merge commit)
 
-Le dépôt merge **en squash uniquement** (`squash and merge`). Conséquence : la
-PR entière devient **un seul commit** sur `main`, dont le **message = le titre
-de la PR** (et le corps = la liste des commits de la branche). Le `main` reste
-linéaire et lisible (1 PR = 1 commit), mais cela impose une discipline :
+Le dépôt merge **en merge commit** (`merge and merge`, **pas squash**) pour
+préserver l'historique fin de chaque PR sur `main`
+([ADR 0037](docs/decisions/0037-strategie-merge-commit.md) : `git log`/`bisect`/
+`blame` voient chaque commit). Conséquence et discipline :
 
-- **Le titre de PR EST le commit de `main`** → il doit être un Conventional
-  Commit valide (`feat(scope): …`, minuscule, sans `(#issue)`). Un job CI le
-  valide (`commitlint` sur le titre) : le squash le propage tel quel à `main`,
-  donc à release-please et au `CHANGELOG`.
-- **1 PR = 1 type/scope cohérent** = **1 ligne de `CHANGELOG`**. Le squash
-  n'expose qu'**un** préfixe au changelog ; mélanger deux features distinctes
-  dans une PR en cache une. Les `docs:`/`test:` qui _servent_ la feature peuvent
-  l'accompagner ; deux capacités indépendantes → deux PR.
-- **Lier les issues via `Closes #N` dans la _description_ de PR**, pas dans le
-  corps des commits (le squash les enfouit ; GitHub n'auto-fermerait pas). C'est
-  ce qui ferme l'issue au merge et garde le lien commit↔issue durable.
-- **Pas de `(#issue)` dans le titre** : le squash ajoute déjà `(#PR)`. En mettre
-  un produit un double numéro parasite (`… (#157) (#144)`).
-- Les commits _internes_ à la branche peuvent rester atomiques (utile à la
-  revue) — ils sont aplatis au merge, donc leur granularité ne survit pas sur
-  `main`. Si cette granularité doit survivre (revert/bisect fins), **scinder en
-  plusieurs PR** plutôt que compter sur le squash.
+- **Chaque commit d'une PR doit être propre** : la CI valide **commitlint sur
+  toute la plage** de la PR (pas seulement le titre), car chaque commit arrive
+  tel quel sur `main` (et alimente release-please / le `CHANGELOG`). Soigner et
+  regrouper ses commits **avant** le merge.
+- **Conventional Commits** : sujet en minuscule, sans email / sans
+  `Co-Authored-By`, corps ≤ 100 colonnes.
+- **1 PR = 1 type/scope cohérent** : mélanger deux capacités indépendantes dans
+  une PR brouille l'historique et le changelog → **deux PR**. Les
+  `docs:`/`test:` qui _servent_ la feature peuvent l'accompagner.
+- **Lier les issues via `Closes #N`** dans la _description_ de PR (ferme l'issue
+  au merge, garde le lien durable).
+- **Index ADR = ressource partagée** : deux PR parallèles touchant
+  `docs/decisions/README.md` (ajout de lignes au même endroit) **collisionnent**
+  au merge — rebaser la seconde sur `main` et empiler proprement (vécu : 0057 ↔
+  0058).
 
 ## Validation locale complète
 
@@ -192,11 +193,8 @@ Le versionnement est **automatique** via le workflow
 
 Quand vous mergez cette PR, release-please pousse le tag `vX.Y.Z` et crée une
 [GitHub Release](https://github.com/univ-lehavre/cluster/releases) avec le
-changelog généré. Aucun bump manuel à faire.
-
-Le script `pnpm release` (commit-and-tag-version) reste disponible pour un bump
-manuel hors workflow GitHub, mais ce chemin doit rester exceptionnel — la source
-de vérité est release-please.
+changelog généré. Aucun bump manuel à faire — **release-please est la source
+unique** (le bump local `commit-and-tag-version` a été retiré).
 
 ## Code de conduite
 

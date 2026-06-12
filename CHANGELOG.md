@@ -6,13 +6,10 @@ respectent [SemVer](https://semver.org/).
 
 Les entrées sont générées automatiquement à partir des messages de commit
 [Conventional Commits](https://www.conventionalcommits.org/) via
-[commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version)
-:
-
-```bash
-pnpm release:dry   # aperçu
-pnpm release       # bump + tag + commit
-```
+[release-please](https://github.com/googleapis/release-please) : un cron
+quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agrège
+les commits depuis la dernière release. Merger cette PR publie la version (bump +
+tag + entrée de changelog). Rien à lancer en local.
 
 ## [2.34.0](https://github.com/univ-lehavre/cluster/compare/v2.33.0...v2.34.0) (2026-06-12)
 
