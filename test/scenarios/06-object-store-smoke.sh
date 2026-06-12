@@ -16,7 +16,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 KEEP_DATALAKE=${KEEP_DATALAKE:-0}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # shellcheck disable=SC2329 # invoquxc3xa9 via trap EXIT
 cleanup() {

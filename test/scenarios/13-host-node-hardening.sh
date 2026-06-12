@@ -35,7 +35,8 @@
 # `exit` ciblés).
 set -uo pipefail
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 STATE_SH="$HERE/../../bootstrap/state.sh"

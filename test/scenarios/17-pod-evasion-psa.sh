@@ -41,7 +41,8 @@ BANC=${BANC:-0}
 SC_KEY="test.cluster.dev/scenario"
 SC_VAL="17-pod-evasion-psa"
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # ── Garde « banc jetable uniquement » (ADR 0025) ──────────────────────────────
 # Scénario offensif : on refuse de tourner ailleurs que sur un banc. Heuristique

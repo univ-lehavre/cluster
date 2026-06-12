@@ -43,7 +43,8 @@ IFACE=${IFACE:-}
 BANC=${BANC:-0}
 KEEP=${KEEP:-0}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10)
 node_ssh() { ssh "${SSH_OPTS[@]}" -p "$NODE_PORT" -i "$SSH_KEY" "$USER_REMOTE@$NODE_IP" "$@"; }

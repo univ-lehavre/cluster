@@ -40,7 +40,8 @@ BANC=${BANC:-0}
 SC_KEY="test.cluster.dev/scenario"
 SC_VAL="18-exfiltration-networkpolicy"
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # ── Garde « banc jetable uniquement » (ADR 0025) ── cf. scénario 17.
 assert_banc() {

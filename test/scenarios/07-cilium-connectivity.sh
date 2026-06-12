@@ -12,7 +12,8 @@ set -euo pipefail
 FAST=${FAST:-1}
 TESTS=${TESTS:-}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 if ! command -v cilium >/dev/null 2>&1; then
     log "✗ CLI 'cilium' absente — installer cilium-cli (cf. bootstrap/cni.sh)"

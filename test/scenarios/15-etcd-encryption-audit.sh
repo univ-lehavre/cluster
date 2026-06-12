@@ -38,7 +38,8 @@ NS=${NAMESPACE:-default}
 SECRET=scenario15-witness
 ENC_DIR=/etc/kubernetes/enc
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes)
 cp_ssh() { ssh "${SSH_OPTS[@]}" -p "${CP_PORT}" -i "${SSH_KEY}" "${USER_REMOTE}@${CP_IP}" "$@"; }
 kc() { cp_ssh "sudo KUBECONFIG=/etc/kubernetes/admin.conf kubectl $*"; }

@@ -24,7 +24,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 STRICT_UI=${STRICT_UI:-0}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # shellcheck source=test/lima/ui-assert.sh
 . ../lima/ui-assert.sh

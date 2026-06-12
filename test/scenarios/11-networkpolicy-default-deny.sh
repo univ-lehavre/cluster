@@ -29,7 +29,8 @@ SC_KEY="test.cluster.dev/scenario"
 SC_VAL="11-networkpolicy-default-deny"
 LABEL="$SC_KEY=$SC_VAL"
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # shellcheck disable=SC2329 # invoqué via trap EXIT
 cleanup() {

@@ -19,7 +19,8 @@ VAGRANT_DIR=${VAGRANT_DIR:-test/multi-node}
 DOWNTIME_S=${DOWNTIME_S:-60}
 KEEP=${KEEP:-0}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ceph() { kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph "$@"; }
 
 log "État initial Ceph"

@@ -20,7 +20,8 @@ set -euo pipefail
 STRICT_MON=${STRICT_MON:-0}
 MON_NS=${MON_NS:-monitoring}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 LOKI_SVC="loki.${MON_NS}.svc.cluster.local:3100"
 # Étiquette témoin unique au run (évite de confondre avec d'anciens logs).

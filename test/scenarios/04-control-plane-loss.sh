@@ -16,7 +16,8 @@ CONTROL=${CONTROL:-cp1} # défaut d'exemple (ADR 0023) ; surcharger via $CONTROL
 DOWNTIME_S=${DOWNTIME_S:-60}
 VAGRANT_DIR=${VAGRANT_DIR:-test/multi-node}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log "Pré-snapshot etcd (vérifier que le timer tourne)"
 ssh debian@"$CONTROL" 'systemctl is-active etcd-snapshot.timer' || \

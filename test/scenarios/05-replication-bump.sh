@@ -17,7 +17,8 @@ POOL_NAME=${POOL_NAME:-rook-ceph-block-replicated-pool}
 NEW_SIZE=${NEW_SIZE:-4}
 REVERT=${REVERT:-1}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ceph() { kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph "$@"; }
 
 log "Compter les hôtes (failureDomain: host)"

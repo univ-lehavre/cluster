@@ -22,7 +22,8 @@ KEEP=${KEEP:-0}
 SC_KEY="test.cluster.dev/scenario"
 SC_VAL="01-block-rwx-write-read"
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # shellcheck disable=SC2329 # invoquxc3xa9 via trap EXIT
 cleanup() {

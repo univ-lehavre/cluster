@@ -27,7 +27,8 @@ GITEA_ORG=${GITEA_ORG:-atlas}
 GITEA_REPO=${GITEA_REPO:-workflows}
 APP=${APP:-atlas-workflows}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Assertions PURES (testées en bats) : classify_argocd_app, classify_webhook_trigger
 # (gitops-assert) ; parse_ol_job_count, classify_marquez_ingest (dataops-assert).

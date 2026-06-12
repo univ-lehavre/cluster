@@ -39,7 +39,8 @@ MEM_LIMIT=${MEM_LIMIT:-128Mi}
 SC_KEY="test.cluster.dev/scenario"
 SC_VAL="21-chaos-saturation-cpu-mem"
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ceph() { kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph "$@" 2>/dev/null; }
 ceph_status() {
     if command -v jq >/dev/null 2>&1; then ceph health -f json 2>/dev/null | jq -r '.status'

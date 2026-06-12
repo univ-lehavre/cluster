@@ -58,7 +58,8 @@ VERIFY_S3_BUCKET=${VERIFY_S3_BUCKET:-}
 
 WEBSERVER_URL="http://dagster-dagster-webserver.${CODELOC_NS}.svc.cluster.local:80/graphql"
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Assertions PURES (testées en bats) : parse_ol_job_count, classify_marquez_ingest.
 # shellcheck source=test/lima/dataops-assert.sh

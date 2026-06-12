@@ -31,8 +31,10 @@
 
 set -euo pipefail
 
-USER_REMOTE=${USER_REMOTE:-debian}
-SSH_OPTS=${SSH_OPTS:-}
+# Primitives SSH partagées (USER_REMOTE, SSH_OPTS, ssh_q, ssh_ok, ssh_script) —
+# factorisées dans lib/ssh-report.sh (#296), sourcées comme state-classify.sh.
+# shellcheck source=bootstrap/lib/ssh-report.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/ssh-report.sh"
 
 hosts=("$@")
 if [ ${#hosts[@]} -eq 0 ]; then
@@ -50,28 +52,7 @@ fi
 declare -i ok_n=0 fail_n=0 skip_n=0 reachable_n=0
 next_step=""
 
-ssh_q() {
-    # ssh_q HOST CMD — best effort, stderr muet, retourne stdout.
-    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
-    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
-        "${USER_REMOTE}@$1" "$2" 2>/dev/null
-}
-
-ssh_ok() {
-    # ssh_ok HOST CMD — exit 0 si la commande distante renvoie 0.
-    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
-    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
-        "${USER_REMOTE}@$1" "$2" >/dev/null 2>&1
-}
-
-ssh_script() {
-    # ssh_script HOST — lit un script bash depuis stdin et l'exécute via
-    # `sudo bash -s` sur HOST. Utile pour les vérifications multi-lignes
-    # qui touchent à /etc/shadow ou autres fichiers privilégiés.
-    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
-    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
-        "${USER_REMOTE}@$1" 'sudo bash -s' 2>/dev/null
-}
+# ssh_q / ssh_ok / ssh_script : voir lib/ssh-report.sh (sourcé plus haut).
 
 kubectl_q() { kubectl "$@" 2>/dev/null; }
 

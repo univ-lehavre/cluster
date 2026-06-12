@@ -55,7 +55,8 @@ KEEP=${KEEP:-0}
 ATTACKER_IP=${ATTACKER_IP:-203.0.113.66}
 TRIES=${TRIES:-6} # > maxretry (3) pour déclencher franchement
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10)
 target_ssh() { ssh "${SSH_OPTS[@]}" -p "$TARGET_PORT" -i "$SSH_KEY" "$USER_REMOTE@$TARGET_IP" "$@"; }

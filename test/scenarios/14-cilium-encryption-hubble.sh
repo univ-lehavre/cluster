@@ -18,7 +18,8 @@
 # Variables : EXPECTED_NODES (défaut: auto = nb de nœuds Ready)
 set -euo pipefail
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Un pod cilium-agent quelconque sert de point d'exécution pour cilium-dbg /
 # hubble (présents dans l'image de l'agent).

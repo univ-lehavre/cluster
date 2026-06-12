@@ -18,8 +18,10 @@
 
 set -euo pipefail
 
-USER_REMOTE=${USER_REMOTE:-debian}
-SSH_OPTS=${SSH_OPTS:-}
+# Primitives SSH partagées (USER_REMOTE, SSH_OPTS, ssh_q, ssh_ok, ssh_script) —
+# factorisées dans bootstrap/lib/ssh-report.sh (#296).
+# shellcheck source=bootstrap/lib/ssh-report.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/ssh-report.sh"
 
 hosts=("$@")
 if [ ${#hosts[@]} -eq 0 ]; then
@@ -34,17 +36,7 @@ else
     G=''; R=''; Y=''; B=''; C=''; D=''; N=''
 fi
 
-ssh_q() {
-    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
-    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
-        "${USER_REMOTE}@$1" "$2" 2>/dev/null
-}
-
-ssh_ok() {
-    # shellcheck disable=SC2086 # we want word splitting on $SSH_OPTS
-    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes \
-        "${USER_REMOTE}@$1" "$2" >/dev/null 2>&1
-}
+# ssh_q / ssh_ok : voir lib/ssh-report.sh (sourcé plus haut).
 
 active() {
     # active HOST SVC — renvoie "active" / "inactive" / "absent"

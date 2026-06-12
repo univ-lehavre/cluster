@@ -37,7 +37,8 @@ WITNESS_KEY="proof"
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ok() { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 die() {
     printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2

@@ -10,7 +10,8 @@
 # OSDs Pending sur 12).
 set -euo pipefail
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # `column -N` (en-têtes) n'existe que sur util-linux (Linux) ; le `column`
 # BSD de macOS — où tourne souvent ce script via kubectl distant — l'ignore et

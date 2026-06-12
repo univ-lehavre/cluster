@@ -19,7 +19,8 @@ set -euo pipefail
 STRICT_MON=${STRICT_MON:-0}
 MON_NS=${MON_NS:-monitoring}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 PROM_SVC="kube-prometheus-stack-prometheus.${MON_NS}.svc.cluster.local:9090"
 GRAFANA_SVC="kube-prometheus-stack-grafana.${MON_NS}.svc.cluster.local:80"

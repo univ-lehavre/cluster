@@ -27,7 +27,8 @@ STRICT_OL=${STRICT_OL:-0}
 MARQUEZ_SVC=${MARQUEZ_SVC:-marquez.marquez.svc.cluster.local}
 OL_NAMESPACE=${OL_NAMESPACE:-dagster}
 
-log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
+# shellcheck source=test/scenarios/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Lib pure d'assertion (verdicts STATUS|message) — partagée avec dataops-chain.
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
