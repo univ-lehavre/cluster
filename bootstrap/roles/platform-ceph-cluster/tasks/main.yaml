@@ -207,3 +207,69 @@
       retries: '{{ ceph_health_retries }}'
       delay: '{{ ceph_health_delay }}'
       changed_when: false
+
+  # ── Reprise après incident (ADR 0050 cas (a) — DIAGNOSTIQUE, pas compensateur) ─
+  # Les gates ci-dessus sont des LECTURES idempotentes (k8s_info/apply SSA,
+  # changed_when:false) : Rook réconcilie, un re-jeu reprend — il n'y a RIEN à
+  # compenser (pas de delete, frontière ADR 0050). Mais sans rescue, un timeout
+  # de la gate santé (ex. un OSD qui ne montera JAMAIS — disque à secteur
+  # défectueux, drift #278) échoue MUET après ~20 min (ceph_health_retries×delay).
+  # ADR 0056 §10 : là où l'operator n'expose pas de signal terminal franc (le
+  # `Medium Error` d'un disque vit dans la job osd-prepare, PAS dans
+  # CephCluster.status.ceph.health), on ASSUME le timeout MAIS on le rend LISIBLE :
+  # on liste l'écart d'OSD et l'état des jobs osd-prepare pour pointer le disque.
+  rescue:
+    - name: Collect the CephCluster status (diagnostic)
+      kubernetes.core.k8s_info:
+        api_version: ceph.rook.io/v1
+        kind: CephCluster
+        name: rook-ceph
+        namespace: rook-ceph
+      register: ceph_cluster_diag
+      run_once: true
+
+    - name: Collect the OSD-prepare jobs state (le disque suspect y apparaît)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: rook-ceph
+        label_selectors:
+          - app=rook-ceph-osd-prepare
+      register: ceph_prepare_diag
+      run_once: true
+
+    - name: Report Ceph convergence failure (écart OSD + jobs prepare + disque)
+      vars:
+        ceph_cr_d: '{{ ceph_cluster_diag.resources[0] | default({}) }}'
+        ceph_st_d: '{{ ceph_cr_d.status.ceph | default({}) }}'
+        osd_up: >-
+          {{ ceph_st_d.versions.osd | default({}) | dict2items
+             | map(attribute='value') | map('int') | sum }}
+        prepare_failed: >-
+          {{ ceph_prepare_diag.resources | default([])
+             | rejectattr('status.phase', 'equalto', 'Succeeded')
+             | map(attribute='metadata.name') | list }}
+      ansible.builtin.debug:
+        msg: >-
+          Rook-Ceph non convergé. Phase CR :
+          {{ ceph_cr_d.status.phase | default('(CR absent)') }} ; santé :
+          {{ ceph_st_d.health | default('?') }} ; OSD up {{ osd_up }} /
+          {{ ceph_osd_expected }} attendus. Jobs osd-prepare non terminées :
+          {{ prepare_failed | default([]) }}. Causes fréquentes : un disque à
+          secteur défectueux (Medium Error) → l'OSD ne monte jamais, le `Medium
+          error` apparaît dans `kubectl -n rook-ceph logs <osd-prepare-du-nœud>`
+          et `dmesg` du nœud (drift #278) ; disque non brut/non wipé ; RAM OSD
+          insuffisante. Si un disque est HS : le purger
+          (`ceph osd purge <id>`), l'exclure, et abaisser `ceph_osd_expected`
+          (surcharge d'instance, ADR 0023). Diagnostic :
+          kubectl -n rook-ceph get cephcluster,pods ;
+          kubectl -n rook-ceph get events --sort-by=.lastTimestamp.
+      run_once: true
+
+    - name: Fail with an actionable message after diagnosis
+      ansible.builtin.fail:
+        msg: >-
+          La convergence Rook-Ceph n'a pas abouti dans le délai
+          ({{ ceph_health_retries }}×{{ ceph_health_delay }}s). Cf. diagnostic
+          ci-dessus (écart d'OSD, jobs osd-prepare, disque suspect). Corriger la
+          cause puis RE-JOUER le même chemin (les gates sont idempotentes).
+      run_once: true
