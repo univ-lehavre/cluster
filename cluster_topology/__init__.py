@@ -30,6 +30,7 @@ from cluster_topology.plan import (
     suggest_next,
 )
 from cluster_topology.profile import derive_run_params
+from cluster_topology.roundtrip import RoundtripResult, run_roundtrip
 
 __all__ = [
     "Topology",
@@ -53,4 +54,6 @@ __all__ = [
     "RunMetrics",
     "metrics_of",
     "format_metrics",
+    "RoundtripResult",
+    "run_roundtrip",
 ]

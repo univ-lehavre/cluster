@@ -441,6 +441,79 @@ class Smoke(unittest.TestCase):
         self.assertIn("usage", err)
 
 
+class Roundtrip(unittest.TestCase):
+    def _stub(self, res):
+        orig = cli._roundtrip.run_roundtrip
+        cli._roundtrip.run_roundtrip = lambda phase, **kw: res
+        self.addCleanup(setattr, cli._roundtrip, "run_roundtrip", orig)
+
+    def test_reversible_is_zero(self):
+        from cluster_topology.roundtrip import RoundtripResult, RoundtripStep
+
+        self._stub(
+            RoundtripResult(
+                phase="monitoring",
+                layers=["monitoring"],
+                steps=[RoundtripStep("détruire", True), RoundtripStep("vérifier sain", True)],
+            )
+        )
+        code, out, _ = _capture(["roundtrip", "--phase", "monitoring", "--yes"])
+        self.assertEqual(code, 0)
+        self.assertIn("réversible", out)
+
+    def test_not_reversible_is_one(self):
+        from cluster_topology.roundtrip import RoundtripResult, RoundtripStep
+
+        self._stub(
+            RoundtripResult(
+                phase="gitops",
+                layers=["gitops", "gitops-seed"],
+                steps=[RoundtripStep("détruire gitops", False, "rc=3")],
+            )
+        )
+        code, _, _ = _capture(["roundtrip", "--phase", "gitops", "--yes"])
+        self.assertEqual(code, 1)
+
+    def test_storage_without_full_is_usage_error(self):
+        # ceph (clôture de stockage) sans --full → RoundtripError → code 2.
+        def boom(phase, **kw):
+            raise cli._roundtrip.RoundtripError("exiger l'opt-in `--full`")
+
+        orig = cli._roundtrip.run_roundtrip
+        cli._roundtrip.run_roundtrip = boom
+        self.addCleanup(setattr, cli._roundtrip, "run_roundtrip", orig)
+        code, _, err = _capture(["roundtrip", "--phase", "ceph", "--yes"])
+        self.assertEqual(code, 2)
+        self.assertIn("usage", err)
+
+    def test_full_and_yes_flags_passed(self):
+        from cluster_topology.roundtrip import RoundtripResult, RoundtripStep
+
+        seen = {}
+
+        def capture(phase, *, allow_full=False, assume_yes=False):
+            seen["full"] = allow_full
+            seen["yes"] = assume_yes
+            return RoundtripResult(phase=phase, layers=[phase], steps=[RoundtripStep("x", True)])
+
+        orig = cli._roundtrip.run_roundtrip
+        cli._roundtrip.run_roundtrip = capture
+        self.addCleanup(setattr, cli._roundtrip, "run_roundtrip", orig)
+        _capture(["roundtrip", "--phase", "ceph", "--full", "--yes"])
+        self.assertTrue(seen["full"])
+        self.assertTrue(seen["yes"])
+
+    def test_unknown_phase_is_argparse_usage(self):
+        with self.assertRaises(SystemExit) as ctx:
+            cli.main(["roundtrip", "--phase", "frobnicate"])
+        self.assertEqual(ctx.exception.code, 2)  # choices argparse
+
+    def test_phase_required(self):
+        with self.assertRaises(SystemExit) as ctx:
+            cli.main(["roundtrip"])
+        self.assertEqual(ctx.exception.code, 2)
+
+
 class Dispatch(unittest.TestCase):
     def test_unknown_command_is_usage(self):
         with self.assertRaises(SystemExit) as ctx:
