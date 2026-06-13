@@ -41,19 +41,20 @@ lointain. Aucun palier ne casse le précédent (invariant byte-identique, ADR 00
 ## Suivi
 
 État global : voir l'en-tête [`## État`](#état) (Actif). Démarré le 2026-06-13 :
-**P0 fait** + la moitié prod de **P1 prouvée** (générateur byte-identique).
+**P0 et P1 faits** (générateur byte-identique des deux inventaires, prouvé par
+test).
 
-| Palier | État        | Issue(s)                         | Run de preuve                                                                                    |
-| ------ | ----------- | -------------------------------- | ------------------------------------------------------------------------------------------------ |
-| P0     | ✅ fait     | —                                | `topology.example.yaml` + paquet `cluster_topology/`                                             |
-| P1     | 🟡 en cours | —                                | **prod byte-identique prouvé** (test) ; reste : inventaire banc (`write_inventory`) + group_vars |
-| P2     | ⬜ à faire  | —                                | —                                                                                                |
-| P3     | ⬜ à faire  | —                                | —                                                                                                |
-| P4     | ⬜ à faire  | —                                | —                                                                                                |
-| P5     | ⬜ à faire  | —                                | —                                                                                                |
-| P6     | ⬜ à faire  | —                                | —                                                                                                |
-| P7     | ⬜ à faire  | **#250** (banc Lima HA `ha-3cp`) | —                                                                                                |
-| P8     | ⬜ à faire  | —                                | —                                                                                                |
+| Palier | État       | Issue(s)                         | Run de preuve                                                                                        |
+| ------ | ---------- | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| P0     | ✅ fait    | —                                | `topology.example.yaml` + paquet `cluster_topology/`                                                 |
+| P1     | ✅ fait    | —                                | **inventaires prod + banc byte-identiques** (12 tests, vs `hosts.example.yaml` et `write_inventory`) |
+| P2     | ⬜ à faire | —                                | profil/défauts/graphe → group_vars de profil DÉRIVÉS (ceph_osd_expected, etc.)                       |
+| P3     | ⬜ à faire | —                                | façade CLI (`generate`/`validate`/`status`/`diff`)                                                   |
+| P4     | ⬜ à faire | —                                | —                                                                                                    |
+| P5     | ⬜ à faire | —                                | —                                                                                                    |
+| P6     | ⬜ à faire | —                                | —                                                                                                    |
+| P7     | ⬜ à faire | **#250** (banc Lima HA `ha-3cp`) | —                                                                                                    |
+| P8     | ⬜ à faire | —                                | —                                                                                                    |
 
 **Issues créées depuis ce plan** : _(aucune encore — à lier au fil de
 l'implémentation)_.

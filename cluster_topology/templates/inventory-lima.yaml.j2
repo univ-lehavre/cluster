@@ -1,0 +1,26 @@
+# Inventaire généré par le banc Lima — NE PAS versionner (artefact de run).
+cloud:
+  children:
+    control:
+    workers:
+  vars:
+    ansible_user: lima
+    target_kind: lima
+control:
+  hosts:
+{% for vm in control_nodes %}    {{ vm }}:
+      ansible_host: lima-{{ vm }}
+      ansible_ssh_common_args: "-F {{ lima_home }}/.lima/{{ vm }}/ssh.config"
+{% endfor %}
+workers:
+{% if worker_nodes %}  hosts:
+{% for vm in worker_nodes %}    {{ vm }}:
+      ansible_host: lima-{{ vm }}
+      ansible_ssh_common_args: "-F {{ lima_home }}/.lima/{{ vm }}/ssh.config"
+{% endfor %}
+{% else %}  hosts: {}
+{% endif %}
+control_host:
+  hosts:
+    localhost:
+      ansible_connection: local
