@@ -159,37 +159,54 @@ classify_downstream_block() {
 # ─── PRIMITIVES kubectl/ssh (NON pures — réseau) ────────────────────────────
 # Attendent KUBECTL/vm_sh/log/ok/die/retry de run-phases.sh/lib.sh (sourcées).
 
+# Kinds de CR connus pour bloquer une terminaison de ns par leurs finalizers
+# (banc jetable : on les force). Inclut le `Cluster` CNPG ET son `ObjectStore`
+# Barman (plugin barman-cloud) — ce dernier coinçait `postgres` en Terminating.
+_STUCK_CR_KINDS="obc.objectbucket.io objectbucket.io cephcluster.ceph.rook.io \
+cephobjectstore.ceph.rook.io cephblockpool.ceph.rook.io cephfilesystem.ceph.rook.io \
+cluster.postgresql.cnpg.io objectstore.barmancloud.cnpg.io"
+
 # k8s_force_delete_ns NS…
 #   Supprime chaque namespace, en FORÇANT les finalizers récalcitrants (banc
-#   jetable : on ne ménage pas les deadlocks de finalizers, ADR 0054 §2). delete
-#   non bloquant d'abord ; si le ns reste en Terminating, patch finalizers=null
-#   sur le ns ET sur les CR coincés qu'il contient.
+#   jetable : on ne ménage pas les deadlocks, ADR 0054 §2). delete non bloquant ;
+#   si le ns reste en Terminating, force les finalizers des CR coincés PUIS finalise
+#   le ns via le sous-ressource /finalize (le patch du ns ne suffit pas pour un
+#   ns déjà Terminating). CONTINUE sur les ns suivants même si l'un échoue (un échec
+#   isolé ne doit pas abandonner le reste de la clôture) ; échoue à la fin si résidus.
 k8s_force_delete_ns() {
-    local ns
+    local ns failed=""
     for ns in "$@"; do
         "${KUBECTL[@]}" get ns "${ns}" > /dev/null 2>&1 || continue
         log "  rollback : suppression du namespace ${ns} (force finalizers si bloqué)"
         "${KUBECTL[@]}" delete ns "${ns}" --wait=false --ignore-not-found > /dev/null 2>&1 || true
-        # Laisse 10 s au delete propre, sinon force.
         if retry 10 2 _ns_absent "${ns}"; then continue; fi
-        # Forcer : retirer les finalizers des CR coincés (OBC, CR Rook/CNPG…) puis du ns.
+        # Forcer les finalizers des CR coincés (OBC, CR Rook/CNPG/Barman).
         local kind
-        for kind in obc.objectbucket.io objectbucket.io cephcluster.ceph.rook.io \
-            cephobjectstore.ceph.rook.io cephblockpool.ceph.rook.io \
-            cephfilesystem.ceph.rook.io cluster.postgresql.cnpg.io; do
+        for kind in ${_STUCK_CR_KINDS}; do
             "${KUBECTL[@]}" -n "${ns}" get "${kind}" -o name 2> /dev/null \
                 | while read -r res; do
                     "${KUBECTL[@]}" -n "${ns}" patch "${res}" --type merge \
                         -p '{"metadata":{"finalizers":[]}}' > /dev/null 2>&1 || true
                 done
         done
-        "${KUBECTL[@]}" patch ns "${ns}" --type merge \
-            -p '{"metadata":{"finalizers":[]}}' > /dev/null 2>&1 || true
-        retry 30 2 _ns_absent "${ns}" \
-            || die "rollback : namespace ${ns} non supprimé (finalizers résiduels ?)"
+        # Finaliser le ns : retirer spec.finalizers via /finalize (fix canonique
+        # d'un ns coincé en Terminating ; un patch simple est ignoré à ce stade).
+        _ns_force_finalize "${ns}"
+        retry 30 2 _ns_absent "${ns}" || failed="${failed} ${ns}"
     done
+    [ -z "${failed}" ] || die "rollback : namespace(s) non supprimé(s) :${failed} (finalizers résiduels ?)"
 }
 _ns_absent() { ! "${KUBECTL[@]}" get ns "$1" > /dev/null 2>&1; }
+
+# _ns_force_finalize NS — retire spec.finalizers du ns via le sous-ressource
+# /finalize (la seule voie pour débloquer un ns déjà en Terminating). Best-effort.
+_ns_force_finalize() {
+    local ns=$1 tmp
+    tmp=$("${KUBECTL[@]}" get ns "${ns}" -o json 2> /dev/null | jq 'del(.spec.finalizers)' 2> /dev/null) || return 0
+    [ -n "${tmp}" ] || return 0
+    printf '%s' "${tmp}" \
+        | "${KUBECTL[@]}" replace --raw "/api/v1/namespaces/${ns}/finalize" -f - > /dev/null 2>&1 || true
+}
 
 # k8s_delete_targeted "LIGNES"
 #   Supprime des ressources ciblées (une par ligne, forme « -n NS KIND NAME » ou
