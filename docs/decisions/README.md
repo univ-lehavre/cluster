@@ -83,3 +83,4 @@ Format léger inspiré de Michael Nygard :
 | 0061 | [Posture d'adoption des bonnes pratiques (principe-chapeau)](0061-posture-adoption-bonnes-pratiques.md)                              | Accepted           |
 | 0062 | [Cultures d'ingénierie revendiquées (principe-chapeau)](0062-cultures-ingenierie.md)                                                 | Accepted           |
 | 0063 | [`ansible-runner` pour la boucle « suggère → lance » (P5)](0063-ansible-runner-boucle-p5.md)                                         | Accepted           |
+| 0064 | [Longhorn comme option de stockage du catalogue (3ᵉ profil)](0064-longhorn-option-stockage-catalogue.md)                             | Proposed           |

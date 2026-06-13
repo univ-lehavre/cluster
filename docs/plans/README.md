@@ -63,3 +63,4 @@ Ce dépôt est un **catalogue de topologies d'infrastructure** générique. Donc
 | [2026-06-04-audit-realignement-main-dagster.md](2026-06-04-audit-realignement-main-dagster.md) | Audit       | Réalignement `feat/dagster` ↔ `main` (renumérotation ADR)                        |
 | [plan-rollback-par-phase.md](plan-rollback-par-phase.md)                                       | Plan        | Rollback par phase sur le banc (mise en œuvre ADR 0054)                          |
 | [plan-refonte-doc.md](plan-refonte-doc.md)                                                     | Plan        | Refonte documentaire — hero, manifeste, câblage Diátaxis (met en œuvre ADR 0059) |
+| [plan-stockage-longhorn.md](plan-stockage-longhorn.md)                                         | Plan        | Longhorn, 3ᵉ profil de stockage (met en œuvre ADR 0064 — `Brouillon`)            |
