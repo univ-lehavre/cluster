@@ -146,3 +146,11 @@ consigné dans `test/lima/RESULTS.md`. CI : `pnpm lint` (inclut bats) +
   subchart postgres est désactivé → ajouté à la main. Rendu validé kubeconform,
   trivy clean (invocation CI `scan-ref .`), audit digests vert. Validation banc
   en suivi.
+
+## Suivi (ADR 0057)
+
+État : **Achevé** (cf. en-tête `## État`). Tous les paliers décrits ci-dessus
+sont livrés et mergés ; les détails par palier vivent dans le corps du plan.
+
+**Issues rattachées** (toutes fermées) : #130, #148, #161, #164. **Runs de
+preuve** : consignés dans [`test/lima/RESULTS.md`](../../test/lima/RESULTS.md).

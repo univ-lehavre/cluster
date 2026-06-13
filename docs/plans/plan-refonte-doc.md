@@ -109,3 +109,11 @@ liste ADR), pas ici.
   [ha-3cp](../decisions/0055-ha-3cp-hyperconverge-promotion-in-place.md)).
   Manifeste + hero + câblage nav repris et réconciliés avec `main` (sans
   `STATUS.md` retiré, sans Tailscale abandonné, datasets nommés génériques).
+
+## Suivi (ADR 0057)
+
+État : **Achevé** (cf. en-tête `## État`). Hero, manifeste, ADR Diátaxis (0059)
+et alignement `demarrage` livrés via #279.
+
+**Issues rattachées** : #276 (fermée — livrée par #279), #279 (mergée). **Runs
+de preuve** : sans objet (refonte documentaire, validée par `docs:build`).

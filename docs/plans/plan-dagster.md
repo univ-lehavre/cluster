@@ -145,3 +145,13 @@ Ready ? Skip propre si absent.
   insecure) n'avait pas été levé. Validation e2e suivie en **#144** (recréer le
   banc, lever le blocage — cause racine candidate : #140). Le statut « Validé »
   de l'ADR a été corrigé en « validation en suivi » (honnêteté).
+
+## Suivi (ADR 0057)
+
+État : **Achevé** (cf. en-tête `## État`). Tous les paliers décrits ci-dessus
+sont livrés et mergés ; les détails par palier vivent dans le corps du plan.
+
+- **Issues rattachées** (toutes fermées/mergées) : #129, #130, #137, #140, #141,
+  #144.
+- **Runs de preuve** : consignés dans
+  [`test/lima/RESULTS.md`](../../test/lima/RESULTS.md).
