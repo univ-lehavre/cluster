@@ -32,6 +32,64 @@ ressources** plus élevée — jugée acceptable sur des nœuds à 251 GiB de RA
 L'ADR note qu'il faudrait **revoir ce choix** si le besoin objet (S3)
 disparaissait, ou si l'échelle se réduisait drastiquement.
 
+## Trois profils de stockage : local-path, Longhorn, Ceph
+
+Le choix d'[ADR 0018](../decisions/0018-rook-ceph-vs-longhorn.md) vaut **pour le
+datalake** ; il ne dit pas que Ceph est le seul stockage du catalogue. En
+pratique, le dépôt — fidèle à sa nature de **catalogue de topologies**
+([ADR 0023](../decisions/0023-plateforme-exemple-generique.md)) — **propose
+trois profils** de stockage persistant, dont **un seul est activé** par
+déploiement. [ADR 0064](../decisions/0064-longhorn-option-stockage-catalogue.md)
+acte **Longhorn** comme troisième profil, comblant le trou entre le local-path
+(zéro résilience) et Ceph (résilient mais lourd).
+
+| Profil       | Brique                 | Nœuds | Résilience bloc | Objet S3                        | Complexité | Créneau                                      |
+| ------------ | ---------------------- | ----- | --------------- | ------------------------------- | ---------- | -------------------------------------------- |
+| `local-path` | local-path-provisioner | 1+    | **aucune**      | non                             | minimale   | jetable, mono-nœud, dev, bancs légers        |
+| `longhorn`   | Longhorn               | 2-3+  | ×2/×3 répliqué  | **non** (2ᵉ solution si besoin) | légère     | bloc répliqué multi-nœuds, **sans datalake** |
+| `ceph`       | Rook-Ceph              | 4+    | ×3 / EC 2+1     | **oui** (RGW intégré)           | élevée     | prod datalake, bloc + objet + fichier unifié |
+
+**local-path** — un Deployment + une StorageClass (`WaitForFirstConsumer`,
+`Delete`). Complexité quasi nulle, empreinte minime (c'est ce qui rend le profil
+`light` tenable : 8 GiB RAM / 20 GiB disque par VM contre 12/40 en Ceph). En
+contrepartie : **aucune résilience** — le PV est épinglé à un nœud, dont la
+perte emporte les données ; pas d'objet ni de RWX ; pas de snapshots CSI. Pour
+tout ce qui est éphémère ou ré-montable ; jamais pour de la donnée à conserver.
+
+**Longhorn** — bloc distribué répliqué synchrone (×2/×3) piloté par un operator.
+Plus simple à opérer que Ceph (pas de pools/CRUSH/rééquilibrage manuel), plus
+résilient que local-path (survit à la perte d'un nœud). Son angle mort est
+l'objet : **il ne fait que du bloc**. C'est précisément ce qui l'a écarté du
+datalake ([ADR 0018](../decisions/0018-rook-ceph-vs-longhorn.md)), où le S3 est
+requis ; mais c'est sans objet pour les topologies **sans datalake**. Si l'une
+d'elles a malgré tout besoin d'un petit S3 (Loki, backups CNPG), elle l'obtient
+par une **2ᵉ brique légère** — SeaweedFS/MinIO — exactement comme le profil
+`local-path` le fait déjà
+([ADR 0036](../decisions/0036-backing-s3-unique-rgw.md)). Le couple **Longhorn
+(bloc) + SeaweedFS (objet)** est l'alternative **composée** au **Ceph unifié** :
+deux briques simples contre une brique riche.
+
+**Ceph** — bloc + objet + fichier dans une seule plateforme, résilience graduée
+par criticité (×3 sans coupure pour le bloc critique, EC 2+1 économique pour le
+datalake ré-ingestible), échelle disque native (dizaines d'OSDs/nœud, block.db
+NVMe). En contrepartie : complexité opérationnelle élevée, empreinte ressources,
+plancher de 4 nœuds. Reste le **socle obligatoire du datalake** — Longhorn n'y
+est pas un candidat (échelle, objet intégré, EC), et 0064 **n'autorise pas** à
+l'y remplacer.
+
+> **La ligne de partage du catalogue.** local-path pour ce qui est **jetable** ;
+> Longhorn dès qu'il faut du **bloc qui survit à un nœud sans la lourdeur de
+> Ceph** ; Ceph dès qu'il faut **du durable haute capacité ou du S3 intégré**
+> (le datalake). Le choix se fait **par topologie** —
+> [ADR 0064](../decisions/0064-longhorn-option-stockage-catalogue.md) rouvre,
+> pour les topologies bloc-seul, le débat « unifié vs composé » que
+> [ADR 0018](../decisions/0018-rook-ceph-vs-longhorn.md) avait tranché pour le
+> seul datalake. Longhorn est aujourd'hui une option **actée mais non encore
+> implémentée** : ADR `Proposed`, mise en œuvre suivie par
+> [`plan-stockage-longhorn.md`](../plans/plan-stockage-longhorn.md) (état
+> `Brouillon` tant que l'ADR n'est pas `Accepted` —
+> [ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6).
+
 ## Deux régimes de redondance : ×3 pour le bloc, EC 2+1 pour le datalake
 
 Ceph propose deux modes de redondance, et le dépôt les répartit volontairement
@@ -167,9 +225,14 @@ L'honnêteté de l'ADR mérite d'être reportée ici, car ses limites sont assum
 
 ## Vue d'ensemble : un fil cohérent
 
-Les cinq décisions forment une chaîne logique : Rook-Ceph est choisi comme socle
-unifié ([0018](../decisions/0018-rook-ceph-vs-longhorn.md)) ; sa redondance est
-réglée par criticité — ×3 sans interruption pour les workloads bloc
+Les décisions forment une chaîne logique. Au niveau du **catalogue**, trois
+profils de stockage coexistent — local-path (jetable), Longhorn (bloc répliqué
+simple, [0064](../decisions/0064-longhorn-option-stockage-catalogue.md)) et Ceph
+(unifié) — un seul activé par topologie. Au niveau du **socle datalake**,
+Rook-Ceph est choisi comme socle unifié
+([0018](../decisions/0018-rook-ceph-vs-longhorn.md), que 0064 complète sans
+l'invalider) ; sa redondance est réglée par criticité — ×3 sans interruption
+pour les workloads bloc
 ([0001](../decisions/0001-replication-x3-pour-workloads-bloc.md)) et EC 2+1
 économique pour le datalake ré-ingestible
 ([0004](../decisions/0004-erasure-coding-2plus1-datalake.md)) ; le `block.db`
@@ -177,8 +240,9 @@ NVMe unique par nœud
 ([0008](../decisions/0008-metadatadevice-nvme-spof-par-noeud.md)) crée un SPOF
 que ces redondances absorbent déjà ; et la sauvegarde par VolumeSnapshots
 ([0013](../decisions/0013-sauvegarde-donnees-applicatives.md)) couvre les angles
-morts (suppression, corruption) que la redondance ne traite pas. Le fil rouge :
-`failureDomain: host` et le modèle de panne « perte d'un hôte » sur 4 nœuds.
+morts (suppression, corruption) que la redondance ne traite pas. Le fil rouge du
+socle Ceph : `failureDomain: host` et le modèle de panne « perte d'un hôte » sur
+4 nœuds.
 
 ## Voir aussi
 
