@@ -6,7 +6,8 @@ Cette page est le **point d'entrée** du dépôt pour un nouvel arrivant. Elle d
 
 > 🔰 Gardez le [**glossaire**](glossaire.md) ouvert à côté : tous les sigles
 > (Kubernetes, etcd, OSD, PVC, CNI, erasure coding, quorum…) y sont définis en
-> langage simple.
+> langage simple. Pour **comprendre** le projet avant de le faire, le
+> [**manifeste**](manifeste.md) le raconte de bout en bout.
 
 ## Public visé
 
@@ -34,10 +35,10 @@ pas. Les sections avancées sont signalées.
 
 ## Parcours numéroté
 
-1. **Comprendre l'architecture et les choix.** Lire ce fichier, le
-   [glossaire](glossaire.md), puis le [README racine](../README.md) (section «
-   Structure »). Pour le _pourquoi_ de chaque décision, parcourir les
-   [ADR](decisions/) (Architecture Decision Records).
+1. **Se repérer.** Lire ce fichier et garder le [glossaire](glossaire.md) ouvert
+   à côté. Pas besoin du _pourquoi_ de chaque décision pour démarrer : il est
+   raconté dans le [manifeste](manifeste.md), à lire avant ou après, sans
+   interrompre l'installation.
 2. **Installer le cluster.** Suivre la séquence de référence pas à pas :
    [`bootstrap/RUNBOOK.md`](../bootstrap/RUNBOOK.md) — préparation OS,
    `kubeadm`, CNI Cilium, jonction des workers. Raccourcis :

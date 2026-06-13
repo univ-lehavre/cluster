@@ -51,6 +51,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Accueil', link: '/' },
+      { text: 'Manifeste', link: '/docs/manifeste' },
       { text: 'Par où commencer', link: '/docs/demarrage' },
       { text: 'Boîte à outils', link: '/docs/outils' },
       { text: 'Guide dev data', link: '/docs/guide-dev-data' },
@@ -64,6 +65,7 @@ export default defineConfig({
         text: 'Pour démarrer',
         items: [
           { text: 'Accueil', link: '/' },
+          { text: 'Manifeste (le récit)', link: '/docs/manifeste' },
           { text: 'Par où commencer', link: '/docs/demarrage' },
           { text: 'Boîte à outils (scripts)', link: '/docs/outils' },
           { text: 'Guide du développeur data', link: '/docs/guide-dev-data' },

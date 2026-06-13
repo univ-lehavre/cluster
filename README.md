@@ -1,10 +1,53 @@
-# Cluster
+---
+layout: home
+hero:
+  name: Cluster
+  tagline: >-
+    Un cluster Kubernetes de recherche hyperconvergé — installation, stockage
+    distribué, chaîne DataOps et services transverses, racontés de bout en bout.
+  actions:
+    - theme: brand
+      text: Lire le manifeste
+      link: /docs/manifeste
+    - theme: alt
+      text: Le guide
+      link: /docs/demarrage
+features:
+  - icon: 📖
+    title: Le manifeste
+    details: >-
+      Le récit du projet pour néophyte — contexte, objectif, méthode, voyage,
+      résultats. Les mots-clés renvoient au glossaire et aux décisions.
+    link: /docs/manifeste
+  - icon: 🚀
+    title: Démarrer
+    details: Public visé, prérequis, parcours d'installation pas à pas.
+    link: /docs/demarrage
+  - icon: 🧱
+    title: Les composants
+    details: La pile technologique brique par brique — rôle et raison d'être.
+    link: /docs/composants
+  - icon: 🧭
+    title: Décisions (ADR)
+    details:
+      Pourquoi chaque choix de conception, au format Nygard, daté et immuable.
+    link: /docs/decisions/
+  - icon: 🔬
+    title: Audit & qualité
+    details: État des lieux vérifié, plan d'action, garde-fous en place.
+    link: /docs/audit/
+  - icon: 🧪
+    title: Banc de test
+    details: Topologies reproductibles sur Lima, preuves opérationnelles.
+    link: /test/
+---
 
 [![DOI](https://zenodo.org/badge/1243564575.svg)](https://doi.org/10.5281/zenodo.20287209)
 
 Manifests, playbooks et runbooks pour déployer et opérer un cluster Kubernetes
 de recherche : installation, stockage distribué, applications de calcul et
-services transverses.
+services transverses. Pour le **récit complet** (néophyte, de bout en bout),
+lire le [**manifeste**](docs/manifeste.md).
 
 📖 **Documentation en ligne** :
 [univ-lehavre.github.io/cluster](https://univ-lehavre.github.io/cluster/) —
