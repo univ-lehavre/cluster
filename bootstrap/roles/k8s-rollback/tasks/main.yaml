@@ -53,10 +53,13 @@
   ansible.builtin.dpkg_selections:
     name: '{{ item }}'
     selection: install
+  # Symétrique des holds posés à l'install : kubelet/kubeadm/cri-tools
+  # (k8s-install) + containerd.io (k8s-CRI-install, #295). `kubectl` n'est jamais
+  # installé ni held par le bootstrap → corrigé en `cri-tools` (#295).
   loop:
     - kubelet
     - kubeadm
-    - kubectl
+    - cri-tools
     - containerd.io
   failed_when: false
 
