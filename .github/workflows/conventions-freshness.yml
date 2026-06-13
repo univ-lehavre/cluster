@@ -1,4 +1,4 @@
-name: Audit conventions
+name: Conventions freshness
 
 # Garde-fou de respect des conventions de gouvernance (ADR 0060). Vérifie sur le
 # code seul : conformité ADR↔plan↔issue↔drift (ADR 0057/0058), cohérence des
@@ -49,9 +49,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPORT: ${{ steps.check.outputs.report }}
         run: |
-          LABEL="audit-conventions"
+          LABEL="conventions-freshness"
           TITLE="📋 Conventions de gouvernance — manquements détectés"
-          NOTE="— Détecté par audit-conventions.yml (ADR 0060). Corriger les points"
+          NOTE="— Détecté par conventions-freshness.yml (ADR 0060). Corriger les points"
           NOTE="${NOTE} ci-dessus puis relancer le workflow ; l'issue se referme quand"
           NOTE="${NOTE} le rapport est vert. Non bloquant (ADR 0042 §1)."
           BODY=$(printf '%s\n\n%s' "$REPORT" "$NOTE")

@@ -115,7 +115,7 @@ tracée (ADR), chaque écart de run est indexé (drift), chaque convention est
 auto-vérifiée ([ADR 0060](docs/decisions/0060-audit-conventions-gouvernance.md))
 :
 
-<!-- STATS:DEBUT — bloc régénéré par `pnpm audit:gouvernance --stats` (ADR 0060) -->
+<!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
 
 - **60 ADR** (56 Accepted, 4 Proposed) — chaque choix de conception, daté et
   immuable
@@ -130,8 +130,8 @@ auto-vérifiée ([ADR 0060](docs/decisions/0060-audit-conventions-gouvernance.md
 
 <!-- STATS:FIN -->
 
-> Régénérer ce bloc : `pnpm audit:gouvernance --stats`. Le respect des
-> conventions est audité chaque semaine (workflow `audit-conventions`, non
+> Régénérer ce bloc : `pnpm check:gouvernance --stats`. Le respect des
+> conventions est vérifié chaque semaine (workflow `conventions-freshness`, non
 > bloquant).
 
 ## Trademarks

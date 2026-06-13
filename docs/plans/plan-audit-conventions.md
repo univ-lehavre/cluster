@@ -24,9 +24,9 @@ un cron non bloquant + un bloc de statistiques affiché.
 1. **Script `scripts/check_gouvernance.py`** — logique pure testée
    (`tests/test_check_gouvernance.py`), façade CLI : `--report` (humain),
    `--stats` (bloc chiffres), code de sortie 0/1. Câblé
-   `pnpm audit:gouvernance`.
-2. **Workflow cron** `.github/workflows/audit-conventions.yml` — hebdomadaire,
-   non bloquant, ouvre/met à jour une issue dédoublonnée par label
+   `pnpm check:gouvernance`.
+2. **Workflow cron** `.github/workflows/conventions-freshness.yml` —
+   hebdomadaire, non bloquant, ouvre/met à jour une issue dédoublonnée par label
    `audit-conventions` (motif `bench-freshness.yml`).
 3. **Bloc « le dépôt en chiffres »** — stats injectées dans la doc
    (README/manifeste), régénérables par `--stats`.

@@ -7,8 +7,8 @@ fraîcheur des passages d'audit. Produit aussi les statistiques de gouvernance
 (« le dépôt en chiffres »).
 
 NON bloquant par destination : lancé par un cron hebdomadaire
-(.github/workflows/audit-conventions.yml) qui consigne les manquements dans une
-issue ; lançable à la main via `pnpm audit:gouvernance`.
+(.github/workflows/conventions-freshness.yml) qui consigne les manquements dans une
+issue ; lançable à la main via `pnpm check:gouvernance`.
 
 Usage :
   python3 scripts/check_gouvernance.py            # rapport humain + code 0/1

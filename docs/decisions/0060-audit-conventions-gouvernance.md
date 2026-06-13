@@ -67,11 +67,11 @@ Quatre familles de contrôles, sur le code seul (pas d'état distant) :
 - **NON bloquant en CI** : on ne **bloque pas** une PR sur une convention de
   gouvernance (une dérive documentaire ne casse pas le produit, et bloquer
   frictionne au mauvais moment). Le script tourne en **cron hebdomadaire**
-  (`.github/workflows/audit-conventions.yml`) ; s'il trouve des manquements, il
-  **ouvre/met à jour UNE issue récapitulative** dédoublonnée par **label**
+  (`.github/workflows/conventions-freshness.yml`) ; s'il trouve des manquements,
+  il **ouvre/met à jour UNE issue récapitulative** dédoublonnée par **label**
   (`audit-conventions`), exactement comme `bench-freshness.yml` (l'unicité par
   label, pas par titre — leçon des doublons #273/#288).
-- **Lançable à la main** : `pnpm audit:gouvernance` (rapport local) et
+- **Lançable à la main** : `pnpm check:gouvernance` (rapport local) et
   `workflow_dispatch`. Le rapport est **lisible** (liste les manquements par
   famille) — pas un simple code de sortie.
 
