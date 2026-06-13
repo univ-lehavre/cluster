@@ -43,3 +43,19 @@ def render_prod_inventory(topo: Topology) -> str:
         control_nodes=topo.control_nodes,
         worker_nodes=topo.worker_nodes,
     )
+
+
+def render_lima_inventory(topo: Topology, lima_home: str) -> str:
+    """Rend l'inventaire du banc Lima (= sortie de `write_inventory`, lib.sh).
+
+    BYTE-IDENTIQUE attendu par rapport à `write_inventory` (invariant P1, côté
+    banc). `lima_home` est DÉRIVÉ DU TERRAIN (le `$HOME` du poste — chemin SSH
+    `<home>/.lima/<vm>/ssh.config`), donc fourni explicitement : c'est la seule
+    valeur non byte-stable de cette sortie. `workers` vide → `hosts: {}`.
+    """
+    template = _env().get_template("inventory-lima.yaml.j2")
+    return template.render(
+        control_nodes=topo.control_nodes,
+        worker_nodes=topo.worker_nodes,
+        lima_home=lima_home,
+    )

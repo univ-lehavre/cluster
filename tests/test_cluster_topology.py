@@ -15,6 +15,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from cluster_topology import load_topology, render_prod_inventory  # noqa: E402
+from cluster_topology.generator import render_lima_inventory  # noqa: E402
 from cluster_topology.model import (  # noqa: E402
     TopologyError,
     topology_from_dict,
@@ -130,6 +131,68 @@ class ByteExactInvariant(unittest.TestCase):
             "le générateur ne reproduit plus bootstrap/hosts.example.yaml à l'octet "
             "(invariant P1, ADR 0056 §3) — éditer le template, pas le fichier généré",
         )
+
+
+class LimaInventoryByteExact(unittest.TestCase):
+    """P1, côté banc : render_lima_inventory == sortie de `write_inventory`.
+
+    Fixtures golden vérifiées byte-pour-byte contre la VRAIE sortie de
+    `write_inventory` (test/lima/lib.sh) avec un HOME fixe `/H`. Si la séquence
+    d'echo de write_inventory change, ce test casse → garde-fou de parité.
+    """
+
+    HOME = "/H"
+
+    def test_multi_node_3(self):
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {"name": "cp1", "roles": ["control"]},
+                    {"name": "node1", "roles": ["worker"]},
+                    {"name": "node2", "roles": ["worker"]},
+                ],
+                target_kind="lima",
+            )
+        )
+        expected = (
+            "# Inventaire généré par le banc Lima — NE PAS versionner (artefact de run).\n"
+            "cloud:\n"
+            "  children:\n"
+            "    control:\n"
+            "    workers:\n"
+            "  vars:\n"
+            "    ansible_user: lima\n"
+            "    target_kind: lima\n"
+            "control:\n"
+            "  hosts:\n"
+            "    cp1:\n"
+            "      ansible_host: lima-cp1\n"
+            '      ansible_ssh_common_args: "-F /H/.lima/cp1/ssh.config"\n'
+            "workers:\n"
+            "  hosts:\n"
+            "    node1:\n"
+            "      ansible_host: lima-node1\n"
+            '      ansible_ssh_common_args: "-F /H/.lima/node1/ssh.config"\n'
+            "    node2:\n"
+            "      ansible_host: lima-node2\n"
+            '      ansible_ssh_common_args: "-F /H/.lima/node2/ssh.config"\n'
+            "control_host:\n"
+            "  hosts:\n"
+            "    localhost:\n"
+            "      ansible_connection: local\n"
+        )
+        self.assertEqual(render_lima_inventory(topo, self.HOME), expected)
+
+    def test_single_cp_no_worker_emits_empty_hosts(self):
+        topo = topology_from_dict(
+            _base(nodes=[{"name": "cp1", "roles": ["control"]}], target_kind="lima")
+        )
+        out = render_lima_inventory(topo, self.HOME)
+        # le cas workers-vide doit émettre EXACTEMENT `  hosts: {}` (write_inventory)
+        self.assertIn("workers:\n  hosts: {}\n", out)
+        self.assertNotIn("    node", out)
+        # et le bloc control_host suit immédiatement
+        self.assertIn("  hosts: {}\ncontrol_host:\n", out)
 
 
 if __name__ == "__main__":
