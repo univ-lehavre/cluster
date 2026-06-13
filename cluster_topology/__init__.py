@@ -6,20 +6,25 @@ Ansible aujourd'hui ; group_vars de profil et table de nœuds Lima ensuite).
 Ansible reste le moteur de convergence (ADR 0056 §7) — l'outil ne réimplémente
 jamais la convergence ni un état réconcilié.
 
-Paliers P0-P1 (plan-modele-declaratif) : modéliser (`topology.example.yaml`) +
+Paliers P0-P2 (plan-modele-declaratif) : modéliser (`topology.example.yaml`) ;
 générer les DEUX inventaires BYTE-IDENTIQUES à l'existant — prod
 (`bootstrap/hosts.example.yaml`) et banc Lima (sortie de `write_inventory`,
-test/lima/lib.sh). La logique (chargement, dérivation, rendu) est pure et testée
-(tests/test_cluster_topology.py, ADR 0017). La DÉRIVATION de profil (group_vars
-de profil : ceph_osd_expected, etc.) relève de P2.
+test/lima/lib.sh) ; DÉRIVER le profil (inclusion cumulative ADR 0039 + faisceau
+`-e` à parité bash : `derive_run_params`, ceph_osd_expected, etc.). La logique
+(chargement, dérivation, rendu) est pure et testée (tests/test_cluster_topology.py,
+ADR 0017). La FAÇADE CLI/CI qui expose cette surface (generate/validate/status/
+diff) relève de P3 et vit dans `scripts/topology.py` (façade fine, hors paquet).
 """
 
 from cluster_topology.generator import render_lima_inventory, render_prod_inventory
-from cluster_topology.model import Topology, load_topology
+from cluster_topology.model import Topology, TopologyError, load_topology
+from cluster_topology.profile import derive_run_params
 
 __all__ = [
     "Topology",
+    "TopologyError",
     "load_topology",
     "render_prod_inventory",
     "render_lima_inventory",
+    "derive_run_params",
 ]

@@ -41,20 +41,23 @@ lointain. Aucun palier ne casse le précédent (invariant byte-identique, ADR 00
 ## Suivi
 
 État global : voir l'en-tête [`## État`](#état) (Actif). Démarré le 2026-06-13 :
-**P0, P1 et P2 faits** — générateur byte-identique des deux inventaires (P1) +
-dérivation de profil pure et à parité avec le bash (P2), prouvés par test.
+**P0 à P3 faits** — générateur byte-identique des deux inventaires (P1) +
+dérivation de profil pure et à parité avec le bash (P2) + façade CLI/CI
+`scripts/topology.py` (`generate`/`validate`/`status`/`diff`, P3), prouvés par
+test. La commande `diff` est câblée en CI (`pnpm lint:topology-drift`) : la
+moindre dérive de l'inventaire prod régénéré casse le lint.
 
-| Palier | État       | Issue(s)                         | Run de preuve                                                                                                                   |
-| ------ | ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| P0     | ✅ fait    | —                                | `topology.example.yaml` + paquet `cluster_topology/`                                                                            |
-| P1     | ✅ fait    | —                                | **inventaires prod + banc byte-identiques** (12 tests, vs `hosts.example.yaml` et `write_inventory`)                            |
-| P2     | ✅ fait    | —                                | **dérivation de profil** (inclusion cumulative ADR 0039 + faisceau `-e` à parité bash, `cluster_topology/profile.py`, 12 tests) |
-| P3     | ⬜ à faire | —                                | façade CLI (`generate`/`validate`/`status`/`diff`)                                                                              |
-| P4     | ⬜ à faire | —                                | —                                                                                                                               |
-| P5     | ⬜ à faire | —                                | —                                                                                                                               |
-| P6     | ⬜ à faire | —                                | —                                                                                                                               |
-| P7     | ⬜ à faire | **#250** (banc Lima HA `ha-3cp`) | —                                                                                                                               |
-| P8     | ⬜ à faire | —                                | —                                                                                                                               |
+| Palier | État       | Issue(s)                         | Run de preuve                                                                                                                                           |
+| ------ | ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0     | ✅ fait    | —                                | `topology.example.yaml` + paquet `cluster_topology/`                                                                                                    |
+| P1     | ✅ fait    | —                                | **inventaires prod + banc byte-identiques** (12 tests, vs `hosts.example.yaml` et `write_inventory`)                                                    |
+| P2     | ✅ fait    | —                                | **dérivation de profil** (inclusion cumulative ADR 0039 + faisceau `-e` à parité bash, `cluster_topology/profile.py`, 12 tests)                         |
+| P3     | ✅ fait    | —                                | **façade CLI/CI** `scripts/topology.py` (`generate`/`validate`/`status`/`diff`, argparse stdlib) ; `diff` câblé en CI (`lint:topology-drift`), 16 tests |
+| P4     | ⬜ à faire | —                                | —                                                                                                                                                       |
+| P5     | ⬜ à faire | —                                | —                                                                                                                                                       |
+| P6     | ⬜ à faire | —                                | —                                                                                                                                                       |
+| P7     | ⬜ à faire | **#250** (banc Lima HA `ha-3cp`) | —                                                                                                                                                       |
+| P8     | ⬜ à faire | —                                | —                                                                                                                                                       |
 
 **Issues créées depuis ce plan** : _(aucune encore — à lier au fil de
 l'implémentation)_.
