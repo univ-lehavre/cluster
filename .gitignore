@@ -59,6 +59,13 @@ docs/.vitepress/dist/
 # Ansible runtime cache
 .ansible/
 
+# ansible-runner (P5, ADR 0063) : private_data_dir = bootstrap/ → runner y crée
+# artifacts/ (logs par run) et env/ (cmdline/envvars/extravars RÉUTILISÉS d'un run
+# à l'autre). Artefacts locaux, JAMAIS versionnés — et un env/cmdline résiduel
+# fausserait les runs suivants (ex. --syntax-check collé pour tous).
+bootstrap/artifacts/
+bootstrap/env/
+
 # OpenTofu / Terraform — provisioning cloud (ADR 0032). L'état contient des
 # identités réelles → JAMAIS versionné (ADR 0023) ; idem les *.tfvars réels
 # (le *.tfvars.example générique reste versionné). Le code *.tf et
