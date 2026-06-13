@@ -81,3 +81,4 @@ Format léger inspiré de Michael Nygard :
 | 0059 | [Diátaxis : typologie des quatre modes de documentation + câblage inline](0059-diataxis-typologie-documentation.md)                  | Accepted           |
 | 0060 | [Audit régulier du respect des conventions de gouvernance](0060-audit-conventions-gouvernance.md)                                    | Accepted           |
 | 0061 | [Posture d'adoption des bonnes pratiques (principe-chapeau)](0061-posture-adoption-bonnes-pratiques.md)                              | Accepted           |
+| 0062 | [Cultures d'ingénierie revendiquées (principe-chapeau)](0062-cultures-ingenierie.md)                                                 | Accepted           |
