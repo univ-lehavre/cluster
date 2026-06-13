@@ -215,9 +215,115 @@ inchangés faute d'une logique de capture des changements.
 
 ## Méthode
 
+Une plateforme qui se veut **reproductible** ne peut pas être bâtie n'importe
+comment : la méthode est elle-même un résultat. Quatre disciplines la cadrent.
+
+**Tout choix se trace, immuablement.** Chaque décision de conception est
+consignée dans un [ADR](decisions/) (_Architecture Decision Record_) au format
+Nygard léger — contexte, décision, statut, conséquences. Un ADR ne se réécrit
+pas : il est _superseded_ quand une décision en remplace une autre, jamais
+effacé. Ce méta-cadre est lui-même outillé : un ADR **décide** (immuable), un
+[plan](plans/) **met en œuvre** (vivant), une issue **exécute**, une PR
+**livre** — quatre rôles non chevauchants
+([ADR 0057](decisions/0057-gouvernance-documentaire-adr-plan-issue.md)). On
+sait, des mois plus tard, _pourquoi_ une chose est ainsi.
+
+**Le bon outil pour chaque geste.** Le dépôt suit une doctrine explicite du
+choix d'outil par action
+([ADR 0049](decisions/0049-doctrine-choix-outil-par-action.md)) : bash
+orchestre, Ansible converge de façon idempotente, jq parse, Python porte la
+logique non triviale (et se teste), bats et pytest éprouvent. La documentation
+suit [Diátaxis](decisions/0059-diataxis-typologie-documentation.md) — une page
+sert **un** besoin de lecture (apprendre, faire, vérifier, comprendre), et l'on
+**câble** plutôt que de recopier. L'historique se préserve par merge-commit
+([ADR 0037](decisions/0037-strategie-merge-commit.md)) ; aucune page de doc
+n'est orpheline ([ADR 0029](decisions/0029-markdown-atteignable-doc.md),
+contrôle automatique bloquant).
+
+**Du logiciel libre, maîtrisé.** Toute la pile est open-source — choix cohérent
+avec l'objectif de souveraineté : pas de boîte noire ni de licence captive sur
+le chemin critique. Les versions sont épinglées par digest d'index multi-arch
+([ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)), les
+dépendances suivies en PR dédiées, jamais auto-mergées. Le détail des briques et
+de leurs alternatives écartées vit dans [composants](composants.md).
+
+**On prouve, on n'affirme pas.** C'est le principe-chapeau
+([ADR 0052](decisions/0052-reproductibilite-des-resultats.md)) : un résultat
+n'existe que reproductible **depuis le code seul**. Un état complété à la main
+est une preuve invalide ; l'idempotence se démontre par un rejeu sans
+changement. Pour verrouiller ce principe, des garde-fous s'enchaînent **avant**
+que la moindre régression atteigne la production — hooks de commit, intégration
+continue, banc d'essai, détection de dérive sur les serveurs. L'inventaire
+complet est dans [SAFEGUARDS.md](../SAFEGUARDS.md) ; leur **mesure** agrégée,
+sur la [page des preuves](preuves.md).
+
 ## Le voyage parcouru
 
+Une plateforme ne naît pas droite du premier coup. Ce qui distingue celle-ci,
+c'est que **chaque détour est consigné** plutôt que lissé — et c'est précisément
+la trace de ces détours qui atteste du sérieux du processus.
+
+La mécanique est régulière : un [ADR](decisions/) acte une décision ; un
+[plan](plans/) la déroule en paliers ; une issue exécute un palier ; une PR le
+livre ; et **un run de bout en bout sur banc révèle ce que ni la relecture ni le
+lint ne voyaient**. Chacun de ces écarts — un _drift_ — est indexé dans un
+[registre unique](architecture/registre-drifts.yaml) (symptôme, cause,
+correctif, portée, statut), puis distillé en invariants réutilisables dans les
+[leçons des runs](architecture/lecons-des-runs.md).
+
+Trois exemples donnent le ton. Le build de l'interface web du store de
+[_lineage_](composants.md#marquez-et-openlineage-lineage) **saturait la
+mémoire** à 5 Gio : il a fallu dimensionner le banc pour le pic, pas pour le
+repos. Un flux entre l'[orchestrateur](composants.md#dagster-orchestration) et
+le store de lineage **échouait silencieusement** faute d'une
+[NetworkPolicy](glossaire.md#cni-container-network-interface) d'_egress_ — un
+vrai bug du livrable, corrigé à la racine, pas contourné. Et des définitions de
+ressources personnalisées ([CRD](glossaire.md#crd-custom-resource-definition))
+que l'outil officiel acceptait étaient **rejetées par le parseur** d'un autre,
+imposant de les appliquer autrement. Aucun de ces pièges n'était visible au lint
+: tous passaient au vert
+([ADR 0034](decisions/0034-validation-e2e-from-scratch.md)).
+
+La leçon est double. D'abord, **le compteur de drifts qui se tarit run après run
+_est_ la courbe de fiabilisation** : la répétition n'est pas un aveu de
+faiblesse, c'est le processus. Ensuite, **la connaissance capitalise** — les
+pièges d'un chantier servent de spécification au suivant. Le détail daté de
+chaque campagne vit dans le [journal des runs](../test/lima/RESULTS.md).
+
 ## Résultats
+
+À ce jour, la plateforme **tient sa promesse centrale sur le banc** : montée de
+zéro, sans intervention manuelle, elle assemble la chaîne complète et la prouve
+fonctionnelle.
+
+La [chaîne DataOps](architecture/chaine-dataops.md) est validée **de bout en
+bout** : un run réel de l'[orchestrateur](composants.md#dagster-orchestration)
+émet des événements [OpenLineage](composants.md#marquez-et-openlineage-lineage),
+qui sont **ingérés et visibles** dans le store de lineage — la chaîne
+orchestration → traçabilité → visualisation n'est pas montée « en théorie »,
+elle a fait transiter un vrai job. Sous elle, le socle est lui aussi éprouvé :
+[Kubernetes](glossaire.md#kubernetes-k8s) sur plusieurs nœuds, réseau
+[Cilium](composants.md#cilium-cni) chiffré, stockage distribué
+[Ceph](composants.md#rook-ceph) (bloc, fichier et objet S3),
+[PostgreSQL managé](composants.md#postgresql-via-cloudnativepg) avec sauvegarde
+vers S3, et l'observabilité (métriques + logs) sollicitée par des épreuves
+réelles. Le détail des combinaisons réellement montées — et la nature de chaque
+épreuve (unitaire, intégration de chaîne, chaos) — est dans la
+[matrice du catalogue](architecture/matrice-catalogue.md).
+
+Surtout, **ce qui n'est pas prouvé est dit comme tel**. Tout l'existant a été
+validé sur une seule combinaison d'axes — architecture arm64, terrain local,
+trois nœuds avec un plan de contrôle unique. Restent des **trous assumés** : le
+matériel x86 (validé seulement en production cible), la **haute disponibilité**
+réelle du plan de contrôle (`ha-3cp`), et le **multi-sites**. Ces angles morts
+sont nommés, pas dissimulés — l'honnêteté sur la couverture fait partie de la
+preuve. La [page des preuves](preuves.md) consolide l'ensemble et renvoie à
+chaque trace brute.
+
+La frontière reste celle posée en introduction : ce dépôt livre le **contenant**
+— un socle générique, reproductible, prouvé. Le **contenu** métier (les
+pipelines, les jeux de données réels d'un projet) se branche dessus depuis le
+dépôt applicatif, en suivant le [guide du développeur data](guide-dev-data.md).
 
 ## Références
 
