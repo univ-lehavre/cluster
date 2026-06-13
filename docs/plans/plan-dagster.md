@@ -1,5 +1,11 @@
 # Plan — Étape 1.7 : orchestrateur Dagster (event log dans CloudNativePG)
 
+## État
+
+> **État : Achevé** (2026-06-13) · **Fonde :
+> [ADR 0026](../decisions/0026-orchestration-dagster.md)** (Accepted) · **Issues
+> : #129, #130, #137, #140, #141, #144** (toutes fermées/mergées)
+>
 > Date du plan : 2026-06-04. Socle décisionnel :
 > [ADR 0026](../decisions/0026-orchestration-dagster.md) (orchestration
 > Dagster) + [ADR 0024](../decisions/0024-postgres-manage-cloudnative-pg.md)

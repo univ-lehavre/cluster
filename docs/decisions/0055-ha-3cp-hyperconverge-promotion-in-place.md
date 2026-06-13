@@ -127,7 +127,7 @@ ne collisionnent **que** s'ils revendiquent la même IP. Deux garde-fous :
 
 ## Statut
 
-Proposed (2026-06-11). **Précise**
+Accepted (2026-06-11 ; promu de Proposed le 2026-06-13). **Précise**
 [ADR 0047](0047-topologie-ha-3cp-control-plane-dedie.md) (variante
 hyperconvergée 4 nœuds, là où 0047 décrit le modèle CP dédiés 6 VMs) et
 **amende** [ADR 0002](0002-control-plane-unique-avec-endpoint.md) (argument « 3

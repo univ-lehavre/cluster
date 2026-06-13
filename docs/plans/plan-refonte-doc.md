@@ -1,5 +1,12 @@
 # Plan — Refonte documentaire : hero, manifeste, câblage, Diátaxis
 
+## État
+
+> **État : Achevé** (2026-06-13) · **Fonde :
+> [ADR 0059](../decisions/0059-diataxis-typologie-documentation.md)** (Accepted)
+> · **Issues : [#276](https://github.com/univ-lehavre/cluster/issues/276)**
+> (fermée), #279 (mergée)
+>
 > **Fonde** :
 > [ADR 0059 — Diátaxis](../decisions/0059-diataxis-typologie-documentation.md).
 > **Issue** : [#276](https://github.com/univ-lehavre/cluster/issues/276).

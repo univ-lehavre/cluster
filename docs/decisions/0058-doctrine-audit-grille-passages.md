@@ -96,7 +96,7 @@ de nouvelles notes, sans écraser celui-ci.
 
 ## Statut
 
-Proposed (2026-06-12). Sœur de
+Accepted (2026-06-12 ; promu de Proposed le 2026-06-13). Sœur de
 [ADR 0057](0057-gouvernance-documentaire-adr-plan-issue.md) (gouvernance
 documentaire) ; applique aux audits le pattern grille/passage daté déjà acté
 pour les preuves de banc ([ADR 0042](0042-fraicheur-preuves-banc.md)) et la

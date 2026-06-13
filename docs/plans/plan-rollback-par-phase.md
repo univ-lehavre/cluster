@@ -1,5 +1,12 @@
 # Plan d'implémentation — Rollback par phase sur le banc (ADR 0054)
 
+## État
+
+> **État : Actif** (depuis 2026-06-11) · **Fonde :
+> [ADR 0054](../decisions/0054-rollback-par-phase-banc.md)** (Accepted) ·
+> **Issue : [#274](https://github.com/univ-lehavre/cluster/issues/274)** · lots
+> 1-5 faits, restent doc (lot 6) + preuve `RESULTS.md`
+
 Met en œuvre [ADR 0054](../decisions/0054-rollback-par-phase-banc.md) : un
 rollback **par phase**, symétrique du montage, destructif total, banc jetable.
 Ce plan est le **comment** ; la décision (le **pourquoi**) est dans l'ADR.

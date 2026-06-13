@@ -73,21 +73,40 @@ réordonner P0-P8 ? » → **oui** → c'est un **plan**, pas un ADR.
   `<thème>` ») ; le plan **référence l'ADR qui le fonde** en en-tête (règle
   existante conservée).
 
-### 3. Plans THÉMATIQUES et VIVANTS, avec une section « Suivi »
+### 3. Plans THÉMATIQUES et VIVANTS, avec un état et une section « Suivi »
 
 - **Nommage thématique**, lié à la décision, pas daté : `plan-<thème>.md` (ex.
   `plan-modele-declaratif.md`, `plan-ha-3cp.md`). Le plan **vit** tant que la
   décision se met en œuvre ; il n'est pas une photo de session.
-- **Section « Suivi » obligatoire** — le plan devient le **tableau de bord** de
-  la décision, ce que ni l'ADR (immuable) ni l'issue (atomique) ne peuvent être
-  :
+- **En-tête `## État` OBLIGATOIRE** — un champ de **premier niveau**, comme
+  l'ADR a son `## Statut`. Un coup d'œil suffit à savoir où en est la mise en
+  œuvre, sans lire tout le Suivi. Valeurs normées **datées** :
+
+  | État          | Sens                                                                                                                   |
+  | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+  | **Brouillon** | rédigé mais non engagé ; typiquement l'ADR fondateur est encore `Proposed` (cf. §6) → **pas d'implémentation** active. |
+  | **Actif**     | mise en œuvre en cours ; l'ADR fondateur est `Accepted` ; des issues/PR avancent les paliers.                          |
+  | **Achevé**    | tous les paliers faits et prouvés ; reste versionné comme trace.                                                       |
+  | **Abandonné** | mise en œuvre arrêtée (décision révisée / superseded) ; conservé pour l'historique.                                    |
+
+  Forme en en-tête :
+  `> **État : Actif** (depuis AAAA-MM-JJ) · **Fonde : ADR NNNN** · **Issues : #N…**`.
+
+- **Section « Suivi » obligatoire** — le plan est le **tableau de bord** de la
+  décision, ce que ni l'ADR (immuable) ni l'issue (atomique) ne peuvent être :
   - les **paliers** (cases à cocher, l'ordre de marche évolutif) ;
-  - les **issues créées** depuis le plan (liens `#NNN`) et leur état ;
-  - l'**état d'achèvement global** (en cours / achevé / abandonné) ;
+  - les **issues rattachées** (liens `#NNN`) et leur état — qu'elles soient
+    **créées depuis le plan** OU **préexistantes adoptées** : un plan formalisé
+    après coup (extraction de paliers d'un ADR, cadrage tardif) **embarque les
+    issues en cours** qui le réalisent déjà (ex. #250 pour `ha-3cp`, #274 pour
+    le rollback) au lieu d'en ouvrir de nouvelles. Le plan **agrège**, il ne
+    duplique pas ;
   - un renvoi aux **runs de preuve** (`RESULTS.md`) qui valident un palier
     ([ADR 0034](0034-validation-e2e-from-scratch.md)/[0052](0052-reproductibilite-des-resultats.md)).
-- Quand tous les paliers sont faits et prouvés, le plan passe **achevé** (il
-  reste versionné comme trace, comme un ADR superseded reste lisible).
+- L'**état d'achèvement global** vit dans l'en-tête `## État` (ci-dessus), pas
+  enfoui dans le Suivi. Quand tous les paliers sont faits et prouvés, l'en-tête
+  passe **Achevé** (le plan reste versionné comme trace, comme un ADR superseded
+  reste lisible).
 
 ### 4. Distinguer plan vivant et audit de session
 
@@ -109,9 +128,33 @@ réordonner P0-P8 ? » → **oui** → c'est un **plan**, pas un ADR.
 - Le **plan est le pivot** du suivi : c'est lui qui agrège « où en est la mise
   en œuvre de cette décision », plutôt qu'un chaînage à reconstituer à la main.
 
+### 6. Cycle de vie de l'ADR — `Proposed` n'autorise pas l'implémentation
+
+Le statut de l'ADR **gouverne** ce que le plan a le droit de faire. La règle :
+**on n'implémente (plan `Actif` + PR de code) qu'à partir d'un ADR `Accepted`.**
+
+| Statut ADR     | Plan autorisé                            | Code (PR) autorisé           |
+| -------------- | ---------------------------------------- | ---------------------------- |
+| **Proposed**   | `Brouillon` (cadrage, paliers esquissés) | **Non** — décision pas figée |
+| **Accepted**   | `Actif` (paliers déroulés, issues, PR)   | **Oui**                      |
+| **Superseded** | plan basculé `Abandonné` ou réécrit      | (selon l'ADR successeur)     |
+| **Deprecated** | plan `Abandonné`                         | non                          |
+
+Raison : un ADR `Proposed` peut encore être **réécrit ou rejeté** ; investir du
+code dessus, c'est risquer de jeter le travail (ou pire, figer dans le code une
+décision que l'ADR n'a pas actée). Acter d'abord (`Accepted`), implémenter
+ensuite. Le **passage `Accepted`** est précisément le signal qui fait passer le
+plan de `Brouillon` à `Actif`.
+
+**Exception bornée** : un **prototype jetable** (spike, `test/spikes/`) peut
+précéder l'acceptation pour _éclairer_ la décision — mais il ne s'agit pas d'une
+mise en œuvre du plan (pas de PR sur le chemin de production, pas de palier
+coché). Le spike informe l'ADR ; il ne l'implémente pas.
+
 ## Statut
 
-Proposed (2026-06-12). **Précise et durcit**
+Accepted (2026-06-12 ; amendé 2026-06-13 : ajout du cycle de vie de l'ADR §6 et
+de l'en-tête `## État` du plan §3). **Précise et durcit**
 [CONTRIBUTING.md](../../CONTRIBUTING.md) (section « Traçabilité ») et
 `docs/plans/README.md` (qui suggéraient la relation ADR↔plan sans l'imposer ni
 tracer l'avancement). N'invalide aucun ADR ; impose en revanche d'**extraire**
@@ -136,13 +179,19 @@ recoupement avec les ADR) est un **chantier distinct**, non tranché ici.
     [ADR 0055](0055-ha-3cp-hyperconverge-promotion-in-place.md) vers le plan
     `ha-3cp` (ou l'issue #250 qui en tient déjà lieu) ;
   - amender [CONTRIBUTING.md](../../CONTRIBUTING.md) et `docs/plans/README.md`
-    (nommage thématique, section « Suivi » obligatoire, relation 1:1).
+    (nommage thématique, section « Suivi » obligatoire, relation 1:1) ;
+  - poser l'en-tête **`## État`** (§3) sur les plans existants ;
+  - **promouvoir les ADR `Proposed` qui ont déjà un plan/du code en `Accepted`**
+    (§6) : un ADR `Proposed` ne peut pas avoir un plan `Actif` — la décision
+    doit être actée pour que sa mise en œuvre soit légitime.
 - **Prix à payer** : un peu plus de cérémonie (créer un plan séparé dès qu'un
-  ADR a une mise en œuvre) ; la tentation de tout mettre dans l'ADR demande une
-  discipline — mais c'est précisément ce que la règle rend non négociable.
-- **Migration douce** : les plans datés existants restent valides (trace) ; la
-  convention thématique s'applique aux **nouveaux** plans et aux extractions
-  ci-dessus.
+  ADR a une mise en œuvre, poser l'état, acter l'ADR avant de coder) ; la
+  tentation de tout mettre dans l'ADR — ou de coder sur une décision pas figée —
+  demande une discipline que la règle rend non négociable.
+- **Migration faite** : le nommage thématique `plan-<thème>.md` s'applique à
+  **tous** les plans vivants — les plans historiquement datés ont été renommés
+  (2026-06-13). Seuls les **audits de session** (§4) restent datés
+  (`AAAA-MM-JJ-audit-<sujet>.md`), car un audit EST une photo d'un moment.
 
 ## Alternatives écartées
 

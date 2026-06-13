@@ -65,9 +65,13 @@ Règles :
   immuable, un déroulé évolue). Un ADR purement conceptuel peut n'avoir aucun
   plan. Le plan **référence l'ADR qui le fonde** en en-tête.
 - **Plans THÉMATIQUES et vivants** : `plan-<thème>.md` (pas daté). Chaque plan
-  porte une section **« Suivi »** : paliers (cases à cocher), **issues créées**
-  (liens `#NNN`), **état d'achèvement** global, renvoi aux runs de preuve
-  (`RESULTS.md`). Le plan est le **tableau de bord** d'une décision.
+  porte (1) un **en-tête `## État`** (Brouillon / Actif / Achevé / Abandonné,
+  daté, comme l'ADR a son `## Statut`) et (2) une section **« Suivi »** :
+  paliers (cases à cocher), **issues rattachées** (`#NNN`, créées ou
+  préexistantes adoptées), renvoi aux runs de preuve (`RESULTS.md`). Le plan est
+  le **tableau de bord** d'une décision. **`Proposed` ⇒ pas d'implémentation** :
+  un plan ne passe `Actif` (code mergeable) qu'une fois l'ADR fondateur
+  **`Accepted`**.
 - **Audit = grille permanente + passages datés**
   ([ADR 0058](docs/decisions/0058-doctrine-audit-grille-passages.md)) : la
   grille (dimensions/critères/méthode) ne périme pas ; un passage est daté

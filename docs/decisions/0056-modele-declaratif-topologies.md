@@ -431,8 +431,9 @@ timeout **reste la garantie de terminaison**.
 
 ## Statut
 
-Proposed (2026-06-12). **Réalise** la restructuration par profils de topologie
-que [ADR 0023](0023-plateforme-exemple-generique.md) avait actée en vision et
+Accepted (2026-06-12 ; promu de Proposed le 2026-06-13). **Réalise** la
+restructuration par profils de topologie que
+[ADR 0023](0023-plateforme-exemple-generique.md) avait actée en vision et
 reportée. **Amende** [ADR 0020](0020-exposition-reseau-tout-cilium.md)
 (réintroduit NodePort comme repli + exposition = dimension déclarée). **Étend**
 le tuple [ADR 0039](0039-nomenclature-axes-catalogue.md) (intègre durcissement +

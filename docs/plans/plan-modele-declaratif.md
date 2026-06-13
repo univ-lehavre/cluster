@@ -1,12 +1,18 @@
 # Plan — Modèle déclaratif unifié des topologies
 
-> **Fonde** : [ADR 0056](../decisions/0056-modele-declaratif-topologies.md)
-> (modèle déclaratif unifié — un fichier `topology.yaml` décrit, Ansible
-> converge). **Cadre** : ce plan met en œuvre une décision, il ne la remplace
-> pas
-> ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md)).
-> Les _pourquoi_ vivent dans l'ADR 0056 ; ce plan porte le **déroulé évolutif**
-> et son **suivi**.
+## État
+
+> **État : Actif** (depuis 2026-06-12) · **Fonde :
+> [ADR 0056](../decisions/0056-modele-declaratif-topologies.md)** (Accepted —
+> modèle déclaratif unifié, un fichier `topology.yaml` décrit, Ansible converge)
+> · **Issues : [#250](https://github.com/univ-lehavre/cluster/issues/250)**
+> (palier P7, ha-3cp).
+>
+> **Cadre**
+> ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md)) :
+> ce plan met en œuvre une décision, il ne la remplace pas. Les _pourquoi_
+> vivent dans l'ADR 0056 ; ce plan porte le **déroulé évolutif** et son
+> **suivi**.
 
 ## Paliers de réalisation (P0 → P8)
 
@@ -34,7 +40,8 @@ lointain. Aucun palier ne casse le précédent (invariant byte-identique, ADR 00
 
 ## Suivi
 
-**État global** : 🟡 _en cours_ (P0 non démarré — l'ADR 0056 vient d'être acté).
+État global : voir l'en-tête [`## État`](#état) (Actif). P0 non démarré — l'ADR
+0056 vient d'être acté (Accepted 2026-06-13).
 
 | Palier | État       | Issue(s)                         | Run de preuve |
 | ------ | ---------- | -------------------------------- | ------------- |

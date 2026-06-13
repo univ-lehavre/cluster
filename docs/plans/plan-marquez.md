@@ -1,5 +1,11 @@
 # Plan — Étape 1.8 : store de lineage OpenLineage (Marquez) + harnais E2E DataOps
 
+## État
+
+> **État : Achevé** (2026-06-13) · **Fonde :
+> [ADR 0028](../decisions/0028-orchestration-openlineage-marquez.md)**
+> (Accepted) · **Issues : #130, #148, #161, #164** (toutes fermées)
+>
 > Date du plan : 2026-06-05. Socle décisionnel :
 > [ADR 0028](../decisions/0028-orchestration-openlineage-marquez.md) (Marquez) +
 > [ADR 0024](../decisions/0024-postgres-manage-cloudnative-pg.md) (PostgreSQL
