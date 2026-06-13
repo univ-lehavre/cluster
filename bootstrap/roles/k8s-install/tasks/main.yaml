@@ -24,7 +24,7 @@
     # tronqué (cf. ci-dessous).
     - name: Get the kubernetes Release key
       ansible.builtin.get_url:
-        url: https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key
+        url: 'https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor }}/deb/Release.key'
         dest: /tmp/k8s-release.key
         mode: '0644'
 
@@ -53,7 +53,7 @@
       ansible.builtin.deb822_repository:
         name: kubernetes
         types: [deb]
-        uris: https://pkgs.k8s.io/core:/stable:/v1.34/deb/
+        uris: 'https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor }}/deb/'
         suites: ['/']
         signed_by: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         state: present
@@ -67,13 +67,26 @@
     # via `crictl exec` dans le static pod) et par les procédures de
     # récupération du RUNBOOK. Même dépôt pkgs.k8s.io que kubeadm/kubelet →
     # version alignée sur la matrice 1.34.
-    - name: Install kubelet, kubeadm and cri-tools
+    # Patch EXACT (ADR 0006/0052, #295) : on épingle la version apt à
+    # `{{ k8s_patch }}-*` (le suffixe `-N.N` du paquet Debian varie, le glob
+    # `-*` l'absorbe). Sans ce pin, le dépôt mineur poserait « le dernier 1.34.z
+    # du jour » → dérive de patch entre deux installs. kubeadm doit être de la
+    # MÊME version que `kubernetesVersion` posé à l'init (kubeadm refuse une
+    # cible plus récente que son binaire) — les deux dérivent de k8s_patch.
+    #
+    # cri-tools a sa PROPRE cadence : un seul release par MINEURE (1.34.0),
+    # pas par patch K8s (pas de cri-tools 1.34.9). On le fige donc à `{{ k8s_minor }}.0`
+    # (compatible avec tous les patchs 1.34.x via l'API CRI stable par mineure).
+    # allow_downgrade : permet de converger vers la version cible si une plus
+    # récente avait été posée hors pin (re-jeu déterministe).
+    - name: Install kubelet, kubeadm and cri-tools (patch épinglé)
       ansible.builtin.apt:
         name:
-          - kubelet
-          - kubeadm
-          - cri-tools
+          - 'kubelet={{ k8s_patch }}-*'
+          - 'kubeadm={{ k8s_patch }}-*'
+          - 'cri-tools={{ k8s_minor }}.0-*'
         state: present
+        allow_downgrade: true
 
     - name: Hold kubelet, kubeadm and cri-tools at their installed version
       ansible.builtin.dpkg_selections:

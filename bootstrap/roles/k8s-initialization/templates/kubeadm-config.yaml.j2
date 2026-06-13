@@ -33,6 +33,12 @@ kind: ClusterConfiguration
 # (cluster-banc), il n'a donc pas besoin de surcharger cette valeur.
 clusterName: {{ cluster_name | default('cluster-prod') }}
 controlPlaneEndpoint: {{ control_plane_endpoint }}:{{ control_plane_port }}
+# Version d'API du control-plane FIGÉE au patch (ADR 0006/0052, #295). Sans
+# cette clé, kubeadm résout lui-même la version à l'init → deux installs à deux
+# dates dérivent en patchs DIFFÉRENTS. On la cale sur k8s_patch (même source que
+# le pin apt de kubeadm dans k8s-install). kubeadm refuse une cible plus récente
+# que son binaire : les deux DOIVENT donc dériver de la même variable.
+kubernetesVersion: v{{ k8s_patch | default('1.34.9') }}
 {% if pod_subnet | default('') | length > 0 or service_subnet | default('') | length > 0 %}
 # CIDR pods/services explicites. PROD : non posés (kubeadm garde ses défauts,
 # le podCIDR venant de Cilium en 10.244.0.0/16). Utile UNIQUEMENT à une topologie
