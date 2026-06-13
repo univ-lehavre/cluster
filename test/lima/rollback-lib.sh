@@ -178,6 +178,52 @@ classify_hardening_signal() {
     esac
 }
 
+# ─── HA control-plane (ha-3cp, ADR 0047/0055, #250) — fonctions pures ────────
+
+# ha_cp_join_order CP…
+#   Ordre de PROMOTION des control-planes : le PREMIER est le CP primaire (init),
+#   les suivants sont promus UN À UN (join --control-plane). Renvoie les CP à
+#   JOINDRE (donc tous SAUF le primaire), un par ligne, dans l'ordre d'apparition.
+#   Vide si ≤ 1 CP (pas de HA). L'appelant gate la santé etcd entre chaque.
+ha_cp_join_order() {
+    local primary="" cp
+    for cp in "$@"; do
+        if [ -z "${primary}" ]; then
+            primary="${cp}"
+        else
+            printf '%s\n' "${cp}"
+        fi
+    done
+}
+
+# classify_etcd_health STDOUT EXPECTED
+#   Verdict de la gate `etcdctl endpoint health --cluster` AVANT de promouvoir le
+#   CP suivant (fenêtre N=2 fragile, #250). STDOUT = la sortie d'etcdctl ;
+#   EXPECTED = nombre d'endpoints attendus sains (= nombre de CP déjà membres).
+#   Une ligne par endpoint « <url> is healthy » si sain. Verdict STATUS|message :
+#   - tous les EXPECTED endpoints « is healthy » → ok (quorum sain, on peut joindre)
+#   - au moins un « is unhealthy » / manquant   → fail (ne pas promouvoir : risque
+#                                                  de perdre le quorum à N+1)
+#   - sortie vide / illisible                    → skip (etcd injoignable — l'appelant
+#                                                  attend/retente, refus franc)
+classify_etcd_health() {
+    local out=${1:-} expected=${2:-0} healthy unhealthy
+    out=${out#"${out%%[![:space:]]*}"}
+    if [ -z "${out}" ]; then
+        printf 'skip|santé etcd illisible (sortie vide) — etcd injoignable ?\n'
+        return 0
+    fi
+    unhealthy=$(printf '%s\n' "${out}" | grep -c 'is unhealthy')
+    healthy=$(printf '%s\n' "${out}" | grep -c 'is healthy')
+    if [ "${unhealthy}" -gt 0 ]; then
+        printf 'fail|quorum etcd DÉGRADÉ (%s endpoint(s) unhealthy) — ne pas promouvoir\n' "${unhealthy}"
+    elif [ "${healthy}" -ge "${expected}" ] && [ "${expected}" -gt 0 ]; then
+        printf 'ok|quorum etcd sain (%s/%s endpoints healthy) — promotion possible\n' "${healthy}" "${expected}"
+    else
+        printf 'skip|santé etcd incomplète (%s/%s healthy) — attendre\n' "${healthy}" "${expected}"
+    fi
+}
+
 # ─── GRAPHE ATOMIQUE (ADR 0066, Lot 0 : à CÔTÉ des rollback_phase_*) ─────────
 #
 # L'unité du périmètre descend de la PHASE (composite, fragile) vers le COMPOSANT

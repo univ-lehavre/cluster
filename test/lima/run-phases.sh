@@ -471,6 +471,109 @@ phase_bootstrap() {
     "${KUBECTL[@]}" get nodes -o wide
 }
 
+# ── Phase bootstrap-ha — CP PRIMAIRE derrière la VIP (ha-3cp, #250) ──────────
+# Variante HA de phase_bootstrap : le CP primaire s'initialise avec la VIP comme
+# controlPlaneEndpoint, kube-vip posé AVANT l'init. Args : CP_IP VIP VIP_IFACE.
+# Amorçage k8s ≥ 1.29 (cf. en-tête run_ha_3cp) : kube-vip monte super-admin.conf
+# le temps de l'init (admin.conf inutilisable avant que l'API tourne), puis on
+# rebascule sur admin.conf. Au bootstrap, SEUL le primaire est dans `control` ;
+# cp2/cp3 rejoignent ensuite (phase_join_control_plane).
+phase_bootstrap_ha() {
+    local cp_ip=$1 vip=$2 vip_iface=$3
+    preflight
+    log "Phase bootstrap-ha — CP primaire ${CP} derrière la VIP ${vip}"
+    mkdir -p "${WORKDIR}"
+
+    # Inventaire : SEUL le primaire en control (les autres CP joignent après).
+    write_inventory "${INVENTORY}" "${CP}" ""
+
+    # Variables communes : la VIP est le control_plane_endpoint (certSANs + hosts),
+    # kube-vip paramétré (VIP + interface). control_plane_ip = advertise du primaire.
+    local -a ha_vars=(
+        -e "control_plane_ip=${cp_ip}"
+        -e "control_plane_endpoint=${vip}"
+        -e "kube_vip_address=${vip}"
+        -e "kube_vip_interface=${vip_iface}"
+        -e "control_plane_vip=${vip}"
+    )
+
+    # 1. Pré-init : checks → cri → kubeadm → control-planes (PAS encore init).
+    local pb
+    for pb in checks cri kubeadm control-planes; do
+        log "  ansible-playbook ${pb}.yaml"
+        ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/${pb}.yaml" "${ha_vars[@]}"
+    done
+
+    # 2. kube-vip AVANT l'init, en super-admin.conf (amorçage k8s ≥ 1.29).
+    log "  ansible-playbook kube-vip.yaml (amorçage : super-admin.conf)"
+    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/kube-vip.yaml" \
+        "${ha_vars[@]}" -e "kube_vip_kubeconfig_path=/etc/kubernetes/super-admin.conf"
+
+    # 3. Init du CP primaire (controlPlaneEndpoint = VIP). La VIP répond via kube-vip.
+    log "  ansible-playbook initialisation.yaml (kubeadm init via VIP)"
+    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/initialisation.yaml" "${ha_vars[@]}"
+
+    # 4. Bascule kube-vip sur admin.conf (régime permanent ; super-admin.conf est
+    #    sensible et non distribué). Re-render idempotent du manifeste statique.
+    log "  ansible-playbook kube-vip.yaml (régime : admin.conf)"
+    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/kube-vip.yaml" \
+        "${ha_vars[@]}" -e "kube_vip_kubeconfig_path=/etc/kubernetes/admin.conf"
+
+    # 5. CNI (Cilium) — local-path, donc plage LB-IPAM + L2 dérivées du réseau.
+    local lb_prefix="${cp_ip%.*}"
+    apply_gwapi_crds_in_vm "${CP}" "${GWAPI_VERSION}"
+    run_cni "${CP}" \
+        "LB_IPAM_RANGE_START=${lb_prefix}.240" \
+        "LB_IPAM_RANGE_STOP=${lb_prefix}.250" \
+        "L2_INTERFACE=${vip_iface}"
+    fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc
+
+    # GATE : le primaire est Ready (1 nœud à ce stade).
+    retry 300 10 nodes_ready_all \
+        || die "CP primaire non Ready : $("${KUBECTL[@]}" get nodes 2>&1)"
+    ok "CP primaire ${CP} Ready derrière la VIP ${vip}"
+}
+
+# ── Phase join-control-plane — promeut UN CP additionnel (ha-3cp, #250) ──────
+# Args : CP_À_PROMOUVOIR VIP. Pose kube-vip (admin.conf) sur le nœud puis joue
+# join-control-plane.yaml limité à ce nœud (le rôle prépare la certificate-key
+# fraîche sur le primaire). La gate etcd est portée par l'appelant (run_ha_3cp).
+phase_join_control_plane() {
+    local cp=$1 vip=$2
+    preflight
+    log "Phase join-control-plane — promotion de ${cp} (VIP ${vip})"
+
+    # Ajouter le nœud au groupe control de l'inventaire (il devient CP membre).
+    # On reconstruit l'inventaire control = primaire + CP déjà promus + ce cp.
+    local control="${CP}" entry vm
+    for entry in "${NODES[@]}"; do
+        vm="${entry%%:*}"
+        [ "${vm}" = "${CP}" ] && continue
+        # Inclure les CP déjà promus (marqueur cp-joined.log) + le cp courant.
+        if [ "${vm}" = "${cp}" ] || vm_sh "${vm}" test -f cp-joined.log 2>/dev/null; then
+            control="${control} ${vm}"
+        fi
+    done
+    write_inventory "${INVENTORY}" "${control}" ""
+
+    local -a ha_vars=(
+        -e "control_plane_endpoint=${vip}"
+        -e "kube_vip_address=${vip}"
+        -e "kube_vip_interface=${HA_VIP_IFACE:-$(vm_uservv2_iface "${CP}")}"
+    )
+
+    # kube-vip (admin.conf — la VIP est déjà portée par le primaire) sur ce nœud,
+    # puis join --control-plane limité à ce nœud.
+    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/kube-vip.yaml" \
+        "${ha_vars[@]}" -e "kube_vip_kubeconfig_path=/etc/kubernetes/admin.conf" --limit "${cp}"
+    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/join-control-plane.yaml" \
+        "${ha_vars[@]}" --limit "${cp},${CP}"
+
+    retry 300 10 nodes_ready_all \
+        || die "${cp} non Ready après promotion : $("${KUBECTL[@]}" get nodes 2>&1)"
+    ok "${cp} promu control-plane (derrière la VIP ${vip})"
+}
+
 # ── Phase bootstrap-fault — ARRÊT INJECTÉ : prouve le rescue (ADR 0050/0052 §5) ─
 # Exerce le chemin de REPRISE d'un rôle à effet de bord non idempotent (init OU
 # join) en INJECTANT une faute, puis vérifie le protocole opposable de la règle 5
@@ -1480,6 +1583,81 @@ run_hardening_if_requested() {
     [ "${HARDENING_STATE:-plain}" = hardened ] && TARGET="${TARGET}+hardening"
 }
 
+# ── Chemin ha-3cp — control-plane HA hyperconvergé (ADR 0047/0055, #250) ─────
+# Prouve la MÉCANIQUE HA commune (VIP kube-vip + quorum etcd qui survit à la perte
+# d'1 CP) sur 3 VM HYPERCONVERGÉES en local-path (HA ⊥ stockage : pas de Ceph).
+# Séquence (chemin nommé codé, ADR 0045/0046 — jamais à la main) :
+#   1. 3 VM (NODES override) en local-path ;
+#   2. bootstrap du CP PRIMAIRE avec la VIP comme controlPlaneEndpoint : kube-vip
+#      posé AVANT l'init (la VIP doit répondre pendant `kubeadm init`), via
+#      super-admin.conf (k8s ≥ 1.29 : admin.conf inutilisable avant que l'API
+#      tourne), puis bascule du manifeste kube-vip sur admin.conf ;
+#   3. CNI (Cilium) ;
+#   4. promotion de cp2 puis cp3, UN À UN, avec gate `etcd health` entre chaque
+#      (fenêtre N=2 fragile) ;
+#   5. stockage local-path.
+# La PREUVE (VIP joignable, survie à 1 panne, changed=0) = un run de banc consigné
+# (ADR 0034/0052) ; ce code ne vaut pas preuve seul (#250 garde-fou).
+#
+# Variables d'amorçage : HA_VIP (la VIP de l'API) et HA_VIP_IFACE (interface L2)
+# sont dérivées du réseau Lima au run (pas codées — ADR 0023) ; surchargeables.
+run_ha_3cp() {
+    preflight
+    [ "${WITH_CEPH:-0}" = 1 ] && die "ha-3cp = local-path (HA ⊥ stockage, #250) ; ne pas combiner WITH_CEPH=1"
+
+    # Topologie HA : 3 CP hyperconvergés (override NODES — le défaut du harnais est
+    # 1 CP + 2 workers ; ha-3cp est une cible à outillage dédié, cf. en-tête NODES).
+    NODES=("cp1:control" "cp2:control" "cp3:control")
+    CP=cp1  # CP primaire (init + kubeconfig + cni)
+
+    time_phase up phase_up
+
+    # IP user-v2 du primaire (advertise + /etc/hosts). La VIP = même /24, hors DHCP
+    # et hors plage LB-IPAM ; dérivée si non fournie.
+    local cp_ip
+    cp_ip=$(vm_uservv2_ip "${CP}")
+    [ -n "${cp_ip}" ] || die "${CP} : pas d'IP user-v2"
+    local vip="${HA_VIP:-${cp_ip%.*}.40}"
+    local vip_iface
+    vip_iface="${HA_VIP_IFACE:-$(vm_uservv2_iface "${CP}")}"
+    [ -n "${vip_iface}" ] || die "${CP} : interface user-v2 introuvable (VIP)"
+    ok "ha-3cp : VIP ${vip} sur ${vip_iface} (CP primaire ${CP} ${cp_ip})"
+
+    time_phase bootstrap-ha "phase_bootstrap_ha ${cp_ip} ${vip} ${vip_iface}"
+
+    # Promotion des CP additionnels, UN À UN, gate etcd entre chaque.
+    local cp expected=1
+    for cp in $(ha_cp_join_order cp1 cp2 cp3); do
+        ha_gate_etcd_health "${expected}"
+        time_phase "join-cp-${cp}" "phase_join_control_plane ${cp} ${vip}"
+        expected=$((expected + 1))
+    done
+    ha_gate_etcd_health "${expected}"  # quorum final à 3
+
+    time_phase storage-simple phase_storage_simple
+    log "🎉 Chemin 'ha-3cp' : 3 CP hyperconvergés derrière la VIP ${vip} (local-path)."
+}
+
+# ha_gate_etcd_health EXPECTED — gate la santé etcd (classify_etcd_health) AVANT
+# de promouvoir le CP suivant. Lit `etcdctl endpoint health --cluster` sur le CP
+# primaire (toolbox kubeadm) ; refuse de continuer si le quorum est dégradé.
+ha_gate_etcd_health() {
+    local expected=$1 out verdict
+    log "  gate etcd : quorum sain à ${expected} membre(s) avant promotion ?"
+    out=$(vm_sh "${CP}" sudo sh -c \
+        'ETCDCTL_API=3 etcdctl \
+           --endpoints=https://127.0.0.1:2379 \
+           --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+           --cert=/etc/kubernetes/pki/etcd/server.crt \
+           --key=/etc/kubernetes/pki/etcd/server.key \
+           endpoint health --cluster' 2>/dev/null) || true
+    verdict=$(classify_etcd_health "${out}" "${expected}")
+    case "${verdict%%|*}" in
+        ok) ok "  ${verdict#*|}" ;;
+        *)  die "ha-3cp : ${verdict#*|}" ;;
+    esac
+}
+
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 case "${1:-}" in
     up) time_phase up phase_up ;;
@@ -1595,6 +1773,21 @@ case "${1:-}" in
         log "ℹ️  UI exposées : vérifier via le scénario 28 (URLs via Gateway, #232)."
         record_if_fresh "${run_start}"
         ;;
+    # ── ha-3cp : control-plane HA hyperconvergé, 3 CP derrière la VIP kube-vip ──
+    # (ADR 0047/0055, #250). local-path (HA ⊥ stockage). La PREUVE = ce run consigné
+    # (VIP joignable + quorum etcd survivant à 1 panne CP, ADR 0034/0052).
+    ha-3cp)
+        TARGET="ha-3cp"
+        WITH_CEPH=0
+        chemin_prelude
+        run_start=$(date +%s)
+        run_ha_3cp
+        run_hardening_if_requested
+        record_if_fresh "${run_start}"
+        ;;
+    # Phases ha-3cp atomiques (diagnostic / re-jeu ciblé d'une promotion).
+    bootstrap-ha) [ "$#" -ge 4 ] || die "usage : bootstrap-ha <cp_ip> <vip> <vip_iface>"; time_phase bootstrap-ha "phase_bootstrap_ha $2 $3 $4" ;;
+    join-control-plane) [ -n "${3:-}" ] || die "usage : join-control-plane <cp> <vip>"; time_phase "join-cp-$2" "phase_join_control_plane $2 $3" ;;
     status) phase_status ;;
     down) phase_down ;;
     # Rollback d'UNE phase (ADR 0054, #274) : défait ce que `<phase>` a monté.

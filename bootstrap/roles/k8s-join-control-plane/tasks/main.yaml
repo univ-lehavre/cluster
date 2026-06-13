@@ -1,0 +1,154 @@
+# code: language=ansible
+# Promotion d'un control-plane ADDITIONNEL (ha-3cp, ADR 0047/0055, #250).
+# Mirroir de k8s-join-cluster (worker) — mêmes garde-fous d'idempotence et de
+# reprise (ADR 0050) — mais en `kubeadm join --control-plane` :
+#   - certs frais : `kubeadm init phase upload-certs --upload-certs` sur le CP
+#     primaire (TTL 2 h) → certificate-key ;
+#   - join = commande worker + `--control-plane --certificate-key <clé>` ;
+#   - UN CP À LA FOIS (l'appelant boucle nœud par nœud) avec gate `etcd health`
+#     entre chaque : la fenêtre N=2 (2 CP) est fragile, on ne promeut le 3ᵉ que si
+#     le quorum à 2 est sain.
+# Marqueur `creates: cp-joined.log` écrit APRÈS succès (pas via redirection) ; le
+# rescue compense (`kubeadm reset --force` + retrait du membre etcd resté
+# fantôme) puis échoue de façon actionnable, pour un re-jeu effectif.
+
+# ── 1. Sur le CP PRIMAIRE : clé de certificats fraîche + commande de join CP ──
+- name: Prepare control-plane join material on the primary control plane
+  delegate_to: '{{ groups["control"][0] }}'
+  run_once: true
+  become: true
+  become_method: ansible.builtin.sudo
+  block:
+    - name: Upload control-plane certs (fresh certificate-key, TTL 2h)
+      # Re-téléverse les certs du CP dans le secret kubeadm-certs et IMPRIME une
+      # certificate-key fraîche. check_mode: false — la clé est consommée par le
+      # join, la tâche doit tourner même en --check (ADR 0051). Non idempotente
+      # par nature (nouvelle clé à chaque appel) → changed_when: false.
+      ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+      register: cp_upload_certs
+      changed_when: false
+      check_mode: false
+
+    - name: Extract the certificate-key from the upload output
+      # La sortie se termine par la ligne clé (64 hex). On l'isole sans groupe de
+      # capture (regex_search(str, pat, '\1') lève « Unknown argument » et gèle la
+      # gate — piège connu) : on filtre la dernière ligne qui matche.
+      ansible.builtin.set_fact:
+        cp_certificate_key: >-
+          {{ cp_upload_certs.stdout_lines
+             | select('match', '^[0-9a-f]{64}$') | list | last }}
+
+    - name: Get a fresh join command (token worker)
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: cp_join_command_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Build the control-plane join command
+      # Commande worker + flags CP. L'endpoint pointe la VIP (control_plane_endpoint
+      # surchargé par le chemin codé) → le nouveau CP s'enregistre derrière la VIP.
+      ansible.builtin.set_fact:
+        cp_join_command: >-
+          {{ cp_join_command_raw.stdout_lines[0] }}
+          --control-plane --certificate-key {{ cp_certificate_key }}
+
+# ── 2. Sur le CP À PROMOUVOIR : join --control-plane (idempotent + rescue) ────
+- name: Join this node as an additional control plane
+  become: true
+  become_method: ansible.builtin.sudo
+  block:
+    - name: Wait for the API VIP to be reachable
+      ansible.builtin.wait_for:
+        host: '{{ control_plane_endpoint }}'
+        port: '{{ control_plane_port }}'
+        timeout: 60
+
+    - name: Join the cluster as a control plane
+      # Le marqueur cp-joined.log (CHECKPOINT) garde l'idempotence : un CP déjà
+      # promu ne re-tente pas. Écrit en tâche SÉPARÉE après succès (cf. ci-dessous).
+      ansible.builtin.command: '{{ hostvars[groups["control"][0]].cp_join_command }}'
+      args:
+        chdir: '{{ ansible_facts.env.HOME }}'
+        creates: cp-joined.log
+      register: cp_join_result
+
+    - name: Record the control-plane join checkpoint (after success)
+      # Contenu figé (pas d'horodatage) → idempotence du rejeu (changed=0).
+      ansible.builtin.copy:
+        content: "control plane joined\n"
+        dest: '{{ ansible_facts.env.HOME }}/cp-joined.log'
+        mode: '0644'
+
+  # ── Reprise après incident (ADR 0050 cas (b)) ──────────────────────────────
+  rescue:
+    - name: Capture the kubelet state for diagnosis
+      ansible.builtin.command: journalctl -u kubelet --no-pager -n 30
+      register: cp_join_kubelet_diag
+      changed_when: false
+      failed_when: false
+
+    - name: Show the kubelet diagnosis
+      ansible.builtin.debug:
+        var: cp_join_kubelet_diag.stdout_lines
+
+    # COMPENSATION 1 : reset le demi-join (kubelet + PKI + manifests statiques du
+    # CP partiel). NE touche PAS containerd/APT (apanage de k8s-rollback).
+    - name: Compensate the aborted control-plane join (kubeadm reset --force)
+      ansible.builtin.command: kubeadm reset --force
+      register: cp_join_reset
+      changed_when: "'cleaned up' in cp_join_reset.stdout or cp_join_reset.rc == 0"
+      failed_when: false
+
+    # COMPENSATION 2 (spécifique CP) : un join CP avorté peut laisser un MEMBRE
+    # ETCD fantôme (etcd a pu enregistrer le nouveau membre avant l'échec) →
+    # le quorum se croit à N+1 sans le N+1ᵉ réel = quorum cassé au prochain join.
+    # On retire le membre resté, depuis le CP PRIMAIRE, par son nom de nœud.
+    - name: Remove the orphaned etcd member left by the aborted join
+      delegate_to: '{{ groups["control"][0] }}'
+      become: true
+      become_method: ansible.builtin.sudo
+      vars:
+        _etcdctl: >-
+          ETCDCTL_API=3 etcdctl
+          --endpoints=https://127.0.0.1:2379
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt
+          --cert=/etc/kubernetes/pki/etcd/server.crt
+          --key=/etc/kubernetes/pki/etcd/server.key
+      # member list → member remove <id>. On matche le membre dont le NOM CONTIENT
+      # l'hostname du nœud (champ 3 d'etcdctl) : le nom du membre etcd = le nom de
+      # nœud kubelet, qui peut être préfixé selon le terrain (banc Lima : l'alias
+      # `lima-<vm>` ≠ inventory_hostname `<vm>`). Le `~` (contient) tolère les deux
+      # — à CONFIRMER au run de banc (le nom exact dépend du hostname guest). Si
+      # plusieurs membres matchent (improbable), on retire le premier ; best-effort,
+      # no-op si le membre n'existe pas (join échoué AVANT l'enregistrement etcd).
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        id=$({{ _etcdctl }} member list 2>/dev/null
+             | awk -F, -v n="{{ inventory_hostname }}" 'index($3, n) > 0 {print $1; exit}');
+        if [ -n "$id" ]; then {{ _etcdctl }} member remove "$id"; fi
+      args:
+        executable: /bin/bash
+      register: cp_etcd_member_rm
+      changed_when: 'cp_etcd_member_rm.stdout | length > 0'
+      failed_when: false
+
+    - name: Remove the stale control-plane join checkpoint so the re-run re-joins
+      ansible.builtin.file:
+        path: '{{ ansible_facts.env.HOME }}/cp-joined.log'
+        state: absent
+
+    - name: Fail with an actionable message after compensation
+      ansible.builtin.fail:
+        msg: >-
+          `kubeadm join --control-plane` a échoué et a été compensé (reset +
+          retrait du membre etcd orphelin). Le nœud est revenu à un état propre,
+          re-promouvable : corriger la cause (certificate-key expirée TTL 2 h →
+          re-jouer ce rôle qui en régénère une ; quorum etcd → vérifier la santé
+          des CP déjà promus) puis RE-JOUER le même chemin.
+
+  always:
+    - name: Report the control-plane join outcome
+      ansible.builtin.debug:
+        msg: >-
+          k8s-join-control-plane terminé (cp-joined.log présent = CP promu ;
+          sinon le rescue a compensé et fait échouer pour re-jeu).

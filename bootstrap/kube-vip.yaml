@@ -1,0 +1,17 @@
+# code: language=ansible
+# Pose la VIP de l'API (kube-vip, pod statique ARP) sur les control-planes
+# (ha-3cp, ADR 0047/0055, #250). Joué par le chemin codé `ha-3cp` (run-phases.sh)
+# AVANT le `kubeadm init` du CP primaire (la VIP doit répondre pendant l'init),
+# avec kube_vip_kubeconfig_path = super-admin.conf le temps de l'amorçage
+# (k8s ≥ 1.29), puis re-joué avec admin.conf après l'init (bascule pilotée par
+# le chemin via la variable). Idempotent (template).
+- name: Deploy kube-vip control-plane VIP
+  hosts: control
+  pre_tasks:
+    - name: Audit-log — record playbook execution (kube-vip)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: kube-vip.yaml
+  roles:
+    - kube-vip

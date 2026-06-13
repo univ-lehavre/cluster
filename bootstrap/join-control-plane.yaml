@@ -1,0 +1,16 @@
+# code: language=ansible
+# Promotion d'un control-plane additionnel (ha-3cp, ADR 0047/0055, #250).
+# Joué UN NŒUD À LA FOIS par le chemin codé `ha-3cp` (run-phases.sh) via
+# `--limit <cp>` : le rôle prépare le matériel (certificate-key fraîche) sur le
+# CP primaire (delegate_to) puis promeut le nœud ciblé. La gate `etcd health`
+# entre deux promotions est portée par le chemin codé (fenêtre N=2 fragile).
+- name: Promote an additional control plane to the cluster
+  hosts: control
+  pre_tasks:
+    - name: Audit-log — record playbook execution (control-plane join)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: join-control-plane.yaml
+  roles:
+    - k8s-join-control-plane

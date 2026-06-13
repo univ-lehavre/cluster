@@ -1,0 +1,14 @@
+---
+# Valeurs par défaut du rôle k8s-join-control-plane (ADR 0047/0055, #250).
+# Promeut un nœud en control-plane additionnel (topologie ha-3cp) : un CP à la
+# fois, derrière la VIP kube-vip. Mirroir de k8s-join-cluster (worker) avec
+# `--control-plane --certificate-key` + nettoyage du membre etcd au rescue.
+
+# Endpoint stable de l'API (la VIP en HA) + port — surchargés par le chemin codé.
+control_plane_endpoint: cluster-api
+control_plane_port: 6443
+
+# Attente de santé etcd entre deux promotions (fenêtre N=2 fragile, #250) :
+# on ne promeut le CP suivant que si le quorum etcd courant est sain.
+cp_join_etcd_retries: 24
+cp_join_etcd_delay: 5

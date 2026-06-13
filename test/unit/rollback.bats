@@ -212,6 +212,42 @@ setup() {
     [[ "$output" == skip\|* ]]
 }
 
+# ─── HA control-plane : ha_cp_join_order + classify_etcd_health (#250) ────────
+
+@test "ha/join_order : 3 CP → cp2 cp3 (primaire cp1 exclu, ordre stable)" {
+    run ha_cp_join_order cp1 cp2 cp3
+    [ "$(printf '%s' "$output" | tr '\n' ' ')" = "cp2 cp3" ]
+}
+
+@test "ha/join_order : 1 CP → vide (pas de HA)" {
+    run ha_cp_join_order cp1
+    [ -z "$output" ]
+}
+
+@test "ha/etcd : tous sains (2/2) → ok (promotion possible)" {
+    run classify_etcd_health "https://a:2379 is healthy
+https://b:2379 is healthy" 2
+    [ "$status" -eq 0 ]
+    [[ "$output" == ok\|* ]]
+}
+
+@test "ha/etcd : un unhealthy → fail (ne pas promouvoir)" {
+    run classify_etcd_health "https://a:2379 is healthy
+https://b:2379 is unhealthy" 2
+    [[ "$output" == fail\|* ]]
+    [[ "$output" == *"DÉGRADÉ"* ]]
+}
+
+@test "ha/etcd : sortie vide → skip (etcd injoignable, refus franc)" {
+    run classify_etcd_health "" 2
+    [[ "$output" == skip\|* ]]
+}
+
+@test "ha/etcd : incomplet (1/2 sains) → skip (attendre)" {
+    run classify_etcd_health "https://a:2379 is healthy" 2
+    [[ "$output" == skip\|* ]]
+}
+
 # ═══ GRAPHE ATOMIQUE (ADR 0066, Lot 0) — invariants prouvés sans banc ════════
 # Périmètres vérifiés contre le code (workflow consigné 2026-06-13). Ces tests
 # sont la garantie que les oublis du modèle par phase (cnpg-system…) deviennent
