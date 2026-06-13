@@ -45,7 +45,7 @@ jobs:
       #   - `feat!:` ou `BREAKING CHANGE:` → bump major (1.0.0 → 2.0.0)
       #   - Autres types (`chore:`, `docs:`, `ci:`, …) → pas de bump
       - id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           # Le `bootstrap-sha` initial est posé une fois pour signaler que

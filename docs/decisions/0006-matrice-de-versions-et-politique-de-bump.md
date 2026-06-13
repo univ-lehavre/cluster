@@ -14,18 +14,18 @@ par Cilium 1.19 et Rook 1.19, tous deux testés jusqu'à K8s 1.34).
 
 ### Matrice cible (mai 2026)
 
-| Composant       | Version cible              | Fichier piloté                                                                                                     |
-| --------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Kubernetes      | **1.34**                   | [`bootstrap/roles/k8s-install`](../../bootstrap/roles/k8s-install/) (clé + dépôt `pkgs.k8s.io/v1.34`)              |
-| Cilium          | **1.19.x** (dernier patch) | [`bootstrap/cni.sh`](../../bootstrap/cni.sh) (CLI épinglée)                                                        |
-| Rook            | **1.19.x**                 | [`storage/ceph/operator.yaml`](../../storage/ceph/operator.yaml) + `crds.yaml`/`common.yaml`                       |
-| Ceph            | **20.2.1 Tentacle**        | [`storage/ceph/cluster.yaml`](../../storage/ceph/cluster.yaml) (image `quay.io/ceph/ceph:v20.2.1`)                 |
-| containerd.io   | **2.2.4**                  | dépôt Docker (cf. [ADR 0005](0005-cri-containerd-via-depot-docker.md))                                             |
-| Dashboard chart | **7.10.0**                 | [`platform/k8s-dashboard/manage.sh`](../../platform/k8s-dashboard/manage.sh) (`CHART_VERSION`)                     |
-| Registry image  | **3.1.1**                  | [`platform/container-registry/deployment.yaml`](../../platform/container-registry/deployment.yaml)                 |
-| Gateway API CRD | **1.4.1**                  | [`platform/cilium-expo/README.md`](../../platform/cilium-expo/) (pré-install, cf. ADR 0020)                        |
-| cert-manager    | **1.20.2**                 | [`platform/cert-manager/cert-manager.yaml`](../../platform/cert-manager/cert-manager.yaml) (images par digest)     |
-| Argo CD         | **3.4.3**                  | [`platform/argocd/argocd.yaml`](../../platform/argocd/argocd.yaml) (+ dex 2.45.0, redis 8.2.3 ; images par digest) |
+| Composant       | Version cible              | Fichier piloté                                                                                                                                    |
+| --------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kubernetes      | **1.34.9** (patch figé)    | [`bootstrap/group_vars/all.yaml`](../../bootstrap/group_vars/all.yaml) (`k8s_minor`/`k8s_patch` → dépôt apt + `kubernetesVersion` à l'init, #295) |
+| Cilium          | **1.19.x** (dernier patch) | [`bootstrap/cni.sh`](../../bootstrap/cni.sh) (CLI épinglée)                                                                                       |
+| Rook            | **1.19.x**                 | [`storage/ceph/operator.yaml`](../../storage/ceph/operator.yaml) + `crds.yaml`/`common.yaml`                                                      |
+| Ceph            | **20.2.1 Tentacle**        | [`storage/ceph/cluster.yaml`](../../storage/ceph/cluster.yaml) (image `quay.io/ceph/ceph:v20.2.1`)                                                |
+| containerd.io   | **2.2.4**                  | dépôt Docker (cf. [ADR 0005](0005-cri-containerd-via-depot-docker.md))                                                                            |
+| Dashboard chart | **7.10.0**                 | [`platform/k8s-dashboard/manage.sh`](../../platform/k8s-dashboard/manage.sh) (`CHART_VERSION`)                                                    |
+| Registry image  | **3.1.1**                  | [`platform/container-registry/deployment.yaml`](../../platform/container-registry/deployment.yaml)                                                |
+| Gateway API CRD | **1.4.1**                  | [`platform/cilium-expo/README.md`](../../platform/cilium-expo/) (pré-install, cf. ADR 0020)                                                       |
+| cert-manager    | **1.20.2**                 | [`platform/cert-manager/cert-manager.yaml`](../../platform/cert-manager/cert-manager.yaml) (images par digest)                                    |
+| Argo CD         | **3.4.3**                  | [`platform/argocd/argocd.yaml`](../../platform/argocd/argocd.yaml) (+ dex 2.45.0, redis 8.2.3 ; images par digest)                                |
 
 Plafond commun K8s = **1.34** (limite de Cilium 1.19 et Rook 1.19 testés). Ceph
 Squid v19 sort d'EOL en septembre 2026 → Tentacle pour une install neuve.
@@ -126,6 +126,18 @@ Les bancs doivent cibler la **même version Kubernetes (1.34)** que le bootstrap
    Vérification :
    [`scripts/audit-image-digests.sh`](../../scripts/audit-image-digests.sh)
    (audite tous les digests épinglés du dépôt).
+   - **GitHub Actions** (`uses:`) : épinglées par **SHA de commit** (jamais
+     `@vX` ni `@branch` — un tag est mutable, une branche encore plus), avec en
+     commentaire le **tag de référence depuis lequel le SHA a été résolu** :
+     `uses: owner/repo@<sha40> # vX` (le tag majeur que l'action publie, ex.
+     `# v4` ; le patch exact si l'action ne publie qu'un tag patch, ex.
+     `# v0.36.0`). Même esprit que le digest d'image : une référence immuable,
+     le commentaire ne servant qu'à la lisibilité humaine. Le bump suit la même
+     discipline (mettre à jour SHA + commentaire dans la même PR). Source de
+     version K8s du bootstrap = `k8s_minor`/`k8s_patch`
+     ([`bootstrap/group_vars/all.yaml`](../../bootstrap/group_vars/all.yaml),
+     #295) : un bump K8s y change le patch, le dépôt apt ET `kubernetesVersion`
+     à l'init en un seul point.
 4. **Valider sur le banc multi-nœuds** ([`test/lima/`](../../test/lima/)) avant
    tout déploiement sur une topologie cible : déployer la nouvelle version,
    vérifier `state.sh` toutes couches vertes, jouer un cycle bootstrap →
