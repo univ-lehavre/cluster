@@ -3,7 +3,8 @@
 # Un « drift » = un écart révélé par un run e2e que le lint ne voyait pas. Ce
 # fichier est LE catalogue indexé ; les pages de synthèse (lecons-des-runs.md) et
 # les journaux de campagne (test/lima/RESULTS.md) y RÉFÈRENT par id, sans
-# dupliquer le détail.
+# dupliquer le détail. Le drift est la 3e trace EMPIRIQUE de la cartographie
+# documentaire, à côté des passages d'audit et de RESULTS.md (ADR 0058 §6).
 #
 # Champs par entrée :
 #   id        : Lnn (stable, citable)
@@ -14,9 +15,13 @@
 #   symptome  : ce qu'on a vu
 #   cause     : la cause-racine
 #   correctif : ce qui a été fait
-#   statut    : corrige | caduc (topologie/contexte abandonné) | ouvert
+#   statut    : corrige | caduc (topologie/contexte abandonné) | en-cours | ouvert
+#   issue     : '#NNN' — OBLIGATOIRE si statut ouvert/en-cours (ADR 0058 §6 :
+#               un écart non corrigé est actionnable → une issue le porte ;
+#               un drift ouvert sans issue est un constat orphelin). Omis quand
+#               statut = corrige/caduc (clos par construction).
 #
-# Couverture : L1–L46. Les pages de synthèse (lecons-des-runs.md) et les journaux
+# Couverture : L1–L56. Les pages de synthèse (lecons-des-runs.md) et les journaux
 # de campagne (test/RESULTS.md banc Vagrant déprécié, test/lima/RESULTS.md banc
 # courant) RÉFÈRENT à ce registre par id. Le préfixe L = banc Lima (source
 # canonique des fiches L1–L40) ; le banc Vagrant numérotait ses propres écarts
@@ -184,6 +189,7 @@ drifts:
       Contournement : phase `kubeconfig` séparée (le cluster était sain) ; reste
       à durcir dans le bootstrap.
     statut: ouvert
+    issue: TODO # durcissement bootstrap SIGPIPE — issue à ouvrir (ADR 0058 §6)
 
   - id: L13
     campagne: 'chaîne DataOps shell — banc Lima (#148)'
@@ -589,6 +595,7 @@ drifts:
       refuser proprement si incohérent. Contournement actuel : passer WITH_CEPH=1
       à toutes les phases d'un banc Ceph.
     statut: ouvert
+    issue: TODO # auto-détection du profil (storageClass réel) — issue à ouvrir (ADR 0058 §6)
 
   - id: L45
     campagne: 'migration ansible_facts (échéance ansible-core 2.24)'
@@ -831,3 +838,4 @@ drifts:
       CHAUD (HTTP 200 via Gateway, scénario 28 PASS). Re-preuve from-scratch
       différée → issue #251 (ADR 0034/0046).
     statut: en-cours
+    issue: '#251' # re-preuve L55/L56 par run atlas-ceph from-scratch (ADR 0058 §6)

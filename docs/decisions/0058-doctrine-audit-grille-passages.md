@@ -94,15 +94,58 @@ comme on ne réécrit pas `RESULTS.md`) : on les **marque** comme passage du
 2026-05-29 et on les range sous la nouvelle structure. Un futur passage produira
 de nouvelles notes, sans écraser celui-ci.
 
+### 6. Le registre des drifts — 3ᵉ trace empirique
+
+L'audit et `RESULTS.md` ne sont pas les seules traces **empiriques** (datées,
+mesurées, non réécrites). Le **registre des drifts**
+([`docs/architecture/registre-drifts.yaml`](../architecture/registre-drifts.yaml))
+en est la troisième, et relève de la **même famille** : un _drift_ = un **écart
+révélé par un run e2e que le lint ne voyait pas**
+([ADR 0034](0034-validation-e2e-from-scratch.md)/[0052](0052-reproductibilite-des-resultats.md)).
+On l'**inscrit dans la cartographie du workflow** au même titre que les passages
+d'audit, avec une convention explicite :
+
+- **Source de vérité unique et citable** : le registre YAML est LE catalogue ;
+  les pages de synthèse
+  ([`lecons-des-runs.md`](../architecture/lecons-des-runs.md)) et les journaux
+  ([`RESULTS.md`](../../test/lima/RESULTS.md)) y **renvoient par id**, sans
+  dupliquer le détail. Un drift est cité **partout par son `Lnn`** (commentaires
+  de code, RUNBOOK, rôles) — l'id est stable.
+- **Champs normés par entrée** : `id` (`Lnn`, stable), `campagne` (le
+  chantier/issue qui l'a révélé), `portee` (**code** = défaut du livrable, vaut
+  pour tous les bancs ET la prod ; **env** = artefact d'un banc précis ;
+  **harnais** = outillage de test, pas le livrable), `symptome`, `cause`,
+  `correctif`, `statut`.
+- **Statut normé** : `corrige` | `caduc` (topologie/contexte abandonné) |
+  `ouvert`. Append-only : on ne supprime pas une entrée, son `statut` évolue
+  (honnêteté de l'historique, comme `RESULTS.md`).
+- **Renvoie aux ADR, ne les paraphrase pas** (comme un passage, §3) : un drift
+  dont le correctif découle d'une décision **cite l'ADR**.
+- **`ouvert` ⇒ issue liée** (symétrie avec les manques d'audit, §4) : un drift
+  non corrigé est un **écart actionnable** → il porte un champ
+  **`issue: '#NNN'`** qui trace sa résolution. Un drift `ouvert` **sans** issue
+  est un constat orphelin (interdit) — comme un manque d'audit sans issue. Un
+  drift `corrige` ou `caduc` n'a pas besoin d'issue (il est clos par
+  construction).
+
+La frontière avec un **passage d'audit** : l'audit **note** (mesure un écart à
+un standard, /5) à une date choisie ; le drift **capture un fait** (un écart
+précis qu'un run a fait surgir) au fil de l'eau. Les deux sont datés,
+append-only, renvoient aux ADR et alimentent des issues — mais l'un est une
+**évaluation périodique**, l'autre un **incident de run indexé**.
+
 ## Statut
 
-Accepted (2026-06-12 ; promu de Proposed le 2026-06-13). Sœur de
+Accepted (2026-06-12 ; promu de Proposed le 2026-06-13 ; étendu le 2026-06-13 au
+registre des drifts, §6). Sœur de
 [ADR 0057](0057-gouvernance-documentaire-adr-plan-issue.md) (gouvernance
-documentaire) ; applique aux audits le pattern grille/passage daté déjà acté
-pour les preuves de banc ([ADR 0042](0042-fraicheur-preuves-banc.md)) et la
-reproductibilité ([ADR 0052](0052-reproductibilite-des-resultats.md)).
-N'invalide pas l'audit existant ; impose de le **restructurer** (grille
-extraite, passage daté, manques → issues) — cf. Conséquences.
+documentaire) ; applique aux audits **et au registre des drifts** le pattern
+grille/passage daté déjà acté pour les preuves de banc
+([ADR 0042](0042-fraicheur-preuves-banc.md)) et la reproductibilité
+([ADR 0052](0052-reproductibilite-des-resultats.md)). N'invalide pas l'audit
+existant ni le registre existant ; impose de restructurer l'audit (grille
+extraite, passage daté, manques → issues) et acte la convention du drift
+(`statut` normé, `ouvert` ⇒ issue liée) — cf. Conséquences.
 
 ## Conséquences
 

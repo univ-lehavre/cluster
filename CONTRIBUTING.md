@@ -44,13 +44,14 @@ Quatre natures d'écrits, quatre rôles non chevauchants — **un ADR DÉCIDE, u
 plan MET EN ŒUVRE, une issue EXÉCUTE, une PR LIVRE**
 ([ADR 0057](docs/decisions/0057-gouvernance-documentaire-adr-plan-issue.md)) :
 
-| Trace     | Où                | Rôle                                                                                                                                       |
-| --------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **ADR**   | `docs/decisions/` | **Décide** (le _pourquoi_) — structurante, numérotée, **immuable**.                                                                        |
-| **Plan**  | `docs/plans/`     | **Met en œuvre** une décision (paliers + suivi) — thématique, **vivant**.                                                                  |
-| **Issue** | GitHub            | **Exécute** — unité de travail fermable.                                                                                                   |
-| **PR**    | GitHub            | **Livre** un changement + sa preuve, ferme une issue / coche un palier.                                                                    |
-| **Audit** | `docs/audit/`     | **Mesure** l'écart à un standard — grille permanente + passages datés ([ADR 0058](docs/decisions/0058-doctrine-audit-grille-passages.md)). |
+| Trace     | Où                                       | Rôle                                                                                                                                                                             |
+| --------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ADR**   | `docs/decisions/`                        | **Décide** (le _pourquoi_) — structurante, numérotée, **immuable**.                                                                                                              |
+| **Plan**  | `docs/plans/`                            | **Met en œuvre** une décision (paliers + suivi) — thématique, **vivant**.                                                                                                        |
+| **Issue** | GitHub                                   | **Exécute** — unité de travail fermable.                                                                                                                                         |
+| **PR**    | GitHub                                   | **Livre** un changement + sa preuve, ferme une issue / coche un palier.                                                                                                          |
+| **Audit** | `docs/audit/`                            | **Mesure** l'écart à un standard — grille permanente + passages datés ([ADR 0058](docs/decisions/0058-doctrine-audit-grille-passages.md)).                                       |
+| **Drift** | `docs/architecture/registre-drifts.yaml` | **Capture** un écart révélé par un run e2e (`Lnn` indexé) — trace empirique datée, `ouvert` ⇒ issue liée ([ADR 0058](docs/decisions/0058-doctrine-audit-grille-passages.md) §6). |
 
 **Le test de découpe (par temporalité,
 [ADR 0057](docs/decisions/0057-gouvernance-documentaire-adr-plan-issue.md))** :
