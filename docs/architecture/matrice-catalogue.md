@@ -188,6 +188,13 @@ exigé) — **pas** s'il a tourné. Le statut d'exécution réel (quoi a été p
 sur quelle combinaison, quand) est dans le **bloc « Scénarios exécutés »** juste
 après la table. Source : [`test/scenarios/`](../../test/scenarios/).
 
+> **Miroir machine (ADR 0056 P4).** Cette table a un pendant exécutable :
+> `cluster_topology/epreuves.py` (constante `EPREUVES`) la reprend champ par
+> champ pour **filtrer** les épreuves jouables selon une `topology.yaml`
+> (`topology.py epreuves`). Un test de parité (`tests/test_epreuves.py`) casse
+> si le code et le glob `test/scenarios/NN-*.sh` divergent — la table reste la
+> source humaine, le code son miroir testé.
+
 La colonne **Type** distingue la **nature** de l'épreuve :
 
 - **`unit`** — vérifie **une propriété isolée** d'une brique (ex. un PVC se

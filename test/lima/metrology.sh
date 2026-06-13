@@ -58,15 +58,19 @@ metro_freshness_verdict() {
 # Seuil de fraîcheur (jours) d'un CHEMIN nommé — cadences ADR 0045 §6. Les
 # défauts sont SURCHARGEABLES par variable d'env `SEUIL_<CHEMIN>` (chemin en
 # majuscules, tirets → underscores : SEUIL_STORAGE_REAL, SEUIL_CLUSTER_DATAOPS).
-# Un chemin inconnu retombe sur SEUIL_JOURS (défaut 7). PUR (lit l'env, pas le fs).
+# Le suffixe `+hardening` est REPLIÉ sur le chemin de base (cohérent avec
+# metro_last_date_for_target, #244) : `storage-real+hardening` a le seuil de
+# `storage-real`. Un chemin inconnu retombe sur SEUIL_JOURS (défaut 7). PUR.
 # Usage : metro_seuil_for_target <chemin>
 metro_seuil_for_target() {
-    local target=$1 var val
+    local target=$1 base var val
+    # Replier `+hardening` sur le chemin de base avant tout (seuil ET env var).
+    base=${target%%+*}
     # Nom de variable d'env dérivé : storage-real → SEUIL_STORAGE_REAL.
-    var="SEUIL_$(printf '%s' "${target}" | tr 'a-z-' 'A-Z_')"
+    var="SEUIL_$(printf '%s' "${base}" | tr 'a-z-' 'A-Z_')"
     eval "val=\${${var}:-}"
     if [ -n "${val}" ]; then printf '%s' "${val}"; return; fi
-    case "${target}" in
+    case "${base}" in
         atlas) printf '7' ;;
         storage-real) printf '30' ;;
         cluster-dataops) printf '90' ;;
