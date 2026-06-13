@@ -40,13 +40,13 @@ Sans Tailscale, le service reste accessible depuis l'intérieur du cluster
 ## Créer une bucket
 
 Créer un fichier de claim (voir
-[`object-bucket-claim-gdelt.yaml`](object-bucket-claim-gdelt.yaml) pour un
-exemple), puis l'appliquer.
+[`object-bucket-claim-example.yaml`](object-bucket-claim-example.yaml) pour un
+exemple générique), puis l'appliquer.
 
-Récupérer les credentials :
+Récupérer les credentials (le Secret porte le nom de la bucket) :
 
 ```bash
-BUCKET=stormglass
+BUCKET=example-source
 kubectl get secret "${BUCKET}" -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 --decode
 echo
 kubectl get secret "${BUCKET}" -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 --decode

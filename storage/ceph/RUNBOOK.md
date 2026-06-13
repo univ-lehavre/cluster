@@ -169,7 +169,8 @@ kubectl apply -f storageClass/block-ec-retain.yaml       # EC 2+1, reclaim Retai
 ```bash
 kubectl apply -f storageClass/datalake/datalake-ec.yaml
 kubectl apply -f storageClass/datalake/storage-class.yaml
-kubectl apply -f storageClass/datalake/object-bucket-claim-gdelt.yaml
+# Une bucket par source (exemple générique ci-dessous, à dupliquer/renommer) :
+kubectl apply -f storageClass/datalake/object-bucket-claim-example.yaml
 ```
 
 Voir [`storageClass/datalake/README.md`](storageClass/datalake/README.md) pour

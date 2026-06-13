@@ -1,0 +1,12 @@
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+# Exemple GÉNÉRIQUE (ADR 0023) : ce dépôt est un catalogue de topologies, pas un
+# déploiement réel. Copier ce claim en remplaçant `example-source` par le nom de
+# la bucket voulue (une bucket = un Secret de credentials du même nom). Le RGW
+# datalake provisionne la bucket et le Secret automatiquement.
+metadata:
+  name: example-source
+  namespace: rook-ceph
+spec:
+  bucketName: example-source
+  storageClassName: rook-ceph-datalake
