@@ -23,6 +23,16 @@ précédents.
 > date**, pas l'état courant. Un futur passage les réactualisera (sur jalon —
 > cf. _Cadence_).
 
+## Workflows multi-agents consignés (4ᵉ trace empirique)
+
+Les **[workflows multi-agents consignés](workflows/)** — cartographies en
+éventail et revues adversariales qui ont fondé une décision structurante — sont
+la **4ᵉ trace empirique** du dépôt
+([ADR 0067](../decisions/0067-workflows-consignes-4e-trace-empirique.md)), à
+côté des passages d'audit ci-dessus, de `RESULTS.md` et du registre des drifts
+(ADR 0058 §6). On y consigne la **synthèse + les findings vérifiés** (pas les
+rapports bruts, ADR 0023), datés et non réécrits.
+
 ## La grille (permanente)
 
 Les **dimensions auditées**. Chaque passage les note /5 ; la grille n'en dit que

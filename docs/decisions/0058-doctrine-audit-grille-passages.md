@@ -134,6 +134,13 @@ précis qu'un run a fait surgir) au fil de l'eau. Les deux sont datés,
 append-only, renvoient aux ADR et alimentent des issues — mais l'un est une
 **évaluation périodique**, l'autre un **incident de run indexé**.
 
+> **4ᵉ trace empirique**
+> ([ADR 0067](0067-workflows-consignes-4e-trace-empirique.md)) : les **workflows
+> multi-agents consignés** (cartographie / revue adversariale qui fonde une
+> décision) rejoignent cette famille — un raisonnement **vérifié par des
+> indépendants** que le lint ne produit pas. On consigne la **synthèse + les
+> findings** (pas les rapports bruts, ADR 0023), dans `docs/audit/workflows/`.
+
 ## Statut
 
 Accepted (2026-06-12 ; promu de Proposed le 2026-06-13 ; étendu le 2026-06-13 au
