@@ -72,8 +72,10 @@ marche.
 
 ## Statut
 
-Accepted (2026-06-01). Amendé le 2026-06-07 (Python à parité, outillage uv/ruff,
-tests obligatoires, Node = runtime d'outils).
+Superseded by 0049 (2026-06-08). Initialement Accepted (2026-06-01), amendé le
+2026-06-07 (Python à parité, outillage uv/ruff, tests obligatoires, Node =
+runtime d'outils), puis repris intégralement et étendu par
+[ADR 0049](0049-doctrine-choix-outil-par-action.md).
 
 ## Conséquences
 

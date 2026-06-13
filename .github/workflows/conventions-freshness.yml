@@ -1,0 +1,68 @@
+name: Conventions freshness
+
+# Garde-fou de respect des conventions de gouvernance (ADR 0060). Vérifie sur le
+# code seul : conformité ADR↔plan↔issue↔drift (ADR 0057/0058), cohérence des
+# index, fraîcheur des passages d'audit. NON BLOQUANT : cron hebdomadaire (jamais
+# sur push/pull_request). S'il y a des manquements, ouvre/met à jour UNE issue
+# récapitulative dédoublonnée par label (motif bench-freshness.yml, ADR 0042 §1 :
+# signaler, ne pas bloquer).
+on:
+  schedule:
+    - cron: '0 8 * * 1' # tous les lundis 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+
+      - name: Auditer le respect des conventions
+        id: check
+        # On capture le rapport et le code de sortie SANS faire échouer l'étape :
+        # le verdict pilote l'ouverture d'issue, le job reste vert (non bloquant).
+        run: |
+          set +e
+          out=$(uv run python scripts/check_gouvernance.py 2>&1)
+          rc=$?
+          echo "$out"
+          {
+            echo "rc=$rc"
+            echo "report<<EOF"
+            echo "$out"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # Ouvre (ou met à jour) UNE issue récapitulative quand il y a des
+      # manquements (rc != 0). Unicité par LABEL (match exact), jamais par titre
+      # (leçon des doublons #273/#288, cf. bench-freshness.yml).
+      - name: Ouvrir/mettre à jour l'issue de conformité
+        if: ${{ steps.check.outputs.rc != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ${{ steps.check.outputs.report }}
+        run: |
+          LABEL="conventions-freshness"
+          TITLE="📋 Conventions de gouvernance — manquements détectés"
+          NOTE="— Détecté par conventions-freshness.yml (ADR 0060). Corriger les points"
+          NOTE="${NOTE} ci-dessus puis relancer le workflow ; l'issue se referme quand"
+          NOTE="${NOTE} le rapport est vert. Non bloquant (ADR 0042 §1)."
+          BODY=$(printf '%s\n\n%s' "$REPORT" "$NOTE")
+          gh label create "$LABEL" --color 0E8A16 \
+            --description "Manquements aux conventions de gouvernance — une seule à la fois" \
+            --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          EXISTING=$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty' --repo "$GITHUB_REPOSITORY")
+          if [ -n "$EXISTING" ]; then
+            echo "Issue de conformité #$EXISTING déjà ouverte → commentaire."
+            gh issue comment "$EXISTING" --body "$BODY" --repo "$GITHUB_REPOSITORY"
+          else
+            echo "Aucune issue de conformité ouverte → création."
+            gh issue create --title "$TITLE" --body "$BODY" --label "$LABEL" --repo "$GITHUB_REPOSITORY"
+          fi

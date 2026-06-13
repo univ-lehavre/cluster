@@ -108,6 +108,32 @@ la prod :
 Inventaire complet et détaillé : [SAFEGUARDS.md](SAFEGUARDS.md). Comment
 contribuer / outillage local : [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Le dépôt en chiffres
+
+La gouvernance est **mesurée**, pas seulement déclarée. Chaque décision est
+tracée (ADR), chaque écart de run est indexé (drift), chaque convention est
+auto-vérifiée ([ADR 0060](docs/decisions/0060-audit-conventions-gouvernance.md))
+:
+
+<!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
+
+- **60 ADR** (56 Accepted, 4 Proposed) — chaque choix de conception, daté et
+  immuable
+- **6 plans** vivants — la mise en œuvre des décisions, avec leur état
+  d'avancement
+- **57 drifts** indexés — chaque écart révélé par un run e2e, avec cause et
+  correctif
+- **29 scénarios** E2E reproductibles — les preuves opérationnelles sur banc
+  Lima
+- **0 % de duplication** shell (seuil `jscpd` ≤ 5 %) — primitives factorisées en
+  libs
+
+<!-- STATS:FIN -->
+
+> Régénérer ce bloc : `pnpm check:gouvernance --stats`. Le respect des
+> conventions est vérifié chaque semaine (workflow `conventions-freshness`, non
+> bloquant).
+
 ## Trademarks
 
 Tous les noms de produits et marques mentionnés dans ce dépôt sont la propriété
