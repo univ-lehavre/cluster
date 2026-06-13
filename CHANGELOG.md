@@ -11,6 +11,36 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.34.1](https://github.com/univ-lehavre/cluster/compare/v2.34.0...v2.34.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **ceph:** rescue diagnostique sur la gate de convergence (ADR 0050/0056) ([19065b4](https://github.com/univ-lehavre/cluster/commit/19065b4270ec324f5f20ea83e7fd87d6748d2b7b))
+* **ceph:** rescue diagnostique sur la gate de convergence Rook-Ceph ([a088a3c](https://github.com/univ-lehavre/cluster/commit/a088a3c80be6fe29831425181a7736a55118be06))
+
+
+### Refactor
+
+* **bash:** factoriser les primitives ssh + log des scénarios ([97474eb](https://github.com/univ-lehavre/cluster/commit/97474eb3a42f8af3fa5f07376d21db148656102d))
+* **bash:** factoriser les primitives ssh + log des scénarios ([#296](https://github.com/univ-lehavre/cluster/issues/296)) ([0b64da9](https://github.com/univ-lehavre/cluster/commit/0b64da96674191ff4914ffcfab4caa4330cebf1f))
+
+
+### Documentation
+
+* **adr:** ADR 0056 modèle déclaratif unifié des topologies ([177e799](https://github.com/univ-lehavre/cluster/commit/177e799a03848bc74b6937b97a0e66bd6cffb1a7))
+* **adr:** adr 0057 gouvernance documentaire (adr décide, plan met en œuvre) ([b488799](https://github.com/univ-lehavre/cluster/commit/b488799513b93b88f4b38abcd27ddb7f214bcb68))
+* **adr:** ADR 0057 gouvernance documentaire (ADR décide, plan met en œuvre) ([4b2b47d](https://github.com/univ-lehavre/cluster/commit/4b2b47dab36be8af88c24fac024461502c194a55))
+* **adr:** adr 0058 doctrine de l'audit (grille permanente, passages datés) ([d6076ac](https://github.com/univ-lehavre/cluster/commit/d6076ac639fd31f2917bb1bbed3e8ad6bd16f376))
+* **adr:** ADR 0058 doctrine de l'audit (grille permanente, passages datés) ([efa8332](https://github.com/univ-lehavre/cluster/commit/efa83322620b3cd487bd233a31e0f5fba56f7195))
+* **adr:** ajouter adr 0056 modèle déclaratif unifié des topologies ([57695c2](https://github.com/univ-lehavre/cluster/commit/57695c29a841669c1f1d39adaa4bc23eb786c4ab))
+* aligner la prose sur l'outillage réel — release-please + merge commit ([#294](https://github.com/univ-lehavre/cluster/issues/294)) ([432aa62](https://github.com/univ-lehavre/cluster/commit/432aa625255c76bf749eb333692cc2d2b4c07e0f))
+* aligner la prose sur l'outillage réel (release-please + merge commit) ([23145c8](https://github.com/univ-lehavre/cluster/commit/23145c832a9c8c9e5cf661394455865b85479c67))
+* **audit:** restructurer docs/audit/ en grille permanente + passage daté (ADR 0058) ([ab220aa](https://github.com/univ-lehavre/cluster/commit/ab220aa1b85f7d54a65ac18f6985cc955b5410a6))
+* **audit:** restructurer en grille permanente + passage daté (adr 0058) ([#292](https://github.com/univ-lehavre/cluster/issues/292)) ([1cff2ee](https://github.com/univ-lehavre/cluster/commit/1cff2eeb8c93556ce6d363ad8ddec749292dd0e9))
+* durcir CONTRIBUTING + plans/README selon ADR 0057 ([1e3ff0a](https://github.com/univ-lehavre/cluster/commit/1e3ff0a287f08f0525b1c0b921e301f73bbc4eee))
+* durcir CONTRIBUTING + plans/README selon adr 0057 ([#290](https://github.com/univ-lehavre/cluster/issues/290)) ([629722d](https://github.com/univ-lehavre/cluster/commit/629722d92f0710b7ba8b09fbe5d70ca284b1432a))
+
 ## [2.34.0](https://github.com/univ-lehavre/cluster/compare/v2.33.0...v2.34.0) (2026-06-12)
 
 
