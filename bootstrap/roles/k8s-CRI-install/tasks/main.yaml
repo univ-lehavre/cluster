@@ -93,6 +93,21 @@
         state: present
         update_cache: true
 
+    # Fige containerd.io comme kubelet/kubeadm/cri-tools (ADR 0005/0006, #295) :
+    # l'ADR 0005 affirme ce hold (« compensation : un apt-mark hold containerd.io
+    # posé par le rôle, à libérer explicitement pour bumper ») et k8s-rollback le
+    # LÈVE déjà — il ne manquait que la pose. Sans lui, containerd flotte au
+    # premier `apt upgrade` (os-upgrade.yaml fait `upgrade: full`), brisant la
+    # reproductibilité (ADR 0052) et le couplage CRI↔kubelet de la matrice.
+    # Bump containerd VOLONTAIRE (hors cycle k8s-upgrade, qui ne touche PAS
+    # containerd) : `apt-mark unhold containerd.io` → installer la version cible
+    # de la matrice ADR 0006 → re-hold ; ou rollback.yaml (qui un-hold) puis
+    # re-bootstrap. dpkg_selections est idempotent (changed=0 au re-jeu).
+    - name: Hold containerd.io at its installed version
+      ansible.builtin.dpkg_selections:
+        name: containerd.io
+        selection: hold
+
     # containerd.io ships a config.toml that disables the CRI plugin, so
     # generate the full default and force the systemd cgroup driver.
     - name: Generate the default containerd configuration

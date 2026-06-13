@@ -4,3 +4,18 @@
 # door open for adding control planes later without reinstalling.
 control_plane_endpoint: cluster-api
 control_plane_port: 6443
+
+# ─── Version Kubernetes — source de vérité unique (ADR 0006, #295) ───────────
+# Reproductibilité (ADR 0052) : sans patch figé, le dépôt apt épinglé à la seule
+# mineure pose « le dernier 1.34.z publié le jour de l'install » et le `hold`
+# ne fait que geler ce patch après coup → deux installs à deux dates = patchs
+# DIFFÉRENTS, sans qu'aucun fichier versionné ne change. On fige donc le patch :
+#   - k8s_minor : pilote le dépôt apt pkgs.k8s.io (chemin v{{ k8s_minor }}).
+#   - k8s_patch : pin EXACT des paquets (kubelet/kubeadm/cri-tools = {{ k8s_patch }}-*)
+#                 ET de kubernetesVersion à l'init (v{{ k8s_patch }}). kubeadm
+#                 refuse un kubernetesVersion plus récent que son binaire : les
+#                 deux DOIVENT donc rester sur le même patch.
+# Bump = une PR explicite qui met à jour ces deux valeurs + la matrice ADR 0006
+# (politique de bump §5). Valeurs génériques surchargeables (ADR 0023).
+k8s_minor: '1.34'
+k8s_patch: '1.34.9'

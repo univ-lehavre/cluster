@@ -103,6 +103,12 @@
   changed_when: "'upgrade' in upgrade_node.stdout"
 
 # ── kubelet + kubectl : sur tous les nœuds, après kubeadm ─────────────────────
+# NB (#295) : cri-tools n'est PAS remonté ici — il suit la cadence MINEURE
+# (un seul release par mineure, ex. 1.34.0) et l'API CRI est stable par mineure,
+# donc un upgrade de PATCH n'a pas à le bouger. Lors d'un upgrade MINEUR (bump de
+# k8s_minor en group_vars), penser à remonter cri-tools (unhold→install
+# cri-tools={{ k8s_minor }}.0-*→re-hold) sinon un re-jeu de k8s-install post-bump
+# bute sur le hold résiduel (cf. revue #295).
 - name: Mettre à jour kubelet et kubectl à la version cible
   become: true
   block:
