@@ -41,4 +41,6 @@ findings qu'un succès.
 
 ## Entrées
 
-_(à compléter au fil des workflows décisionnels)_
+- [2026-06-13 — Vérification des périmètres atomiques (graphe ADR 0066)](2026-06-13-verification-graphe-atomique.md)
+  — cartographie en éventail (5 agents) qui a vérifié 23 composants + 30+ arêtes
+  contre le code avant l'encodage du graphe atomique (Lot 0).

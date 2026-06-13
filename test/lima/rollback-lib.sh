@@ -156,6 +156,357 @@ classify_downstream_block() {
     fi
 }
 
+# ─── GRAPHE ATOMIQUE (ADR 0066, Lot 0 : à CÔTÉ des rollback_phase_*) ─────────
+#
+# L'unité du périmètre descend de la PHASE (composite, fragile) vers le COMPOSANT
+# ATOMIQUE (ADR 0066). Un composant a AU PLUS un namespace propre + ses CRD
+# propres + ses ressources hors-ns explicitement attachées ; un SEUL graphe
+# atomique (component_deps) est la source de vérité — il dérive l'ordre de
+# montage (tri topo), de rollback (inverse) et la clôture du roundtrip.
+#
+# Lot 0 = CI seule : ces fonctions vivent À CÔTÉ des rollback_phase_* (rien
+# retiré), prouvées par les invariants bats (test/unit/rollback.bats). La bascule
+# du rollback réel (Lot 3) et du montage (Lot 4) viendra après preuve banc.
+# Périmètres VÉRIFIÉS contre le code réel (workflow consigné 2026-06-13,
+# docs/audit/workflows/). Valeurs génériques banc (ADR 0023).
+#
+# Mêmes signatures/forme que les rollback_phase_* : case sur $1, stdout, une
+# ressource/ligne. Convention « possesseur vs locataire » d'un ns partagé : SEUL
+# le possesseur a component_namespace=NS ; un locataire qui dépose dans le ns
+# d'autrui a ns_propre=∅ + des targeted explicites (c'est CE qui rend l'oubli
+# cnpg-system structurellement impossible — ADR 0066 §Contexte).
+
+# component_namespace COMP
+#   Le (≤1) namespace que COMP POSSÈDE, ou vide s'il n'en possède aucun (racine,
+#   locataire d'un ns d'autrui, ou ressource purement node-side). Invariant de
+#   TRIVIALITÉ + UNICITÉ DU POSSESSEUR (un ns ↦ un seul composant).
+component_namespace() {
+    case "${1:-}" in
+        cert-manager)     printf 'cert-manager\n' ;;
+        ceph)             printf 'rook-ceph\n' ;;
+        seaweedfs)        printf 's3\n' ;;
+        prometheus-stack) printf 'monitoring\n' ;;       # POSSESSEUR du ns monitoring
+        registry)         printf 'registry\n' ;;
+        cnpg-operator)    printf 'cnpg-system\n' ;;       # ≠ postgres (l'oubli historique)
+        cnpg-cluster-pg)  printf 'postgres\n' ;;          # POSSESSEUR unique de postgres
+        dagster)          printf 'dagster\n' ;;
+        marquez)          printf 'marquez\n' ;;
+        gitea)            printf 'gitea\n' ;;
+        argocd)           printf 'argocd\n' ;;
+        # ∅ : racines (bootstrap→kube-system NON supprimable, build-images,
+        # metrics-server, gateway-api) ; locataires (loki, barman-plugin,
+        # cnpg-secrets, s3-backing-*) ; gitops-seed (données).
+        *)                printf '\n' ;;
+    esac
+}
+
+# component_targeted COMP
+#   Ressources CIBLÉES que COMP crée (dont dans le ns d'AUTRUI — invariant de
+#   COMPLÉTUDE PAR OWNERSHIP : une OBC dans rook-ceph est un targeted de son
+#   PRODUCTEUR, jamais un résidu de ceph). Une par ligne, « -n NS KIND NAME » ou
+#   « KIND NAME » (cluster-scoped). Vide sinon.
+component_targeted() {
+    case "${1:-}" in
+        cert-manager)
+            printf 'clusterissuer.cert-manager.io selfsigned-bootstrap\n'
+            printf 'clusterissuer.cert-manager.io internal-ca\n' ;;
+        metrics-server)
+            printf -- '-n kube-system deployment.apps metrics-server\n'
+            printf 'apiservice.apiregistration.k8s.io v1beta1.metrics.k8s.io\n' ;;
+        sc)
+            printf 'storageclass.storage.k8s.io rook-ceph-block-replicated\n'
+            printf 'storageclass.storage.k8s.io rook-ceph-block-ec-delete\n'
+            printf 'storageclass.storage.k8s.io rook-ceph-block-ec\n'
+            printf 'storageclass.storage.k8s.io rook-cephfs\n' ;;
+        datalake)
+            printf -- '-n rook-ceph cephobjectstore.ceph.rook.io datalake\n'
+            printf -- '-n rook-ceph cephobjectstoreuser.ceph.rook.io datalake\n'
+            printf 'storageclass.storage.k8s.io rook-ceph-datalake\n' ;;
+        loki)
+            printf -- '-n monitoring statefulset.apps loki\n'
+            printf -- '-n monitoring configmap loki\n'
+            printf -- '-n monitoring secret loki-s3-creds\n' ;;
+        s3-backing-loki)
+            # OBC dans rook-ceph (ns d'autrui) → targeted du PRODUCTEUR.
+            printf -- '-n rook-ceph objectbucketclaim.objectbucket.io loki-buckets\n' ;;
+        barman-plugin)
+            printf -- '-n cnpg-system deployment.apps barman-cloud\n' ;;
+        cnpg-cluster-pg)
+            printf -- '-n postgres cluster.postgresql.cnpg.io pg\n'
+            printf -- '-n postgres objectstore.barmancloud.cnpg.io pg-backup\n'
+            printf -- '-n postgres scheduledbackup.postgresql.cnpg.io pg-daily\n' ;;
+        s3-backing-cnpg)
+            printf -- '-n rook-ceph objectbucketclaim.objectbucket.io cnpg-backups\n' ;;
+        gitea)
+            printf -- '-n gitea httproute.gateway.networking.k8s.io gitea\n'
+            printf -- '-n gitea gateway.gateway.networking.k8s.io gitea\n' ;;
+        argocd)
+            printf -- '-n argocd httproute.gateway.networking.k8s.io argocd-server\n'
+            printf -- '-n argocd gateway.gateway.networking.k8s.io argocd\n'
+            printf -- '-n argocd appproject.argoproj.io atlas\n' ;;
+        gitops-seed)
+            printf -- '-n argocd applications.argoproj.io atlas\n' ;;
+        *) printf '\n' ;;
+    esac
+}
+
+# component_crd_groups COMP
+#   Groupes API dont COMP POSSÈDE les CRD (jamais ceux qu'il EMPRUNTE). Une CRD
+#   PARTAGÉE (gateway.networking.k8s.io, ceph.rook.io, objectbucket.io,
+#   barmancloud.cnpg.io, postgresql.cnpg.io, argoproj.io quand un autre la
+#   possède) n'est listée QUE chez son possesseur — la lister chez un emprunteur
+#   casserait les autres (garde-fou anti-GC partagé, invariant bats #6).
+component_crd_groups() {
+    case "${1:-}" in
+        gateway-api)      printf 'gateway.networking.k8s.io\n' ;;  # possédé ici, EMPRUNTÉ par registry/gitea/argocd
+        cert-manager)     printf 'cert-manager.io acme.cert-manager.io\n' ;;
+        ceph)             printf 'ceph.rook.io objectbucket.io\n' ;; # EMPRUNTÉ par sc/datalake/s3-backing-*
+        prometheus-stack) printf 'monitoring.coreos.com\n' ;;
+        cnpg-operator)    printf 'postgresql.cnpg.io\n' ;;          # EMPRUNTÉ par cnpg-cluster-pg
+        barman-plugin)    printf 'barmancloud.cnpg.io\n' ;;         # EMPRUNTÉ par cnpg-cluster-pg
+        argocd)           printf 'argoproj.io\n' ;;                 # EMPRUNTÉ par gitops-seed
+        *)                printf '\n' ;;
+    esac
+}
+
+# component_has_nodeside COMP
+#   "yes" si COMP laisse un état NODE-SIDE hors d'atteinte du delete k8s (disques
+#   Ceph + /var/lib/rook ; images containerd du registry). Métadonnée portée même
+#   si un rollback k8s-only ne le nettoie pas (banc).
+component_has_nodeside() {
+    case "${1:-}" in
+        bootstrap | build-images | ceph) printf 'yes\n' ;;
+        *)                               printf 'no\n' ;;
+    esac
+}
+
+# component_profile COMP
+#   Profil de stockage qui CONDITIONNE COMP (ADR 0066 : le when: vit dans le
+#   composant, pas dans l'alias). always|ceph|leger.
+#   - ceph  : ceph/sc/datalake/s3-backing-* (n'existent qu'en profil Ceph)
+#   - leger : seaweedfs (alternative S3, EXCLUSIVE de datalake)
+#   - always: tout le reste
+component_profile() {
+    case "${1:-}" in
+        ceph | sc | datalake | s3-backing-loki | s3-backing-cnpg) printf 'ceph\n' ;;
+        seaweedfs)                                                printf 'leger\n' ;;
+        *)                                                        printf 'always\n' ;;
+    esac
+}
+
+# component_deps COMP
+#   Dépendances DIRECTES de COMP (séparées par des espaces) — le GRAPHE ATOMIQUE
+#   UNIQUE (ADR 0066 §invariant 3). Source de vérité dont dérivent : l'ordre de
+#   montage (tri topo), de rollback (inverse) et la clôture du roundtrip. Vide =
+#   racine. Arêtes vérifiées contre le code (workflow consigné 2026-06-13).
+component_deps() {
+    case "${1:-}" in
+        bootstrap)        printf '\n' ;;
+        build-images)     printf '\n' ;;
+        gateway-api)      printf '\n' ;;
+        cert-manager)     printf '\n' ;;
+        metrics-server)   printf '\n' ;;
+        ceph)             printf '\n' ;;
+        sc)               printf 'ceph\n' ;;
+        datalake)         printf 'ceph sc\n' ;;
+        seaweedfs)        printf '\n' ;;
+        registry)         printf 'gateway-api\n' ;;
+        s3-backing-loki)  printf 'datalake\n' ;;
+        prometheus-stack) printf 'cert-manager\n' ;;
+        loki)             printf 'prometheus-stack s3-backing-loki\n' ;;
+        cnpg-operator)    printf 'cert-manager\n' ;;
+        barman-plugin)    printf 'cnpg-operator cert-manager\n' ;;
+        cnpg-secrets)     printf '\n' ;;
+        s3-backing-cnpg)  printf 'datalake\n' ;;
+        cnpg-cluster-pg)  printf 'cnpg-operator barman-plugin cnpg-secrets s3-backing-cnpg\n' ;;
+        dagster)          printf 'cnpg-cluster-pg registry build-images\n' ;;
+        marquez)          printf 'cnpg-cluster-pg registry build-images\n' ;;
+        gitea)            printf 'cert-manager gateway-api\n' ;;
+        argocd)           printf 'cert-manager gateway-api gitea\n' ;;
+        gitops-seed)      printf 'argocd gitea build-images\n' ;;
+        *)                printf '\n' ;;
+    esac
+}
+
+# component_known COMP — 0 (vrai) si COMP est un composant atomique connu. Le
+# catalogue complet sert au dispatch ET aux invariants bats (itération sur tout).
+component_known() {
+    case "${1:-}" in
+        bootstrap | build-images | gateway-api | cert-manager | metrics-server \
+            | ceph | sc | datalake | seaweedfs | registry | s3-backing-loki \
+            | prometheus-stack | loki | cnpg-operator | barman-plugin \
+            | cnpg-secrets | s3-backing-cnpg | cnpg-cluster-pg | dagster \
+            | marquez | gitea | argocd | gitops-seed)
+            return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# component_all — liste de TOUS les composants atomiques (ordre lexical stable),
+# pour itérer dans les invariants bats. Une source unique du catalogue.
+component_all() {
+    printf '%s\n' \
+        bootstrap build-images gateway-api cert-manager metrics-server \
+        ceph sc datalake seaweedfs registry s3-backing-loki \
+        prometheus-stack loki cnpg-operator barman-plugin cnpg-secrets \
+        s3-backing-cnpg cnpg-cluster-pg dagster marquez gitea argocd gitops-seed
+}
+
+# component_expand_alias ALIAS
+#   L'ensemble (non ordonné, un par ligne) de composants désignés par un ALIAS de
+#   phase (ADR 0066 §« Phase = alias »). Le périmètre composite n'est plus en
+#   intension : c'est l'union des composants. Un alias agrégé (atlas-ceph) est la
+#   clôture du graphe. Profil porté par component_profile, pas codé ici.
+component_expand_alias() {
+    case "${1:-}" in
+        ceph)         printf '%s\n' ceph ;;
+        sc)           printf '%s\n' sc ;;
+        datalake)     printf '%s\n' datalake ;;
+        metrics-server) printf '%s\n' metrics-server ;;
+        monitoring)   printf '%s\n' prometheus-stack loki s3-backing-loki ;;
+        dataops)      printf '%s\n' registry cnpg-operator barman-plugin \
+            cnpg-secrets s3-backing-cnpg cnpg-cluster-pg dagster marquez ;;
+        gitops)       printf '%s\n' gitea argocd ;;
+        gitops-seed)  printf '%s\n' gitops-seed ;;
+        # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
+        # seulement, run-phases.sh) ; tie-break d'ordre fixé par topo_sort.
+        atlas-ceph)   printf '%s\n' \
+            bootstrap build-images gateway-api cert-manager \
+            ceph sc datalake registry s3-backing-loki prometheus-stack loki \
+            cnpg-operator barman-plugin cnpg-secrets s3-backing-cnpg \
+            cnpg-cluster-pg dagster marquez gitea argocd gitops-seed ;;
+        *)            printf '\n' ;;
+    esac
+}
+
+# component_alias_weight COMP
+#   Poids d'ALIAS (entier) reflétant l'ordre CODÉ des phases (atlas-ceph :
+#   socle → ceph → sc → datalake → monitoring → gitops → dataops → gitops-seed).
+#   Sert de tie-break PRINCIPAL dans topo_sort : entre deux composants prêts (mêmes
+#   contraintes de dépendance), on émet d'abord celui du plus petit poids — ce qui
+#   reproduit l'ordre codé que les seules arêtes de données ne fixent pas (ex.
+#   monitoring < dataops alors que registry, dans dataops, ne dépend que du socle).
+#   Workflow consigné 2026-06-13 : ce tie-break est la pré-condition du Lot 4
+#   (ADR 0066) — le topo-sort doit reproduire EXACTEMENT l'ordre codé.
+component_alias_weight() {
+    case "${1:-}" in
+        bootstrap | build-images | gateway-api | cert-manager | metrics-server) printf '0\n' ;;
+        ceph)                                                                    printf '1\n' ;;
+        sc)                                                                      printf '2\n' ;;
+        datalake | seaweedfs)                                                    printf '3\n' ;;
+        prometheus-stack | loki | s3-backing-loki)                               printf '4\n' ;;
+        gitea | argocd)                                                          printf '5\n' ;;
+        registry | cnpg-operator | barman-plugin | cnpg-secrets | s3-backing-cnpg | cnpg-cluster-pg | dagster | marquez)
+            printf '6\n' ;;
+        gitops-seed)                                                             printf '7\n' ;;
+        *)                                                                       printf '9\n' ;;
+    esac
+}
+
+# topo_sort COMP…
+#   Tri TOPOLOGIQUE pur (aucun réseau) de la sous-clôture des composants donnés,
+#   via component_deps : une dépendance sort AVANT son dépendant (ordre de
+#   MONTAGE ; le rollback prend l'inverse). Tie-break DÉTERMINISTE entre nœuds
+#   prêts = (poids d'alias, ordre stable component_all) → reproduit l'ordre codé
+#   (invariant #5) et reste reproductible (invariant #3). Détecte les cycles
+#   (échoue, code 1). Kahn sur l'ensemble fermé par dépendance.
+topo_sort() {
+    local -a wanted=("$@")
+    # Fermeture transitive : inclure toute dépendance des composants demandés.
+    local -a closed=()
+    local -A in_closed=()
+    local -a stack=("${wanted[@]}")
+    local c d
+    while [ ${#stack[@]} -gt 0 ]; do
+        c="${stack[0]}"; stack=("${stack[@]:1}")
+        [ -n "${in_closed[$c]:-}" ] && continue
+        in_closed[$c]=1; closed+=("$c")
+        for d in $(component_deps "$c"); do
+            [ -n "${in_closed[$d]:-}" ] || stack+=("$d")
+        done
+    done
+    # Kahn avec tie-break par ordre stable de component_all.
+    local -A indeg=() emitted=()
+    for c in "${closed[@]}"; do
+        indeg[$c]=0
+    done
+    for c in "${closed[@]}"; do
+        for d in $(component_deps "$c"); do
+            [ -n "${in_closed[$d]:-}" ] && indeg[$c]=$((indeg[$c] + 1))
+        done
+    done
+    # Index stable de chaque composant (rang dans component_all) — tie-break 2ⁿᵈ.
+    local -A rank=(); local i=0
+    for c in $(component_all); do rank[$c]=$i; i=$((i + 1)); done
+    # Kahn : à chaque pas, émettre LE meilleur nœud prêt (indeg 0), trié par
+    # (poids d'alias, rang stable). Un seul à la fois → le tie-break ordonne
+    # vraiment (émettre tous les prêts d'un coup perdrait l'ordre d'alias).
+    local -a order=()
+    local emitted_count=0 total=${#closed[@]}
+    while [ "${emitted_count}" -lt "${total}" ]; do
+        local best="" best_key="" w key
+        for c in "${closed[@]}"; do
+            [ -n "${emitted[$c]:-}" ] && continue
+            [ "${indeg[$c]}" -eq 0 ] || continue
+            w=$(component_alias_weight "$c")
+            # Clé triable : poids (1 chiffre) puis rang (zéro-paddé 3).
+            key=$(printf '%s%03d' "$w" "${rank[$c]:-999}")
+            if [ -z "${best}" ] || [ "${key}" \< "${best_key}" ]; then
+                best="$c"; best_key="$key"
+            fi
+        done
+        [ -n "${best}" ] || break  # plus aucun nœud prêt → cycle (détecté plus bas)
+        order+=("${best}"); emitted[${best}]=1; emitted_count=$((emitted_count + 1))
+        # Décrémenter les dépendants de best.
+        local x
+        for x in "${closed[@]}"; do
+            [ -n "${emitted[$x]:-}" ] && continue
+            for d in $(component_deps "$x"); do
+                [ "$d" = "${best}" ] && indeg[$x]=$((indeg[$x] - 1))
+            done
+        done
+    done
+    [ "${emitted_count}" -eq "${total}" ] || {
+        printf 'topo_sort: cycle détecté (composants non ordonnables)\n' >&2
+        return 1
+    }
+    printf '%s\n' "${order[@]}"
+}
+
+# component_stuck_cr_kinds COMP…
+#   Union DÉRIVÉE des kinds de CR à finalizer des composants donnés (ADR 0066 :
+#   remplace _STUCK_CR_KINDS figée par une union calculée — fin d'une 2ᵉ source).
+#   Un kind est « bloquant » s'il porte un finalizer qui coince une terminaison de
+#   ns : OBC, CR Ceph (Cluster/ObjectStore/BlockPool/Filesystem), Cluster CNPG +
+#   ObjectStore Barman. Dérivé des groupes CRD touchés par les composants (propres
+#   ou empruntés). Sortie triée → déterministe (invariant #3).
+component_stuck_cr_kinds() {
+    local c group
+    {
+        for c in "$@"; do
+            for group in $(component_crd_groups "$c"); do
+                case "${group}" in
+                    objectbucket.io)
+                        printf '%s\n' obc.objectbucket.io ;;
+                    ceph.rook.io)
+                        printf '%s\n' cephcluster.ceph.rook.io \
+                            cephobjectstore.ceph.rook.io cephblockpool.ceph.rook.io \
+                            cephfilesystem.ceph.rook.io ;;
+                    postgresql.cnpg.io)
+                        printf '%s\n' cluster.postgresql.cnpg.io ;;
+                    barmancloud.cnpg.io)
+                        printf '%s\n' objectstore.barmancloud.cnpg.io ;;
+                esac
+            done
+            # Producteurs d'OBC (s3-backing-*) EMPRUNTENT objectbucket.io sans le
+            # posséder (crd_groups vide chez eux) → ajouter leur kind bloquant.
+            case "$c" in
+                s3-backing-loki | s3-backing-cnpg) printf '%s\n' obc.objectbucket.io ;;
+            esac
+        done
+    } | sort -u | paste -sd' ' -
+}
+
 # ─── PRIMITIVES kubectl/ssh (NON pures — réseau) ────────────────────────────
 # Attendent KUBECTL/vm_sh/log/ok/die/retry de run-phases.sh/lib.sh (sourcées).
 
