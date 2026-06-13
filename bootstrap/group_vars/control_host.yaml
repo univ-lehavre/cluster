@@ -1,0 +1,22 @@
+# code: language=ansible
+#
+# Variables du groupe `control_host` — le POSTE DE CONTRÔLE (#277).
+#
+# Les playbooks plateforme/Ceph (dataops, ceph-*, monitoring, metrics-server,
+# local-path, cnpg-secrets, gitops) pilotent l'API Kubernetes via la collection
+# `kubernetes.core` depuis `localhost`, PAS depuis un nœud. Cette collection
+# exige le client Python `kubernetes` (+ `certifi` pour le CA HTTPS).
+#
+# Ces libs sont VERSIONNÉES dans pyproject.toml et provisionnées par `uv sync`
+# dans le `.venv` du projet — y compris sur un contrôleur macOS « externally-
+# managed » où le `pip` système échoue (ADR 0006/0023, #277). On pointe donc
+# l'interpréteur Python du poste de contrôle vers ce `.venv` PAR DÉFAUT.
+#
+# Chemin repo-relatif (générique, ADR 0023) : `playbook_dir` est le dossier
+# `bootstrap/` du play en cours ; le `.venv` vit à la racine du dépôt, soit
+# `../.venv`. Aucun chemin absolu propre à un déploiement n'est versionné.
+#
+# SURCHARGE : un déploiement qui place son `.venv` ailleurs (ou un autre Python)
+# pose `ansible_python_interpreter` au niveau de l'HÔTE `localhost` dans son
+# inventaire (gitignoré) — une variable d'hôte gagne sur ce défaut de groupe.
+ansible_python_interpreter: '{{ playbook_dir }}/../.venv/bin/python'

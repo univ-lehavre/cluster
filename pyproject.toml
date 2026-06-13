@@ -10,9 +10,20 @@ name = "cluster-tooling"
 version = "0.0.0"
 description = "Scripts outillage du dépôt cluster (Python ; ADR 0017)"
 requires-python = ">=3.12"
-# pyyaml : parsing YAML multi-doc du garde-fou contrat→platform (check_contract.py,
-# ADR 0043). Seule dépendance runtime ; uv.lock épingle la version (esprit ADR 0006).
-dependencies = ["pyyaml>=6,<7"]
+# Dépendances runtime — uv.lock épingle les versions (esprit ADR 0006) :
+#   pyyaml     : parsing YAML multi-doc du garde-fou contrat→platform
+#                (check_contract.py, ADR 0043).
+#   kubernetes : client Python exigé par la collection Ansible kubernetes.core
+#                (modules k8s/k8s_info des plays plateforme) ; certifi fournit le
+#                bundle CA HTTPS. Versionnés ICI (et non plus posés au coup par
+#                coup par la pré-tâche `pip`) pour que `uv sync` provisionne un
+#                contrôleur reproductible — banc ET prod, y compris sur un macOS
+#                « externally-managed » où le `pip` système échoue (#277).
+dependencies = [
+    "pyyaml>=6,<7",
+    "kubernetes>=31,<37",
+    "certifi",
+]
 
 [dependency-groups]
 dev = [

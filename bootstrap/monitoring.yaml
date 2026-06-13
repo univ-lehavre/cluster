@@ -16,12 +16,28 @@
   pre_tasks:
     # kubernetes.core exige la lib Python `kubernetes` ; certifi fournit le CA
     # (mêmes prérequis que dataops.yaml — drift L23).
-    - name: Ensure the Python kubernetes client is present
-      ansible.builtin.pip:
-        name:
-          - kubernetes
-          - certifi
-        state: present
+    # GARDE (#277) : les libs de pilotage (kubernetes, certifi) sont versionnées
+    # dans pyproject.toml et provisionnées par `uv sync` dans le .venv du projet,
+    # vers lequel pointe l'interpréteur du groupe `control_host` (group_vars). On
+    # NE les installe plus au coup par coup via `pip` (qui échouait sur un
+    # contrôleur macOS « externally-managed ») : on VÉRIFIE leur présence et on
+    # oriente vers `uv sync` si elles manquent.
+    - name: 'Garde : client Python kubernetes+certifi présent (sinon : uv sync)'
+      block:
+        - name: Probe import kubernetes + certifi
+          ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import kubernetes, certifi'"
+          changed_when: false
+          check_mode: false
+      rescue:
+        - name: Manque le client Python — guider vers uv sync
+          ansible.builtin.fail:
+            msg: >-
+              Le client Python `kubernetes` (ou `certifi`) est introuvable dans
+              l'interpréteur {{ ansible_python_interpreter | default('python3') }}.
+              Provisionner le .venv du poste de contrôle avant de jouer ce play :
+              `uv sync` à la racine du dépôt (ADR 0006/0023, #277). Si le .venv
+              vit ailleurs, surcharger `ansible_python_interpreter` sur l'hôte
+              localhost de l'inventaire.
     - name: Resolve the certifi CA bundle path
       ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import certifi; print(certifi.where())'"
       register: monitoring_certifi

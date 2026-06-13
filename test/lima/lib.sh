@@ -244,6 +244,15 @@ write_inventory() {
         else
             echo "  hosts: {}"
         fi
+        # Poste de contrôle (#277) : les plays plateforme/Ceph pilotent l'API k8s
+        # depuis `localhost` (-e dataops_k8s_host=localhost). On le déclare dans le
+        # groupe `control_host` pour qu'il hérite de bootstrap/group_vars/
+        # control_host.yaml → interpréteur = .venv du dépôt (kubernetes+certifi
+        # provisionnés par `uv sync`). connection: local (pas de SSH vers soi-même).
+        echo "control_host:"
+        echo "  hosts:"
+        echo "    localhost:"
+        echo "      ansible_connection: local"
     } > "${inv}"
 }
 

@@ -3,6 +3,30 @@
 Playbooks Ansible et scripts d'installation initiale de Kubernetes sur un parc
 de serveurs Debian.
 
+## Prérequis du poste de contrôle
+
+Les playbooks **plateforme/Ceph** (`dataops`, `ceph-*`, `monitoring`,
+`metrics-server`, `local-path`, `cnpg-secrets`, `gitops`) pilotent l'API
+Kubernetes via la collection `kubernetes.core` **depuis le poste de contrôle**
+(`localhost`), pas depuis un nœud. Cette collection exige le client Python
+`kubernetes` (+ `certifi`). Ces libs sont **versionnées** (`pyproject.toml`,
+`uv.lock`) et provisionnées dans le `.venv` du dépôt — y compris sur un
+contrôleur macOS « externally-managed » où le `pip` système échoue (ADR
+0006/0023, [#277]). Avant de jouer ces playbooks :
+
+```sh
+uv sync   # à la racine du dépôt — crée/maj .venv avec kubernetes + certifi
+```
+
+L'interpréteur Python de `localhost` est dirigé vers ce `.venv` par le groupe
+`control_host` ([`group_vars/control_host.yaml`](group_vars/control_host.yaml)).
+L'inventaire d'exemple ([`hosts.example.yaml`](hosts.example.yaml)) montre la
+déclaration de ce groupe ; un `.venv` placé ailleurs se surcharge par hôte. Si
+les libs manquent, ces playbooks **échouent tôt** avec un rappel `uv sync`
+(garde en `pre_tasks`).
+
+[#277]: https://github.com/univ-lehavre/cluster/issues/277
+
 ## Contenu
 
 | Fichier                                              | Rôle                                                                                |

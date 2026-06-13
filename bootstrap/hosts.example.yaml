@@ -42,3 +42,15 @@ workers:
 #   hosts:
 #     site-distant:
 #       ansible_host: 10.1.0.10
+
+# Poste de contrôle (#277) : les playbooks plateforme/Ceph (dataops, ceph-*,
+# monitoring, metrics-server, local-path, cnpg-secrets, gitops) pilotent l'API
+# Kubernetes depuis `localhost`, pas depuis un nœud. Le groupe `control_host`
+# leur applique l'interpréteur du .venv du dépôt (group_vars/control_host.yaml :
+# kubernetes+certifi provisionnés par `uv sync`). Garder ce bloc tel quel suffit
+# dans le cas standard (.venv à la racine du dépôt). Ne surcharger
+# `ansible_python_interpreter` (chemin absolu) QUE si le .venv vit ailleurs.
+control_host:
+  hosts:
+    localhost:
+      ansible_connection: local
