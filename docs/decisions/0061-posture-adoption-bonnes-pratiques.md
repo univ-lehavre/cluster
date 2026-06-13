@@ -97,6 +97,12 @@ documentaire), [ADR 0052](0052-reproductibilite-des-resultats.md)
 - **Auto-application** : ce principe est lui-même une bonne pratique adoptée
   selon ses propres règles (ne contredit aucun ADR ; gain = lever l'ambiguïté de
   posture ; structurant donc tracé par CET ADR).
+- **Inventaire visible** : le corpus des pratiques adoptées est recensé dans une
+  page de référence —
+  [`bonnes-pratiques.md`](../architecture/bonnes-pratiques.md) — qui renvoie à
+  l'ADR fondant chaque pratique. La **conformité** à ces pratiques est vérifiée
+  par `pnpm check:gouvernance`
+  ([ADR 0060](0060-audit-conventions-gouvernance.md)).
 - **Prix à payer** : un jugement humain reste requis (« cette pratique est-elle
   _éprouvée_ ? son gain est-il _net_ ? est-elle _structurante_ ? »). Le principe
   cadre la décision, il ne l'automatise pas — et c'est voulu (cf. le risque de
