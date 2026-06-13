@@ -280,6 +280,36 @@ detect_storage_profile() {
     log "  profil détecté : storageClass=${STORAGE_SC}, backing S3=${STORAGE_BACKING} (${STORAGE_ENDPOINT})"
 }
 
+# detect_hardening_state : DÉRIVE l'état de DURCISSEMENT de l'ÉTAT RÉEL de l'hôte
+# (ADR 0065 §2 : le durcissement est un état CONSTATABLE, pas un flag à re-saisir).
+# Constate via SSH (comme state.sh) les couches que phase_hardening pose sur le
+# banc (tags `audit,detection` → auditd + fail2ban) et pose HARDENING_STATE :
+#   - les deux actifs   → HARDENING_STATE=hardened (l'hôte EST durci → +hardening) ;
+#   - les deux inactifs → HARDENING_STATE=plain ;
+#   - illisible (hôte injoignable) → die (« détection fiable ou refus franc », L44) ;
+#   - état partiel      → die (durcissement incohérent à corriger, pas à deviner).
+# WITH_HARDENING=1 reste l'INTENTION d'APPLIQUER sur un build neuf (run_hardening_
+# if_requested) ; cette détection sert à dériver le suffixe TARGET de la RÉALITÉ.
+detect_hardening_state() {
+    local node="${CP}" auditd fail2ban verdict
+    auditd=$(vm_sh "${node}" systemctl is-active auditd 2> /dev/null || true)
+    fail2ban=$(vm_sh "${node}" systemctl is-active fail2ban 2> /dev/null || true)
+    # `systemctl is-active` rend `active`/`inactive`/`failed`/`unknown` — on
+    # normalise tout ce qui n'est pas `active`/`inactive` en `unknown` (illisible).
+    case "${auditd}" in active | inactive) : ;; *) auditd=unknown ;; esac
+    case "${fail2ban}" in active | inactive) : ;; *) fail2ban=unknown ;; esac
+    verdict=$(classify_hardening_signal "${auditd}" "${fail2ban}")
+    case "${verdict%%|*}" in
+        ok)
+            case "${verdict#*|}" in
+                hardened*) HARDENING_STATE=hardened ;;
+                *)         HARDENING_STATE=plain ;;
+            esac
+            log "  durcissement détecté : ${HARDENING_STATE} (auditd=${auditd}, fail2ban=${fail2ban})" ;;
+        *) die "détection du durcissement : ${verdict#*|}" ;;
+    esac
+}
+
 # Gate commun : crée un PVC test sur la SC $1 (défaut si vide) et vérifie Bound.
 gate_test_pvc() {
     local sc="${1:-}"
@@ -1422,15 +1452,22 @@ chemin_prelude() {
     : > "${PHASE_DURATIONS}" # repart d'un relevé propre pour CE run
 }
 
-# Axe ORTHOGONAL durcissement (#240, ADR 0045 §3) : applique le hardening hôte si
-# WITH_HARDENING=1, sur N'IMPORTE QUEL chemin, juste après le socle (hôte prêt).
-# No-op sinon. Le verdict (durci/non) est reflété dans le suffixe de TARGET pour
-# que le run consigné distingue les deux variantes (preuve par chemin, ADR 0042).
+# Axe ORTHOGONAL durcissement (#240, ADR 0045 §3) : WITH_HARDENING=1 est l'INTENTION
+# d'APPLIQUER le hardening hôte (secure.yml) sur N'IMPORTE QUEL chemin, juste après
+# le socle. Le suffixe `+hardening` de TARGET, lui, DÉRIVE de l'ÉTAT RÉEL de l'hôte
+# (ADR 0065 §2 : un état se détecte, pas se re-saisit) — pas du flag : ainsi un
+# re-jeu/roundtrip contre un hôte DÉJÀ durci retrouve `+hardening` sans repasser le
+# flag, et le run consigné distingue les deux variantes par la réalité (ADR 0042).
 run_hardening_if_requested() {
+    # Intention : appliquer le durcissement sur un build neuf (no-op si déjà fait —
+    # phase_hardening est idempotente via Ansible).
     if [ "${WITH_HARDENING:-0}" = 1 ]; then
         time_phase hardening phase_hardening
-        TARGET="${TARGET}+hardening"
     fi
+    # État : le suffixe reflète ce que l'hôte EST, détecté via SSH (refus franc si
+    # injoignable/incohérent). Couvre aussi un hôte durci hors de CE run.
+    detect_hardening_state
+    [ "${HARDENING_STATE:-plain}" = hardened ] && TARGET="${TARGET}+hardening"
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
