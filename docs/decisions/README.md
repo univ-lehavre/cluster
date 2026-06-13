@@ -80,3 +80,4 @@ Format léger inspiré de Michael Nygard :
 | 0058 | [Doctrine de l'audit : une grille permanente, des passages datés](0058-doctrine-audit-grille-passages.md)                            | Accepted           |
 | 0059 | [Diátaxis : typologie des quatre modes de documentation + câblage inline](0059-diataxis-typologie-documentation.md)                  | Accepted           |
 | 0060 | [Audit régulier du respect des conventions de gouvernance](0060-audit-conventions-gouvernance.md)                                    | Accepted           |
+| 0061 | [Posture d'adoption des bonnes pratiques (principe-chapeau)](0061-posture-adoption-bonnes-pratiques.md)                              | Accepted           |

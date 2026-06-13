@@ -23,6 +23,7 @@ lecture** par thème, qui pointent vers eux.
 | [`validation-banc.md`](validation-banc.md)     | Historique et évolution des campagnes de test sur le banc                     |
 | [`matrice-catalogue.md`](matrice-catalogue.md) | Axes du catalogue, couverture des scénarios et des builds (matrice ADR 0023)  |
 | [`lecons-des-runs.md`](lecons-des-runs.md)     | Drifts e2e par catégorie + tableau de bord (matériel/temps/drifts) — ADR 0034 |
+| [`bonnes-pratiques.md`](bonnes-pratiques.md)   | Inventaire des bonnes pratiques appliquées au dépôt, par domaine — ADR 0061   |
 
 Les **définitions** des termes sont dans le [glossaire](../glossaire.md) ; les
 **décisions** détaillées et datées dans les [ADR](../decisions/).
