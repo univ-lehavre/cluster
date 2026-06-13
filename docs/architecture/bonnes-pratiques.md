@@ -26,6 +26,29 @@ code** (16).
 
 [[toc]]
 
+## Par culture d'ingénierie (vue transverse)
+
+Deux grilles **orthogonales** lisent le même corpus. Les sections suivantes
+classent les pratiques **par mécanisme** (ce que le script `check_gouvernance`
+vérifie). Cette section les regroupe **par culture d'ingénierie** — la lecture «
+quelles cultures le dépôt revendique »
+([ADR 0062](../decisions/0062-cultures-ingenierie.md)). Une même pratique peut
+relever de plusieurs cultures.
+
+| Culture                  | Statut             | Ce qu'elle recouvre ici                                                                              | ADR pivots                   |
+| ------------------------ | ------------------ | ---------------------------------------------------------------------------------------------------- | ---------------------------- |
+| **GitOps**               | ✅ en place        | Git source de vérité, merge-commit, pas de push direct, Argo CD + Gitea, patron apply                | 0022, 0037, 0044             |
+| **DataOps**              | ✅ en place        | Dagster, lineage OpenLineage/Marquez, base managée CNPG, contrat d'interface, pas de PII             | 0026, 0028, 0033, 0041, 0043 |
+| **DevSecOps**            | ✅ en place        | digests multi-arch, actions par SHA, Trivy IaC, secrets non versionnés, PSA, etcd chiffré, WireGuard | 0006, 0014, 0019, 0023       |
+| **IaC**                  | ✅ en place        | catalogue de topologies déclaratif, idempotence Ansible prouvée, provisioning OpenTofu               | 0023, 0032, 0033             |
+| **Platform Engineering** | 🔶 en construction | paved roads (catalogue) + contrat plateforme↔consommateur ; IDP self-service à venir                 | 0023, 0043, 0056             |
+| **MLOps**                | 🔶 à venir         | socle DataOps = prérequis ; aucun composant ML déployé                                               | —                            |
+| **SRE**                  | 🔶 partiel         | drift detection (`state.sh`), fraîcheur, etcd backup/RPO, rollback ; sans SLO/error budget           | 0042, 0014                   |
+| **FinOps (efficience)**  | 🔶 partiel         | métrologie ressources (Prometheus), capacité Ceph, sizing banc ; à formaliser                        | 0016                         |
+| **FinOps (coût €)**      | ❌ écarté          | bare-metal non facturé, mono-tenant — pas de chargeback (rouvrirait avec la topo cloud)              | —                            |
+
+Détail et justification : [ADR 0062](../decisions/0062-cultures-ingenierie.md).
+
 ## Reproductibilité, validation & preuves
 
 | Pratique                                                                                                                                                                                                                                                                                                       | Source                       |
