@@ -25,10 +25,13 @@ Usage :
   uv run python scripts/topology.py diff [--kind prod|lima --against PATH]
   uv run python scripts/topology.py epreuves [--all] [--type unit|intég|chaos]   (P4)
   uv run python scripts/topology.py runs [--target atlas|storage-real|…]          (P4)
+  uv run python scripts/topology.py next [--target …] [--apply]                   (P5)
 
 P4 ajoute deux commandes READ-ONLY : `epreuves` (liste filtrée par la topologie,
 exig. 6 — ne lance rien) et `runs` (lit l'historique + fraîcheur, exig. 10-12 —
-ne réécrit rien). Lancer une épreuve ou converger relève de P5 (ansible-runner).
+ne réécrit rien). P5 ajoute `next` : suggère la prochaine phase (diff voulu−réel) ;
+`--apply` la LANCE via ansible-runner — décision humaine explicite, jamais
+d'auto-apply (ADR 0063). Sans --apply, `next` est informatif (code 0).
 
 Codes de sortie (contrat CI) : 0 = succès / invariant tenu / lecture ; 1 = erreur
 métier (topology invalide ou introuvable, dérive byte-identique détectée) ; 2 =
@@ -54,6 +57,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import yaml  # noqa: E402
 
 from cluster_topology import (  # noqa: E402
+    PlanError,
     TopologyError,
     derive_run_params,
     filter_epreuves,
@@ -61,8 +65,10 @@ from cluster_topology import (  # noqa: E402
     load_topology,
     render_lima_inventory,
     render_prod_inventory,
+    suggest_next,
     verdict_for_run,
 )
+from cluster_topology import runner as _runner  # noqa: E402
 from cluster_topology.history import last_run_for_target, latest_run  # noqa: E402
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -284,6 +290,82 @@ def cmd_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_for_target(runs, target: str | None):
+    """Le run de référence pour un chemin : le dernier de ce `target` si l'historique
+    porte le champ, sinon le dernier run global (rétrocompat — mêmes phases/fraîcheur
+    servent au diff). Garantit que diff et fraîcheur s'appuient sur LE MÊME run."""
+    run = last_run_for_target(runs, target) if target else None
+    return run if run is not None else latest_run(runs)
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    """Suggère la prochaine phase (diff voulu − réel) ; --apply la LANCE (ADR 0063).
+
+    Sans --apply : lecture informative, code 0 (la suggestion « il manque X » N'EST
+    PAS un échec — c'est le travail de `next`). Avec --apply : délègue à la couche
+    ansible-runner isolée (runner.launch_phase) ; décision humaine explicite (G2),
+    code propagé du run. JAMAIS d'auto-apply ni d'enchaînement de la séquence.
+    """
+    path = _resolve(args.file)
+    topo = load_topology(path)
+    runs = load_runs(args.history or _RUNS_HISTORY)
+    now = int(dt.datetime.now(tz=dt.UTC).timestamp())
+    target = args.target  # None → plan.default_target le déduit
+    run = _run_for_target(runs, target)
+    etat_frais, _ = verdict_for_run(run, target, now)
+    done = set(run.phases) if run is not None else set()
+    run_params = derive_run_params(topo)
+    try:
+        sugg = suggest_next(topo, target, done, etat_frais, run_params=run_params)
+    except PlanError as exc:
+        raise _UsageError(str(exc)) from exc
+
+    print(sugg.message)
+    if sugg.phase is None:
+        return 0
+    if not args.apply:
+        print(f"  pour lancer : topology.py next --target {sugg.target} --apply")
+        return 0
+
+    # --apply : décision humaine explicite. La phase doit avoir un playbook unitaire.
+    if sugg.playbook is None:
+        raise _UsageError(
+            f"la phase `{sugg.phase}` n'est pas un play unitaire lançable "
+            "(déléguée au chemin nommé run-phases.sh) — la lancer via run-phases.sh"
+        )
+    private_data_dir = os.path.join(_ROOT, "bootstrap")
+    inventory = os.path.join(private_data_dir, "hosts.yaml")
+    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
+    # L'inventaire réel est gitignoré (ADR 0023) — sans lui, ansible-runner
+    # prendrait le chemin pour un nom d'hôte (erreur cryptique). On l'arrête net
+    # avec un message qui pointe vers l'exemple versionné.
+    if not os.path.exists(inventory):
+        raise _UsageError(
+            f"inventaire absent : {os.path.relpath(inventory, _ROOT)} "
+            "— le générer (`topology.py generate -o bootstrap/hosts.yaml`) "
+            "ou le copier depuis bootstrap/hosts.example.yaml"
+        )
+    playbook = os.path.relpath(os.path.join(_ROOT, sugg.playbook), private_data_dir)
+    print(f"→ lancement de {sugg.phase} ({sugg.playbook}) via ansible-runner…")
+    try:
+        result = _runner.launch_phase(
+            playbook,
+            sugg.run_params,
+            private_data_dir,
+            inventory,
+            ansible_config=ansible_cfg,
+            # KUBECONFIG vient de l'environnement du poste (config locale de
+            # l'opérateur, comme run-phases.sh/lib.sh) ; transmis explicitement
+            # plutôt que laissé ambiant dans le sous-processus runner.
+            kubeconfig=os.environ.get("KUBECONFIG"),
+            target_kind=topo.target_kind,
+        )
+    except _runner.RunnerUnavailable as exc:
+        raise _UsageError(str(exc)) from exc
+    print(f"  rc={result.rc} status={result.status}")
+    return 0 if result.rc == 0 else 1
+
+
 _DISPATCH = {
     "validate": cmd_validate,
     "generate": cmd_generate,
@@ -291,6 +373,7 @@ _DISPATCH = {
     "status": cmd_status,
     "epreuves": cmd_epreuves,
     "runs": cmd_runs,
+    "next": cmd_next,
 }
 
 
@@ -391,6 +474,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p_runs.add_argument("--target", default=None, help="chemin nommé ciblé (atlas, storage-real…)")
     p_runs.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
+    )
+
+    p_next = sub.add_parser("next", help="suggère la prochaine phase (et --apply la lance)")
+    _add_file(p_next)
+    p_next.add_argument(
+        "--target", default=None, help="chemin nommé visé (défaut : déduit du profil+backend)"
+    )
+    p_next.add_argument(
+        "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
+    )
+    p_next.add_argument(
+        "--apply",
+        action="store_true",
+        help="LANCER la phase suggérée via ansible-runner (décision humaine, ADR 0063)",
     )
     return ap
 

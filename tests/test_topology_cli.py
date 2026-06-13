@@ -9,6 +9,7 @@ garde-fou byte-identique de `diff`.
 """
 
 import contextlib
+import datetime as dt
 import importlib.util
 import io
 import os
@@ -19,6 +20,12 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
+
+
+def dt_today() -> str:
+    """Date ISO d'aujourd'hui (UTC) — pour fabriquer un run FRAIS dans une fixture."""
+    return dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 # scripts/topology.py n'est pas un module importable par nom (dossier scripts/
 # sans __init__) : on le charge par chemin, comme un point d'entrée.
@@ -251,6 +258,122 @@ runs:
         code, _, err = _capture(["runs", "--history", "/nope/runs.yaml"])
         self.assertEqual(code, 1)
         self.assertIn("erreur", err)
+
+
+class Next(unittest.TestCase):
+    _EMPTY_HIST = "runs: []\n"
+    # Historique frais où le socle Ceph est joué → la 1re phase manquante de
+    # cluster-dataops est `datalake` (qui A un playbook unitaire, donc --apply-able).
+    _SOCLE_DONE = f"""\
+runs:
+  - id: r1
+    date: {dt_today()}
+    profil: ceph
+    topologie: multi-node-3
+    phases:
+      up: 1
+      bootstrap: 1
+      ceph: 1
+      sc: 1
+"""
+
+    def test_suggests_without_apply_is_zero_and_never_launches(self):
+        # Sans --apply : informatif, code 0, et le runner n'est JAMAIS appelé.
+        called = []
+        orig = cli._runner.launch_phase
+        cli._runner.launch_phase = lambda *a, **k: called.append(1)
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
+        hist = _tmp(self._EMPTY_HIST)
+        self.addCleanup(os.unlink, hist)
+        code, out, _ = _capture(
+            ["next", "-f", _EXAMPLE, "--target", "atlas-ceph", "--history", hist]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("Prochaine étape", out)
+        self.assertEqual(called, [])  # aucun lancement sans --apply
+
+    def test_unknown_target_is_usage_error(self):
+        code, _, err = _capture(["next", "-f", _EXAMPLE, "--target", "frobnicate"])
+        self.assertEqual(code, 2)
+        self.assertIn("usage", err)
+
+    def _ensure_inventory(self):
+        """Garantit un bootstrap/hosts.yaml (gitignoré, absent en CI) pour --apply ;
+        le retire ensuite si on l'a créé. Sinon le garde-fou d'inventaire bloque."""
+        inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
+        if not os.path.exists(inv):
+            with open(inv, "w", encoding="utf-8") as f:
+                f.write("# inventaire de test (créé puis retiré)\n")
+            self.addCleanup(os.unlink, inv)
+
+    def test_apply_launches_runner_and_maps_rc(self):
+        # --apply appelle runner.launch_phase (stub rc=0) → code 0 ; UNE phase.
+        from cluster_topology.runner import RunResult
+
+        self._ensure_inventory()
+        calls = []
+
+        def fake(playbook, extravars, pdd, inv, **kw):
+            calls.append((playbook, extravars))
+            return RunResult(rc=0, status="successful")
+
+        orig = cli._runner.launch_phase
+        cli._runner.launch_phase = fake
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
+        hist = _tmp(self._SOCLE_DONE)
+        self.addCleanup(os.unlink, hist)
+        code, _, _ = _capture(
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 1)  # UNE phase lancée, pas la séquence
+        # 1re phase manquante après le socle = datalake (l'exemple a hardening
+        # désactivé) ; le point clé : UNE phase, avec un playbook réel.
+        self.assertTrue(calls[0][0].endswith(".yaml"))
+
+    def test_apply_without_inventory_is_usage_error(self):
+        # --apply sans bootstrap/hosts.yaml → erreur d'usage claire (code 2),
+        # pas une erreur cryptique d'ansible-runner.
+        inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
+        if os.path.exists(inv):
+            self.skipTest("bootstrap/hosts.yaml présent localement — cas testé en CI")
+        orig = cli._runner.launch_phase
+        cli._runner.launch_phase = lambda *a, **k: None
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
+        hist = _tmp(self._SOCLE_DONE)
+        self.addCleanup(os.unlink, hist)
+        code, _, err = _capture(
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("inventaire absent", err)
+
+    def test_apply_propagates_failure_rc(self):
+        from cluster_topology.runner import RunResult
+
+        self._ensure_inventory()
+        orig = cli._runner.launch_phase
+        cli._runner.launch_phase = lambda *a, **k: RunResult(rc=2, status="failed")
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
+        hist = _tmp(self._SOCLE_DONE)
+        self.addCleanup(os.unlink, hist)
+        code, _, _ = _capture(
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+        )
+        self.assertEqual(code, 1)  # run KO → code 1
+
+    def test_apply_on_non_playbook_phase_is_usage_error(self):
+        # Une phase sans play unitaire (up, sur rejeu depuis zéro) ne s'apply pas.
+        orig = cli._runner.launch_phase
+        cli._runner.launch_phase = lambda *a, **k: None
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
+        hist = _tmp(self._EMPTY_HIST)
+        self.addCleanup(os.unlink, hist)
+        code, _, err = _capture(
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("usage", err)
 
 
 class Dispatch(unittest.TestCase):

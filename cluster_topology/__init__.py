@@ -20,6 +20,14 @@ from cluster_topology.epreuves import EPREUVES, Epreuve, filter_epreuves
 from cluster_topology.generator import render_lima_inventory, render_prod_inventory
 from cluster_topology.history import Run, load_runs, verdict_for_run
 from cluster_topology.model import Topology, TopologyError, load_topology
+from cluster_topology.plan import (
+    KNOWN_TARGETS,
+    PlanError,
+    Suggestion,
+    default_target,
+    expected_phase_sequence,
+    suggest_next,
+)
 from cluster_topology.profile import derive_run_params
 
 __all__ = [
@@ -35,4 +43,10 @@ __all__ = [
     "Run",
     "load_runs",
     "verdict_for_run",
+    "Suggestion",
+    "PlanError",
+    "KNOWN_TARGETS",
+    "default_target",
+    "expected_phase_sequence",
+    "suggest_next",
 ]
