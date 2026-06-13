@@ -42,10 +42,26 @@ class Closure(unittest.TestCase):
             self.assertIn(p, cl)
 
     def test_closure_in_mount_order(self):
-        # L'ordre doit suivre _MOUNT_ORDER (déterministe, amont→aval).
+        # L'ordre est celui du MONTAGE (amont→aval), DÉRIVÉ du graphe atomique
+        # (phase_closure, rollback-lib.sh) — déterministe. On vérifie l'invariant
+        # structurel : une couche de stockage de base sort avant ce qui la consomme.
         cl = roundtrip.closure("ceph")
-        idx = [roundtrip._MOUNT_ORDER.index(p) for p in cl]
-        self.assertEqual(idx, sorted(idx))
+        self.assertEqual(cl[:3], ["ceph", "sc", "datalake"])  # socle stockage d'abord
+        # gitops/gitops-seed (consommateurs) après le stockage.
+        self.assertLess(cl.index("sc"), cl.index("gitops"))
+        self.assertLess(cl.index("gitops"), cl.index("gitops-seed"))
+
+    def test_closure_derives_full_dependents(self):
+        # La clôture DÉRIVÉE doit reproduire l'ancien graphe validé à la main :
+        # détruire `sc` orpheline aussi gitops (PVC gitea sur la StorageClass).
+        self.assertEqual(
+            roundtrip.closure("ceph"),
+            ["ceph", "sc", "datalake", "monitoring", "gitops", "dataops", "gitops-seed"],
+        )
+        self.assertEqual(
+            roundtrip.closure("sc"),
+            ["sc", "datalake", "monitoring", "gitops", "dataops", "gitops-seed"],
+        )
 
     def test_unknown_phase_rejected(self):
         with self.assertRaises(roundtrip.RoundtripError):

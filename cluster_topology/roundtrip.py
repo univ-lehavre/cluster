@@ -6,10 +6,14 @@ de toute sa **clôture descendante** (ce qui dépend d'elle).
 Le scénario donne l'ORDRE (« détruire la couche X ») ; l'outil **déduit** la
 clôture à défaire. Détruire une couche de base cascade sur tout ce qui en dépend :
 détruire `sc` orphelinerait monitoring/dataops/gitea (leurs PVC sont sur la
-StorageClass) ; détruire `ceph` reconstruit tout le socle de stockage. Le graphe
-de clôture (validé avec l'auteur) reflète l'ORDRE DE MONTAGE de run-phases.sh + la
-consommation de stockage — il n'est PAS dans rollback_phase_downstream (qui ne
-capture que les dépendances directes de phase).
+StorageClass) ; détruire `ceph` reconstruit tout le socle de stockage.
+
+La clôture et l'ordre de montage NE SONT PLUS codés ici : ils sont DÉRIVÉS du
+**graphe atomique unique** de `rollback-lib.sh` (`phase_closure` / `topo_sort`,
+ADR 0066) — fin de la 2ᵉ source de vérité (l'ancien `_DEPENDENTS`/`_MOUNT_ORDER`
+en dur, « validé à la main », divergeait du graphe de rollback). Les arêtes de
+stockage BLOC (`gitea`/`registry`/`prometheus-stack`/`cnpg`/`loki` → `sc`, PVC sur
+la StorageClass) sont désormais dans le graphe (workflow consigné 2026-06-13).
 
 Cycle, pour la clôture `[X, …descendants]` :
   1. détruire : `run-phases.sh rollback <p>` pour chaque p, en ordre INVERSE de
@@ -53,74 +57,25 @@ KNOWN_PHASES = (
     "gitops-seed",
 )
 
-# Ordre de MONTAGE (chemin atlas-ceph) — sert à ordonner destroy (inverse) et
-# rebuild (direct) d'une clôture. metrics-server est indépendant (placé tôt).
-_MOUNT_ORDER = (
-    "ceph",
-    "sc",
-    "datalake",
-    "metrics-server",
-    "monitoring",
-    "gitops",
-    "dataops",
-    "gitops-seed",
-)
-
-# Graphe de CLÔTURE : dépendances DIRECTES (← « X est requis par ces couches »),
-# validé avec l'auteur. Reflète l'ordre de montage + la consommation de stockage
-# (tous les PVC sont sur `sc` ; Loki/Barman utilisent le backing S3 de `datalake`).
-_DEPENDENTS = {
-    "ceph": ("sc", "datalake", "monitoring", "gitops", "dataops", "gitops-seed"),
-    "sc": ("datalake", "monitoring", "dataops", "gitops"),
-    "datalake": ("monitoring", "dataops"),
-    "monitoring": (),
-    "gitops": ("gitops-seed",),
-    "dataops": (),
-    "gitops-seed": (),
-    "metrics-server": (),
-}
-
-# Couches de STOCKAGE : leur clôture est large (≈ rebuild du socle) → opt-in.
-_STORAGE_LAYERS = frozenset({"ceph", "sc", "datalake"})
-
 
 class RoundtripError(RuntimeError):
     """Phase inconnue, opt-in manquant, confirmation refusée, ou banc indisponible."""
 
 
-def closure(phase: str) -> list[str]:
-    """Clôture descendante de `phase`, en ordre de MONTAGE (amont→aval).
+# ── Périmètre & clôture : DÉRIVÉS du graphe atomique de rollback-lib.sh ──────
+# Source UNIQUE (ADR 0066) : ni _DEPENDENTS ni _MOUNT_ORDER ne sont codés ici.
 
-    = `phase` + tout ce qui en dépend (transitivement). C'est ce qu'un rollback de
-    `phase` oblige à défaire pour rester cohérent.
+
+def _rollback_lib_call(func: str, phase: str = "") -> str:
+    """Appelle une fonction de rollback-lib.sh et renvoie sa stdout (source unique).
+
+    `phase` est passé en argument seulement s'il est non vide (certaines fonctions,
+    comme `phase_closure`, prennent un argument ; d'autres pas).
     """
-    if phase not in KNOWN_PHASES:
-        raise RoundtripError(f"phase `{phase}` inconnue (connues : {list(KNOWN_PHASES)})")
-    seen: set[str] = set()
-    stack = [phase]
-    while stack:
-        p = stack.pop()
-        if p in seen:
-            continue
-        seen.add(p)
-        stack.extend(_DEPENDENTS.get(p, ()))
-    # Ordonner selon l'ordre de montage (stable, déterministe).
-    return [p for p in _MOUNT_ORDER if p in seen]
-
-
-def involves_storage(phase: str) -> bool:
-    """La clôture de `phase` touche-t-elle une couche de stockage (→ opt-in `full`) ?"""
-    return any(p in _STORAGE_LAYERS for p in closure(phase))
-
-
-# ── Lecture du périmètre par phase (rollback-lib.sh, source unique) ──────────
-
-
-def _rollback_lib_call(func: str, phase: str) -> str:
-    """Appelle une fonction de rollback-lib.sh et renvoie sa stdout (source unique)."""
+    call = f"{func} {phase!r}" if phase else func
     try:
         out = subprocess.run(  # noqa: S603 — chemin codé, func/phase contrôlés
-            ["bash", "-c", f'. "{_ROLLBACK_LIB}" && {func} "{phase}"'],
+            ["bash", "-c", f'. "{_ROLLBACK_LIB}" && {call}'],
             check=True,
             capture_output=True,
             text=True,
@@ -128,6 +83,31 @@ def _rollback_lib_call(func: str, phase: str) -> str:
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RoundtripError(f"lecture du périmètre de `{phase}` impossible : {exc}") from exc
     return out.stdout
+
+
+def closure(phase: str) -> list[str]:
+    """Clôture descendante de `phase`, en ordre de MONTAGE (amont→aval).
+
+    = `phase` + tout ce qui en dépend (transitivement). DÉRIVÉE du graphe atomique
+    (`phase_closure`, rollback-lib.sh) — plus de graphe en dur ici (ADR 0066).
+    """
+    if phase not in KNOWN_PHASES:
+        raise RoundtripError(f"phase `{phase}` inconnue (connues : {list(KNOWN_PHASES)})")
+    return _rollback_lib_call("phase_closure", phase).split()
+
+
+def involves_storage(phase: str) -> bool:
+    """La clôture de `phase` touche-t-elle une couche de stockage (→ opt-in `full`) ?
+
+    Délègue à `phase_involves_storage` (rollback-lib.sh) : code de retour 0 = oui.
+    """
+    if phase not in KNOWN_PHASES:
+        raise RoundtripError(f"phase `{phase}` inconnue (connues : {list(KNOWN_PHASES)})")
+    completed = subprocess.run(  # noqa: S603 — chemin codé, phase contrôlée
+        ["bash", "-c", f'. "{_ROLLBACK_LIB}" && phase_involves_storage {phase!r}'],
+        check=False,
+    )
+    return completed.returncode == 0
 
 
 def phase_namespaces(phase: str) -> list[str]:
