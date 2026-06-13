@@ -88,3 +88,20 @@ Pour chaque phase, un **cycle prouvé sur banc** :
 `pnpm lint` (shellcheck, ansible-lint si playbooks, bats pour les fonctions
 pures), `pnpm docs:build`, markdownlint. Conventional Commits, `BANC_JETABLE`
 jamais contourné. Un lot = une PR, re-prouvée par cycle banc avant le suivant.
+
+## Suivi (ADR 0057)
+
+Issue de pilotage : [#274](https://github.com/univ-lehavre/cluster/issues/274).
+
+| Lot                                   | État                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 1. Socle (primitives + dispatch)      | ✅ fait — `test/lima/rollback-lib.sh`, dispatch `run-phases.sh`, `test/unit/rollback.bats` (commit `c6d2bd9`) |
+| 2. Pilote Ceph                        | ✅ fait — `phase_rollback ceph` + node-side `cleanup.sh` (commit `236815f`)                                   |
+| 3. Phases stockage (`sc`, `datalake`) | ✅ fait — couvertes par `rollback-lib.sh`                                                                     |
+| 4. Phases plateforme                  | ✅ fait — `monitoring`/`dataops`/`gitops`/`gitops-seed`/`metrics-server`                                      |
+| 5. Garde-fou d'ordre aval             | ✅ fait — `classify_downstream_block`                                                                         |
+| 6. Doc (`docs/outils.md` + RUNBOOK)   | 🔲 reste — catalogue `rollback <phase>` non encore documenté                                                  |
+| Preuve par cycle banc (`RESULTS.md`)  | 🔲 reste — cycle monte→rollback→remonte par phase non consigné (ADR 0034/0052)                                |
+
+**Achèvement** : lots 1-5 livrés sur `main` ; restent le lot 6 (doc) et la
+consignation des cycles de preuve. Fermer #274 une fois ces deux derniers faits.
