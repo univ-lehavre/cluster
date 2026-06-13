@@ -199,6 +199,60 @@ class Status(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+class Epreuves(unittest.TestCase):
+    def test_lists_playable(self):
+        code, out, _ = _capture(["epreuves", "-f", _EXAMPLE])
+        self.assertEqual(code, 0)
+        self.assertIn("jouables", out)
+        self.assertIn("vérifié au lancement, P5", out)  # n'en lance aucune
+
+    def test_all_shows_excluded(self):
+        code, out, _ = _capture(["epreuves", "-f", _EXAMPLE, "--all"])
+        self.assertEqual(code, 0)
+        self.assertIn("exclues", out)
+        self.assertIn("offensif", out)  # 17-21 exclus en prod (ADR 0025)
+
+    def test_invalid_topology_is_business_error(self):
+        path = _tmp("nodes:\n  - name: x\n    roles: [master]\n")
+        self.addCleanup(os.unlink, path)
+        code, _, _ = _capture(["epreuves", "-f", path])
+        self.assertEqual(code, 1)
+
+
+class Runs(unittest.TestCase):
+    _HIST = """\
+runs:
+  - id: r1
+    date: 2026-06-01T00:00:00Z
+    profil: ceph
+    topologie: multi-node-3
+    commit: abc
+"""
+
+    def test_reads_history_always_zero(self):
+        # 'runs' est informatif : code 0 même si un chemin est périmé (le verdict
+        # bloquant de CI reste check-freshness.sh, non dupliqué).
+        hist = _tmp(self._HIST)
+        self.addCleanup(os.unlink, hist)
+        code, out, _ = _capture(["runs", "--history", hist])
+        self.assertEqual(code, 0)
+        self.assertIn("run(s) consigné", out)
+
+    def test_target_on_history_without_target_falls_back(self):
+        # --target sur un historique sans champ `target` (rétrocompat) → avis
+        # explicite + état global, code 0 (pas un plantage).
+        hist = _tmp(self._HIST)  # _HIST n'a pas de champ target
+        self.addCleanup(os.unlink, hist)
+        code, out, _ = _capture(["runs", "--history", hist, "--target", "atlas"])
+        self.assertEqual(code, 0)
+        self.assertIn("aucune entrée ne porte de chemin", out)
+
+    def test_missing_history_is_business_error(self):
+        code, _, err = _capture(["runs", "--history", "/nope/runs.yaml"])
+        self.assertEqual(code, 1)
+        self.assertIn("erreur", err)
+
+
 class Dispatch(unittest.TestCase):
     def test_unknown_command_is_usage(self):
         with self.assertRaises(SystemExit) as ctx:

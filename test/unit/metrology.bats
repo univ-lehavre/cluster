@@ -231,6 +231,21 @@ YAML
     [ "$output" = "7" ]
 }
 
+@test "metro_seuil_for_target : atlas+hardening replié → 7 (comme atlas, #244)" {
+    run metro_seuil_for_target atlas+hardening
+    [ "$output" = "7" ]
+}
+
+@test "metro_seuil_for_target : storage-real+hardening replié → 30" {
+    run metro_seuil_for_target storage-real+hardening
+    [ "$output" = "30" ]
+}
+
+@test "metro_seuil_for_target : surcharge env vaut aussi pour +hardening" {
+    SEUIL_STORAGE_REAL=45 run metro_seuil_for_target storage-real+hardening
+    [ "$output" = "45" ]
+}
+
 # ─── metro_parse_prom_vector : vecteur multi-séries → label\tvaleur (#241) ───
 
 # Les fonctions sont sourcées dans setup() ; on pipe directement dessus (pas de

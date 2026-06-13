@@ -23,12 +23,19 @@ Usage :
   uv run python scripts/topology.py generate [--kind prod|lima] [--what inventory|run-params]
   uv run python scripts/topology.py status [--real [--hosts cp1 node1]]
   uv run python scripts/topology.py diff [--kind prod|lima --against PATH]
+  uv run python scripts/topology.py epreuves [--all] [--type unit|intég|chaos]   (P4)
+  uv run python scripts/topology.py runs [--target atlas|storage-real|…]          (P4)
 
-Codes de sortie (contrat CI) : 0 = succès / invariant tenu ; 1 = erreur métier
-(topology invalide ou introuvable, dérive byte-identique détectée) ; 2 = usage
-(flag manquant, référence absente, destination `-o` invalide). Pour `status
---real`, on PROPAGE le code de bootstrap/state.sh (0 conforme / 1 drift /
-2 aucun hôte joignable — mêmes codes).
+P4 ajoute deux commandes READ-ONLY : `epreuves` (liste filtrée par la topologie,
+exig. 6 — ne lance rien) et `runs` (lit l'historique + fraîcheur, exig. 10-12 —
+ne réécrit rien). Lancer une épreuve ou converger relève de P5 (ansible-runner).
+
+Codes de sortie (contrat CI) : 0 = succès / invariant tenu / lecture ; 1 = erreur
+métier (topology invalide ou introuvable, dérive byte-identique détectée) ; 2 =
+usage (flag manquant, référence absente, destination `-o` invalide). `runs` rend
+TOUJOURS 0 (lecture informative ; le verdict bloquant CI reste check-freshness.sh).
+Pour `status --real`, on PROPAGE le code de bootstrap/state.sh (0 conforme /
+1 drift / 2 aucun hôte joignable — mêmes codes).
 
 La logique de mapping exception→code est testée par tests/test_topology_cli.py.
 """
@@ -36,6 +43,7 @@ La logique de mapping exception→code est testée par tests/test_topology_cli.p
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import difflib
 import os
 import subprocess
@@ -48,16 +56,23 @@ import yaml  # noqa: E402
 from cluster_topology import (  # noqa: E402
     TopologyError,
     derive_run_params,
+    filter_epreuves,
+    load_runs,
     load_topology,
     render_lima_inventory,
     render_prod_inventory,
+    verdict_for_run,
 )
+from cluster_topology.history import last_run_for_target, latest_run  # noqa: E402
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
 _DEFAULT_TOPOLOGY = os.path.join(_ROOT, "topology.yaml")
 _EXAMPLE_TOPOLOGY = os.path.join(_ROOT, "topology.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
 _STATE_SH = os.path.join(_ROOT, "bootstrap", "state.sh")
+_RUNS_HISTORY = os.path.join(_ROOT, "test", "lima", "runs-history.yaml")
+# Chemins nommés connus de l'historique (ADR 0045 §6) pour le verdict par chemin.
+_CHEMINS_NOMMES = ["atlas", "storage-real", "cluster-dataops"]
 
 
 def _resolve(path: str | None) -> str:
@@ -210,11 +225,72 @@ def cmd_status(args: argparse.Namespace) -> int:
     return completed.returncode
 
 
+def cmd_epreuves(args: argparse.Namespace) -> int:
+    """Liste les épreuves JOUABLES filtrées par la topologie (exig. 6). Ne LANCE rien.
+
+    Filtre sur l'INTENTION déclarée (profil, backend, nœuds, target_kind) ; un
+    scénario « jouable » peut encore être skip au lancement selon l'état réel du
+    cluster (vérifié en P5). `--all` montre aussi les exclues avec leur raison.
+    """
+    path = _resolve(args.file)
+    topo = load_topology(path)
+    jouables, exclues = filter_epreuves(topo)
+    if args.type:
+        jouables = [e for e in jouables if e.type == args.type]
+    print(f"Épreuves jouables ({len(jouables)}) — filtrées par la topologie déclarée :")
+    for e in jouables:
+        print(f"  {e.num} [{e.type:<5}] {e.categorie:<13} {e.nom}")
+    print("  (jouable selon la topologie ; l'état réel est vérifié au lancement, P5)")
+    if args.all:
+        print(f"\nÉpreuves exclues ({len(exclues)}) :")
+        for e, raison in exclues:
+            print(f"  {e.num} [{e.type:<5}] {e.nom} — {raison}")
+    return 0
+
+
+def cmd_runs(args: argparse.Namespace) -> int:
+    """LIT runs-history.yaml et imprime, par chemin nommé, fraîcheur + objectif d'infra.
+
+    Read-only (exig. 10-11) : ne réécrit jamais l'historique (honnêteté des Runs,
+    ADR 0023). Code 0 TOUJOURS — informatif ; le verdict BLOQUANT de CI reste
+    l'apanage de check-freshness.sh (non dupliqué). La suggestion « pas de run
+    frais » est du TEXTE : aucune action déclenchée (lancer = P5).
+    """
+    history = args.history or _RUNS_HISTORY
+    runs = load_runs(history)
+    now = int(dt.datetime.now(tz=dt.UTC).timestamp())
+    if args.target:
+        run = last_run_for_target(runs, args.target)
+        # Repli : si aucune entrée ne porte de `target` (historique antérieur au
+        # champ), on rapporte l'état global avec un avis explicite.
+        if run is None and not any(r.target for r in runs):
+            _, msg = verdict_for_run(latest_run(runs), None, now)
+            print(f"(aucune entrée ne porte de chemin `target` — état global)\n{msg}")
+            return 0
+        _, msg = verdict_for_run(run, args.target, now)
+        print(msg)
+        return 0
+    print(f"Historique : {len(runs)} run(s) consigné(s) dans {os.path.relpath(history, _ROOT)}")
+    any_target = any(r.target for r in runs)
+    if any_target:
+        for chemin in _CHEMINS_NOMMES:
+            _, msg = verdict_for_run(last_run_for_target(runs, chemin), chemin, now)
+            print(f"  {msg}")
+    else:
+        # Historique sans chemins nommés : verdict global sur le dernier run.
+        _, msg = verdict_for_run(latest_run(runs), None, now)
+        print(f"  {msg}")
+        print("  (les entrées ne portent pas encore de chemin `target` — verdict global)")
+    return 0
+
+
 _DISPATCH = {
     "validate": cmd_validate,
     "generate": cmd_generate,
     "diff": cmd_diff,
     "status": cmd_status,
+    "epreuves": cmd_epreuves,
+    "runs": cmd_runs,
 }
 
 
@@ -237,7 +313,7 @@ def _run(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="topology",
-        description="Façade CLI/CI de l'outil déclaratif des topologies (ADR 0056, P3).",
+        description="Façade CLI/CI de l'outil déclaratif des topologies (ADR 0056, P3-P4).",
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -301,6 +377,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_sta.add_argument(
         "--hosts", nargs="*", default=None, help="hôtes passés à state.sh (défaut : tous)"
+    )
+
+    p_epr = sub.add_parser("epreuves", help="liste les épreuves jouables filtrées par la topologie")
+    _add_file(p_epr)
+    p_epr.add_argument("--all", action="store_true", help="montrer aussi les exclues + la raison")
+    p_epr.add_argument(
+        "--type", choices=["unit", "intég", "chaos"], default=None, help="filtrer par type"
+    )
+
+    p_runs = sub.add_parser("runs", help="lit l'historique des runs + verdict de fraîcheur")
+    p_runs.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
+    p_runs.add_argument("--target", default=None, help="chemin nommé ciblé (atlas, storage-real…)")
+    p_runs.add_argument(
+        "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
     )
     return ap
 

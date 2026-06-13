@@ -1,0 +1,209 @@
+"""Lecture de l'historique des runs + verdicts de fraîcheur (P4, ADR 0056 §8.10-12).
+
+`test/lima/runs-history.yaml` est la **preuve datée** versionnée du banc (ADR
+0034/0042) : une entrée appendée par run `all` complété (champ `date`, `profil`,
+`topologie`, `commit`, durées de phases, métriques échantillonnées). Ce module la
+**LIT** (read-only) et en dérive, sans la réécrire :
+
+- l'**objectif d'infra** attaché à chaque run (exig. 11 : `profil` + `topologie`
+  disent *sur quoi* le résultat a été obtenu ; le champ `target`/chemin nommé est
+  lu s'il est présent — rétrocompat avec les entrées antérieures qui n'en ont
+  pas) ;
+- un **verdict de fraîcheur** (exig. 10 : « ce chemin n'a pas de run frais »),
+  calculé À L'IDENTIQUE de `test/lima/metrology.sh` (seuils ADR 0045 §6 :
+  atlas=7 j, storage-real=30 j, cluster-dataops=90 j, défaut 7 j ; surcharge
+  `SEUIL_<CHEMIN>` ; le suffixe `+hardening` se replie sur le chemin de base).
+
+Honnêteté des Runs (ADR 0023/0052) : un run `fail` n'est PAS un trou — l'historique
+machine ne porte que les succès (un run complet en émet une entrée), les échecs
+sont consignés en prose dans `test/lima/RESULTS.md`. Ce module ne FABRIQUE ni ne
+RÉÉCRIT aucun run ; l'append reste l'apanage de `metro_record_run` (bash, en fin
+de run from-scratch). Aucune métrique n'est produite ici (P6) — seules celles déjà
+consignées sont relues.
+
+Pur (hors `load_runs` qui lit un fichier passé en argument). Testé côte à côte avec
+les bats de `metrology.sh` (parité Python↔bash, tests/test_history.py).
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import os
+from dataclasses import dataclass, field
+from typing import Any
+
+import yaml
+
+# Seuils de fraîcheur par chemin nommé (jours) — MÊMES valeurs que
+# metro_seuil_for_target (metrology.sh, ADR 0045 §6). Un chemin inconnu retombe
+# sur le défaut global (SEUIL_JOURS ou 7).
+SEUILS_DEFAUT = {"atlas": 7, "storage-real": 30, "cluster-dataops": 90}
+SEUIL_GLOBAL_DEFAUT = 7
+
+
+@dataclass
+class Run:
+    """Une entrée de runs-history.yaml. `target` (chemin nommé) et `metriques`
+    sont optionnels (rétrocompat : les premières entrées n'en ont pas)."""
+
+    id: str
+    date: str  # ISO 8601 UTC
+    profil: str | None = None
+    topologie: str | None = None
+    branche: str | None = None
+    commit: str | None = None
+    target: str | None = None
+    arch: str | None = None
+    hote: str | None = None
+    total_s: int | None = None
+    phases: dict[str, Any] = field(default_factory=dict)
+    metriques: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def objectif(self) -> str:
+        """Objectif d'infra lisible (exig. 11) : `profil` sur `topologie`."""
+        prof = self.profil or "?"
+        topo = self.topologie or "?"
+        return f"{prof} / {topo}"
+
+
+def _iso_str(value: Any) -> str:
+    """Forme ISO 8601 `…Z` d'un datetime (désérialisé par yaml). Repli `str()`."""
+    if isinstance(value, dt.datetime):
+        base = value if value.tzinfo else value.replace(tzinfo=dt.UTC)
+        return base.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return str(value)
+
+
+def load_runs(path: str) -> list[Run]:
+    """Charge les runs depuis un runs-history.yaml (read-only, ordre du fichier).
+
+    Tolère les champs optionnels absents (rétrocompat). Un fichier sans `runs:`
+    (ou vide) donne une liste vide — pas une erreur (un banc neuf n'a pas d'historique).
+    """
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not data or "runs" not in data or not data["runs"]:
+        return []
+    runs: list[Run] = []
+    for raw in data["runs"]:
+        # yaml.safe_load peut désérialiser `date:` en datetime ; on garde la forme
+        # brute pour l'affichage mais _parse_iso_epoch accepte les deux.
+        raw_date = raw.get("date", "")
+        runs.append(
+            Run(
+                id=raw.get("id", "?"),
+                date=raw_date if isinstance(raw_date, str) else _iso_str(raw_date),
+                profil=raw.get("profil"),
+                topologie=raw.get("topologie"),
+                branche=raw.get("branche"),
+                commit=raw.get("commit"),
+                target=raw.get("target"),
+                arch=raw.get("arch"),
+                hote=raw.get("hote"),
+                total_s=raw.get("total_s"),
+                phases=raw.get("phases") or {},
+                metriques=raw.get("metriques") or {},
+            )
+        )
+    return runs
+
+
+def _base_target(target: str | None) -> str | None:
+    """Replie le suffixe `+hardening` sur le chemin de base (#244) : pour la
+    fraîcheur, `atlas+hardening` compte comme `atlas`."""
+    if target is None:
+        return None
+    return target.split("+", 1)[0]
+
+
+def seuil_for_target(target: str | None) -> int:
+    """Seuil de fraîcheur (jours) d'un chemin nommé — parité metro_seuil_for_target.
+
+    Surcharge `SEUIL_<CHEMIN>` (majuscules, `-`→`_`) prioritaire ; sinon les
+    défauts ADR 0045 §6 ; sinon le défaut global (`SEUIL_JOURS` ou 7).
+    """
+    base = _base_target(target)
+    if base is not None:
+        # Dérivation identique à `tr 'a-z-' 'A-Z_'` : majuscules + tirets → underscores.
+        env_var = "SEUIL_" + base.upper().replace("-", "_")
+        override = os.environ.get(env_var)
+        if override:
+            return int(override)
+        if base in SEUILS_DEFAUT:
+            return SEUILS_DEFAUT[base]
+    return int(os.environ.get("SEUIL_JOURS", SEUIL_GLOBAL_DEFAUT))
+
+
+def age_days(past_epoch: int, now_epoch: int) -> int:
+    """Jours entiers entre deux epochs — parité metro_age_days (floor, borné à 0)."""
+    diff = (now_epoch - past_epoch) // 86400
+    return max(diff, 0)
+
+
+def freshness_verdict(age: int, seuil: int) -> str:
+    """`frais` si age <= seuil, sinon `perime` — parité metro_freshness_verdict."""
+    return "frais" if age <= seuil else "perime"
+
+
+def _parse_iso_epoch(iso: str) -> int | None:
+    """Epoch (s) d'une date ISO 8601 UTC (`…Z`). None si illisible.
+
+    `yaml.safe_load` désérialise un timestamp ISO en `datetime` ; on accepte donc
+    aussi bien une chaîne brute qu'un objet date/datetime (tolérance de schéma).
+    """
+    if not iso:
+        return None
+    if isinstance(iso, dt.datetime):
+        if iso.tzinfo is None:
+            iso = iso.replace(tzinfo=dt.UTC)
+        return int(iso.timestamp())
+    try:
+        cleaned = str(iso).replace("Z", "+00:00")
+        return int(dt.datetime.fromisoformat(cleaned).timestamp())
+    except ValueError:
+        return None
+
+
+def last_run_for_target(runs: list[Run], target: str) -> Run | None:
+    """Dernier run d'un chemin nommé (replie `+hardening`). None si aucun.
+
+    Si AUCUN run ne porte de champ `target` (entrées antérieures au schéma), on
+    ne filtre pas par chemin : la fonction renvoie None (le chemin est inconnu de
+    l'historique). L'historique global se lit alors via le dernier run tout court.
+    """
+    want = _base_target(target)
+    match = None
+    for run in runs:
+        if _base_target(run.target) == want and run.date:
+            match = run  # fichier chronologique → le dernier retenu est le plus récent
+    return match
+
+
+def latest_run(runs: list[Run]) -> Run | None:
+    """Dernier run daté du fichier (le plus récent), tous chemins confondus."""
+    dated = [r for r in runs if r.date]
+    return dated[-1] if dated else None
+
+
+def verdict_for_run(run: Run | None, target: str | None, now_epoch: int) -> tuple[str, str]:
+    """(état, message) de fraîcheur d'un run. État ∈ {frais, perime, jamais}.
+
+    `jamais` : aucun run (chemin sans preuve). Le message porte l'objectif d'infra
+    et l'âge — la suggestion « ce chemin n'a pas de run frais » nourrit le « que
+    faire ensuite » (exig. 10), en TEXTE informatif : aucune action déclenchée
+    (lancer = P5).
+    """
+    seuil = seuil_for_target(target)
+    label = target or "global"
+    if run is None:
+        return "jamais", f"{label} : aucun run consigné → ce chemin n'a pas de run frais"
+    epoch = _parse_iso_epoch(run.date)
+    if epoch is None:
+        return "jamais", f"{label} : date illisible ({run.date!r})"
+    age = age_days(epoch, now_epoch)
+    etat = freshness_verdict(age, seuil)
+    detail = f"{run.objectif}, commit {run.commit or '?'}, il y a {age} j"
+    compare = f"≤ {seuil} j" if etat == "frais" else f"> {seuil} j"
+    suffixe = "" if etat == "frais" else " → ce chemin n'a pas de run frais"
+    return etat, f"{label} : {etat} (run {run.date}, {detail} {compare}){suffixe}"

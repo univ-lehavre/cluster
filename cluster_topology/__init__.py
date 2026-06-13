@@ -16,7 +16,9 @@ ADR 0017). La FAÇADE CLI/CI qui expose cette surface (generate/validate/status/
 diff) relève de P3 et vit dans `scripts/topology.py` (façade fine, hors paquet).
 """
 
+from cluster_topology.epreuves import EPREUVES, Epreuve, filter_epreuves
 from cluster_topology.generator import render_lima_inventory, render_prod_inventory
+from cluster_topology.history import Run, load_runs, verdict_for_run
 from cluster_topology.model import Topology, TopologyError, load_topology
 from cluster_topology.profile import derive_run_params
 
@@ -27,4 +29,10 @@ __all__ = [
     "render_prod_inventory",
     "render_lima_inventory",
     "derive_run_params",
+    "Epreuve",
+    "EPREUVES",
+    "filter_epreuves",
+    "Run",
+    "load_runs",
+    "verdict_for_run",
 ]
