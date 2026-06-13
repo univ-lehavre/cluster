@@ -56,6 +56,37 @@ class PureFunctions(unittest.TestCase):
         self.assertEqual(ev["control_plane_vip"], "10.0.0.40")
 
 
+class EtcdHealthWiring(unittest.TestCase):
+    """etcdctl n'est PAS sur l'hôte : etcd_health_output passe par `crictl exec`
+    dans le conteneur etcd (DIRECTEMENT, sans sh -c). On stub vm_exec."""
+
+    class _Res:
+        def __init__(self, stdout="", stderr=""):
+            self.stdout, self.stderr, self.returncode = stdout, stderr, 0
+
+    def test_resolves_cid_then_exec_etcdctl(self):
+        calls = []
+
+        def vm_exec(cp, command):
+            calls.append(command)
+            if command[:3] == ["sudo", "crictl", "ps"]:
+                return self._Res(stdout="ETCDCID123\n")  # le CID
+            return self._Res(stdout="https://a:2379 is healthy")  # le crictl exec
+
+        out = ha.etcd_health_output("cp1", vm_exec=vm_exec)
+        self.assertIn("is healthy", out)
+        # 2e appel = crictl exec <cid> etcdctl … endpoint health (PAS de sh -c).
+        exec_call = calls[1]
+        self.assertEqual(exec_call[:4], ["sudo", "crictl", "exec", "ETCDCID123"])
+        self.assertEqual(exec_call[4], "etcdctl")
+        self.assertNotIn("sh", exec_call)
+
+    def test_no_etcd_container_returns_empty(self):
+        # CP sans conteneur etcd (pas encore sain) → sortie vide → gate patiente.
+        out = ha.etcd_health_output("cp1", vm_exec=lambda *_a: self._Res(stdout=""))
+        self.assertEqual(out, "")
+
+
 class _Launch:
     """Stub de launch_phase : enregistre les (playbook, kubeconfig_path) lancés ;
     renvoie un succès, ou un échec ciblé sur un playbook donné."""

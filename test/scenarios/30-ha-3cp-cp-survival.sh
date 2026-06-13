@@ -34,15 +34,19 @@ vip_responds() {
 }
 
 # etcd_healthy_count CP — nombre d'endpoints etcd « healthy » vus depuis CP.
+# etcdctl n'est PAS sur l'hôte : on l'exécute DANS le conteneur etcd via crictl
+# exec (même approche que le RUNBOOK/etcd-snapshot), DIRECTEMENT (l'image etcd n'a
+# ni `env` ni `sh`). Renvoie 0 si le conteneur etcd est absent (CP arrêté).
 etcd_healthy_count() {
-    local cp=$1
-    limactl shell "${cp}" sudo sh -c \
-        'ETCDCTL_API=3 etcdctl \
-           --endpoints=https://127.0.0.1:2379 \
-           --cacert=/etc/kubernetes/pki/etcd/ca.crt \
-           --cert=/etc/kubernetes/pki/etcd/server.crt \
-           --key=/etc/kubernetes/pki/etcd/server.key \
-           endpoint health --cluster 2>/dev/null' \
+    local cp=$1 cid
+    cid=$(limactl shell "${cp}" sudo crictl ps --state Running --name '^etcd$' -q 2>/dev/null | head -1)
+    [ -n "${cid}" ] || { echo 0; return 0; }
+    limactl shell "${cp}" sudo crictl exec "${cid}" etcdctl \
+        --endpoints=https://127.0.0.1:2379 \
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+        --cert=/etc/kubernetes/pki/etcd/server.crt \
+        --key=/etc/kubernetes/pki/etcd/server.key \
+        endpoint health --cluster 2>&1 \
         | grep -c 'is healthy' || true
 }
 

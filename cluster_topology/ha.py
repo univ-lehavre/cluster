@@ -117,20 +117,40 @@ def vip_healthz(vip: str, from_vm: str, *, vm_exec=_vm_exec) -> bool:
     return res.returncode == 0 and res.stdout.strip() == "ok"
 
 
-_ETCDCTL = (
-    "ETCDCTL_API=3 etcdctl "
-    "--endpoints=https://127.0.0.1:2379 "
-    "--cacert=/etc/kubernetes/pki/etcd/ca.crt "
-    "--cert=/etc/kubernetes/pki/etcd/server.crt "
-    "--key=/etc/kubernetes/pki/etcd/server.key "
-    "endpoint health --cluster"
-)
+# Args etcdctl (certs du static pod). PAS de `ETCDCTL_API=3` ni `sh -c` : on
+# exécute etcdctl DIRECTEMENT dans le conteneur etcd (voir etcd_health_output) ;
+# l'image etcd n'a ni `env` ni `sh`, et etcdctl ≥ 3.4 utilise l'API v3 par défaut
+# (même contrainte que etcd-snapshot.sh.j2).
+_ETCDCTL_ARGS = [
+    "etcdctl",
+    "--endpoints=https://127.0.0.1:2379",
+    "--cacert=/etc/kubernetes/pki/etcd/ca.crt",
+    "--cert=/etc/kubernetes/pki/etcd/server.crt",
+    "--key=/etc/kubernetes/pki/etcd/server.key",
+    "endpoint",
+    "health",
+    "--cluster",
+]
+
+
+def _etcd_cid(cp: str, *, vm_exec) -> str:
+    """CID du conteneur etcd (static pod kubeadm) sur CP, via crictl. Vide si
+    introuvable (control-plane pas encore sain)."""
+    res = vm_exec(cp, ["sudo", "crictl", "ps", "--state", "Running", "--name", "^etcd$", "-q"])
+    cid = (res.stdout or "").strip().splitlines()
+    return cid[0] if cid else ""
 
 
 def etcd_health_output(cp: str, *, vm_exec=_vm_exec) -> str:
-    """Sortie brute de `etcdctl endpoint health --cluster` depuis CP (sudo)."""
-    res = vm_exec(cp, ["sudo", "sh", "-c", _ETCDCTL])
-    return res.stdout or ""
+    """Sortie de `etcdctl endpoint health --cluster`, exécuté DANS le conteneur
+    etcd (`crictl exec`) — etcdctl n'est pas sur l'hôte (même approche que le
+    RUNBOOK/etcd-snapshot). Vide si le conteneur etcd n'est pas encore là (la gate
+    retentera). etcdctl écrit la santé sur STDERR → on fusionne stdout+stderr."""
+    cid = _etcd_cid(cp, vm_exec=vm_exec)
+    if not cid:
+        return ""
+    res = vm_exec(cp, ["sudo", "crictl", "exec", cid, *_ETCDCTL_ARGS])
+    return (res.stdout or "") + (res.stderr or "")
 
 
 # ── ORCHESTRATION (compose pur + I/O ; dépendances injectées) ────────────────
