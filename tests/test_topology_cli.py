@@ -91,29 +91,29 @@ def _stdin(text):
         sys.stdin = saved
 
 
-class ContextValidate(unittest.TestCase):
-    """`context validate` : verdict de schéma (0 valide / 1 invalide ou absent)."""
+class StackValidate(unittest.TestCase):
+    """`stack validate` : verdict de schéma (0 valide / 1 invalide ou absent)."""
 
     def test_example_is_valid(self):
-        code, out, _ = _capture(["context", "validate", "-f", _EXAMPLE])
+        code, out, _ = _capture(["stack", "validate", "-f", _EXAMPLE])
         self.assertEqual(code, 0)
         self.assertIn("valide", out)
 
     def test_invalid_role_rejected(self):
         path = _tmp(_INVALID_TOPO)
         self.addCleanup(os.unlink, path)
-        code, _, err = _capture(["context", "validate", "-f", path])
+        code, _, err = _capture(["stack", "validate", "-f", path])
         self.assertEqual(code, 1)
         self.assertIn("erreur", err)
 
     def test_ha_without_vip_rejected(self):
         path = _tmp(_HA_NO_VIP)
         self.addCleanup(os.unlink, path)
-        code, _, _ = _capture(["context", "validate", "-f", path])
+        code, _, _ = _capture(["stack", "validate", "-f", path])
         self.assertEqual(code, 1)
 
     def test_missing_file_is_business_error(self):
-        code, _, err = _capture(["context", "validate", "-f", "/nope/topology.yaml"])
+        code, _, err = _capture(["stack", "validate", "-f", "/nope/topology.yaml"])
         self.assertEqual(code, 1)
         self.assertIn("erreur", err)
 
@@ -561,11 +561,11 @@ class Roundtrip(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 2)
 
 
-class Context(unittest.TestCase):
-    """Groupe `context create|list|activate` : crée/active une topo, liste le catalogue.
+class Stack(unittest.TestCase):
+    """`new` + `stack ls|select` (calque Pulumi) : crée/active une stack, liste le catalogue.
 
     Écrit dans le VRAI catalogue topologies/ (la façade y résout les chemins) sous des
-    noms jetables nettoyés en teardown ; le symlink topology.yaml réel (sélection active
+    noms jetables nettoyés en teardown ; le symlink topology.yaml réel (stack courante
     de l'opérateur) est sauvegardé en setUp et restauré en tearDown."""
 
     def setUp(self):
@@ -585,7 +585,7 @@ class Context(unittest.TestCase):
         name = "zz-test-ctx-mono"
         target = self._catalog(name)
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
-        code, out, _ = _capture(["context", "create", name, "--no-input"])
+        code, out, _ = _capture(["new", name, "--no-input"])
         self.assertEqual(code, 0)
         self.assertIn("créée", out)
         self.assertTrue(os.path.exists(target))
@@ -609,14 +609,14 @@ class Context(unittest.TestCase):
             contextlib.redirect_stderr(io.StringIO()),
             _stdin(answers),
         ):
-            code = cli.main(["context", "create", name])
+            code = cli.main(["new", name])
         self.assertEqual(code, 0)
         topo = load_topology(target)
         self.assertTrue(topo.is_ha_control_plane)
         self.assertEqual(len(topo.control_nodes), 3)
 
     def test_create_example_name_rejected_usage(self):
-        code, _, err = _capture(["context", "create", "bad.example", "--no-input"])
+        code, _, err = _capture(["new", "bad.example", "--no-input"])
         self.assertEqual(code, 2)
         self.assertIn("ADR 0023", err)
 
@@ -624,8 +624,8 @@ class Context(unittest.TestCase):
         name = "zz-test-ctx-dup"
         target = self._catalog(name)
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
-        self.assertEqual(_capture(["context", "create", name, "--no-input"])[0], 0)
-        code, _, err = _capture(["context", "create", name, "--no-input"])  # 2e sans --force
+        self.assertEqual(_capture(["new", name, "--no-input"])[0], 0)
+        code, _, err = _capture(["new", name, "--no-input"])  # 2e sans --force
         self.assertEqual(code, 2)
         self.assertIn("existe déjà", err)
 
@@ -633,33 +633,33 @@ class Context(unittest.TestCase):
         name = "zz-test-ctx-activate"
         target = self._catalog(name)
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
-        code, out, _ = _capture(["context", "create", name, "--no-input", "--activate"])
+        code, out, _ = _capture(["new", name, "--no-input", "--activate"])
         self.assertEqual(code, 0)
         self.assertTrue(os.path.islink(self._link))
         self.assertEqual(os.readlink(self._link), f"topologies/{name}.yaml")
         self.assertIn("activée", out)
 
     def test_activate_existing_repoints_and_validates(self):
-        # `context activate` sur une entrée existante : repointe + dérive le chemin.
+        # `stack select` sur une entrée existante : repointe + dérive le chemin.
         name = "zz-test-ctx-act-existing"
         target = self._catalog(name)
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
-        _capture(["context", "create", name, "--no-input"])  # sans activer
-        code, out, _ = _capture(["context", "activate", name])
+        _capture(["new", name, "--no-input"])  # sans activer
+        code, out, _ = _capture(["stack", "select", name])
         self.assertEqual(code, 0)
         self.assertEqual(os.readlink(self._link), f"topologies/{name}.yaml")
         self.assertIn("dérivé", out)
 
     def test_activate_absent_is_business_error_with_catalog(self):
-        code, _, err = _capture(["context", "activate", "zz-nexistepas"])
+        code, _, err = _capture(["stack", "select", "zz-nexistepas"])
         self.assertEqual(code, 1)
         self.assertIn("introuvable", err)
         self.assertIn("disponibles", err)  # aide : liste le catalogue
 
     def test_list_marks_active_and_derives(self):
-        # Active une entrée connue, puis `context list` doit la marquer ★ + son chemin.
-        _capture(["context", "activate", "socle.example"])
-        code, out, _ = _capture(["context", "list"])
+        # Active une entrée connue, puis `stack ls` doit la marquer ★ + son chemin.
+        _capture(["stack", "select", "socle.example"])
+        code, out, _ = _capture(["stack", "ls"])
         self.assertEqual(code, 0)
         self.assertIn("socle.example", out)
         self.assertIn("★", out)

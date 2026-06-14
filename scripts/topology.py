@@ -19,10 +19,10 @@ sous-commandes triviales n'en justifient aucune ; l'ADR 0056 §2 cite « typer/c
 comme illustration de style, pas comme exigence d'outillage.
 
 Usage :
-  uv run python scripts/topology.py context create <nom> [--activate] [--no-input]
-  uv run python scripts/topology.py context list
-  uv run python scripts/topology.py context activate <nom>
-  uv run python scripts/topology.py context validate [-f topology.yaml]
+  uv run python scripts/topology.py new <nom> [--activate] [--no-input]   (calque pulumi new)
+  uv run python scripts/topology.py stack ls                              (calque pulumi stack)
+  uv run python scripts/topology.py stack select <nom>
+  uv run python scripts/topology.py stack validate [-f topology.yaml]
   uv run python scripts/topology.py generate [--kind prod|lima] [--what inventory|run-params]
   uv run python scripts/topology.py status [--real [--hosts cp1 node1]]
   uv run python scripts/topology.py diff [--kind prod|lima --against PATH]
@@ -148,8 +148,8 @@ class _UsageError(Exception):
 # ── Sous-commandes (chacune renvoie un code de sortie) ──────────────────────
 
 
-def cmd_context_validate(args: argparse.Namespace) -> int:
-    """`context validate` : charge + valide topology.yaml et force la dérivation backend/profil.
+def cmd_stack_validate(args: argparse.Namespace) -> int:
+    """`stack validate` : charge + valide topology.yaml et force la dérivation backend/profil.
 
     Porte d'entrée CI du contrat : tout verdict de schéma (rôle inconnu,
     HA-sans-VIP, backend/profil inconnu) est levé par le paquet (TopologyError)
@@ -233,8 +233,12 @@ def _activate_symlink(target_rel: str) -> None:
     os.symlink(target_rel, link)
 
 
-def cmd_context_create(args: argparse.Namespace) -> int:
-    """`context create` : crée une topologie dans le catalogue via un ASSISTANT (ADR 0056).
+def cmd_new(args: argparse.Namespace) -> int:
+    """`new <nom>` : crée une topologie dans le catalogue via un ASSISTANT (ADR 0056).
+
+    Commande de premier niveau, calquée sur `pulumi new` (scaffolde une nouvelle
+    stack). La GESTION des stacks existantes (lister, activer, valider) vit dans le
+    groupe `stack` (calque `pulumi stack`).
 
     Pose le MINIMUM décisionnel (profil, backend, terrain, cible, nb de CP/workers,
     + mode LB si HA) dans les enums connus, construit un YAML minimal VALIDE
@@ -324,12 +328,14 @@ def cmd_context_create(args: argparse.Namespace) -> int:
         _activate_symlink(plan.target)
         print(f"✓ activée : topology.yaml → {plan.target} (chemin dérivé : {default_target(topo)})")
     else:
-        print(f"  pour l'activer : topology.py context activate {plan.name}")
+        print(f"  pour l'activer : topology.py stack select {plan.name}")
     return 0
 
 
-def cmd_context_activate(args: argparse.Namespace) -> int:
-    """`context activate` : active une topologie EXISTANTE (repointe le symlink topology.yaml).
+def cmd_stack_select(args: argparse.Namespace) -> int:
+    """`stack select` : active une topologie EXISTANTE (repointe le symlink topology.yaml).
+
+    Calque `pulumi stack select` : choisit la stack courante parmi le catalogue.
 
     Résout `topologies/<nom>(.example).yaml` → VALIDE le schéma (garde-fou : on
     n'active pas un fichier cassé, contrairement à `ln -sf`) → repointe le symlink →
@@ -374,8 +380,10 @@ def _active_target_rel() -> str | None:
     return os.readlink(link)
 
 
-def cmd_context_list(args: argparse.Namespace) -> int:
-    """`context list` : liste le catalogue, marque l'ACTIVE (★), donne le chemin dérivé.
+def cmd_stack_ls(args: argparse.Namespace) -> int:
+    """`stack ls` : liste le catalogue, marque l'ACTIVE (★), donne le chemin dérivé.
+
+    Calque `pulumi stack ls` : énumère les stacks, repère la courante.
 
     Read-only : énumère `topologies/*.y*ml` (topos réelles + modèles `.example`),
     repère l'entrée pointée par le symlink `topology.yaml`, et dérive pour chacune
@@ -383,7 +391,7 @@ def cmd_context_list(args: argparse.Namespace) -> int:
     sans faire échouer la liste (code 0 toujours — informatif)."""
     entries = sorted(glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml")))
     if not entries:
-        print("catalogue vide — `topology.py context create <nom>` pour en créer une.")
+        print("catalogue vide — `topology.py new <nom>` pour en créer une.")
         return 0
     active_rel = _active_target_rel()
     active_base = os.path.basename(active_rel) if active_rel else None
@@ -398,17 +406,17 @@ def cmd_context_list(args: argparse.Namespace) -> int:
             derived = f"(invalide : {exc})"
         print(f"  {mark} {name:<22} → {derived}")
     if active_base is None:
-        print("  (aucune active — `context activate <nom>` ; sinon l'outil utilise socle.example)")
+        print("  (aucune active — `stack select <nom>` ; sinon l'outil utilise socle.example)")
     return 0
 
 
-def cmd_context(args: argparse.Namespace) -> int:
-    """Routeur du groupe `context` (create | list | activate). Façade de dispatch.
+def cmd_stack(args: argparse.Namespace) -> int:
+    """Routeur du groupe `stack` (ls | select | validate). Façade de dispatch.
 
-    argparse garantit `ctx_cmd` ∈ {create, list, activate} (sous-parser `required`)
-    — on route vers la façade dédiée. Un `context` sans verbe est une erreur d'usage
-    (argparse l'arrête en amont avec le help du groupe)."""
-    return _CONTEXT_DISPATCH[args.ctx_cmd](args)
+    Calque `pulumi stack`. argparse garantit `stack_cmd` ∈ {ls, select, validate}
+    (sous-parser `required`) — on route vers la façade dédiée. Un `stack` sans verbe
+    est une erreur d'usage (argparse l'arrête en amont avec le help du groupe)."""
+    return _STACK_DISPATCH[args.stack_cmd](args)
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
@@ -812,16 +820,16 @@ def cmd_roundtrip(args: argparse.Namespace) -> int:
     return 0 if result.reversible else 1
 
 
-# Verbes du groupe `context` (noun-verb, modèle kubectl/terraform).
-_CONTEXT_DISPATCH = {
-    "create": cmd_context_create,
-    "list": cmd_context_list,
-    "activate": cmd_context_activate,
-    "validate": cmd_context_validate,
+# Verbes du groupe `stack` (calque `pulumi stack` : ls | select | validate).
+_STACK_DISPATCH = {
+    "ls": cmd_stack_ls,
+    "select": cmd_stack_select,
+    "validate": cmd_stack_validate,
 }
 
 _DISPATCH = {
-    "context": cmd_context,
+    "new": cmd_new,  # calque `pulumi new` (top-level)
+    "stack": cmd_stack,  # calque `pulumi stack`
     "generate": cmd_generate,
     "diff": cmd_diff,
     "status": cmd_status,
@@ -869,51 +877,47 @@ def _build_parser() -> argparse.ArgumentParser:
         # --no-input accepté partout (uniformité CI) ; sans interactivité, no-op.
         p.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
 
-    # `validate` et `default-target` sont RETIRÉS du menu CLI pour l'instant (les
-    # fonctions cmd_validate/cmd_default_target restent dans le module, juste plus
     # `default-target` reste retiré du menu pour l'instant (reviendra avec topology.py
     # up, son consommateur) ; cmd_default_target reste dans le module, juste plus
     # exposé. La fonction default_target() de plan.py reste utilisée en interne
-    # (context list/activate/create).
+    # (stack ls/select, new).
 
-    # Groupe `context` (noun-verb) : create | list | activate | validate — gère le
-    # catalogue de topologies et la sélection de l'active (modèle kubectl/terraform).
-    p_ctx = sub.add_parser(
-        "context", help="gère le catalogue de topologies (create | list | activate | validate)"
+    # Calque Pulumi : `new` (top-level, scaffolde une stack) + groupe `stack`
+    # (gère les stacks existantes : ls | select | validate).
+    p_new = sub.add_parser(
+        "new", help="crée une topologie (stack) via un assistant — calque `pulumi new`"
     )
-    ctx_sub = p_ctx.add_subparsers(dest="ctx_cmd", required=True)
-
-    p_ctx_create = ctx_sub.add_parser(
-        "create", help="crée une topologie dans le catalogue via un assistant (questions)"
-    )
-    p_ctx_create.add_argument(
-        "name", help="nom de la topologie (→ topologies/<nom>.yaml, gitignorée)"
-    )
-    p_ctx_create.add_argument(
+    p_new.add_argument("name", help="nom de la topologie (→ topologies/<nom>.yaml, gitignorée)")
+    p_new.add_argument(
         "--activate",
         action="store_true",
         help="activer sans demander (sinon la question est posée en fin d'assistant)",
     )
-    p_ctx_create.add_argument(
+    p_new.add_argument(
         "--force", action="store_true", help="écraser topologies/<nom>.yaml s'il existe"
     )
-    p_ctx_create.add_argument(
+    p_new.add_argument(
         "--no-input",
         action="store_true",
         help="non interactif : défauts + pas d'activation sauf --activate (CI)",
     )
 
-    ctx_sub.add_parser("list", help="liste le catalogue, marque l'active (★) + chemin dérivé")
-
-    p_ctx_act = ctx_sub.add_parser(
-        "activate", help="active une topologie existante du catalogue (repointe le symlink)"
+    p_stack = sub.add_parser(
+        "stack", help="gère les stacks (ls | select | validate) — calque `pulumi stack`"
     )
-    p_ctx_act.add_argument(
+    stack_sub = p_stack.add_subparsers(dest="stack_cmd", required=True)
+
+    stack_sub.add_parser("ls", help="liste le catalogue, marque l'active (★) + chemin dérivé")
+
+    p_stack_sel = stack_sub.add_parser(
+        "select", help="active une stack existante (repointe le symlink topology.yaml)"
+    )
+    p_stack_sel.add_argument(
         "name", help="nom de l'entrée du catalogue (ex : 3-nodes-1-cp, socle.example)"
     )
 
-    p_ctx_val = ctx_sub.add_parser("validate", help="valide le schéma d'une topologie")
-    _add_file(p_ctx_val)
+    p_stack_val = stack_sub.add_parser("validate", help="valide le schéma d'une topologie")
+    _add_file(p_stack_val)
 
     p_gen = sub.add_parser("generate", help="dérive un artefact (inventaire ou run-params)")
     _add_file(p_gen)
