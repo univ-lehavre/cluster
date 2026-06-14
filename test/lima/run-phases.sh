@@ -1757,7 +1757,7 @@ case "${1:-}" in
         ;;
     # ha-cni : rappel interne de la sous-commande Python ha-3cp (la CNI reste bash,
     # ADR 0049). Args : <vip_iface> <lb_prefix>.
-    ha-cni) [ -n "${3:-}" ] || die "usage : ha-cni <vip_iface> <lb_prefix>"; CP=cp1; phase_ha_cni "$2" "$3" ;;
+    ha-cni) [ -n "${3:-}" ] || die "usage : ha-cni <vip_iface> <lb_prefix>"; phase_ha_cni "$2" "$3" ;;
     # facts — contrat machine : imprime CP_IP/L2_IFACE (+ VIP/VIP_IFACE si HA) que
     # topology.py consomme (inversion de frontière, ADR 0049/0056). Brique LUE par Python.
     facts) emit_facts ;;

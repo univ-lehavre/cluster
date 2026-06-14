@@ -14,8 +14,35 @@ from cluster_topology.bootstrap import (  # noqa: E402
     BootstrapError,
     bootstrap_extravars,
     bootstrap_playbooks,
+    inventory_has_workers,
     run_bootstrap,
 )
+
+# Rendu de write_inventory (lib.sh) — control unique SANS worker (workers vide).
+_INV_NO_WORKERS = """\
+cloud:
+  children:
+    control:
+    workers:
+control:
+  hosts:
+    node1:
+      ansible_host: lima-node1
+workers:
+  hosts: {}
+"""
+
+# Rendu avec UN worker (groupe workers peuplé).
+_INV_WITH_WORKERS = """\
+control:
+  hosts:
+    cp1:
+      ansible_host: lima-cp1
+workers:
+  hosts:
+    node1:
+      ansible_host: lima-node1
+"""
 
 
 class _FakeResult:
@@ -43,6 +70,26 @@ class Sequence(unittest.TestCase):
         # Copie défensive : muter le retour ne touche pas la source de vérité.
         bootstrap_playbooks().append("intrus.yaml")
         self.assertNotIn("intrus.yaml", bootstrap_playbooks())
+
+    def test_no_workers_omits_join_workers(self):
+        # Control unique : pas de worker à joindre → join-workers.yaml SAUTÉ.
+        pbs = bootstrap_playbooks(has_workers=False)
+        self.assertNotIn("join-workers.yaml", pbs)
+        self.assertEqual(len(pbs), 5)
+        # Les 5 autres restent dans l'ordre.
+        self.assertEqual(pbs[0], "checks.yaml")
+        self.assertEqual(pbs[-1], "initialisation.yaml")
+
+
+class InventoryHasWorkers(unittest.TestCase):
+    def test_empty_workers_group_is_false(self):
+        self.assertFalse(inventory_has_workers(_INV_NO_WORKERS))
+
+    def test_populated_workers_group_is_true(self):
+        self.assertTrue(inventory_has_workers(_INV_WITH_WORKERS))
+
+    def test_no_workers_key_at_all_is_false(self):
+        self.assertFalse(inventory_has_workers("control:\n  hosts:\n    cp1:\n"))
 
 
 class Extravars(unittest.TestCase):
@@ -91,6 +138,19 @@ class RunBootstrap(unittest.TestCase):
     def test_cni_failure_raises(self):
         with self.assertRaises(BootstrapError):
             run_bootstrap("10.0.0.5", launch=lambda *a, **k: _FakeResult(rc=0), run_cni=lambda: 1)
+
+    def test_no_workers_skips_join_workers_playbook(self):
+        # has_workers=False : join-workers.yaml n'est PAS lancé (5 playbooks + cni).
+        launched = []
+
+        def launch(pb, extravars):
+            launched.append(pb)
+            return _FakeResult(rc=0)
+
+        result = run_bootstrap("10.0.0.5", launch=launch, run_cni=lambda: 0, has_workers=False)
+        self.assertNotIn("join-workers.yaml", launched)
+        self.assertEqual(len(launched), 5)
+        self.assertEqual(len(result.steps), 6)  # 5 playbooks + cni
 
 
 if __name__ == "__main__":

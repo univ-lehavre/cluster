@@ -278,8 +278,7 @@ def cmd_stack_new(args: argparse.Namespace) -> int:
     target_abs = os.path.join(_ROOT, plan.target)
     if os.path.exists(target_abs) and not args.force:
         raise _UsageError(
-            f"{plan.target} existe déjà — `--force` pour l'écraser "
-            "(ou choisis un autre nom)"
+            f"{plan.target} existe déjà — `--force` pour l'écraser (ou choisis un autre nom)"
         )
 
     # Assistant : on collecte les réponses du minimum, puis (si HA) le mode LB.
@@ -377,8 +376,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         )
         dispo = ", ".join(catalog) or "(catalogue vide)"
         print(
-            f"erreur : {target_rel} introuvable dans le catalogue.\n"
-            f"  disponibles : {dispo}",
+            f"erreur : {target_rel} introuvable dans le catalogue.\n  disponibles : {dispo}",
             file=sys.stderr,
         )
         return 1
@@ -1026,9 +1024,10 @@ def cmd_ha_3cp(args: argparse.Namespace) -> int:
 def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
     """Orchestre le socle k8s (`bootstrap`) — la partie ANSIBLE (interne, ADR 0063).
 
-    Migration de bootstrap_node_sequence vers Python : lance les 6 playbooks du socle
+    Migration de bootstrap_node_sequence vers Python : lance les playbooks du socle
     (checks→…→join-workers) via runner.launch_phase (le MÊME montage que ha-3cp), avec
-    `-e control_plane_ip=<cp_ip>`. L'inventaire, la dérivation de cp_ip/iface, la CNI
+    `-e control_plane_ip=<cp_ip>`. `join-workers` est SAUTÉ si l'inventaire n'a aucun
+    worker (control unique). L'inventaire, la dérivation de cp_ip/iface, la CNI
     (Cilium dans la VM) et le kubeconfig restent à run-phases.sh (briques bash, ADR
     0049) ; cette commande reçoit cp_ip/inventaire déjà dérivés du banc et rappelle
     `ha-cni <iface> <lb-prefix>` pour la CNI. La logique (séquence, fail-fast) est
@@ -1059,7 +1058,11 @@ def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
 
     def run_cni() -> int:
         # CNI (+ GW API CRDs + kubeconfig) : brique bash réutilisée (ha-cni <iface>
-        # <lb-prefix>). lb_prefix = le /24 du cp_ip (ex. 10.0.0.5 → 10.0.0).
+        # <lb-prefix>). lb_prefix = le /24 du cp_ip (ex. 10.0.0.5 → 10.0.0). L'arm
+        # `ha-cni` dérive le CP du 1er nœud `control` de NODES (plus de `CP=cp1` codé) ;
+        # NODES vient de NODES_OVERRIDE, posé par `up` et hérité tout au long de la
+        # chaîne (up → run-phases.sh → bootstrap-seq → ici). On le passe EXPLICITEMENT
+        # pour ne pas dépendre d'un héritage d'env silencieux (et garantir node1, pas cp1).
         lb_prefix = args.cp_ip.rsplit(".", 1)[0]
         return subprocess.run(  # noqa: S603 — chemin codé, arguments contrôlés
             [
@@ -1070,11 +1073,20 @@ def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
                 lb_prefix,
             ],
             check=False,
+            env={**os.environ},
         ).returncode
 
-    print(f"→ bootstrap : socle k8s (6 playbooks via Python/runner, CP {args.cp_ip})")
+    # has_workers dérivé de l'inventaire (source de vérité écrite par run-phases.sh) :
+    # un control unique sans worker fait sauter join-workers.yaml (la DÉCISION est en
+    # Python, qui connaît la topo — pas en bash qui lance tout en aveugle).
+    with open(inventory, encoding="utf-8") as fh:
+        has_workers = _bootstrap.inventory_has_workers(fh.read())
+    n_pb = len(_bootstrap.bootstrap_playbooks(has_workers=has_workers))
+    print(f"→ bootstrap : socle k8s ({n_pb} playbooks via Python/runner, CP {args.cp_ip})")
     try:
-        result = _bootstrap.run_bootstrap(args.cp_ip, launch=launch, run_cni=run_cni)
+        result = _bootstrap.run_bootstrap(
+            args.cp_ip, launch=launch, run_cni=run_cni, has_workers=has_workers
+        )
     except _runner.RunnerUnavailable as exc:
         raise _UsageError(str(exc)) from exc
     except _bootstrap.BootstrapError as exc:
@@ -1356,16 +1368,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="sauter la confirmation (requis hors TTY pour détruire)"
     )
 
-    p_up = sub.add_parser(
-        "up", help="monte la stack active de bout en bout (calque `pulumi up`)"
-    )
+    p_up = sub.add_parser("up", help="monte la stack active de bout en bout (calque `pulumi up`)")
     _add_file(p_up)
     p_up.add_argument(
         "--target", default=None, help="chemin nommé visé (défaut : dérivé de la stack active)"
     )
-    p_up.add_argument(
-        "--yes", action="store_true", help="sauter la confirmation (requis hors TTY)"
-    )
+    p_up.add_argument("--yes", action="store_true", help="sauter la confirmation (requis hors TTY)")
 
     p_next = sub.add_parser(
         "next", help="applique la prochaine couche manquante du plan (1er drift)"
@@ -1459,9 +1467,7 @@ def _build_bootstrap_parser() -> argparse.ArgumentParser:
     bootstrap_node_sequence). Interne, routée à part dans main() comme ha-3cp."""
     ap = argparse.ArgumentParser(prog="topology bootstrap-seq")
     ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
-    ap.add_argument(
-        "--l2-iface", required=True, dest="l2_iface", help="interface L2 (LB-IPAM/CNI)"
-    )
+    ap.add_argument("--l2-iface", required=True, dest="l2_iface", help="interface L2 (LB-IPAM/CNI)")
     ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
     return ap
 
