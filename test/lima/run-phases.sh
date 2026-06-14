@@ -1399,19 +1399,31 @@ status_last_run() {
 }
 
 # ── Down — détruit VMs + disques nommés ──────────────────────────────────────
+# phase_down [vm…] — détruit les VMs nommées (+ leurs disques). Sans argument :
+# les NODES du harnais (banc complet). AVEC arguments (noms de VM) : seulement
+# celles-ci — c'est ainsi que `topology.py destroy` cible les VMs de la STACK active
+# (déléguée ici, limactl reste du bash, ADR 0049). Ne retire le WORKDIR que pour un
+# démontage COMPLET (sans liste explicite).
 phase_down() {
     require_lima
-    log "Destruction du banc Lima (VMs + disques nommés)"
-    local entry vm d
-    for entry in "${NODES[@]}"; do
-        vm="${entry%%:*}"
+    local targets=("$@") vm d
+    if [ ${#targets[@]} -eq 0 ]; then
+        local entry
+        for entry in "${NODES[@]}"; do targets+=("${entry%%:*}"); done
+        log "Destruction du banc Lima (VMs + disques nommés)"
+    else
+        log "Destruction des VMs : ${targets[*]} (+ disques nommés)"
+    fi
+    for vm in "${targets[@]}"; do
         lima_delete_node "${vm}"
         for d in $(node_disks "${vm}"); do
             lima_disk_delete "${d}"
         done
     done
-    rm -rf "${WORKDIR}"
-    ok "banc démonté — rien ne subsiste"
+    # WORKDIR (inventaire/artefacts du banc) : retiré seulement pour un démontage
+    # complet — une destruction ciblée (stack) ne touche pas l'état du harnais.
+    [ $# -eq 0 ] && rm -rf "${WORKDIR}"
+    ok "VMs démontées — rien ne subsiste"
 }
 
 # ── Chemins d'installation (ADR 0045) ───────────────────────────────────────
@@ -1724,7 +1736,7 @@ case "${1:-}" in
     # d'inventaire reste du bash, write_inventory). Workers vide (HA hyperconvergé).
     ha-inventory) [ -n "${2:-}" ] || die "usage : ha-inventory <cp1,cp2,…>"; mkdir -p "${WORKDIR}"; write_inventory "${INVENTORY}" "$(echo "$2" | tr ',' ' ')" "" ;;
     status) phase_status ;;
-    down) phase_down ;;
+    down) phase_down "${@:2}" ;;
     # Rollback d'UNE phase (ADR 0054, #274) : défait ce que `<phase>` a monté.
     # BANC_JETABLE=1 requis (destructif total). Ex : BANC_JETABLE=1 ... rollback ceph
     rollback) [ -n "${2:-}" ] || die "usage : rollback <phase> (ceph|sc|datalake|metrics-server|monitoring|dataops|gitops|gitops-seed)"; phase_rollback "$2" ;;

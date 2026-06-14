@@ -13,6 +13,7 @@ import datetime as dt
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -821,6 +822,67 @@ class StackRefresh(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertNotIn("ORPHELINES", out)
         self.assertIn("cp1", out)
+
+
+class Destroy(unittest.TestCase):
+    """`destroy` : détruit les VMs de la stack active, confirmation, délègue à down."""
+
+    def _stub_vms(self, vms):
+        orig = cli._real_vms
+        cli._real_vms = lambda: vms
+        self.addCleanup(setattr, cli, "_real_vms", orig)
+
+    def _stub_down(self, rc=0):
+        # Capture l'appel à run-phases.sh down (PAS de vraie destruction en test).
+        calls = []
+
+        def _spy(cmd, *a, **k):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(args=cmd, returncode=rc)
+
+        orig = cli.subprocess.run
+        cli.subprocess.run = _spy
+        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        return calls
+
+    def test_destroys_stack_vms_with_yes(self):
+        # cp1 est déclaré par _EXAMPLE et présent → destroy le cible, --yes saute le prompt.
+        self._stub_vms(["cp1"])
+        calls = self._stub_down()
+        code, out, _ = _capture(["destroy", "-f", _EXAMPLE, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertIn("détruite", out)
+        # Délégation à run-phases.sh down cp1 (les VMs de la stack passées en args).
+        self.assertEqual(len(calls), 1)
+        self.assertIn("down", calls[0])
+        self.assertIn("cp1", calls[0])
+
+    def test_no_stack_vm_is_noop(self):
+        # Aucune VM de la stack présente (cp9 = orpheline) → rien à détruire, code 0,
+        # et l'orpheline n'est PAS touchée (destroy ≠ nettoyage d'orphelines).
+        self._stub_vms(["cp9"])
+        calls = self._stub_down()
+        code, out, _ = _capture(["destroy", "-f", _EXAMPLE, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertIn("aucune VM à détruire", out)
+        self.assertEqual(calls, [])  # down JAMAIS appelé
+
+    def test_refuses_without_yes_off_tty(self):
+        # Hors TTY (test) sans --yes : refus (pas de suppression silencieuse), code 2,
+        # et down JAMAIS appelé.
+        self._stub_vms(["cp1"])
+        calls = self._stub_down()
+        code, _, err = _capture(["destroy", "-f", _EXAMPLE])
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])
+        self.assertIn("refusée", err)
+
+    def test_propagates_down_failure(self):
+        self._stub_vms(["cp1"])
+        self._stub_down(rc=3)  # run-phases.sh down échoue
+        code, _, err = _capture(["destroy", "-f", _EXAMPLE, "--yes"])
+        self.assertEqual(code, 1)
+        self.assertIn("échec", err)
 
 
 class Dispatch(unittest.TestCase):

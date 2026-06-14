@@ -30,6 +30,7 @@ Usage :
   uv run python scripts/topology.py epreuves [--all] [--type unit|intég|chaos]   (P4)
   uv run python scripts/topology.py runs [--target atlas|storage-real|…]          (P4)
   uv run python scripts/topology.py preview [--target …]            (calque pulumi preview)
+  uv run python scripts/topology.py destroy [--yes]                (calque pulumi destroy)
   uv run python scripts/topology.py next [--target …] [--apply]                   (P5)
   uv run python scripts/topology.py metrics [--last]                               (P6)
   uv run python scripts/topology.py smoke [--namespace …]                          (P6)
@@ -468,6 +469,69 @@ def cmd_stack_refresh(args: argparse.Namespace) -> int:
         print("→ terrain vierge (aucune VM) — montage propre depuis zéro.")
     elif state.must_destroy_first:
         print("→ détruire les VMs orphelines avant un montage propre de cette stack.")
+    return 0
+
+
+def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
+    """Confirme la DESTRUCTION des VMs `vms`. --yes saute ; hors TTY sans --yes : refus.
+
+    Garde-fou anti-destruction silencieuse : sur un TTY, on invite l'opérateur
+    (liste les VMs) ; sans TTY (CI/script), on EXIGE --yes (sinon on ne détruit RIEN)."""
+    if assume_yes:
+        return True
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print(
+            "destruction refusée hors TTY sans --yes (pas de suppression silencieuse).",
+            file=sys.stderr,
+        )
+        return False
+    rep = input(f"⚠️  DÉTRUIRE définitivement les VMs {vms} (+ disques) ? [oui/non] ")
+    return rep.strip().lower() in ("oui", "o", "yes", "y")
+
+
+def cmd_destroy(args: argparse.Namespace) -> int:
+    """`destroy` : détruit les VMs de la stack active (calque `pulumi destroy`).
+
+    Cible les VMs RÉELLES qui appartiennent à la stack active (déclarées ET
+    existantes — `refresh`/classify_refresh) et délègue leur suppression à
+    `run-phases.sh down <vm…>` (limactl reste du bash, ADR 0049 ; façade fine comme
+    `status --real` → state.sh). Confirmation interactive obligatoire (--yes pour la
+    CI/non-interactif). NE touche PAS les VMs orphelines (autre stack) — destroy
+    défait CE QUE LA STACK a monté, pas le reste.
+
+    Codes : 0 succès (ou rien à détruire) ; 1 échec du down délégué ; 2 confirmation
+    refusée / hors TTY sans --yes."""
+    path = _resolve(args.file)
+    topo = load_topology(path)
+    stack = topo.catalog.get("topology", "—")
+    declared = topo.control_nodes + topo.worker_nodes
+    state = classify_refresh(stack, declared, _real_vms(), [])
+    # On ne détruit QUE les VMs de la stack RÉELLEMENT présentes (vms_present) ; les
+    # orphelines (autre stack) ne sont pas de notre ressort (destroy ≠ nettoyage).
+    targets = state.vms_present
+    if not targets:
+        print(f"stack `{stack}` : aucune VM à détruire (rien de monté pour cette stack).")
+        if state.vms_orphan:
+            print(
+                f"  (VMs orphelines présentes : {', '.join(state.vms_orphan)} — "
+                "d'une AUTRE stack, non détruites par `destroy`)"
+            )
+        return 0
+
+    print(f"stack `{stack}` — VMs à détruire : {', '.join(targets)}")
+    if not _confirm_destroy(targets, assume_yes=args.yes):
+        print("destruction annulée.", file=sys.stderr)
+        return 2
+
+    # Délégation à run-phases.sh down <vm…> (bash garde limactl, ADR 0049).
+    rc = subprocess.run(  # noqa: S603 — chemin codé, noms de VM contrôlés (topo validée)
+        ["bash", os.path.join(_ROOT, "test", "lima", "run-phases.sh"), "down", *targets],
+        check=False,
+    ).returncode
+    if rc != 0:
+        print(f"échec de la destruction (run-phases.sh down rc={rc}).", file=sys.stderr)
+        return 1
+    print(f"✓ stack `{stack}` détruite ({len(targets)} VM(s)).")
     return 0
 
 
@@ -1000,6 +1064,7 @@ _STACK_DISPATCH = {
 
 _DISPATCH = {
     "stack": cmd_stack,  # calque `pulumi stack` (new | ls | select | validate)
+    "destroy": cmd_destroy,  # calque `pulumi destroy`
     "generate": cmd_generate,
     "diff": cmd_diff,
     "status": cmd_status,
@@ -1171,6 +1236,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_prev.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
+    )
+
+    p_destroy = sub.add_parser(
+        "destroy", help="détruit les VMs de la stack active (calque `pulumi destroy`)"
+    )
+    _add_file(p_destroy)
+    p_destroy.add_argument(
+        "--yes", action="store_true", help="sauter la confirmation (requis hors TTY pour détruire)"
     )
 
     p_next = sub.add_parser("next", help="suggère la prochaine phase (et --apply la lance)")
