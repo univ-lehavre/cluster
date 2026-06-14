@@ -1126,13 +1126,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="topology",
         description="Façade CLI/CI de l'outil déclaratif des topologies (ADR 0056, P3-P4).",
     )
-    # metavar explicite : liste les commandes PUBLIQUES (ha-3cp, interne, est masquée
-    # — son sous-parser existe avec help=SUPPRESS mais n'apparaît pas dans le résumé).
-    sub = ap.add_subparsers(
-        dest="cmd",
-        required=True,
-        metavar="{stack,refresh,preview,next,destroy,artifact,test}",
-    )
+    # ha-3cp n'est PAS un sous-parser ici (commande interne routée à part dans main) :
+    # le menu ne liste donc que les commandes publiques, sans `==SUPPRESS==` parasite.
+    sub = ap.add_subparsers(dest="cmd", required=True)
 
     def _add_file(p: argparse.ArgumentParser) -> None:
         p.add_argument(
@@ -1352,19 +1348,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # ha-3cp : commande INTERNE (appelée par run-phases.sh avec --cp-ip/--vip dérivés
-    # du banc), pas un verbe du menu public — MASQUÉE du --help (argparse.SUPPRESS).
-    # Reste invocable. Sera absorbée par `up` (inversion de frontière, ADR 0063).
-    p_ha = sub.add_parser("ha-3cp", help=argparse.SUPPRESS)
-    p_ha.add_argument("--nodes", default="cp1,cp2,cp3", help="CP, le 1er = primaire (csv)")
-    p_ha.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
-    p_ha.add_argument("--vip", required=True, help="VIP de l'API (kube-vip)")
-    p_ha.add_argument("--vip-iface", required=True, dest="vip_iface", help="interface L2 de la VIP")
-    p_ha.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
+    return ap
+
+
+def _build_ha_parser() -> argparse.ArgumentParser:
+    """Parser DÉDIÉ à la commande interne `ha-3cp` (hors du menu public).
+
+    ha-3cp est appelée par run-phases.sh avec --cp-ip/--vip dérivés du banc — ce
+    n'est pas un verbe du menu. On la garde HORS du parser principal (sinon argparse
+    l'expose dans le --help et la liste des choix). Routée à part dans main() ; sera
+    absorbée par `up` (inversion de frontière, ADR 0063)."""
+    ap = argparse.ArgumentParser(prog="topology ha-3cp")
+    ap.add_argument("--nodes", default="cp1,cp2,cp3", help="CP, le 1er = primaire (csv)")
+    ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
+    ap.add_argument("--vip", required=True, help="VIP de l'API (kube-vip)")
+    ap.add_argument("--vip-iface", required=True, dest="vip_iface", help="interface L2 de la VIP")
+    ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    # ha-3cp est interceptée AVANT le parser principal (commande interne, hors menu).
+    args_list = sys.argv[1:] if argv is None else argv
+    if args_list and args_list[0] == "ha-3cp":
+        args = _build_ha_parser().parse_args(args_list[1:])
+        args.cmd = "ha-3cp"
+        return _run(args)
+    args = _build_parser().parse_args(args_list)
     return _run(args)
 
 
