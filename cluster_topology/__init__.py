@@ -31,6 +31,17 @@ from cluster_topology.plan import (
 )
 from cluster_topology.profile import derive_run_params
 from cluster_topology.roundtrip import RoundtripResult, run_roundtrip
+from cluster_topology.scaffold import (
+    QUESTION_LB_MODE,
+    QUESTIONS,
+    InitPlan,
+    Question,
+    ScaffoldError,
+    build_topology_dict,
+    catalog_entry,
+    plan_init,
+    validate_name,
+)
 
 __all__ = [
     "Topology",
@@ -56,4 +67,13 @@ __all__ = [
     "format_metrics",
     "RoundtripResult",
     "run_roundtrip",
+    "InitPlan",
+    "Question",
+    "QUESTIONS",
+    "QUESTION_LB_MODE",
+    "ScaffoldError",
+    "build_topology_dict",
+    "catalog_entry",
+    "plan_init",
+    "validate_name",
 ]

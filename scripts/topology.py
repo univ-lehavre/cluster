@@ -20,6 +20,10 @@ comme illustration de style, pas comme exigence d'outillage.
 
 Usage :
   uv run python scripts/topology.py validate [-f topology.yaml]
+  uv run python scripts/topology.py context create <nom> [--activate] [--no-input]
+  uv run python scripts/topology.py context list
+  uv run python scripts/topology.py context activate <nom>
+  uv run python scripts/topology.py default-target [-f topology.yaml]
   uv run python scripts/topology.py generate [--kind prod|lima] [--what inventory|run-params]
   uv run python scripts/topology.py status [--real [--hosts cp1 node1]]
   uv run python scripts/topology.py diff [--kind prod|lima --against PATH]
@@ -56,6 +60,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import difflib
+import glob
 import os
 import subprocess
 import sys
@@ -65,8 +70,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import yaml  # noqa: E402
 
 from cluster_topology import (  # noqa: E402
+    QUESTION_LB_MODE,
+    QUESTIONS,
     PlanError,
+    ScaffoldError,
     TopologyError,
+    build_topology_dict,
+    catalog_entry,
     default_target,
     derive_run_params,
     filter_epreuves,
@@ -74,6 +84,7 @@ from cluster_topology import (  # noqa: E402
     load_runs,
     load_topology,
     metrics_of,
+    plan_init,
     render_lima_inventory,
     render_prod_inventory,
     suggest_next,
@@ -168,6 +179,237 @@ def cmd_default_target(args: argparse.Namespace) -> int:
     topo = load_topology(_resolve(args.file))
     print(default_target(topo))
     return 0
+
+
+def _ask(question, *, no_input: bool) -> str:
+    """Pose UNE question de l'assistant et renvoie la réponse (ou le défaut).
+
+    Sous `--no-input` (CI, pas de TTY) : renvoie le défaut sans prompter. Sinon :
+    affiche le libellé + l'aide + les choix (avec le défaut entre crochets) ; une
+    entrée vide retient le défaut ; un choix hors enum re-demande (la validation
+    finale reste à build_topology_dict/load_topology, mais on guide ici)."""
+    if no_input:
+        return question.default
+    choices = f" ({'|'.join(question.choices)})" if question.choices else ""
+    suffix = f" [{question.default}]"
+    while True:
+        if question.help:
+            print(f"  — {question.help}", file=sys.stderr)
+        answer = input(f"{question.prompt}{choices}{suffix} : ").strip()
+        if not answer:
+            return question.default
+        if question.choices and answer not in question.choices:
+            print(f"    `{answer}` hors choix ; valides : {question.choices}", file=sys.stderr)
+            continue
+        return answer
+
+
+def _confirm(prompt: str, *, default: bool, no_input: bool) -> bool:
+    """Question oui/non. Sous --no-input : renvoie `default` sans prompter (CI).
+
+    Entrée vide → défaut. Accepte o/oui/y/yes (vrai) et n/non/no (faux), insensible
+    à la casse ; toute autre saisie re-demande."""
+    if no_input:
+        return default
+    hint = "O/n" if default else "o/N"
+    while True:
+        answer = input(f"{prompt} [{hint}] : ").strip().lower()
+        if not answer:
+            return default
+        if answer in ("o", "oui", "y", "yes"):
+            return True
+        if answer in ("n", "non", "no"):
+            return False
+        print("    réponds o(ui) ou n(on)", file=sys.stderr)
+
+
+def _activate_symlink(target_rel: str) -> None:
+    """Repointe le symlink d'activation topology.yaml → <target_rel> (relatif, gitignoré).
+
+    Remplace un lien/fichier existant. Chemin RELATIF au dépôt (le symlink vit à la
+    racine, à côté de topologies/) — robuste à un déplacement du clone."""
+    link = os.path.join(_ROOT, "topology.yaml")
+    if os.path.islink(link) or os.path.exists(link):
+        os.unlink(link)
+    os.symlink(target_rel, link)
+
+
+def cmd_context_create(args: argparse.Namespace) -> int:
+    """`context create` : crée une topologie dans le catalogue via un ASSISTANT (ADR 0056).
+
+    Pose le MINIMUM décisionnel (profil, backend, terrain, cible, nb de CP/workers,
+    + mode LB si HA) dans les enums connus, construit un YAML minimal VALIDE
+    (build_topology_dict), le valide (load_topology, réutilisé), l'écrit dans
+    `topologies/<nom>.yaml` (topo RÉELLE gitignorée, jamais `.example`), puis PROPOSE
+    de l'activer (question en fin d'assistant ; `--activate` force le oui sans
+    demander). `--no-input` retient les défauts (CI). Refuse d'écraser sans `--force`.
+
+    Codes : 0 succès ; 1 schéma invalide (improbable, l'assistant borne les enums) ;
+    2 usage (nom invalide, cible présente sans --force, modèle/écriture impossibles).
+    """
+    try:
+        plan = plan_init(args.name, activate=args.activate)
+    except ScaffoldError as exc:
+        raise _UsageError(str(exc)) from exc
+
+    target_abs = os.path.join(_ROOT, plan.target)
+    if os.path.exists(target_abs) and not args.force:
+        raise _UsageError(
+            f"{plan.target} existe déjà — `--force` pour l'écraser "
+            "(ou choisis un autre nom)"
+        )
+
+    # Assistant : on collecte les réponses du minimum, puis (si HA) le mode LB.
+    print(f"Assistant de création — topologie `{plan.name}` :", file=sys.stderr)
+    answers: dict[str, str] = {}
+    for question in QUESTIONS:
+        answers[question.key] = _ask(question, no_input=args.no_input)
+    try:
+        n_cp = int(answers.get("control_planes", "1"))
+    except ValueError:
+        n_cp = 1
+    if n_cp >= 2:  # HA → le modèle exige un control_plane_lb : on demande son mode.
+        answers[QUESTION_LB_MODE.key] = _ask(QUESTION_LB_MODE, no_input=args.no_input)
+
+    try:
+        data = build_topology_dict(plan.name, answers)
+    except ScaffoldError as exc:
+        raise _UsageError(str(exc)) from exc
+
+    # Bandeau d'en-tête : valeurs GÉNÉRIQUES par défaut (ADR 0023) ; l'opérateur
+    # remplace par ses vraies valeurs dans ce fichier gitignoré.
+    header = (
+        f"# topologies/{plan.name}.yaml — topologie RÉELLE (gitignorée, ADR 0023).\n"
+        f"# Générée par `topology.py init` (assistant). Ajuste nœuds/rôles/IP ;\n"
+        f"# `topology.py validate` revérifie le schéma. `status: cible` tant qu'aucun\n"
+        f"# run ne l'a montée (honnêteté ADR 0052).\n"
+    )
+    body = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+    # Écrire le fichier, puis le VALIDER via load_topology (qui lit un chemin et
+    # fait foi : cohérence HA↔VIP, rôles). En cas d'échec on retire le fichier pour
+    # ne pas laisser un scaffold invalide dans le catalogue.
+    try:
+        with open(target_abs, "w", encoding="utf-8") as f:
+            f.write(header + body)
+    except OSError as exc:
+        raise _UsageError(f"écriture impossible vers {plan.target} : {exc}") from exc
+
+    try:
+        topo = load_topology(target_abs)
+    except TopologyError as exc:
+        os.unlink(target_abs)  # ne pas laisser un scaffold invalide dans le catalogue
+        print(f"erreur : topologie générée invalide ({exc}) — fichier retiré", file=sys.stderr)
+        return 1
+
+    print(
+        f"✓ {plan.target} créée "
+        f"({len(topo.control_nodes)} control / {len(topo.worker_nodes)} worker)."
+    )
+
+    # Activation : on la PROPOSE une fois la topo créée (oui par défaut) plutôt que
+    # de l'exiger en flag. `--activate` force le oui sans demander ; `--no-input`
+    # retient le défaut (oui que si --activate, pour rester déterministe en CI).
+    if args.activate:
+        activate = True
+    elif args.no_input:
+        activate = False
+    else:
+        activate = _confirm(
+            f"Activer `{plan.name}` maintenant (topology.yaml → {plan.target}) ?",
+            default=True,
+            no_input=False,
+        )
+
+    if activate:
+        _activate_symlink(plan.target)
+        print(f"✓ activée : topology.yaml → {plan.target} (chemin dérivé : {default_target(topo)})")
+    else:
+        print(f"  pour l'activer : topology.py context activate {plan.name}")
+    return 0
+
+
+def cmd_context_activate(args: argparse.Namespace) -> int:
+    """`context activate` : active une topologie EXISTANTE (repointe le symlink topology.yaml).
+
+    Résout `topologies/<nom>(.example).yaml` → VALIDE le schéma (garde-fou : on
+    n'active pas un fichier cassé, contrairement à `ln -sf`) → repointe le symlink →
+    confirme le chemin dérivé. Accepte un modèle versionné (`<nom>.example`) comme
+    cible (activer le banc générique est légitime).
+
+    Codes : 0 succès ; 1 fichier absent / schéma invalide ; 2 usage (nom invalide).
+    """
+    try:
+        target_rel = catalog_entry(args.name)
+    except ScaffoldError as exc:
+        raise _UsageError(str(exc)) from exc
+
+    target_abs = os.path.join(_ROOT, target_rel)
+    if not os.path.exists(target_abs):
+        # Aide : lister ce que le catalogue propose réellement.
+        catalog = sorted(
+            os.path.basename(p) for p in glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml"))
+        )
+        dispo = ", ".join(catalog) or "(catalogue vide)"
+        print(
+            f"erreur : {target_rel} introuvable dans le catalogue.\n"
+            f"  disponibles : {dispo}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Garde-fou : valider AVANT d'activer (ne pas pointer le symlink sur un fichier cassé).
+    topo = load_topology(target_abs)
+    _activate_symlink(target_rel)
+    print(f"✓ activée : topology.yaml → {target_rel} (chemin dérivé : {default_target(topo)})")
+    return 0
+
+
+def _active_target_rel() -> str | None:
+    """Cible du symlink d'activation `topology.yaml` (chemin relatif), ou None.
+
+    None = pas de symlink (aucune topo active → l'outil retombe sur l'exemple)."""
+    link = os.path.join(_ROOT, "topology.yaml")
+    if not os.path.islink(link):
+        return None
+    return os.readlink(link)
+
+
+def cmd_context_list(args: argparse.Namespace) -> int:
+    """`context list` : liste le catalogue, marque l'ACTIVE (★), donne le chemin dérivé.
+
+    Read-only : énumère `topologies/*.y*ml` (topos réelles + modèles `.example`),
+    repère l'entrée pointée par le symlink `topology.yaml`, et dérive pour chacune
+    son chemin nommé (default_target). Une entrée illisible/invalide est signalée
+    sans faire échouer la liste (code 0 toujours — informatif)."""
+    entries = sorted(glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml")))
+    if not entries:
+        print("catalogue vide — `topology.py context create <nom>` pour en créer une.")
+        return 0
+    active_rel = _active_target_rel()
+    active_base = os.path.basename(active_rel) if active_rel else None
+    print(f"Catalogue de topologies ({len(entries)}) — ★ = active :")
+    for path in entries:
+        base = os.path.basename(path)
+        name = base[: -len(".yaml")] if base.endswith(".yaml") else base[: -len(".yml")]
+        mark = "★" if base == active_base else " "
+        try:
+            derived = default_target(load_topology(path))
+        except (TopologyError, OSError, PlanError) as exc:
+            derived = f"(invalide : {exc})"
+        print(f"  {mark} {name:<22} → {derived}")
+    if active_base is None:
+        print("  (aucune active — `context activate <nom>` ; sinon l'outil utilise socle.example)")
+    return 0
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    """Routeur du groupe `context` (create | list | activate). Façade de dispatch.
+
+    argparse garantit `ctx_cmd` ∈ {create, list, activate} (sous-parser `required`)
+    — on route vers la façade dédiée. Un `context` sans verbe est une erreur d'usage
+    (argparse l'arrête en amont avec le help du groupe)."""
+    return _CONTEXT_DISPATCH[args.ctx_cmd](args)
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
@@ -556,9 +798,17 @@ def cmd_roundtrip(args: argparse.Namespace) -> int:
     return 0 if result.reversible else 1
 
 
+# Verbes du groupe `context` (noun-verb, modèle kubectl/terraform).
+_CONTEXT_DISPATCH = {
+    "create": cmd_context_create,
+    "list": cmd_context_list,
+    "activate": cmd_context_activate,
+}
+
 _DISPATCH = {
     "validate": cmd_validate,
     "default-target": cmd_default_target,
+    "context": cmd_context,
     "generate": cmd_generate,
     "diff": cmd_diff,
     "status": cmd_status,
@@ -613,6 +863,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "default-target", help="imprime le chemin nommé dérivé de la topologie active"
     )
     _add_file(p_dt)
+
+    # Groupe `context` (noun-verb) : create | list | activate — gère le catalogue de
+    # topologies et la sélection de l'active (modèle kubectl/terraform workspace).
+    p_ctx = sub.add_parser(
+        "context", help="gère le catalogue de topologies (create | list | activate)"
+    )
+    ctx_sub = p_ctx.add_subparsers(dest="ctx_cmd", required=True)
+
+    p_ctx_create = ctx_sub.add_parser(
+        "create", help="crée une topologie dans le catalogue via un assistant (questions)"
+    )
+    p_ctx_create.add_argument(
+        "name", help="nom de la topologie (→ topologies/<nom>.yaml, gitignorée)"
+    )
+    p_ctx_create.add_argument(
+        "--activate",
+        action="store_true",
+        help="activer sans demander (sinon la question est posée en fin d'assistant)",
+    )
+    p_ctx_create.add_argument(
+        "--force", action="store_true", help="écraser topologies/<nom>.yaml s'il existe"
+    )
+    p_ctx_create.add_argument(
+        "--no-input",
+        action="store_true",
+        help="non interactif : défauts + pas d'activation sauf --activate (CI)",
+    )
+
+    ctx_sub.add_parser("list", help="liste le catalogue, marque l'active (★) + chemin dérivé")
+
+    p_ctx_act = ctx_sub.add_parser(
+        "activate", help="active une topologie existante du catalogue (repointe le symlink)"
+    )
+    p_ctx_act.add_argument(
+        "name", help="nom de l'entrée du catalogue (ex : 3-nodes-1-cp, socle.example)"
+    )
 
     p_gen = sub.add_parser("generate", help="dérive un artefact (inventaire ou run-params)")
     _add_file(p_gen)

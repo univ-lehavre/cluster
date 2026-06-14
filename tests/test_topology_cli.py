@@ -80,6 +80,17 @@ def _tmp(content):
     return path
 
 
+@contextlib.contextmanager
+def _stdin(text):
+    """Alimente sys.stdin avec `text` le temps du bloc (réponses d'un assistant)."""
+    saved = sys.stdin
+    sys.stdin = io.StringIO(text)
+    try:
+        yield
+    finally:
+        sys.stdin = saved
+
+
 class Validate(unittest.TestCase):
     def test_example_is_valid(self):
         code, out, _ = _capture(["validate", "-f", _EXAMPLE])
@@ -512,6 +523,112 @@ class Roundtrip(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             cli.main(["roundtrip"])
         self.assertEqual(ctx.exception.code, 2)
+
+
+class Context(unittest.TestCase):
+    """Groupe `context create|list|activate` : crée/active une topo, liste le catalogue.
+
+    Écrit dans le VRAI catalogue topologies/ (la façade y résout les chemins) sous des
+    noms jetables nettoyés en teardown ; le symlink topology.yaml réel (sélection active
+    de l'opérateur) est sauvegardé en setUp et restauré en tearDown."""
+
+    def setUp(self):
+        self._link = os.path.join(_ROOT, "topology.yaml")
+        self._prev = os.readlink(self._link) if os.path.islink(self._link) else None
+
+    def tearDown(self):
+        if os.path.islink(self._link) or os.path.exists(self._link):
+            os.unlink(self._link)
+        if self._prev is not None:
+            os.symlink(self._prev, self._link)
+
+    def _catalog(self, name):
+        return os.path.join(_ROOT, "topologies", f"{name}.yaml")
+
+    def test_create_mono_no_input_writes_valid_gitignored(self):
+        name = "zz-test-ctx-mono"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        code, out, _ = _capture(["context", "create", name, "--no-input"])
+        self.assertEqual(code, 0)
+        self.assertIn("créée", out)
+        self.assertTrue(os.path.exists(target))
+        # Le fichier produit est VALIDE (re-validable) et mono-CP par défaut.
+        topo = load_topology(target)
+        self.assertEqual(len(topo.control_nodes), 1)
+        self.assertFalse(topo.is_ha_control_plane)
+        # --no-input sans --activate : ne touche PAS le symlink (déterminisme CI).
+        self.assertEqual(
+            os.readlink(self._link) if os.path.islink(self._link) else None, self._prev
+        )
+
+    def test_create_ha_via_answers_inserts_lb(self):
+        # 3 CP fournis via stdin → l'assistant demande le mode LB, puis « activer ? » (non).
+        name = "zz-test-ctx-ha"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        answers = "base\nlocal-path\nlocal\nlima\n3\n0\nkube-vip-arp\nn\n"
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+            _stdin(answers),
+        ):
+            code = cli.main(["context", "create", name])
+        self.assertEqual(code, 0)
+        topo = load_topology(target)
+        self.assertTrue(topo.is_ha_control_plane)
+        self.assertEqual(len(topo.control_nodes), 3)
+
+    def test_create_example_name_rejected_usage(self):
+        code, _, err = _capture(["context", "create", "bad.example", "--no-input"])
+        self.assertEqual(code, 2)
+        self.assertIn("ADR 0023", err)
+
+    def test_create_existing_without_force_is_usage(self):
+        name = "zz-test-ctx-dup"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        self.assertEqual(_capture(["context", "create", name, "--no-input"])[0], 0)
+        code, _, err = _capture(["context", "create", name, "--no-input"])  # 2e sans --force
+        self.assertEqual(code, 2)
+        self.assertIn("existe déjà", err)
+
+    def test_create_activate_flag_repoints_symlink(self):
+        name = "zz-test-ctx-activate"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        code, out, _ = _capture(["context", "create", name, "--no-input", "--activate"])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.islink(self._link))
+        self.assertEqual(os.readlink(self._link), f"topologies/{name}.yaml")
+        self.assertIn("activée", out)
+
+    def test_activate_existing_repoints_and_validates(self):
+        # `context activate` sur une entrée existante : repointe + dérive le chemin.
+        name = "zz-test-ctx-act-existing"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        _capture(["context", "create", name, "--no-input"])  # sans activer
+        code, out, _ = _capture(["context", "activate", name])
+        self.assertEqual(code, 0)
+        self.assertEqual(os.readlink(self._link), f"topologies/{name}.yaml")
+        self.assertIn("dérivé", out)
+
+    def test_activate_absent_is_business_error_with_catalog(self):
+        code, _, err = _capture(["context", "activate", "zz-nexistepas"])
+        self.assertEqual(code, 1)
+        self.assertIn("introuvable", err)
+        self.assertIn("disponibles", err)  # aide : liste le catalogue
+
+    def test_list_marks_active_and_derives(self):
+        # Active une entrée connue, puis `context list` doit la marquer ★ + son chemin.
+        _capture(["context", "activate", "socle.example"])
+        code, out, _ = _capture(["context", "list"])
+        self.assertEqual(code, 0)
+        self.assertIn("socle.example", out)
+        self.assertIn("★", out)
+        # socle.example (dataops+ceph) dérive atlas-ceph.
+        self.assertIn("atlas-ceph", out)
 
 
 class Dispatch(unittest.TestCase):
