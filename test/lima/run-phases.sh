@@ -1416,8 +1416,9 @@ phase_down() {
 
 # ── Chemins d'installation (ADR 0045) ───────────────────────────────────────
 # Quatre chemins nommés, du plus court au plus complet. Chacun monte d'abord le
-# SOCLE (up → bootstrap → stockage, avec cache #219), puis ses couches
-# applicatives. L'observabilité (monitoring) est posée TÔT (avant gitops/dataops)
+# SOCLE (up → bootstrap [+ ceph+sc en mode Ceph], avec cache #219), puis — pour les
+# chemins store+ en local-path — la couche stockage (run_storage_simple), puis ses
+# couches applicatives. Le chemin `socle`/base reste NU (k8s + CNI, sans stockage). L'observabilité (monitoring) est posée TÔT (avant gitops/dataops)
 # pour capter leur démarrage, et fournit le backing S3 SeaweedFS que dataops
 # consomme en mode léger. Axe orthogonal : WITH_HARDENING=1 durcit l'hôte sur
 # n'importe quel chemin (#240). L'agrégat `all` est supprimé (ADR 0045 §3).
@@ -1426,8 +1427,14 @@ phase_down() {
 # ne consigner QUE les runs from-scratch (drift L49).
 SOCLE_BUILT=0
 
-# Monte le socle (up → bootstrap → stockage selon profil), avec cache du socle
-# (#219). Pose SOCLE_BUILT=1 si le socle a RÉELLEMENT été bâti (pas réutilisé).
+# Monte le socle, avec cache du socle (#219). Pose SOCLE_BUILT=1 si le socle a
+# RÉELLEMENT été bâti (pas réutilisé).
+#
+# Le socle de BASE = up → bootstrap (k8s + CNI SEULS) : le STOCKAGE n'en fait PAS
+# partie (ADR 0039 : `storage` ∈ profil store, pas base ; aligné sur plan.py). En
+# mode Ceph le socle pose ceph+sc (indissociable de ce backend). En local-path, la
+# couche `storage-simple` est posée SÉPARÉMENT par les chemins store+ (atlas…) via
+# run_storage_simple — le chemin `socle` (profil base) ne la pose PAS.
 run_socle() {
     local profil
     profil=$(metro_profil "${WITH_CEPH:-0}")
@@ -1444,11 +1451,18 @@ run_socle() {
         time_phase sc phase_sc
         log "🎉 Socle monté (mode Ceph) : up → bootstrap → ceph → storageClasses."
     else
-        time_phase storage-simple phase_storage_simple
-        log "🎉 Socle monté (mode rapide) : up → bootstrap → storage-simple."
+        log "🎉 Socle de base monté (k8s + CNI) : up → bootstrap (stockage = couche store+)."
     fi
     metro_cache_save "${profil}"
     SOCLE_BUILT=1
+}
+
+# Couche STOCKAGE local-path (storage-simple), posée par les chemins store+ APRÈS le
+# socle (atlas…). Le chemin `socle`/base ne l'appelle pas. No-op en mode Ceph (le
+# stockage Ceph est déjà dans run_socle).
+run_storage_simple() {
+    [ "${WITH_CEPH:-0}" = 1 ] && return 0
+    time_phase storage-simple phase_storage_simple
 }
 
 # Consigne le run SI from-scratch (socle réellement bâti). Un run sur cache (#219)
@@ -1618,6 +1632,7 @@ case "${1:-}" in
         run_start=$(date +%s)
         run_socle
         run_hardening_if_requested
+        run_storage_simple  # couche stockage local-path (atlas = dataops, crée des PVC)
         # metrics-server AVANT monitoring : palier 1 autonome (#252), rend
         # `kubectl top` opérant dès le socle — un dev atlas voit l'usage CPU/RAM.
         time_phase metrics-server phase_metrics_server
@@ -1628,7 +1643,7 @@ case "${1:-}" in
         # l'image émetteur (buildée par dataops) et cible le ns dagster (monté
         # par dataops). Argo CD réconcilie ensuite le workflow depuis Gitea.
         time_phase gitops-seed phase_gitops_seed
-        log "🎉 Chemin 'atlas' : metrics-server → monitoring → gitops → dataops → gitops-seed."
+        log "🎉 Chemin 'atlas' : storage-simple → metrics-server → monitoring → gitops → dataops → gitops-seed."
         log "ℹ️  Preuve e2e des workflows atlas par GitOps : scénario 27 (#231)."
         log "👉 Accès dev (URLs *.cluster.lan + secrets + .env atlas) : test/lima/access.sh (ADR 0048)."
         record_if_fresh "${run_start}"

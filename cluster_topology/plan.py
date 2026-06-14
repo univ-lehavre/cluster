@@ -56,12 +56,21 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
 }
 
 # ── Séquences ordonnées des chemins nommés (transcription de run-phases.sh) ──
-# Le socle préfixe chaque chemin : up → bootstrap → (ceph+sc | storage-simple).
+# Le socle de BASE = up → bootstrap (k8s + CNI SEULS). Le STOCKAGE n'en fait PAS
+# partie : c'est la brique du profil `store` (ADR 0039 : base ⊂ store ; PROFILE_BRICKS
+# rattache `storage` à store, pas à base). En mode Ceph le socle pose ceph+sc (le
+# stockage Ceph est indissociable du socle de ce backend) ; en local-path, la couche
+# `storage-simple` est ajoutée par les chemins qui en ont besoin (cf. _STORAGE_LAYER).
 # `hardening` s'insère APRÈS le socle (run_hardening_if_requested) si demandé.
 _SOCLE_CEPH = ["up", "bootstrap", "ceph", "sc"]
-_SOCLE_LIGHT = ["up", "bootstrap", "storage-simple"]
+_SOCLE_LIGHT = ["up", "bootstrap"]
+# Couche stockage local-path, insérée APRÈS le socle léger pour les chemins dont le
+# profil consomme du stockage (store+). Le chemin `socle` (profil base) ne la pose PAS.
+_STORAGE_LAYER = ["storage-simple"]
+# Chemins local-path qui EXIGENT le stockage (profil store+ : leurs apps créent des PVC).
+_LOCAL_PATH_NEEDS_STORAGE = {"atlas"}
 
-# Phases propres à chaque chemin, APRÈS le socle (+ hardening éventuel).
+# Phases propres à chaque chemin, APRÈS le socle (+ stockage + hardening éventuel).
 _PATH_TAIL: dict[str, list[str]] = {
     "socle": [],
     "atlas": ["metrics-server", "monitoring", "gitops", "dataops", "gitops-seed"],
@@ -154,6 +163,12 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     seq = list(socle)
     if _hardening_requested(topo):
         seq.append("hardening")
+    # Couche stockage local-path : ajoutée APRÈS le socle pour les chemins store+ qui
+    # en ont besoin (le Ceph l'a déjà dans son socle ; le chemin `socle`/base ne la
+    # pose pas — base = k8s+CNI nus, ADR 0039). Avant la queue applicative (les apps
+    # consomment le stockage).
+    if backend != "ceph" and target in _LOCAL_PATH_NEEDS_STORAGE:
+        seq.extend(_STORAGE_LAYER)
     seq.extend(_PATH_TAIL[target])
     return seq
 

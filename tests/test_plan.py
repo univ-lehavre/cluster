@@ -87,8 +87,16 @@ class ExpectedSequence(unittest.TestCase):
         )
 
     def test_socle_light(self):
+        # base = socle NU (k8s + CNI) ; le stockage n'est PAS dans base (ADR 0039 :
+        # storage ∈ store, pas base). Plus de storage-simple ici.
         seq = expected_phase_sequence(_topo(profile="base", backend="local-path"), "socle")
-        self.assertEqual(seq, ["up", "bootstrap", "storage-simple"])
+        self.assertEqual(seq, ["up", "bootstrap"])
+
+    def test_atlas_local_path_keeps_storage_before_apps(self):
+        # atlas (dataops, local-path) consomme du stockage → storage-simple est ajouté
+        # APRÈS le socle nu, AVANT les apps (monitoring/dataops créent des PVC).
+        seq = expected_phase_sequence(_topo(backend="local-path"), "atlas")
+        self.assertEqual(seq[:3], ["up", "bootstrap", "storage-simple"])
 
     def test_hardening_inserted_after_socle(self):
         seq = expected_phase_sequence(
