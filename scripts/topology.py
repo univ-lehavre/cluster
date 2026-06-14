@@ -28,16 +28,16 @@ Usage — cycle de vie (top-level, calque Pulumi) :
   uv run python scripts/topology.py preview [--target …]      (calque pulumi preview)
   uv run python scripts/topology.py next [--target …] [--apply]                   (P5)
   uv run python scripts/topology.py destroy [--yes]           (calque pulumi destroy)
-Usage — inspection & artefacts :
-  uv run python scripts/topology.py generate [--kind prod|lima] [--what inventory|run-params]
-  uv run python scripts/topology.py status [--real [--hosts cp1 node1]]
-  uv run python scripts/topology.py diff [--kind prod|lima --against PATH]
-  uv run python scripts/topology.py runs [--target atlas|storage-real|…]          (P4)
-  uv run python scripts/topology.py metrics [--last]                               (P6)
-Usage — épreuves & réversibilité :
-  uv run python scripts/topology.py epreuves [--all] [--type unit|intég|chaos]   (P4)
-  uv run python scripts/topology.py smoke [--namespace …]                          (P6)
-  uv run python scripts/topology.py roundtrip --phase monitoring|gitops|…          (P6+)
+Usage — artefacts (dériver/constater, groupe `artifact`) :
+  uv run python scripts/topology.py artifact generate [--kind prod|lima] [--what …]
+  uv run python scripts/topology.py artifact status [--real [--hosts cp1 node1]]
+  uv run python scripts/topology.py artifact diff [--kind prod|lima --against PATH]
+  uv run python scripts/topology.py artifact runs [--target atlas|…]               (P4)
+  uv run python scripts/topology.py artifact metrics [--last]                       (P6)
+Usage — épreuves & réversibilité (groupe `test`) :
+  uv run python scripts/topology.py test scenarios [--all] [--type unit|intég|chaos] (P4)
+  uv run python scripts/topology.py test smoke [--namespace …]                       (P6)
+  uv run python scripts/topology.py test roundtrip --phase monitoring|gitops|…       (P6+)
 
 P4 ajoute deux commandes READ-ONLY : `epreuves` (liste filtrée par la topologie,
 exig. 6 — ne lance rien) et `runs` (lit l'historique + fraîcheur, exig. 10-12 —
@@ -1064,21 +1064,43 @@ _STACK_DISPATCH = {
     "validate": cmd_stack_validate,
 }
 
+# Verbes du groupe `artifact` : dériver/constater les artefacts d'une topologie.
+_ARTIFACT_DISPATCH = {
+    "generate": cmd_generate,
+    "status": cmd_status,
+    "diff": cmd_diff,
+    "runs": cmd_runs,
+    "metrics": cmd_metrics,
+}
+
+# Verbes du groupe `test` : épreuves jouables + réversibilité (scenarios = ex-epreuves).
+_TEST_DISPATCH = {
+    "scenarios": cmd_epreuves,
+    "smoke": cmd_smoke,
+    "roundtrip": cmd_roundtrip,
+}
+
+
+def cmd_artifact(args: argparse.Namespace) -> int:
+    """Routeur du groupe `artifact` (generate | status | diff | runs | metrics)."""
+    return _ARTIFACT_DISPATCH[args.artifact_cmd](args)
+
+
+def cmd_test(args: argparse.Namespace) -> int:
+    """Routeur du groupe `test` (scenarios | smoke | roundtrip)."""
+    return _TEST_DISPATCH[args.test_cmd](args)
+
+
 _DISPATCH = {
     "stack": cmd_stack,  # calque `pulumi stack` (new | ls | select | validate)
     # Cycle de vie au TOP-LEVEL (fidèle à Pulumi : preview/refresh/destroy/up plats).
     "refresh": cmd_stack_refresh,  # calque `pulumi refresh` (top-level chez Pulumi)
-    "destroy": cmd_destroy,  # calque `pulumi destroy`
-    "generate": cmd_generate,
-    "diff": cmd_diff,
-    "status": cmd_status,
-    "epreuves": cmd_epreuves,
-    "runs": cmd_runs,
-    "preview": cmd_preview,
+    "preview": cmd_preview,  # calque `pulumi preview`
     "next": cmd_next,
-    "metrics": cmd_metrics,
-    "smoke": cmd_smoke,
-    "roundtrip": cmd_roundtrip,
+    "destroy": cmd_destroy,  # calque `pulumi destroy`
+    # Groupes noun-verb (annexe rangée) : artefacts dérivés/constatés + épreuves.
+    "artifact": cmd_artifact,
+    "test": cmd_test,
     "ha-3cp": cmd_ha_3cp,
 }
 
@@ -1104,7 +1126,13 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="topology",
         description="Façade CLI/CI de l'outil déclaratif des topologies (ADR 0056, P3-P4).",
     )
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    # metavar explicite : liste les commandes PUBLIQUES (ha-3cp, interne, est masquée
+    # — son sous-parser existe avec help=SUPPRESS mais n'apparaît pas dans le résumé).
+    sub = ap.add_subparsers(
+        dest="cmd",
+        required=True,
+        metavar="{stack,refresh,preview,next,destroy,artifact,test}",
+    )
 
     def _add_file(p: argparse.ArgumentParser) -> None:
         p.add_argument(
@@ -1169,7 +1197,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_file(p_refresh)
 
-    p_gen = sub.add_parser("generate", help="dérive un artefact (inventaire ou run-params)")
+    # ── Groupe `artifact` (noun-verb) : dériver/constater les artefacts ───────────
+    p_artifact = sub.add_parser(
+        "artifact", help="dérive/constate les artefacts (generate | status | diff | runs | metrics)"
+    )
+    artifact_sub = p_artifact.add_subparsers(dest="artifact_cmd", required=True)
+
+    p_gen = artifact_sub.add_parser(
+        "generate", help="dérive un artefact (inventaire ou run-params)"
+    )
     _add_file(p_gen)
     p_gen.add_argument(
         "--kind",
@@ -1190,7 +1226,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_gen.add_argument("-o", "--output", default=None, help="fichier de sortie (défaut : stdout)")
 
-    p_diff = sub.add_parser("diff", help="vérifie l'invariant byte-identique (code 1 si dérive)")
+    p_diff = artifact_sub.add_parser(
+        "diff", help="vérifie l'invariant byte-identique (code 1 si dérive)"
+    )
     _add_file(p_diff)
     p_diff.add_argument(
         "--kind",
@@ -1207,7 +1245,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--lima-home", default=os.environ.get("HOME"), help="$HOME du poste (si --kind lima)"
     )
 
-    p_sta = sub.add_parser("status", help="état voulu (et --real → state.sh)")
+    p_sta = artifact_sub.add_parser("status", help="état voulu (et --real → state.sh)")
     _add_file(p_sta)
     p_sta.add_argument(
         "--real",
@@ -1218,14 +1256,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--hosts", nargs="*", default=None, help="hôtes passés à state.sh (défaut : tous)"
     )
 
-    p_epr = sub.add_parser("epreuves", help="liste les épreuves jouables filtrées par la topologie")
-    _add_file(p_epr)
-    p_epr.add_argument("--all", action="store_true", help="montrer aussi les exclues + la raison")
-    p_epr.add_argument(
-        "--type", choices=["unit", "intég", "chaos"], default=None, help="filtrer par type"
+    p_runs = artifact_sub.add_parser(
+        "runs", help="lit l'historique des runs + verdict de fraîcheur"
     )
-
-    p_runs = sub.add_parser("runs", help="lit l'historique des runs + verdict de fraîcheur")
     p_runs.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_runs.add_argument("--target", default=None, help="chemin nommé ciblé (atlas, storage-real…)")
     p_runs.add_argument(
@@ -1265,20 +1298,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="LANCER la phase suggérée via ansible-runner (décision humaine, ADR 0063)",
     )
 
-    p_met = sub.add_parser("metrics", help="expose les métriques consignées (durées, cpu/ram)")
+    p_met = artifact_sub.add_parser(
+        "metrics", help="expose les métriques consignées (durées, cpu/ram)"
+    )
     p_met.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_met.add_argument("--last", action="store_true", help="seulement le dernier run")
     p_met.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
     )
 
-    p_smk = sub.add_parser("smoke", help="smoke-test de réversibilité (créer→vérifier→détruire)")
+    # ── Groupe `test` (noun-verb) : épreuves jouables + réversibilité ─────────────
+    p_test = sub.add_parser(
+        "test", help="épreuves jouables + réversibilité (scenarios | smoke | roundtrip)"
+    )
+    test_sub = p_test.add_subparsers(dest="test_cmd", required=True)
+
+    p_epr = test_sub.add_parser(
+        "scenarios", help="liste les scénarios jouables filtrés par la topologie"
+    )
+    _add_file(p_epr)
+    p_epr.add_argument("--all", action="store_true", help="montrer aussi les exclus + la raison")
+    p_epr.add_argument(
+        "--type", choices=["unit", "intég", "chaos"], default=None, help="filtrer par type"
+    )
+
+    p_smk = test_sub.add_parser(
+        "smoke", help="smoke-test de réversibilité (créer→vérifier→détruire)"
+    )
     p_smk.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_smk.add_argument(
         "--namespace", default=None, help="nom du namespace jetable (défaut : topology-smoke)"
     )
 
-    p_rt = sub.add_parser(
+    p_rt = test_sub.add_parser(
         "roundtrip",
         help="round-trip d'une couche + sa clôture : détruire→vérifier→reconstruire→vérifier",
     )
@@ -1299,10 +1351,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="sauter la confirmation interactive (requis hors TTY pour détruire)",
     )
 
-    p_ha = sub.add_parser(
-        "ha-3cp",
-        help="orchestre le montage HA ha-3cp (Ansible via Python ; VM/CNI restent run-phases.sh)",
-    )
+    # ha-3cp : commande INTERNE (appelée par run-phases.sh avec --cp-ip/--vip dérivés
+    # du banc), pas un verbe du menu public — MASQUÉE du --help (argparse.SUPPRESS).
+    # Reste invocable. Sera absorbée par `up` (inversion de frontière, ADR 0063).
+    p_ha = sub.add_parser("ha-3cp", help=argparse.SUPPRESS)
     p_ha.add_argument("--nodes", default="cp1,cp2,cp3", help="CP, le 1er = primaire (csv)")
     p_ha.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
     p_ha.add_argument("--vip", required=True, help="VIP de l'API (kube-vip)")

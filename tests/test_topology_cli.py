@@ -122,28 +122,30 @@ class StackValidate(unittest.TestCase):
 class Generate(unittest.TestCase):
     def test_prod_inventory_matches_facade(self):
         # generate doit ré-émettre EXACTEMENT render_prod_inventory (invariant P1).
-        code, out, _ = _capture(["generate", "-f", _EXAMPLE, "--kind", "prod"])
+        code, out, _ = _capture(["artifact", "generate", "-f", _EXAMPLE, "--kind", "prod"])
         self.assertEqual(code, 0)
         self.assertEqual(out, render_prod_inventory(load_topology(_EXAMPLE)))
 
     def test_lima_inventory_matches_facade(self):
         topo = load_topology(_EXAMPLE)
         # l'exemple est prod ; on force --kind lima avec un HOME fixe.
-        code, out, _ = _capture(["generate", "-f", _EXAMPLE, "--kind", "lima", "--lima-home", "/H"])
+        code, out, _ = _capture(
+            ["artifact", "generate", "-f", _EXAMPLE, "--kind", "lima", "--lima-home", "/H"]
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, render_lima_inventory(topo, "/H"))
 
     def test_run_params_yaml_reparses_to_derivation(self):
         import yaml
 
-        code, out, _ = _capture(["generate", "-f", _EXAMPLE, "--what", "run-params"])
+        code, out, _ = _capture(["artifact", "generate", "-f", _EXAMPLE, "--what", "run-params"])
         self.assertEqual(code, 0)
         self.assertEqual(yaml.safe_load(out), derive_run_params(load_topology(_EXAMPLE)))
 
     def test_output_to_file(self):
         dst = _tmp("")
         self.addCleanup(os.unlink, dst)
-        code, out, _ = _capture(["generate", "-f", _EXAMPLE, "-o", dst])
+        code, out, _ = _capture(["artifact", "generate", "-f", _EXAMPLE, "-o", dst])
         self.assertEqual(code, 0)
         self.assertEqual(out, "")  # rien sur stdout quand -o
         with open(dst, encoding="utf-8") as f:
@@ -152,7 +154,9 @@ class Generate(unittest.TestCase):
     def test_output_to_invalid_dir_is_usage_error(self):
         # -o vers un répertoire absent = destination invalide fournie en argument
         # → erreur d'usage (code 2), pas erreur métier (code 1).
-        code, _, err = _capture(["generate", "-f", _EXAMPLE, "-o", "/nope/nope/inv.yaml"])
+        code, _, err = _capture(
+            ["artifact", "generate", "-f", _EXAMPLE, "-o", "/nope/nope/inv.yaml"]
+        )
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
@@ -160,7 +164,7 @@ class Generate(unittest.TestCase):
 class Diff(unittest.TestCase):
     def test_prod_invariant_holds(self):
         # topologies/socle.example.yaml régénère hosts.example.yaml à l'octet → code 0, vide.
-        code, out, _ = _capture(["diff", "-f", _EXAMPLE, "--kind", "prod"])
+        code, out, _ = _capture(["artifact", "diff", "-f", _EXAMPLE, "--kind", "prod"])
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -168,20 +172,22 @@ class Diff(unittest.TestCase):
         # comparer l'inventaire prod régénéré à une référence DIFFÉRENTE → code 1.
         ref = _tmp("# pas l'inventaire attendu\n")
         self.addCleanup(os.unlink, ref)
-        code, out, _ = _capture(["diff", "-f", _EXAMPLE, "--kind", "prod", "--against", ref])
+        code, out, _ = _capture(
+            ["artifact", "diff", "-f", _EXAMPLE, "--kind", "prod", "--against", ref]
+        )
         self.assertEqual(code, 1)
         self.assertIn("généré", out)  # un diff unifié a été émis
 
     def test_missing_reference_is_usage_error(self):
         code, _, err = _capture(
-            ["diff", "-f", _EXAMPLE, "--kind", "prod", "--against", "/nope.yaml"]
+            ["artifact", "diff", "-f", _EXAMPLE, "--kind", "prod", "--against", "/nope.yaml"]
         )
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
     def test_lima_requires_against(self):
         # pas de golden Lima versionné → --against obligatoire (code 2 sans).
-        code, _, err = _capture(["diff", "-f", _EXAMPLE, "--kind", "lima"])
+        code, _, err = _capture(["artifact", "diff", "-f", _EXAMPLE, "--kind", "lima"])
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
@@ -194,14 +200,14 @@ class Diff(unittest.TestCase):
     def test_default_kind_and_against_resolve_to_prod(self):
         # sans --kind ni --against, l'exemple (target_kind: prod) doit tenir
         # l'invariant — garantit que le défaut de la cible CI est exécutable tel quel.
-        code, out, _ = _capture(["diff", "-f", _EXAMPLE])
+        code, out, _ = _capture(["artifact", "diff", "-f", _EXAMPLE])
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
 
 class Status(unittest.TestCase):
     def test_wanted_state_no_real(self):
-        code, out, _ = _capture(["status", "-f", _EXAMPLE])
+        code, out, _ = _capture(["artifact", "status", "-f", _EXAMPLE])
         self.assertEqual(code, 0)
         self.assertIn("control-planes", out)
         self.assertIn("stockage", out)
@@ -216,7 +222,7 @@ class Status(unittest.TestCase):
         orig = cli.subprocess.run
         cli.subprocess.run = lambda *a, **k: sentinel
         self.addCleanup(setattr, cli.subprocess, "run", orig)
-        code, _, _ = _capture(["status", "-f", _EXAMPLE, "--real"])
+        code, _, _ = _capture(["artifact", "status", "-f", _EXAMPLE, "--real"])
         self.assertEqual(code, 2)
 
     def test_real_passes_topology_hosts_not_hardcoded(self):
@@ -233,7 +239,7 @@ class Status(unittest.TestCase):
         orig = cli.subprocess.run
         cli.subprocess.run = _spy
         self.addCleanup(setattr, cli.subprocess, "run", orig)
-        _capture(["status", "-f", _EXAMPLE, "--real"])
+        _capture(["artifact", "status", "-f", _EXAMPLE, "--real"])
         # _EXAMPLE (socle) = cp1 + node1..node4 → tous présents, dérivés de la topo.
         topo = load_topology(_EXAMPLE)
         for host in topo.control_nodes + topo.worker_nodes:
@@ -248,7 +254,7 @@ class Status(unittest.TestCase):
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
-        code, out, _ = _capture(["status", "-f", path])
+        code, out, _ = _capture(["artifact", "status", "-f", path])
         self.assertEqual(code, 0)
         self.assertIn("node1+worker", out)
         self.assertIn("hyperconvergés", out)  # la ligne workers signale l'hyperconvergence
@@ -256,13 +262,13 @@ class Status(unittest.TestCase):
 
 class Epreuves(unittest.TestCase):
     def test_lists_playable(self):
-        code, out, _ = _capture(["epreuves", "-f", _EXAMPLE])
+        code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE])
         self.assertEqual(code, 0)
         self.assertIn("jouables", out)
         self.assertIn("vérifié au lancement, P5", out)  # n'en lance aucune
 
     def test_all_shows_excluded(self):
-        code, out, _ = _capture(["epreuves", "-f", _EXAMPLE, "--all"])
+        code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE, "--all"])
         self.assertEqual(code, 0)
         self.assertIn("exclues", out)
         self.assertIn("offensif", out)  # 17-21 exclus en prod (ADR 0025)
@@ -270,7 +276,7 @@ class Epreuves(unittest.TestCase):
     def test_invalid_topology_is_business_error(self):
         path = _tmp("nodes:\n  - name: x\n    roles: [master]\n")
         self.addCleanup(os.unlink, path)
-        code, _, _ = _capture(["epreuves", "-f", path])
+        code, _, _ = _capture(["test", "scenarios", "-f", path])
         self.assertEqual(code, 1)
 
 
@@ -289,7 +295,7 @@ runs:
         # bloquant de CI reste check-freshness.sh, non dupliqué).
         hist = _tmp(self._HIST)
         self.addCleanup(os.unlink, hist)
-        code, out, _ = _capture(["runs", "--history", hist])
+        code, out, _ = _capture(["artifact", "runs", "--history", hist])
         self.assertEqual(code, 0)
         self.assertIn("run(s) consigné", out)
 
@@ -298,12 +304,12 @@ runs:
         # explicite + état global, code 0 (pas un plantage).
         hist = _tmp(self._HIST)  # _HIST n'a pas de champ target
         self.addCleanup(os.unlink, hist)
-        code, out, _ = _capture(["runs", "--history", hist, "--target", "atlas"])
+        code, out, _ = _capture(["artifact", "runs", "--history", hist, "--target", "atlas"])
         self.assertEqual(code, 0)
         self.assertIn("aucune entrée ne porte de chemin", out)
 
     def test_missing_history_is_business_error(self):
-        code, _, err = _capture(["runs", "--history", "/nope/runs.yaml"])
+        code, _, err = _capture(["artifact", "runs", "--history", "/nope/runs.yaml"])
         self.assertEqual(code, 1)
         self.assertIn("erreur", err)
 
@@ -560,7 +566,7 @@ runs:
     def test_exposes_consigned_metrics(self):
         hist = _tmp(self._HIST)
         self.addCleanup(os.unlink, hist)
-        code, out, _ = _capture(["metrics", "--history", hist])
+        code, out, _ = _capture(["artifact", "metrics", "--history", hist])
         self.assertEqual(code, 0)
         self.assertIn("cpu_core_s=272", out)
         self.assertIn("12m39s", out)  # 759 s
@@ -568,7 +574,7 @@ runs:
     def test_empty_history(self):
         hist = _tmp("runs: []\n")
         self.addCleanup(os.unlink, hist)
-        code, out, _ = _capture(["metrics", "--history", hist])
+        code, out, _ = _capture(["artifact", "metrics", "--history", hist])
         self.assertEqual(code, 0)
         self.assertIn("aucun run", out)
 
@@ -584,7 +590,7 @@ class Smoke(unittest.TestCase):
         orig = cli._smoke.run_smoke
         cli._smoke.run_smoke = lambda ns: res
         self.addCleanup(setattr, cli._smoke, "run_smoke", orig)
-        code, out, _ = _capture(["smoke"])
+        code, out, _ = _capture(["test", "smoke"])
         self.assertEqual(code, 0)
         self.assertIn("réversible", out)
 
@@ -595,7 +601,7 @@ class Smoke(unittest.TestCase):
         orig = cli._smoke.run_smoke
         cli._smoke.run_smoke = lambda ns: res
         self.addCleanup(setattr, cli._smoke, "run_smoke", orig)
-        code, _, _ = _capture(["smoke"])
+        code, _, _ = _capture(["test", "smoke"])
         self.assertEqual(code, 1)
 
     def test_cluster_unavailable_is_usage_error(self):
@@ -605,7 +611,7 @@ class Smoke(unittest.TestCase):
         orig = cli._smoke.run_smoke
         cli._smoke.run_smoke = boom
         self.addCleanup(setattr, cli._smoke, "run_smoke", orig)
-        code, _, err = _capture(["smoke"])
+        code, _, err = _capture(["test", "smoke"])
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
@@ -626,7 +632,7 @@ class Roundtrip(unittest.TestCase):
                 steps=[RoundtripStep("détruire", True), RoundtripStep("vérifier sain", True)],
             )
         )
-        code, out, _ = _capture(["roundtrip", "--phase", "monitoring", "--yes"])
+        code, out, _ = _capture(["test", "roundtrip", "--phase", "monitoring", "--yes"])
         self.assertEqual(code, 0)
         self.assertIn("réversible", out)
 
@@ -640,7 +646,7 @@ class Roundtrip(unittest.TestCase):
                 steps=[RoundtripStep("détruire gitops", False, "rc=3")],
             )
         )
-        code, _, _ = _capture(["roundtrip", "--phase", "gitops", "--yes"])
+        code, _, _ = _capture(["test", "roundtrip", "--phase", "gitops", "--yes"])
         self.assertEqual(code, 1)
 
     def test_storage_without_full_is_usage_error(self):
@@ -651,7 +657,7 @@ class Roundtrip(unittest.TestCase):
         orig = cli._roundtrip.run_roundtrip
         cli._roundtrip.run_roundtrip = boom
         self.addCleanup(setattr, cli._roundtrip, "run_roundtrip", orig)
-        code, _, err = _capture(["roundtrip", "--phase", "ceph", "--yes"])
+        code, _, err = _capture(["test", "roundtrip", "--phase", "ceph", "--yes"])
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
@@ -668,18 +674,18 @@ class Roundtrip(unittest.TestCase):
         orig = cli._roundtrip.run_roundtrip
         cli._roundtrip.run_roundtrip = capture
         self.addCleanup(setattr, cli._roundtrip, "run_roundtrip", orig)
-        _capture(["roundtrip", "--phase", "ceph", "--full", "--yes"])
+        _capture(["test", "roundtrip", "--phase", "ceph", "--full", "--yes"])
         self.assertTrue(seen["full"])
         self.assertTrue(seen["yes"])
 
     def test_unknown_phase_is_argparse_usage(self):
         with self.assertRaises(SystemExit) as ctx:
-            cli.main(["roundtrip", "--phase", "frobnicate"])
+            cli.main(["test", "roundtrip", "--phase", "frobnicate"])
         self.assertEqual(ctx.exception.code, 2)  # choices argparse
 
     def test_phase_required(self):
         with self.assertRaises(SystemExit) as ctx:
-            cli.main(["roundtrip"])
+            cli.main(["test", "roundtrip"])
         self.assertEqual(ctx.exception.code, 2)
 
 
