@@ -205,61 +205,6 @@ class Diff(unittest.TestCase):
         self.assertEqual(out, "")
 
 
-class Status(unittest.TestCase):
-    def test_wanted_state_no_real(self):
-        code, out, _ = _capture(["artifact", "status", "-f", _EXAMPLE])
-        self.assertEqual(code, 0)
-        self.assertIn("control-planes", out)
-        self.assertIn("stockage", out)
-        self.assertIn("profil", out)
-
-    def test_real_propagates_state_sh_code(self):
-        # --real délègue à state.sh (SSH+kubectl) : non lançable en CI. On vérifie
-        # que le code de state.sh est PROPAGÉ, sans réseau, en stubant subprocess.run.
-        import subprocess
-
-        sentinel = subprocess.CompletedProcess(args=[], returncode=2)
-        orig = cli.subprocess.run
-        cli.subprocess.run = lambda *a, **k: sentinel
-        self.addCleanup(setattr, cli.subprocess, "run", orig)
-        code, _, _ = _capture(["artifact", "status", "-f", _EXAMPLE, "--real"])
-        self.assertEqual(code, 2)
-
-    def test_real_passes_topology_hosts_not_hardcoded(self):
-        # --real sans --hosts interroge les nœuds de la TOPO active (dérivés), pas la
-        # liste codée en dur de state.sh. On capture la commande passée à subprocess.
-        import subprocess
-
-        captured = {}
-
-        def _spy(cmd, *a, **k):
-            captured["cmd"] = cmd
-            return subprocess.CompletedProcess(args=cmd, returncode=0)
-
-        orig = cli.subprocess.run
-        cli.subprocess.run = _spy
-        self.addCleanup(setattr, cli.subprocess, "run", orig)
-        _capture(["artifact", "status", "-f", _EXAMPLE, "--real"])
-        # _EXAMPLE (socle) = cp1 + node1..node4 → tous présents, dérivés de la topo.
-        topo = load_topology(_EXAMPLE)
-        for host in topo.control_nodes + topo.worker_nodes:
-            self.assertIn(host, captured["cmd"])
-
-    def test_hyperconverged_node_annotated(self):
-        # Un nœud control+worker s'affiche `<nom>+worker` ; workers purs = «—» annoté.
-        topo_yaml = (
-            "catalog: {topology: hc, profile: base}\n"
-            "nodes:\n  - {name: node1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
-        )
-        path = _tmp(topo_yaml)
-        self.addCleanup(os.unlink, path)
-        code, out, _ = _capture(["artifact", "status", "-f", path])
-        self.assertEqual(code, 0)
-        self.assertIn("node1+worker", out)
-        self.assertIn("hyperconvergés", out)  # la ligne workers signale l'hyperconvergence
-
-
 class Epreuves(unittest.TestCase):
     def test_lists_playable(self):
         code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE])
@@ -315,7 +260,7 @@ runs:
 
 
 class Preview(unittest.TestCase):
-    """`preview` : plan COMPLET voulu→réel (toute la séquence + état), read-only."""
+    """`preview` : LA vue complète VOULU + RÉEL + PLAN (absorbe status + refresh)."""
 
     _EMPTY_HIST = "runs: []\n"
     # Socle Ceph frais joué SUR LA STACK _EXAMPLE (topologie: multi-node-4) → le
@@ -357,6 +302,34 @@ runs:
         cli._ready_nodes = lambda: []
         self.addCleanup(setattr, cli, "_real_vms", self._orig_vms)
         self.addCleanup(setattr, cli, "_ready_nodes", self._orig_ready)
+
+    def test_three_sections_voulu_reel_plan(self):
+        # preview absorbe status (VOULU) + refresh (RÉEL) : les 3 sections présentes.
+        hist = _tmp(self._EMPTY_HIST)
+        self.addCleanup(os.unlink, hist)
+        code, out, _ = _capture(["preview", "-f", _EXAMPLE, "--history", hist])
+        self.assertEqual(code, 0)
+        self.assertIn("VOULU", out)
+        self.assertIn("RÉEL", out)
+        self.assertIn("PLAN", out)
+        # VOULU (ex-status) : nœuds/profil/backend déclarés.
+        self.assertIn("control-planes", out)
+        self.assertIn("profil", out)
+        # RÉEL (ex-refresh) : les VMs à créer (terrain vierge, stub vms=[]).
+        self.assertIn("VMs à créer", out)
+
+    def test_hyperconverged_node_annotated_in_voulu(self):
+        # Section VOULU : un nœud control+worker s'affiche `<nom>+worker` (ex-status).
+        topo_yaml = (
+            "catalog: {topology: hc, profile: base}\n"
+            "nodes:\n  - {name: node1, roles: [control, worker]}\n"
+            "storage: {backend: local-path}\ntarget_kind: lima\n"
+        )
+        path = _tmp(topo_yaml)
+        self.addCleanup(os.unlink, path)
+        code, out, _ = _capture(["preview", "-f", path])
+        self.assertEqual(code, 0)
+        self.assertIn("node1+worker", out)
 
     def test_shows_full_sequence_with_labels(self):
         # Historique frais partiel → socle à-jour, queue à installer ; libellés MÉTIER.
@@ -435,10 +408,12 @@ runs:
         self.assertIn("usage", err)
 
 
-class Next(unittest.TestCase):
+class Up(unittest.TestCase):
+    """`up` (ex `next --apply`) : applique la prochaine couche manquante via runner."""
+
     _EMPTY_HIST = "runs: []\n"
-    # Historique frais où le socle Ceph est joué → la 1re phase manquante de
-    # cluster-dataops est `datalake` (qui A un playbook unitaire, donc --apply-able).
+    # Historique frais où le socle Ceph est joué → la 1re couche manquante de
+    # cluster-dataops est `datalake` (qui A un playbook unitaire, donc applicable).
     _SOCLE_DONE = f"""\
 runs:
   - id: r1
@@ -452,28 +427,13 @@ runs:
       sc: 1
 """
 
-    def test_suggests_without_apply_is_zero_and_never_launches(self):
-        # Sans --apply : informatif, code 0, et le runner n'est JAMAIS appelé.
-        called = []
-        orig = cli._runner.launch_phase
-        cli._runner.launch_phase = lambda *a, **k: called.append(1)
-        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
-        hist = _tmp(self._EMPTY_HIST)
-        self.addCleanup(os.unlink, hist)
-        code, out, _ = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "atlas-ceph", "--history", hist]
-        )
-        self.assertEqual(code, 0)
-        self.assertIn("Prochaine étape", out)
-        self.assertEqual(called, [])  # aucun lancement sans --apply
-
     def test_unknown_target_is_usage_error(self):
-        code, _, err = _capture(["next", "-f", _EXAMPLE, "--target", "frobnicate"])
+        code, _, err = _capture(["up", "-f", _EXAMPLE, "--target", "frobnicate"])
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
     def _ensure_inventory(self):
-        """Garantit un bootstrap/hosts.yaml (gitignoré, absent en CI) pour --apply ;
+        """Garantit un bootstrap/hosts.yaml (gitignoré, absent en CI) pour `up` ;
         le retire ensuite si on l'a créé. Sinon le garde-fou d'inventaire bloque."""
         inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
         if not os.path.exists(inv):
@@ -481,8 +441,8 @@ runs:
                 f.write("# inventaire de test (créé puis retiré)\n")
             self.addCleanup(os.unlink, inv)
 
-    def test_apply_launches_runner_and_maps_rc(self):
-        # --apply appelle runner.launch_phase (stub rc=0) → code 0 ; UNE phase.
+    def test_applies_one_layer_and_maps_rc(self):
+        # `up` appelle runner.launch_phase (stub rc=0) → code 0 ; UNE couche.
         from cluster_topology.runner import RunResult
 
         self._ensure_inventory()
@@ -498,17 +458,14 @@ runs:
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
         code, _, _ = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+            ["up", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
         )
         self.assertEqual(code, 0)
-        self.assertEqual(len(calls), 1)  # UNE phase lancée, pas la séquence
-        # 1re phase manquante après le socle = datalake (l'exemple a hardening
-        # désactivé) ; le point clé : UNE phase, avec un playbook réel.
+        self.assertEqual(len(calls), 1)  # UNE couche montée, pas la séquence
         self.assertTrue(calls[0][0].endswith(".yaml"))
 
-    def test_apply_without_inventory_is_usage_error(self):
-        # --apply sans bootstrap/hosts.yaml → erreur d'usage claire (code 2),
-        # pas une erreur cryptique d'ansible-runner.
+    def test_without_inventory_is_usage_error(self):
+        # `up` sans bootstrap/hosts.yaml → erreur d'usage claire (code 2).
         inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
         if os.path.exists(inv):
             self.skipTest("bootstrap/hosts.yaml présent localement — cas testé en CI")
@@ -518,12 +475,12 @@ runs:
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
         code, _, err = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+            ["up", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
         )
         self.assertEqual(code, 2)
         self.assertIn("inventaire absent", err)
 
-    def test_apply_propagates_failure_rc(self):
+    def test_propagates_failure_rc(self):
         from cluster_topology.runner import RunResult
 
         self._ensure_inventory()
@@ -533,19 +490,19 @@ runs:
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
         code, _, _ = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+            ["up", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
         )
         self.assertEqual(code, 1)  # run KO → code 1
 
-    def test_apply_on_non_playbook_phase_is_usage_error(self):
-        # Une phase sans play unitaire (up, sur rejeu depuis zéro) ne s'apply pas.
+    def test_non_playbook_layer_is_usage_error(self):
+        # Une couche sans play unitaire (up/bootstrap, sur rejeu depuis zéro) ne s'applique pas.
         orig = cli._runner.launch_phase
         cli._runner.launch_phase = lambda *a, **k: None
         self.addCleanup(setattr, cli._runner, "launch_phase", orig)
         hist = _tmp(self._EMPTY_HIST)
         self.addCleanup(os.unlink, hist)
         code, _, err = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--apply"]
+            ["up", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
         )
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
@@ -793,41 +750,6 @@ class Stack(unittest.TestCase):
         self.assertIn("★", out)
         # socle.example (dataops+ceph) dérive atlas-ceph.
         self.assertIn("atlas-ceph", out)
-
-
-class StackRefresh(unittest.TestCase):
-    """`refresh` : lit le réel (stubé) et classe l'état. Read-only, sans réseau."""
-
-    def _stub(self, vms, ready):
-        # Stub des helpers d'I/O réelle : aucun subprocess limactl/kubectl en test.
-        orig_v, orig_n = cli._real_vms, cli._ready_nodes
-        cli._real_vms = lambda: vms
-        cli._ready_nodes = lambda: ready
-        self.addCleanup(setattr, cli, "_real_vms", orig_v)
-        self.addCleanup(setattr, cli, "_ready_nodes", orig_n)
-
-    def test_orphan_vms_flagged(self):
-        # _EXAMPLE (socle, nœuds cp1+node1..4) ; un cluster réel cp9/cp8 = orphelins.
-        self._stub(vms=["cp9", "cp8"], ready=[])
-        code, out, _ = _capture(["refresh", "-f", _EXAMPLE])
-        self.assertEqual(code, 0)
-        self.assertIn("ORPHELINES", out)
-        self.assertIn("cp9", out)
-        self.assertIn("détruire", out)
-
-    def test_empty_terrain(self):
-        self._stub(vms=[], ready=[])
-        code, out, _ = _capture(["refresh", "-f", _EXAMPLE])
-        self.assertEqual(code, 0)
-        self.assertIn("terrain vierge", out)
-
-    def test_declared_vm_present_not_orphan(self):
-        # cp1 est déclaré par _EXAMPLE → présent, PAS orphelin.
-        self._stub(vms=["cp1"], ready=["cp1"])
-        code, out, _ = _capture(["refresh", "-f", _EXAMPLE])
-        self.assertEqual(code, 0)
-        self.assertNotIn("ORPHELINES", out)
-        self.assertIn("cp1", out)
 
 
 class Destroy(unittest.TestCase):

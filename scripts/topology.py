@@ -24,13 +24,11 @@ Usage — gestion des stacks (catalogue, calque `pulumi stack`) :
   uv run python scripts/topology.py stack select <nom>
   uv run python scripts/topology.py stack validate [-f topology.yaml]
 Usage — cycle de vie (top-level, calque Pulumi) :
-  uv run python scripts/topology.py refresh                   (calque pulumi refresh)
-  uv run python scripts/topology.py preview [--target …]      (calque pulumi preview)
-  uv run python scripts/topology.py next [--target …] [--apply]                   (P5)
-  uv run python scripts/topology.py destroy [--yes]           (calque pulumi destroy)
+  uv run python scripts/topology.py preview [--target …]      (voir : VOULU+RÉEL+PLAN)
+  uv run python scripts/topology.py up [--target …]          (appliquer la couche suivante)
+  uv run python scripts/topology.py destroy [--yes]          (calque pulumi destroy)
 Usage — artefacts (dériver/constater, groupe `artifact`) :
   uv run python scripts/topology.py artifact generate [--kind prod|lima] [--what …]
-  uv run python scripts/topology.py artifact status [--real [--hosts cp1 node1]]
   uv run python scripts/topology.py artifact diff [--kind prod|lima --against PATH]
   uv run python scripts/topology.py artifact runs [--target atlas|…]               (P4)
   uv run python scripts/topology.py artifact metrics [--last]                       (P6)
@@ -39,12 +37,13 @@ Usage — épreuves & réversibilité (groupe `test`) :
   uv run python scripts/topology.py test smoke [--namespace …]                       (P6)
   uv run python scripts/topology.py test roundtrip --phase monitoring|gitops|…       (P6+)
 
-P4 ajoute deux commandes READ-ONLY : `epreuves` (liste filtrée par la topologie,
-exig. 6 — ne lance rien) et `runs` (lit l'historique + fraîcheur, exig. 10-12 —
-ne réécrit rien). P5 ajoute `next` : suggère la prochaine phase (diff voulu−réel) ;
-`--apply` la LANCE via ansible-runner — décision humaine explicite, jamais
-d'auto-apply (ADR 0063). Sans --apply, `next` est informatif (code 0). P6 ajoute
-`metrics` (expose les métriques DÉJÀ consignées, exig. 8 — ne mesure rien de neuf)
+P4 ajoute deux commandes READ-ONLY : `test scenarios` (liste filtrée par la
+topologie, exig. 6 — ne lance rien) et `artifact runs` (lit l'historique +
+fraîcheur, exig. 10-12 — ne réécrit rien). P5 : `preview` MONTRE le plan complet
+(VOULU+RÉEL+PLAN, read-only) et `up` l'APPLIQUE — la 1re couche manquante via
+ansible-runner ; lancer `up` EST la décision humaine (jamais d'auto-enchaînement,
+ADR 0063). P6 ajoute `artifact metrics` (expose les métriques DÉJÀ consignées,
+exig. 8 — ne mesure rien de neuf)
 et `smoke` (test de réversibilité créer→vérifier→détruire sur un cluster vivant,
 exig. 7 — couche kubernetes isolée, code 1 si non réversible). `roundtrip`
 généralise `smoke` à une COUCHE entière (détruire→vérifier→reconstruire→vérifier),
@@ -118,9 +117,8 @@ _CATALOG_DIR = os.path.join(_ROOT, "topologies")
 _DEFAULT_TOPOLOGY = os.path.join(_ROOT, "topology.yaml")
 _EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "socle.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
-_STATE_SH = os.path.join(_ROOT, "bootstrap", "state.sh")
 _RUNS_HISTORY = os.path.join(_ROOT, "test", "lima", "runs-history.yaml")
-# Borne l'attente de `stack refresh` sur limactl/kubectl : un cluster injoignable ou
+# Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
 # un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha._vm_exec).
 _REFRESH_TIMEOUT_S = 8
 # Chemins nommés connus de l'historique (ADR 0045 §6) pour le verdict par chemin.
@@ -445,36 +443,6 @@ def _ready_nodes() -> list[str]:
     return ready
 
 
-def cmd_stack_refresh(args: argparse.Namespace) -> int:
-    """`refresh` : resynchronise l'état RÉEL de la stack active depuis le réel.
-
-    Calque `pulumi refresh` : lit les VMs Lima (`limactl`) + les nœuds k8s (`kubectl`)
-    et CLASSE (classify_refresh, pur) l'état de la stack active : VMs présentes, VMs
-    ORPHELINES (réelles mais hors stack → à détruire d'abord), VMs manquantes (à créer),
-    nœuds Ready. Read-only : ne STOCKE aucun state (ADR 0056 §7), ne lance rien. Code 0
-    toujours (informatif). C'est la base que `preview` consomme pour dire quoi détruire
-    avant d'installer."""
-    path = _resolve(args.file)
-    topo = load_topology(path)
-    stack = topo.catalog.get("topology", "—")
-    declared = topo.control_nodes + topo.worker_nodes
-    state = classify_refresh(stack, declared, _real_vms(), _ready_nodes())
-
-    print(f"stack : {stack}  (état réel lu — non stocké, ADR 0056 §7)")
-    if state.vms_orphan:
-        print(
-            f"  ⚠ VMs ORPHELINES (hors stack, à détruire d'abord) : {', '.join(state.vms_orphan)}"
-        )
-    print(f"  VMs de la stack présentes : {', '.join(state.vms_present) or '—'}")
-    print(f"  VMs à créer (déclarées, absentes) : {', '.join(state.vms_missing) or '—'}")
-    print(f"  nœuds k8s Ready : {', '.join(state.nodes_ready) or '—'}")
-    if state.is_empty:
-        print("→ terrain vierge (aucune VM) — montage propre depuis zéro.")
-    elif state.must_destroy_first:
-        print("→ détruire les VMs orphelines avant un montage propre de cette stack.")
-    return 0
-
-
 def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
     """Confirme la DESTRUCTION des VMs `vms`. --yes saute ; hors TTY sans --yes : refus.
 
@@ -652,51 +620,6 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 1
 
 
-def cmd_status(args: argparse.Namespace) -> int:
-    """État VOULU (lu depuis topology.yaml) ; --real délègue l'état réel à state.sh.
-
-    Sans --real : résumé de l'intention (nœuds, HA, backend, profil, exposition,
-    kind). Avec --real : subprocess vers bootstrap/state.sh (lecture seule, on ne
-    le réimplémente pas) en héritant l'environnement (EXPECT_CLUSTER/SSH_OPTS) ;
-    on ré-émet sa sortie et on PROPAGE son code (0/1/2 déjà alignés).
-    """
-    path = _resolve(args.file)
-    topo = load_topology(path)
-    # Hyperconvergence : un nœud control qui porte aussi `worker` schedule des pods
-    # mais vit dans control_nodes (pas worker_nodes) — on l'annote pour que
-    # `workers: —` ne donne pas l'illusion d'un cluster sans capacité de calcul.
-    hc = set(topo.hyperconverged_nodes)
-    control_disp = ", ".join(
-        f"{n}+worker" if n in hc else n for n in topo.control_nodes
-    )
-    workers_disp = ", ".join(topo.worker_nodes) or (
-        "— (control hyperconvergés schedulent)" if hc else "—"
-    )
-    lines = [
-        f"topologie       : {topo.catalog.get('topology', '—')} (kind={topo.target_kind})",
-        f"control-planes  : {control_disp or '—'}"
-        f"{'  [HA → VIP requise]' if topo.is_ha_control_plane else ''}",
-        f"workers         : {workers_disp}",
-        f"profil          : {topo.catalog.get('profile', 'base')}",
-        f"stockage        : {topo.storage.get('backend', 'local-path')}",
-        f"exposition      : {topo.exposition.get('mode', '—')}",
-    ]
-    print("\n".join(lines))
-    if not args.real:
-        return 0
-    # État réel : déléguer à state.sh (SSH+kubectl). Hérite l'env du shell.
-    # Les hôtes interrogés sont ceux de la TOPO ACTIVE (control + workers dérivés),
-    # pas la liste codée en dur de state.sh (cp1 node1 node2 node3) — sinon `--real`
-    # constate une réalité décorrélée du déclaré (ADR 0056). `--hosts` force une
-    # liste explicite (diagnostic ciblé). control_nodes d'abord (le 1er porte kubectl).
-    hosts = args.hosts or (topo.control_nodes + topo.worker_nodes)
-    # shell=False : `hosts` est passé LITTÉRALEMENT à bash (pas d'expansion shell),
-    # donc pas d'injection même si --hosts vient de la ligne de commande.
-    cmd = ["bash", _STATE_SH, *hosts]
-    completed = subprocess.run(cmd, check=False)  # noqa: S603 — shell=False, args littéraux
-    return completed.returncode
-
-
 def cmd_epreuves(args: argparse.Namespace) -> int:
     """Liste les épreuves JOUABLES filtrées par la topologie (exig. 6). Ne LANCE rien.
 
@@ -765,20 +688,19 @@ def _run_for_target(runs, target: str | None):
 
 
 def cmd_preview(args: argparse.Namespace) -> int:
-    """`preview` : montre le PLAN complet (voulu → réel) sans rien appliquer.
+    """`preview` : LA vue complète d'une stack — VOULU + RÉEL + PLAN (calque `pulumi preview`).
 
-    Calque `pulumi preview`. Confronte la stack active au RÉEL (VMs Lima existantes
-    → ce qu'il faut DÉTRUIRE d'abord) ET liste TOUTE la séquence de couches à monter,
-    chacune avec son libellé MÉTIER (phase_label) et son état :
-    - `- détruire`  : VMs orphelines d'une autre stack (à retirer avant un montage propre) ;
-    - `+ à installer`: couche jamais montée (stack neuve — on n'a JAMAIS joué l'inédit) ;
-    - `~ à rejouer`  : couche d'un run PÉRIMÉ (déjà montée mais run plus frais) ;
-    - `✓ à-jour`     : couche présente et fraîche.
+    Une seule commande « où j'en suis + quoi faire » (absorbe l'ancien `status` et
+    l'ancien `refresh`), en trois sections :
+    - VOULU  : l'intention déclarée (nœuds/HA, profil, backend, exposition) ;
+    - RÉEL   : l'état lu du réel (VMs présentes/orphelines/à créer, nœuds Ready) —
+      non stocké (ADR 0056 §7), juste lu ;
+    - PLAN   : la séquence de couches à monter, chacune avec son libellé MÉTIER et son
+      état (`✓ à-jour`, `+ à installer` si inédit, `~ à rejouer` si run périmé), plus
+      les VMs orphelines `- à détruire d'abord`.
 
-    Read-only : ne LANCE rien, ne DÉTRUIT rien (`next --apply` applique ; détruire = down/
-    destroy). Code 0 toujours (informatif) ; chemin incohérent avec le backend → usage (2).
-    Là où `next` ne montre QUE le 1er drift, `preview` montre le plan ENTIER.
-    """
+    Read-only : ne LANCE ni ne DÉTRUIT rien (`up` applique ; `destroy` détruit). Code 0
+    (informatif) ; chemin incohérent avec le backend → usage (2)."""
     path = _resolve(args.file)
     topo = load_topology(path)
     runs = load_runs(args.history or _RUNS_HISTORY)
@@ -790,9 +712,38 @@ def cmd_preview(args: argparse.Namespace) -> int:
         raise _UsageError(str(exc)) from exc
     resolved_target = target or default_target(topo)
     stack_name = topo.catalog.get("topology", "—")
-    # Le run de référence est celui de CETTE stack (match par nom, PAS de retombée
-    # sur le dernier run global) : une stack jamais montée (status: cible, aucun run
-    # à son nom) n'hérite pas du verdict d'une autre topologie — tout est à installer.
+
+    print(f"stack : {stack_name}  →  chemin : {resolved_target}")
+
+    # ── VOULU (ex-`status`) : l'intention déclarée ───────────────────────────────
+    hc = set(topo.hyperconverged_nodes)
+    control_disp = ", ".join(f"{n}+worker" if n in hc else n for n in topo.control_nodes)
+    workers_disp = ", ".join(topo.worker_nodes) or (
+        "— (control hyperconvergés schedulent)" if hc else "—"
+    )
+    print("VOULU (déclaré) :")
+    print(
+        f"  control-planes : {control_disp or '—'}"
+        f"{'  [HA → VIP requise]' if topo.is_ha_control_plane else ''}"
+    )
+    print(f"  workers        : {workers_disp}")
+    print(
+        f"  profil         : {topo.catalog.get('profile', 'base')}  ·  "
+        f"stockage : {topo.storage.get('backend', 'local-path')}  ·  "
+        f"exposition : {topo.exposition.get('mode', '—')}"
+    )
+
+    # ── RÉEL (ex-`refresh`) : l'état lu du réel (non stocké, ADR 0056 §7) ─────────
+    declared = topo.control_nodes + topo.worker_nodes
+    real = classify_refresh(stack_name, declared, _real_vms(), _ready_nodes())
+    print("RÉEL (lu, non stocké) :")
+    print(f"  VMs présentes  : {', '.join(real.vms_present) or '—'}")
+    print(f"  VMs à créer    : {', '.join(real.vms_missing) or '—'}")
+    if real.vms_orphan:
+        print(f"  ⚠ orphelines   : {', '.join(real.vms_orphan)} (d'une autre stack)")
+    print(f"  nœuds Ready    : {', '.join(real.nodes_ready) or '—'}")
+
+    # ── PLAN : la séquence de couches à monter ───────────────────────────────────
     run = last_run_for_topology(runs, stack_name)
     freshness, _ = verdict_for_run(run, resolved_target, now)
     done = set(run.phases) if run is not None else set()
@@ -801,12 +752,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
     # `perime` (run existant mais plus frais) → « à rejouer ».
     rejeu = freshness == "perime"
     inedit = freshness == "jamais"
-
-    # État réel : les VMs ORPHELINES (d'une autre stack) à détruire AVANT un montage propre.
-    declared = topo.control_nodes + topo.worker_nodes
-    real = classify_refresh(stack_name, declared, _real_vms(), [])
-
-    print(f"stack : {stack_name}  →  chemin : {resolved_target}")
+    print("PLAN (à monter) :")
     if real.vms_orphan:
         for vm in real.vms_orphan:
             print(f"  - détruire {vm:<22} VM d'une autre stack (à retirer d'abord)")
@@ -827,18 +773,22 @@ def cmd_preview(args: argparse.Namespace) -> int:
     if not head:
         print("→ rien à appliquer (stack à jour, terrain propre).")
     else:
-        suffix = "" if inedit else " — `next --apply` pour la 1re couche"
+        suffix = "" if inedit else " — `up` pour appliquer"
         print(f"→ {' ; '.join(head)} (rien lancé{suffix}).")
     return 0
 
 
-def cmd_next(args: argparse.Namespace) -> int:
-    """Suggère la prochaine phase (diff voulu − réel) ; --apply la LANCE (ADR 0063).
+def cmd_up(args: argparse.Namespace) -> int:
+    """`up` : applique la prochaine couche manquante du plan (calque `pulumi up`).
 
-    Sans --apply : lecture informative, code 0 (la suggestion « il manque X » N'EST
-    PAS un échec — c'est le travail de `next`). Avec --apply : délègue à la couche
-    ansible-runner isolée (runner.launch_phase) ; décision humaine explicite (G2),
-    code propagé du run. JAMAIS d'auto-apply ni d'enchaînement de la séquence.
+    Le pendant de `preview` : là où `preview` MONTRE le plan (voir), `up` l'APPLIQUE.
+    Lancer `up` EST la décision humaine (G2, ADR 0063) — pas de flag --apply (l'ancien
+    `next --apply`) : on n'invoque `up` que pour appliquer. Applique la PREMIÈRE couche
+    manquante (1er drift, parité state.sh) via ansible-runner ; ré-invoquer `up` monte
+    la suivante (jamais d'auto-enchaînement silencieux de toute la séquence).
+
+    Code 0 si la couche est montée (ou rien à monter) ; 1 si le run échoue ; 2 (usage)
+    si la couche n'est pas un play unitaire / inventaire absent / chemin incohérent.
     """
     path = _resolve(args.file)
     topo = load_topology(path)
@@ -856,12 +806,9 @@ def cmd_next(args: argparse.Namespace) -> int:
 
     print(sugg.message)
     if sugg.phase is None:
-        return 0
-    if not args.apply:
-        print(f"  pour lancer : topology.py next --target {sugg.target} --apply")
-        return 0
+        return 0  # rien à monter (stack à jour)
 
-    # --apply : décision humaine explicite. La phase doit avoir un playbook unitaire.
+    # Lancer `up` EST la décision. La couche doit avoir un playbook unitaire.
     if sugg.playbook is None:
         raise _UsageError(
             f"la phase `{sugg.phase}` n'est pas un play unitaire lançable "
@@ -1065,9 +1012,9 @@ _STACK_DISPATCH = {
 }
 
 # Verbes du groupe `artifact` : dériver/constater les artefacts d'une topologie.
+# (`status` absorbé par `preview` — la section VOULU ; retiré du menu.)
 _ARTIFACT_DISPATCH = {
     "generate": cmd_generate,
-    "status": cmd_status,
     "diff": cmd_diff,
     "runs": cmd_runs,
     "metrics": cmd_metrics,
@@ -1093,15 +1040,15 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 _DISPATCH = {
     "stack": cmd_stack,  # calque `pulumi stack` (new | ls | select | validate)
-    # Cycle de vie au TOP-LEVEL (fidèle à Pulumi : preview/refresh/destroy/up plats).
-    "refresh": cmd_stack_refresh,  # calque `pulumi refresh` (top-level chez Pulumi)
+    # Cycle de vie au TOP-LEVEL (calque Pulumi). `preview` = voir (VOULU+RÉEL+PLAN,
+    # absorbe status+refresh+la lecture de next) ; `up` = appliquer (ex next --apply).
     "preview": cmd_preview,  # calque `pulumi preview`
-    "next": cmd_next,
+    "up": cmd_up,  # calque `pulumi up`
     "destroy": cmd_destroy,  # calque `pulumi destroy`
     # Groupes noun-verb (annexe rangée) : artefacts dérivés/constatés + épreuves.
     "artifact": cmd_artifact,
     "test": cmd_test,
-    "ha-3cp": cmd_ha_3cp,
+    "ha-3cp": cmd_ha_3cp,  # interne (routée à part dans main, hors menu)
 }
 
 
@@ -1187,12 +1134,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_stack_val = stack_sub.add_parser("validate", help="valide le schéma d'une topologie")
     _add_file(p_stack_val)
 
-    # `refresh` est TOP-LEVEL (Pulumi a `pulumi refresh`, pas `pulumi stack refresh`).
-    p_refresh = sub.add_parser(
-        "refresh", help="resynchronise l'état réel (VMs Lima + nœuds k8s) — calque `pulumi refresh`"
-    )
-    _add_file(p_refresh)
-
     # ── Groupe `artifact` (noun-verb) : dériver/constater les artefacts ───────────
     p_artifact = sub.add_parser(
         "artifact", help="dérive/constate les artefacts (generate | status | diff | runs | metrics)"
@@ -1241,17 +1182,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--lima-home", default=os.environ.get("HOME"), help="$HOME du poste (si --kind lima)"
     )
 
-    p_sta = artifact_sub.add_parser("status", help="état voulu (et --real → state.sh)")
-    _add_file(p_sta)
-    p_sta.add_argument(
-        "--real",
-        action="store_true",
-        help="constater l'état réel via bootstrap/state.sh (SSH+kubectl)",
-    )
-    p_sta.add_argument(
-        "--hosts", nargs="*", default=None, help="hôtes passés à state.sh (défaut : tous)"
-    )
-
     p_runs = artifact_sub.add_parser(
         "runs", help="lit l'historique des runs + verdict de fraîcheur"
     )
@@ -1280,18 +1210,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="sauter la confirmation (requis hors TTY pour détruire)"
     )
 
-    p_next = sub.add_parser("next", help="suggère la prochaine phase (et --apply la lance)")
-    _add_file(p_next)
-    p_next.add_argument(
+    p_up = sub.add_parser(
+        "up", help="applique la prochaine couche manquante du plan (calque `pulumi up`)"
+    )
+    _add_file(p_up)
+    p_up.add_argument(
         "--target", default=None, help="chemin nommé visé (défaut : déduit du profil+backend)"
     )
-    p_next.add_argument(
+    p_up.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
-    )
-    p_next.add_argument(
-        "--apply",
-        action="store_true",
-        help="LANCER la phase suggérée via ansible-runner (décision humaine, ADR 0063)",
     )
 
     p_met = artifact_sub.add_parser(
