@@ -90,6 +90,6 @@ Format léger inspiré de Michael Nygard :
 | 0068 | [Profil `metrics` : palier fin entre `base` et `store`](0068-profil-metrics-palier-fin.md)                                           | Accepted           |
 | 0069 | [`topology.layers` : déclaration explicite des couches (DAG, grain phase)](0069-topology-layers-dag-grain-phase.md)                  | Accepted           |
 | 0070 | [Renommer `test/` en `bench/` ; garder `bootstrap/` à plat](0070-renommer-test-en-bench-bootstrap-plat.md)                           | Accepted           |
-| 0071 | [NodePort : mécanisme d'exposition officiel au même titre que Gateway](0071-nodeport-exposition-officielle.md)                       | Proposed           |
+| 0071 | [Exposition `hostport` (80/443 sur l'hôte) via Cilium eBPF](0071-exposition-hostport-cilium.md)                                      | Proposed           |
 | 0072 | [`cluster scale` : ajuster les replicas au nombre de nœuds](0072-cluster-scale-replicas-noeuds.md)                                   | Proposed           |
 | 0073 | [Hubble UI : activer l'observabilité réseau (opt-in)](0073-hubble-ui-observabilite-reseau.md)                                        | Proposed           |
