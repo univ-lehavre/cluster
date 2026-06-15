@@ -207,6 +207,8 @@ component_namespace() {
         cert-manager)     printf 'cert-manager\n' ;;
         ceph)             printf 'rook-ceph\n' ;;
         seaweedfs)        printf 's3\n' ;;
+        # storage-simple : le local-path-provisioner vit dans kube-system (ns NON
+        # supprimable) → ne POSSÈDE aucun ns (∅, comme metrics-server) → branche *).
         prometheus-stack) printf 'monitoring\n' ;;       # POSSESSEUR du ns monitoring
         registry)         printf 'registry\n' ;;
         cnpg-operator)    printf 'cnpg-system\n' ;;       # ≠ postgres (l'oubli historique)
@@ -240,6 +242,10 @@ component_targeted() {
             printf 'storageclass.storage.k8s.io rook-ceph-block-ec-delete\n'
             printf 'storageclass.storage.k8s.io rook-ceph-block-ec\n'
             printf 'storageclass.storage.k8s.io rook-cephfs\n' ;;
+        storage-simple)
+            # SC local-path + le provisioner dans kube-system (ns non supprimable).
+            printf 'storageclass.storage.k8s.io local-path\n'
+            printf -- '-n kube-system deployment.apps local-path-provisioner\n' ;;
         datalake)
             printf -- '-n rook-ceph cephobjectstore.ceph.rook.io datalake\n'
             printf -- '-n rook-ceph cephobjectstoreuser.ceph.rook.io datalake\n'
@@ -306,22 +312,44 @@ component_has_nodeside() {
 #   Profil de stockage qui CONDITIONNE COMP (ADR 0066 : le when: vit dans le
 #   composant, pas dans l'alias). always|ceph|leger.
 #   - ceph  : ceph/sc/datalake/s3-backing-* (n'existent qu'en profil Ceph)
-#   - leger : seaweedfs (alternative S3, EXCLUSIVE de datalake)
+#   - leger : seaweedfs (alternative S3) + storage-simple (SC local-path), EXCLUSIFS
+#             de la pile Ceph
 #   - always: tout le reste
 component_profile() {
     case "${1:-}" in
         ceph | sc | datalake | s3-backing-loki | s3-backing-cnpg) printf 'ceph\n' ;;
-        seaweedfs)                                                printf 'leger\n' ;;
+        seaweedfs | storage-simple)                               printf 'leger\n' ;;
         *)                                                        printf 'always\n' ;;
     esac
 }
+
+# _rb_backend — backend de stockage du graphe (STORAGE_BACKEND, défaut ceph). Les
+# arêtes de stockage sont BACKEND-CONDITIONNELLES (ADR 0069) : le « when: » vit dans
+# le composant (ADR 0066). DÉFAUT ceph → graphe BYTE-IDENTIQUE à l'historique quand
+# aucun env n'est exporté (bats/rollback ceph prouvé intacts). Lu via $() : la valeur
+# est vue même non exportée (le subshell hérite de l'état complet du shell).
+_rb_backend() {
+    case "${STORAGE_BACKEND:-ceph}" in
+        local-path) printf 'local-path\n' ;;
+        *) printf 'ceph\n' ;;
+    esac
+}
+# Primitive STOCKAGE BLOC résolue par backend : sc (StorageClass Ceph) | storage-simple
+# (provisioner local-path). Toute arête « → SC » est une consommation de PVC bloc.
+_rb_sc() { case "$(_rb_backend)" in local-path) printf 'storage-simple\n' ;; *) printf 'sc\n' ;; esac; }
+# Primitive BACKING S3 résolue par backend : datalake (RGW Ceph) | seaweedfs (local-path).
+_rb_s3() { case "$(_rb_backend)" in local-path) printf 'seaweedfs\n' ;; *) printf 'datalake\n' ;; esac; }
 
 # component_deps COMP
 #   Dépendances DIRECTES de COMP (séparées par des espaces) — le GRAPHE ATOMIQUE
 #   UNIQUE (ADR 0066 §invariant 3). Source de vérité dont dérivent : l'ordre de
 #   montage (tri topo), de rollback (inverse) et la clôture du roundtrip. Vide =
-#   racine. Arêtes vérifiées contre le code (workflow consigné 2026-06-13).
+#   racine. Arêtes vérifiées contre le code (workflow consigné 2026-06-13). Les
+#   arêtes de stockage (SC/S3) sont résolues par backend (ADR 0069, _rb_sc/_rb_s3).
 component_deps() {
+    local SC S3
+    SC=$(_rb_sc)   # sc (ceph) | storage-simple (local-path)
+    S3=$(_rb_s3)   # datalake (ceph) | seaweedfs (local-path)
     case "${1:-}" in
         bootstrap)        printf '\n' ;;
         build-images)     printf '\n' ;;
@@ -331,25 +359,25 @@ component_deps() {
         ceph)             printf '\n' ;;
         sc)               printf 'ceph\n' ;;
         datalake)         printf 'ceph sc\n' ;;
-        seaweedfs)        printf '\n' ;;
-        # Arêtes « → sc » = consommation de stockage BLOC : le composant monte un
-        # PVC sur la StorageClass rook-ceph-block-replicated (produite par `sc`).
-        # Vérifiées contre le code (workflow consigné 2026-06-13, 2ᵉ trace) :
-        # détruire `sc` orphelinerait ces PVC → ils dépendent de `sc`. (`gitea → sc`
-        # est load-bearing : seule arête qui fait entrer gitops/gitops-seed dans
-        # la clôture de `sc`/`ceph`.)
-        registry)         printf 'gateway-api sc\n' ;;
-        s3-backing-loki)  printf 'datalake\n' ;;
-        prometheus-stack) printf 'cert-manager sc\n' ;;
-        loki)             printf 'prometheus-stack s3-backing-loki sc\n' ;;
+        storage-simple)   printf '\n' ;;
+        seaweedfs)        printf 'storage-simple\n' ;;
+        # Arêtes « → SC » = consommation de stockage BLOC : le composant monte un PVC
+        # sur la StorageClass du backend (rook-ceph-block-replicated en ceph,
+        # local-path en local-path). Détruire la SC orphelinerait ces PVC → ils en
+        # dépendent. (`gitea → SC` est load-bearing : seule arête qui fait entrer
+        # gitops/gitops-seed dans la clôture de la SC/du socle.)
+        registry)         printf 'gateway-api %s\n' "$SC" ;;
+        s3-backing-loki)  printf '%s\n' "$S3" ;;
+        prometheus-stack) printf 'cert-manager %s\n' "$SC" ;;
+        loki)             printf 'prometheus-stack s3-backing-loki %s\n' "$SC" ;;
         cnpg-operator)    printf 'cert-manager\n' ;;
         barman-plugin)    printf 'cnpg-operator cert-manager\n' ;;
         cnpg-secrets)     printf '\n' ;;
-        s3-backing-cnpg)  printf 'datalake\n' ;;
-        cnpg-cluster-pg)  printf 'cnpg-operator barman-plugin cnpg-secrets s3-backing-cnpg sc\n' ;;
+        s3-backing-cnpg)  printf '%s\n' "$S3" ;;
+        cnpg-cluster-pg)  printf 'cnpg-operator barman-plugin cnpg-secrets s3-backing-cnpg %s\n' "$SC" ;;
         dagster)          printf 'cnpg-cluster-pg registry build-images\n' ;;
         marquez)          printf 'cnpg-cluster-pg registry build-images\n' ;;
-        gitea)            printf 'cert-manager gateway-api sc\n' ;;
+        gitea)            printf 'cert-manager gateway-api %s\n' "$SC" ;;
         argocd)           printf 'cert-manager gateway-api gitea\n' ;;
         gitops-seed)      printf 'argocd gitea build-images\n' ;;
         *)                printf '\n' ;;
@@ -361,10 +389,10 @@ component_deps() {
 component_known() {
     case "${1:-}" in
         bootstrap | build-images | gateway-api | cert-manager | metrics-server \
-            | ceph | sc | datalake | seaweedfs | registry | s3-backing-loki \
-            | prometheus-stack | loki | cnpg-operator | barman-plugin \
-            | cnpg-secrets | s3-backing-cnpg | cnpg-cluster-pg | dagster \
-            | marquez | gitea | argocd | gitops-seed)
+            | ceph | sc | datalake | seaweedfs | storage-simple | registry \
+            | s3-backing-loki | prometheus-stack | loki | cnpg-operator \
+            | barman-plugin | cnpg-secrets | s3-backing-cnpg | cnpg-cluster-pg \
+            | dagster | marquez | gitea | argocd | gitops-seed)
             return 0 ;;
         *) return 1 ;;
     esac
@@ -375,7 +403,7 @@ component_known() {
 component_all() {
     printf '%s\n' \
         bootstrap build-images gateway-api cert-manager metrics-server \
-        ceph sc datalake seaweedfs registry s3-backing-loki \
+        ceph sc datalake seaweedfs storage-simple registry s3-backing-loki \
         prometheus-stack loki cnpg-operator barman-plugin cnpg-secrets \
         s3-backing-cnpg cnpg-cluster-pg dagster marquez gitea argocd gitops-seed
 }
@@ -390,8 +418,16 @@ component_expand_alias() {
         ceph)         printf '%s\n' ceph ;;
         sc)           printf '%s\n' sc ;;
         datalake)     printf '%s\n' datalake ;;
+        storage-simple) printf '%s\n' storage-simple ;;
         metrics-server) printf '%s\n' metrics-server ;;
-        monitoring)   printf '%s\n' prometheus-stack loki s3-backing-loki ;;
+        # En local-path, monitoring pose AUSSI SeaweedFS (le backing S3 de Loki/CNPG,
+        # rôle platform-seaweedfs when loki_s3_backing==seaweedfs) — le « when: » vit
+        # dans l'alias (ADR 0066). En ceph l'alias est byte-identique. Le `: ;;` final
+        # neutralise le rc≠0 du `[ ] &&` faux (sinon l'alias renverrait rc=1 en ceph).
+        monitoring)
+            printf '%s\n' prometheus-stack loki s3-backing-loki
+            [ "$(_rb_backend)" = local-path ] && printf '%s\n' seaweedfs
+            : ;;
         dataops)      printf '%s\n' registry cnpg-operator barman-plugin \
             cnpg-secrets s3-backing-cnpg cnpg-cluster-pg dagster marquez ;;
         gitops)       printf '%s\n' gitea argocd ;;
@@ -420,7 +456,7 @@ component_alias_weight() {
     case "${1:-}" in
         bootstrap | build-images | gateway-api | cert-manager | metrics-server) printf '0\n' ;;
         ceph)                                                                    printf '1\n' ;;
-        sc)                                                                      printf '2\n' ;;
+        sc | storage-simple)                                                     printf '2\n' ;;
         datalake | seaweedfs)                                                    printf '3\n' ;;
         prometheus-stack | loki | s3-backing-loki)                               printf '4\n' ;;
         gitea | argocd)                                                          printf '5\n' ;;
