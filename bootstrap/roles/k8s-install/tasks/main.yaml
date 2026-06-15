@@ -44,11 +44,19 @@
         touch /etc/apt/keyrings/.kubernetes-apt-keyring.valid
       args:
         executable: /bin/bash
+        # `creates:` porte À LUI SEUL l'idempotence : marqueur présent → la commande
+        # ne tourne PAS (résultat `ok`), absent → elle tourne (`changed`). PAS de
+        # `changed_when: true` : il écraserait le `ok` du skip en `changed` MÊME quand
+        # la commande n'a pas tourné (« Did not run command since … exists ») → faux
+        # `changed` au rejeu, idempotence cassée (ADR 0051/0052). Invariant anti
+        # « marqueur menteur » (#236) intact : .valid distinct, posé après validation gpg.
         creates: /etc/apt/keyrings/.kubernetes-apt-keyring.valid
-      changed_when: true
 
     # deb822_repository remplace apt_repository (déprécié, retiré en
     # ansible-core 2.25). Dépôt « flat » pkgs.k8s.io : suite '/' sans component.
+    # `register` : pilote la MAJ du cache ci-dessous — on ne rafraîchit l'index QUE si
+    # la définition du dépôt a réellement changé (sinon `apt update` tourne à chaque
+    # rejeu → faux `changed`, idempotence cassée ADR 0052).
     - name: Add kubernetes repository
       ansible.builtin.deb822_repository:
         name: kubernetes
@@ -58,10 +66,18 @@
         signed_by: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         state: present
         enabled: true
+      register: k8s_repo
 
-    - name: Update apt cache after adding the kubernetes repository
+    # PAS un handler (no-handler) : un handler tourne en FIN de play, or l'index doit
+    # être frais AVANT l'`apt install` qui suit IMMÉDIATEMENT (même bloc) ; le
+    # `when: … is changed` est ici un gate d'ordre, pas un effet différé.
+    - name: Update apt cache after adding the kubernetes repository # noqa: no-handler
       ansible.builtin.apt:
         update_cache: true
+      # Idempotence : index rafraîchi UNIQUEMENT quand le dépôt vient de changer
+      # (1er run / bump de k8s_minor). Au rejeu, dépôt inchangé → tâche sautée → pas
+      # de faux `changed`. Le cache reste cohérent : un dépôt inchangé a déjà son index.
+      when: k8s_repo is changed
 
     # cri-tools fournit `crictl`, requis par etcd-snapshot.sh (snapshot etcd
     # via `crictl exec` dans le static pod) et par les procédures de
