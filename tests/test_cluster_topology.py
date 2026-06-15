@@ -2,7 +2,7 @@
 
 unittest (stdlib). Deux niveaux :
   - fonctions PURES (dérivations control/worker, validation) sur des dicts injectés ;
-  - l'INVARIANT BYTE-IDENTIQUE (P1) : render(topology.example.yaml) ==
+  - l'INVARIANT BYTE-IDENTIQUE (P1) : render(topologies/socle.example.yaml) ==
     bootstrap/hosts.example.yaml, octet pour octet (ADR 0056 §3).
 
 Lancé par `python3 -m unittest discover tests` (cible `test:python` + CI).
@@ -21,6 +21,7 @@ from cluster_topology.model import (  # noqa: E402
     topology_from_dict,
 )
 from cluster_topology.profile import (  # noqa: E402
+    consumes_storage,
     derive_osd_expected,
     derive_run_params,
     required_profiles,
@@ -73,6 +74,8 @@ class Derivations(unittest.TestCase):
         self.assertEqual(t.control_nodes, ["n1"])
         self.assertEqual(t.worker_nodes, ["n2"])
         self.assertNotIn("n1", t.worker_nodes)
+        # hyperconverged_nodes liste les control qui portent AUSSI worker (n1, pas n2).
+        self.assertEqual(t.hyperconverged_nodes, ["n1"])
 
     def test_ha_detection(self):
         single = topology_from_dict(_base())
@@ -150,12 +153,40 @@ class Validation(unittest.TestCase):
             self.assertEqual(t.network["control_plane_lb"]["mode"], mode)
 
 
+class Exposition(unittest.TestCase):
+    """exposition.mode (ADR 0020/0071) : enum validé, alias lb-ipam→gateway, défaut terrain."""
+
+    def test_default_lima_is_hostport(self):
+        t = topology_from_dict(_base(target_kind="lima"))
+        self.assertEqual(t.exposition_mode, "hostport")
+
+    def test_default_prod_is_gateway(self):
+        t = topology_from_dict(_base(target_kind="prod"))
+        self.assertEqual(t.exposition_mode, "gateway")
+
+    def test_lb_ipam_alias_resolves_to_gateway(self):
+        t = topology_from_dict(_base(exposition={"mode": "lb-ipam"}))
+        self.assertEqual(t.exposition_mode, "gateway")
+
+    def test_hostport_and_none_accepted(self):
+        self.assertEqual(
+            topology_from_dict(_base(exposition={"mode": "hostport"})).exposition_mode, "hostport"
+        )
+        self.assertEqual(
+            topology_from_dict(_base(exposition={"mode": "none"})).exposition_mode, "none"
+        )
+
+    def test_unknown_mode_rejected(self):
+        with self.assertRaises(TopologyError):
+            topology_from_dict(_base(exposition={"mode": "bogus"}))
+
+
 class HaThreeCpExample(unittest.TestCase):
     """La topologie ha-3cp déclarée (hyperconvergé, local-path) est valide et
     expose la mécanique HA attendue (#250, ADR 0055/0056)."""
 
     def setUp(self):
-        self.topo = load_topology(os.path.join(_ROOT, "topology-ha-3cp.example.yaml"))
+        self.topo = load_topology(os.path.join(_ROOT, "topologies", "ha-3cp.example.yaml"))
 
     def test_three_hyperconverged_control_planes(self):
         # 3 CP hyperconvergés → 3 control, 0 worker pur (ils schedulent, ADR 0007).
@@ -183,7 +214,7 @@ class ByteExactInvariant(unittest.TestCase):
     """P1 : le profil prod générique régénère hosts.example.yaml à l'octet."""
 
     def test_prod_inventory_is_byte_identical(self):
-        topo = load_topology(os.path.join(_ROOT, "topology.example.yaml"))
+        topo = load_topology(os.path.join(_ROOT, "topologies", "socle.example.yaml"))
         generated = render_prod_inventory(topo)
         with open(os.path.join(_ROOT, "bootstrap", "hosts.example.yaml"), encoding="utf-8") as f:
             expected = f.read()
@@ -258,17 +289,27 @@ class LimaInventoryByteExact(unittest.TestCase):
 
 
 class ProfileInclusion(unittest.TestCase):
-    """P2 : inclusion cumulative base ⊂ store ⊂ obs ⊂ dataops (ADR 0039)."""
+    """P2 : inclusion cumulative base ⊂ metrics ⊂ store ⊂ obs ⊂ dataops (ADR 0039/0068)."""
 
     def test_cumulative_chain(self):
         self.assertEqual(required_profiles("base"), ["base"])
-        self.assertEqual(required_profiles("store"), ["base", "store"])
-        self.assertEqual(required_profiles("obs"), ["base", "store", "obs"])
-        self.assertEqual(required_profiles("dataops"), ["base", "store", "obs", "dataops"])
+        self.assertEqual(required_profiles("metrics"), ["base", "metrics"])
+        self.assertEqual(required_profiles("store"), ["base", "metrics", "store"])
+        self.assertEqual(required_profiles("obs"), ["base", "metrics", "store", "obs"])
+        self.assertEqual(
+            required_profiles("dataops"), ["base", "metrics", "store", "obs", "dataops"]
+        )
 
     def test_unknown_profile_rejected(self):
         with self.assertRaises(TopologyError):
             required_profiles("mlops")
+
+    def test_consumes_storage(self):
+        # base = k8s+CRI+CNI nus, AUCUN stockage (ADR 0039 : storage ∈ store).
+        self.assertFalse(consumes_storage("base"))
+        self.assertTrue(consumes_storage("store"))
+        self.assertTrue(consumes_storage("obs"))
+        self.assertTrue(consumes_storage("dataops"))
 
 
 class StorageDerivationParity(unittest.TestCase):
@@ -306,7 +347,7 @@ class StorageDerivationParity(unittest.TestCase):
             )
         )
         rp = derive_run_params(topo)
-        self.assertEqual(rp["profiles"], ["base", "store", "obs", "dataops"])
+        self.assertEqual(rp["profiles"], ["base", "metrics", "store", "obs", "dataops"])
         self.assertEqual(rp["registry_storage_class"], "rook-ceph-block-replicated")
         self.assertEqual(rp["cnpg_storage_class"], "rook-ceph-block-replicated")
         self.assertEqual(rp["monitoring_storage_class"], "rook-ceph-block-replicated")
@@ -321,7 +362,7 @@ class StorageDerivationParity(unittest.TestCase):
             _base(catalog={"profile": "obs"}, storage={"backend": "local-path"})
         )
         rp = derive_run_params(topo)
-        self.assertEqual(rp["profiles"], ["base", "store", "obs"])
+        self.assertEqual(rp["profiles"], ["base", "metrics", "store", "obs"])
         self.assertEqual(rp["cnpg_storage_class"], "local-path")
         self.assertEqual(rp["cnpg_s3_backing"], "seaweedfs")
         self.assertFalse(rp["argocd_apply_gateway"])

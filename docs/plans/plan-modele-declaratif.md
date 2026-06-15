@@ -23,7 +23,7 @@ pas le socle**. Réalisation incrémentale, chaque palier prouvé par un run
 
 | Palier | Contenu                                                                                                                                                  | Exigences 0056 §8 |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| **P0** | Modéliser sans générer : `topology.example.yaml` des topologies décrites — révèle les deltas (VIP/LB manquant…)                                          | 1-5 (schéma)      |
+| **P0** | Modéliser sans générer : `topologies/socle.example.yaml` des topologies décrites — révèle les deltas (VIP/LB manquant…)                                  | 1-5 (schéma)      |
 | **P1** | Générateur read-only Lima → inventaire + NODES + profils, **byte-identique** (ADR 0056 §3)                                                               | 1-3               |
 | **P2** | Profil + défauts/variantes + graphe de dépendances                                                                                                       | 3, 13             |
 | **P3** | Façade CLI/CI (`generate`/`validate`/`status`/`diff`)                                                                                                    | —                 |
@@ -55,7 +55,7 @@ casse le lint.
 
 | Palier | État       | Issue(s)                         | Run de preuve                                                                                                                                                                                                                            |
 | ------ | ---------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P0     | ✅ fait    | —                                | `topology.example.yaml` + paquet `cluster_topology/`                                                                                                                                                                                     |
+| P0     | ✅ fait    | —                                | `topologies/socle.example.yaml` + paquet `cluster_topology/`                                                                                                                                                                             |
 | P1     | ✅ fait    | —                                | **inventaires prod + banc byte-identiques** (12 tests, vs `hosts.example.yaml` et `write_inventory`)                                                                                                                                     |
 | P2     | ✅ fait    | —                                | **dérivation de profil** (inclusion cumulative ADR 0039 + faisceau `-e` à parité bash, `cluster_topology/profile.py`, 12 tests)                                                                                                          |
 | P3     | ✅ fait    | —                                | **façade CLI/CI** `scripts/topology.py` (`generate`/`validate`/`status`/`diff`, argparse stdlib) ; `diff` câblé en CI (`lint:topology-drift`), 16 tests                                                                                  |

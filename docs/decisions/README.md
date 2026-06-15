@@ -87,3 +87,10 @@ Format léger inspiré de Michael Nygard :
 | 0065 | [Variables d'environnement : intention vs état détectable](0065-variables-env-intention-vs-etat.md)                                  | Accepted           |
 | 0066 | [Rollback atomique : composants + graphe de dépendances unique](0066-rollback-atomique-graphe-composants.md)                         | Accepted           |
 | 0067 | [Workflows multi-agents consignés : 4ᵉ trace empirique](0067-workflows-consignes-4e-trace-empirique.md)                              | Accepted           |
+| 0068 | [Profil `metrics` : palier fin entre `base` et `store`](0068-profil-metrics-palier-fin.md)                                           | Accepted           |
+| 0069 | [`topology.layers` : déclaration explicite des couches (DAG, grain phase)](0069-topology-layers-dag-grain-phase.md)                  | Accepted           |
+| 0070 | [Renommer `test/` en `bench/` ; garder `bootstrap/` à plat](0070-renommer-test-en-bench-bootstrap-plat.md)                           | Accepted           |
+| 0071 | [Exposition `hostport` (80/443 sur l'hôte) via Cilium eBPF](0071-exposition-hostport-cilium.md)                                      | Proposed           |
+| 0072 | [`cluster scale` : ajuster les replicas au nombre de nœuds](0072-cluster-scale-replicas-noeuds.md)                                   | Proposed           |
+| 0073 | [Hubble UI : activer l'observabilité réseau (opt-in)](0073-hubble-ui-observabilite-reseau.md)                                        | Proposed           |
+| 0074 | [`cluster discover` : reconstruire un `topology.yaml` depuis un cluster réel](0074-cluster-discover-reconstruire-topologie.md)       | Proposed           |

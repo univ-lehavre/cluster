@@ -64,3 +64,4 @@ Ce dépôt est un **catalogue de topologies d'infrastructure** générique. Donc
 | [plan-rollback-par-phase.md](plan-rollback-par-phase.md)                                       | Plan        | Rollback par phase sur le banc (mise en œuvre ADR 0054)                          |
 | [plan-refonte-doc.md](plan-refonte-doc.md)                                                     | Plan        | Refonte documentaire — hero, manifeste, câblage Diátaxis (met en œuvre ADR 0059) |
 | [plan-stockage-longhorn.md](plan-stockage-longhorn.md)                                         | Plan        | Longhorn, 3ᵉ profil de stockage (met en œuvre ADR 0064 — `Brouillon`)            |
+| [plan-renommer-test-bench.md](plan-renommer-test-bench.md)                                     | Plan vivant | Renommer `test/` → `bench/` + ré-indexer `bootstrap/` (met en œuvre ADR 0070)    |

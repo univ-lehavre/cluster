@@ -63,6 +63,12 @@ pods, il bénéficie indirectement du tunnel WireGuard inter-nœuds.
   exposée à protéger, sans valeur pour un cluster **mono-admin**. Le relay + CLI
   suffit.
 
+> **Amendé par [ADR 0073](0073-hubble-ui-observabilite-reseau.md)** : Hubble UI
+> est désormais ACTIVABLE, mais **opt-in et désactivé par défaut**
+> (`HUBBLE_UI_ENABLED=0`) — l'exclusion ci-dessus reste le défaut (rien d'exposé
+> sans demande). Quand activée, l'UI n'est pas exposée hors cluster sans
+> Gateway.
+
 Articulation avec [ADR 0016](0016-observabilite.md) : 0016 traite
 l'observabilité **métrologique** (metrics-server, Prometheus différé). Hubble
 est l'observabilité **réseau** — axe complémentaire, sans recouvrement. Hubble

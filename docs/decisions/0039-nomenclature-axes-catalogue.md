@@ -48,13 +48,24 @@ Un **profil** = une combinaison cohérente et cumulative de briques (chaque
 profil inclut les précédents), pas une brique isolée. Reflète les paliers réels
 du banc (`run-phases.sh`).
 
+> **Amendé par [ADR 0069](0069-topology-layers-dag-grain-phase.md)** : un profil
+> est désormais un cas particulier (un **préfixe** de la chaîne) de
+> `topology.layers`, qui déclare un **ensemble** de couches ordonné par le DAG
+> de dépendances réelles (et non par la chaîne totale). `profile` reste un alias
+> rétrocompatible.
+
 | Code      | Contenu (cumulatif)                                           | Phase banc                                |
 | --------- | ------------------------------------------------------------- | ----------------------------------------- |
 | `base`    | socle : k8s + Cilium (+WireGuard)                             | `bootstrap`                               |
+| `metrics` | + API ressources : metrics-server (`kubectl top`)             | `metrics-server`                          |
 | `store`   | + stockage : local-path **ou** Rook-Ceph (+SC, +RGW datalake) | `storage-simple` / `ceph`+`sc`+`datalake` |
 | `obs`     | + observabilité : Prometheus + Grafana + Loki                 | `monitoring`                              |
 | `dataops` | + chaîne DataOps : CNPG, Dagster, Marquez                     | `dataops`                                 |
 
+> `metrics` ([ADR 0068](0068-profil-metrics-palier-fin.md)) est le plus petit
+> palier d'observabilité : metrics-server n'a aucune dépendance stockage (placé
+> **avant** `store`) et `obs` en hérite (monitoring le suppose présent).
+>
 > `store` et `obs` portent leurs **dimensions fines** (storageClass, backing S3
 > — [matrice §1.5](../architecture/matrice-catalogue.md)) : `store=ceph`
 > implique `rook-ceph` + RGW, `store=local-path` implique SeaweedFS pour l'obs.

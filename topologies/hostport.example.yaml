@@ -1,0 +1,44 @@
+# code: language=yaml
+#
+# topology.yaml — EXEMPLE du mode d'exposition `hostport` (ADR 0071), valeurs
+# génériques (ADR 0023).
+#
+# `exposition.mode: hostport` expose les services sur les **ports standards 80/443
+# de l'IP de l'hôte**, routés en eBPF par Cilium (`kubeProxyReplacement`, déjà
+# actif) — y compris les ports privilégiés < 1024, sans composant supplémentaire.
+# C'est le mode pour une **VM publique mono-NIC** : le service répond directement
+# sur `IP_publique:443`, sans plage LB-IPAM à réserver ni interface L2 annonçable
+# (le coût d'entrée du mode `gateway`).
+#
+# Différence avec `gateway` (le mode de référence, ADR 0020) : pas de bordure L7
+# (pas de routage host/path, pas de terminaison TLS de bordure) — le TLS est
+# terminé par le pod applicatif. Pour multiplexer plusieurs services sur 80/443
+# par hostname, repasser en `gateway`.
+#
+# Ce fichier est VERSIONNÉ (exemple générique) ; le `topology.yaml` réel (symlink
+# d'activation) reste gitignoré.
+
+catalog:
+  arch: x86 # arm64 | x86
+  terrain: cloud # local | cloud | baremetal — `hostport` cible une VM publique
+  topology: edge-public # nom de la stack
+  status: cible # buildé | cible | spike
+
+# ─── exposition : 80/443 sur l'IP de l'hôte via Cilium eBPF (ADR 0071)
+exposition:
+  mode: hostport # gateway | hostport | none (alias lb-ipam → gateway)
+
+# ─── layers : les couches voulues (ADR 0069). Ici un point d'entrée web simple.
+layers: [gitops]
+
+# ─── nodes : un nœud public (control hyperconvergé) exposant 80/443.
+nodes:
+  - name: node1
+    roles:
+      - control
+      - worker
+
+storage:
+  backend: local-path
+
+target_kind: prod # cible un déploiement réel (pas le banc Lima)

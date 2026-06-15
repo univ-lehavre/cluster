@@ -44,11 +44,19 @@
         touch /etc/apt/keyrings/.kubernetes-apt-keyring.valid
       args:
         executable: /bin/bash
+        # `creates:` porte À LUI SEUL l'idempotence : marqueur présent → la commande
+        # ne tourne PAS (résultat `ok`), absent → elle tourne (`changed`). PAS de
+        # `changed_when: true` : il écraserait le `ok` du skip en `changed` MÊME quand
+        # la commande n'a pas tourné (« Did not run command since … exists ») → faux
+        # `changed` au rejeu, idempotence cassée (ADR 0051/0052). Invariant anti
+        # « marqueur menteur » (#236) intact : .valid distinct, posé après validation gpg.
         creates: /etc/apt/keyrings/.kubernetes-apt-keyring.valid
-      changed_when: true
 
     # deb822_repository remplace apt_repository (déprécié, retiré en
     # ansible-core 2.25). Dépôt « flat » pkgs.k8s.io : suite '/' sans component.
+    # `register` : pilote la MAJ du cache ci-dessous — on ne rafraîchit l'index QUE si
+    # la définition du dépôt a réellement changé (sinon `apt update` tourne à chaque
+    # rejeu → faux `changed`, idempotence cassée ADR 0052).
     - name: Add kubernetes repository
       ansible.builtin.deb822_repository:
         name: kubernetes
@@ -58,10 +66,18 @@
         signed_by: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         state: present
         enabled: true
+      register: k8s_repo
 
-    - name: Update apt cache after adding the kubernetes repository
+    # PAS un handler (no-handler) : un handler tourne en FIN de play, or l'index doit
+    # être frais AVANT l'`apt install` qui suit IMMÉDIATEMENT (même bloc) ; le
+    # `when: … is changed` est ici un gate d'ordre, pas un effet différé.
+    - name: Update apt cache after adding the kubernetes repository # noqa: no-handler
       ansible.builtin.apt:
         update_cache: true
+      # Idempotence : index rafraîchi UNIQUEMENT quand le dépôt vient de changer
+      # (1er run / bump de k8s_minor). Au rejeu, dépôt inchangé → tâche sautée → pas
+      # de faux `changed`. Le cache reste cohérent : un dépôt inchangé a déjà son index.
+      when: k8s_repo is changed
 
     # cri-tools fournit `crictl`, requis par etcd-snapshot.sh (snapshot etcd
     # via `crictl exec` dans le static pod) et par les procédures de
@@ -123,13 +139,20 @@
         state: started
 
     - name: Map the control-plane endpoint to the primary control-plane node
-      # `control_plane_ip` (optionnel) surcharge l'IP utilisée pour
-      # joindre le control plane. Utile sur le banc multi-node où le
-      # réseau privé inter-VM (10.0.0.x) doit être préféré au NAT par
-      # défaut détecté par Ansible (10.0.2.x). En prod, on laisse la
-      # variable vide et on tombe sur `ansible_facts.default_ipv4.address`.
+      # `cluster-api` (control_plane_endpoint) résout via /etc/hosts vers l'IP qui
+      # porte l'API. En mono-CP : l'IP du CP primaire (control_plane_ip). En HA
+      # (ha-3cp) : la VIP kube-vip — `control_plane_host_ip` la surcharge, alors que
+      # `control_plane_ip` reste l'advertiseAddress (IP RÉELLE du nœud, une VIP ne
+      # peut pas être annoncée comme adresse etcd/apiserver locale). Défaut =
+      # control_plane_ip → mono-CP inchangé. En prod (les deux vides) : l'IP
+      # principale détectée par Ansible.
+      vars:
+        _cp_host_ip: >-
+          {{ control_plane_host_ip
+             | default(control_plane_ip, true)
+             | default(hostvars[groups['control'][0]].ansible_facts.default_ipv4.address, true) }}
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: '\s{{ control_plane_endpoint }}$'
-        line: "{{ control_plane_ip | default(hostvars[groups['control'][0]].ansible_facts.default_ipv4.address, true) }} {{ control_plane_endpoint }}"
+        line: '{{ _cp_host_ip }} {{ control_plane_endpoint }}'
         state: present

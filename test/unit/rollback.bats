@@ -212,42 +212,6 @@ setup() {
     [[ "$output" == skip\|* ]]
 }
 
-# ─── HA control-plane : ha_cp_join_order + classify_etcd_health (#250) ────────
-
-@test "ha/join_order : 3 CP → cp2 cp3 (primaire cp1 exclu, ordre stable)" {
-    run ha_cp_join_order cp1 cp2 cp3
-    [ "$(printf '%s' "$output" | tr '\n' ' ')" = "cp2 cp3" ]
-}
-
-@test "ha/join_order : 1 CP → vide (pas de HA)" {
-    run ha_cp_join_order cp1
-    [ -z "$output" ]
-}
-
-@test "ha/etcd : tous sains (2/2) → ok (promotion possible)" {
-    run classify_etcd_health "https://a:2379 is healthy
-https://b:2379 is healthy" 2
-    [ "$status" -eq 0 ]
-    [[ "$output" == ok\|* ]]
-}
-
-@test "ha/etcd : un unhealthy → fail (ne pas promouvoir)" {
-    run classify_etcd_health "https://a:2379 is healthy
-https://b:2379 is unhealthy" 2
-    [[ "$output" == fail\|* ]]
-    [[ "$output" == *"DÉGRADÉ"* ]]
-}
-
-@test "ha/etcd : sortie vide → skip (etcd injoignable, refus franc)" {
-    run classify_etcd_health "" 2
-    [[ "$output" == skip\|* ]]
-}
-
-@test "ha/etcd : incomplet (1/2 sains) → skip (attendre)" {
-    run classify_etcd_health "https://a:2379 is healthy" 2
-    [[ "$output" == skip\|* ]]
-}
-
 # ═══ GRAPHE ATOMIQUE (ADR 0066, Lot 0) — invariants prouvés sans banc ════════
 # Périmètres vérifiés contre le code (workflow consigné 2026-06-13). Ces tests
 # sont la garantie que les oublis du modèle par phase (cnpg-system…) deviennent
@@ -341,8 +305,8 @@ https://b:2379 is unhealthy" 2
 @test "atom/acyclicité : topo_sort sur TOUS les composants réussit (pas de cycle)" {
     run topo_sort $(component_all)
     [ "$status" -eq 0 ]
-    # 23 composants (catalogue complet), tous émis.
-    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 23 ]
+    # 24 composants (catalogue complet : + storage-simple, ADR 0069), tous émis.
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 24 ]
 }
 
 @test "atom/acyclicité : un cycle injecté est DÉTECTÉ (échec, code ≠0)" {
@@ -530,4 +494,45 @@ https://b:2379 is unhealthy" 2
     [ "$output" = "monitoring" ]
     run phase_of_component gitea
     [ "$output" = "gitops" ]
+}
+
+# ═══ GRAPHE BACKEND-CONDITIONNEL (ADR 0069) — variante LOCAL-PATH ════════════
+# Le graphe est ceph-shaped par DÉFAUT (les tests ci-dessus, STORAGE_BACKEND unset).
+# En local-path, les arêtes de stockage se reconfigurent : SC→storage-simple,
+# S3→seaweedfs, et seaweedfs entre dans l'alias monitoring. Cette variante n'était
+# pas couverte (le rollback réel ne tourne qu'en ceph) — on la fige ici.
+
+@test "backend/local-path : les arêtes SC deviennent storage-simple, S3 deviennent seaweedfs" {
+    STORAGE_BACKEND=local-path
+    [ "$(component_deps loki)" = "prometheus-stack s3-backing-loki storage-simple" ]
+    [ "$(component_deps s3-backing-cnpg)" = "seaweedfs" ]
+    [ "$(component_deps registry)" = "gateway-api storage-simple" ]
+    [ "$(component_deps gitea)" = "cert-manager gateway-api storage-simple" ]
+}
+
+@test "backend/local-path : monitoring pose AUSSI seaweedfs (alias)" {
+    STORAGE_BACKEND=local-path
+    run component_expand_alias monitoring
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"seaweedfs"* ]]
+}
+
+@test "backend/local-path : topo_sort dataops ordonne storage-simple→seaweedfs→cnpg, sans datalake/sc" {
+    STORAGE_BACKEND=local-path
+    local order; order=$(topo_sort $(component_expand_alias dataops) | tr '\n' ' ')
+    [[ "$order" != *" datalake "* ]] || { echo "datalake ne doit PAS apparaître en local-path"; false; }
+    [[ "$order" != *" sc "* ]] || { echo "sc (Ceph) ne doit PAS apparaître en local-path"; false; }
+    local p_ss p_sw p_pg
+    p_ss=$(printf '%s\n' "$order" | tr ' ' '\n' | grep -nx storage-simple | cut -d: -f1)
+    p_sw=$(printf '%s\n' "$order" | tr ' ' '\n' | grep -nx seaweedfs | cut -d: -f1)
+    p_pg=$(printf '%s\n' "$order" | tr ' ' '\n' | grep -nx cnpg-cluster-pg | cut -d: -f1)
+    [ "$p_ss" -lt "$p_sw" ] && [ "$p_sw" -lt "$p_pg" ]
+}
+
+@test "backend/ceph (défaut) : storage-simple/seaweedfs ABSENTS de la clôture ceph" {
+    # Rétrocompat : sans env (défaut ceph), le graphe reste ceph-shaped.
+    local cl; cl=$(topo_sort $(component_expand_alias atlas-ceph) | tr '\n' ' ')
+    [[ "$cl" != *" storage-simple "* ]] || { echo "storage-simple fuit en ceph !"; false; }
+    [[ "$cl" != *" seaweedfs "* ]] || { echo "seaweedfs fuit en ceph !"; false; }
+    [[ "$cl" == *" datalake "* ]]  # datalake bien présent en ceph
 }

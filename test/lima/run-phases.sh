@@ -65,16 +65,27 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "${HERE}/rollback-lib.sh"
 
 # ── Table des nœuds (noms génériques — ADR 0023) ─────────────────────────────
-# "nom:rôle". Topologie `multi-node-3` : 1 control-plane + 2 workers = quorum mon
-# Ceph (3 nœuds) + ×3 réplication. Tous nœuds de stockage (disques bruts attachés
-# à chacun). C'est la SEULE topologie du banc local (ADR 0040 : single-node
-# abandonné ; ha-3cp/multisite = cibles à outillage dédié, pas via ce harnais).
-NODES=(
-    "cp1:control"
-    "node1:worker"
-    "node2:worker"
-)
-CP=cp1 # nœud control-plane (kubeconfig + cni.sh)
+# "nom:rôle". Défaut `multi-node-3` : 1 control-plane + 2 workers (quorum mon Ceph
+# + ×3 réplication). SURCHARGEABLE par NODES_OVERRIDE (csv "nom:rôle,…") : c'est
+# ainsi que `topology.py up` PILOTE les nœuds depuis la topologie active (inversion
+# de frontière, ADR 0056 — la topologie décide, le harnais exécute). Le 1er nœud
+# control devient le CP primaire (kubeconfig + cni.sh).
+if [ -n "${NODES_OVERRIDE:-}" ]; then
+    IFS=',' read -r -a NODES <<< "${NODES_OVERRIDE}"
+else
+    NODES=(
+        "cp1:control"
+        "node1:worker"
+        "node2:worker"
+    )
+fi
+# CP = 1er nœud `control` de NODES (primaire). Dérivé, pas codé en dur (suit l'override).
+CP=""
+for _entry in "${NODES[@]}"; do
+    [ "${_entry##*:}" = control ] && { CP="${_entry%%:*}"; break; }
+done
+[ -n "${CP}" ] || CP="${NODES[0]%%:*}" # repli : 1er nœud si aucun rôle control explicite
+unset _entry
 # Port hôte du forward de l'API du control-plane (127.0.0.1:API_PORT → guest 6443).
 API_PORT=6443
 
@@ -93,6 +104,9 @@ API_PORT=6443
 # → 40 GiB en mode Ceph (qcow2 thin-provisionné : n'occupe le disque hôte qu'à
 # l'usage réel). Surchargeable via VM_DISK.
 VM_CPUS=2
+# Mémorise si VM_MEMORY a été FOURNI par l'opérateur (vs défaut dérivé) : un chemin
+# peut alors imposer son propre plancher SANS écraser un choix explicite (ha-3cp).
+VM_MEMORY_SET=${VM_MEMORY:+1}
 VM_MEMORY_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 12GiB || echo 8GiB)
 VM_MEMORY=${VM_MEMORY:-${VM_MEMORY_DEFAULT}}
 VM_DISK_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 40GiB || echo 20GiB)
@@ -167,18 +181,45 @@ time_phase() {
     return "${rc}"
 }
 
+# derive_topology_label : étiquette de FORME dérivée de NODES (honnêteté de Run, ADR
+# 0052) — REPLI quand le nom de stack n'est pas fourni (invocation bash directe, sans
+# l'entrée topology.py). On compte les rôles `control`/`worker` de NODES :
+#   1 control seul        → mono-node      ;  ≥2 control → ha-<n>cp
+#   1 control + N workers → multi-node-<n> (défaut historique : multi-node-3 = 1+2)
+derive_topology_label() {
+    local entry role n_control=0 n_worker=0 total=${#NODES[@]}
+    for entry in "${NODES[@]}"; do
+        role=${entry##*:}
+        case "${role}" in
+            control) n_control=$((n_control + 1)) ;;
+            *) n_worker=$((n_worker + 1)) ;;
+        esac
+    done
+    if [ "${n_control}" -ge 2 ]; then
+        printf 'ha-%dcp' "${n_control}"
+    elif [ "${n_worker}" -eq 0 ]; then
+        printf 'mono-node'
+    else
+        printf 'multi-node-%d' "${total}"
+    fi
+}
+
 # Consigne le run complet dans l'historique versionné (#216) et, si Prometheus
 # est déployé, y joint les métriques de coût échantillonnées (#217). Appelé en
 # fin d'un run de chemin réussi. <total_s> = durée cumulée ; <profil> dérivé de WITH_CEPH.
 record_full_run() {
-    local total=$1 profil block
+    local total=$1 profil block topo
     profil=$(metro_profil "${WITH_CEPH:-0}")
+    # `topologie:` = NOM de la stack (STACK_NAME, posé par `topology.py up`) — la CLÉ
+    # que `last_run_for_topology` matche pour le verdict de fraîcheur PAR STACK. À
+    # défaut (run bash direct), repli sur l'étiquette de FORME dérivée de NODES.
+    topo="${STACK_NAME:-$(derive_topology_label)}"
     # Échantillonnage Prometheus sur la fenêtre du run (best-effort, non bloquant).
     block=$(METRO_METRICS_BLOCK='' metro_sample_prometheus "${total}" || true)
     # TARGET (chemin nommé courant, suffixe +hardening inclus) consigné pour la
     # fraîcheur PAR CHEMIN (ADR 0045 §6 / #244).
     METRO_METRICS_BLOCK="${block}" \
-        metro_record_run "${profil}" "multi-node-3" "${total}" "${PHASE_DURATIONS}" "${TARGET:-}"
+        metro_record_run "${profil}" "${topo}" "${total}" "${PHASE_DURATIONS}" "${TARGET:-}"
 }
 
 # Joue un playbook Ansible de plateforme (depuis l'hôte, kubeconfig banc) PUIS
@@ -219,6 +260,10 @@ node_disks() {
 # ── Prédicats pour retry (repris de multi-node) ──────────────────────────────
 # Gate générique : tous les nœuds attendus (${#NODES[@]}) sont Ready.
 nodes_ready_all() { [ "$("${KUBECTL[@]}" get nodes --no-headers 2> /dev/null | grep -cw Ready)" -eq "${#NODES[@]}" ]; }
+# nodes_ready_count N — au MOINS N nœuds Ready. Utile en HA (ha-3cp) où les CP
+# rejoignent un à un : le gate de chaque étape attend le compte attendu à ce
+# stade (1 après l'init du primaire, 2 après cp2…), pas les ${#NODES[@]} finaux.
+nodes_ready_count() { [ "$("${KUBECTL[@]}" get nodes --no-headers 2> /dev/null | grep -cw Ready)" -ge "${1:-1}" ]; }
 # (operator_ready : SUPPRIMÉ — le gate operator Ready est porté dans le rôle
 #  platform-ceph-cluster, ADR 0049. Le diagnostic status garde osds_up/toolbox_ceph.)
 # Nombre d'OSD attendus = nœuds × disques data (3 × 3 = 9).
@@ -440,28 +485,20 @@ phase_bootstrap() {
     [ -n "${cp_ip}" ] || die "${CP} : pas d'IP user-v2"
     ok "${CP} : IP user-v2 ${cp_ip}"
 
-    bootstrap_node_sequence "${INVENTORY}" -e "control_plane_ip=${cp_ip}"
-
-    # Exposition tout-Cilium (ADR 0020) : DÉRIVER la plage LB-IPAM et l'interface
-    # L2 du réseau user-v2 réel du banc (pas de valeur codée en dur — ADR 0023).
-    # Plage = .240-.250 du /24 des nœuds (hors DHCP) ; interface = NIC user-v2
-    # détecté côté invité (Lima ne garantit pas le nom selon les versions).
-    local lb_prefix l2_if
-    lb_prefix=${cp_ip%.*}                       # ex. 192.168.104.1 → 192.168.104
+    # Interface L2 du réseau user-v2 (LB-IPAM/CNI), dérivée du banc (ADR 0023).
+    local l2_if
     l2_if=$(vm_uservv2_iface "${CP}")
     [ -n "${l2_if}" ] || die "${CP} : interface user-v2 introuvable"
-    ok "expo : LB-IPAM ${lb_prefix}.240-.250, L2 sur ${l2_if}"
-    # CRDs Gateway API AVANT Cilium (drift L56) : l'operator les vérifie au boot.
-    apply_gwapi_crds_in_vm "${CP}" "${GWAPI_VERSION}"
-    run_cni "${CP}" \
-        "LB_IPAM_RANGE_START=${lb_prefix}.240" \
-        "LB_IPAM_RANGE_STOP=${lb_prefix}.250" \
-        "L2_INTERFACE=${l2_if}"
-    # Contexte nommé `cluster-banc` (ADR 0053 (b)) : tue l'homonymie kubeadm
-    # (`kubernetes-admin@kubernetes`) qui ferait s'écraser banc et prod dans une
-    # fusion KUBECONFIG=banc:prod. Étiquette générique (ADR 0023), pas une valeur
-    # de déploiement. La prod reçoit son `cluster-prod` côté kubeadm (k8s-init).
-    fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc
+
+    # ORCHESTRATION des 6 playbooks du socle DÉLÉGUÉE à Python (« Python parle Ansible »,
+    # ADR 0063 ; migration de bootstrap_node_sequence). topology.py bootstrap-seq lance
+    # checks→…→join-workers via runner.launch_phase, puis rappelle ICI `ha-cni` (CNI +
+    # CRDs GW API + kubeconfig) — qui reste du bash (Cilium dans la VM, ADR 0049). Le
+    # provisioning VM, l'inventaire (write_inventory) et la dérivation cp_ip/iface
+    # restent au bash ; la SÉQUENCE et le fail-fast sont en Python testé (test_bootstrap).
+    uv run python "${REPO}/scripts/topology.py" bootstrap-seq \
+        --cp-ip "${cp_ip}" --l2-iface "${l2_if}" --inventory "${INVENTORY}" \
+        || die "bootstrap : socle k8s (orchestration Python) en échec"
 
     # GATE : tous les nœuds attendus (${#NODES[@]}) Ready.
     log "Attente des ${#NODES[@]} nœud(s) Ready (max 5 min)"
@@ -469,109 +506,6 @@ phase_bootstrap() {
         || die "moins de ${#NODES[@]} nœud(s) Ready : $("${KUBECTL[@]}" get nodes 2>&1)"
     ok "${#NODES[@]} nœud(s) Ready"
     "${KUBECTL[@]}" get nodes -o wide
-}
-
-# ── Phase bootstrap-ha — CP PRIMAIRE derrière la VIP (ha-3cp, #250) ──────────
-# Variante HA de phase_bootstrap : le CP primaire s'initialise avec la VIP comme
-# controlPlaneEndpoint, kube-vip posé AVANT l'init. Args : CP_IP VIP VIP_IFACE.
-# Amorçage k8s ≥ 1.29 (cf. en-tête run_ha_3cp) : kube-vip monte super-admin.conf
-# le temps de l'init (admin.conf inutilisable avant que l'API tourne), puis on
-# rebascule sur admin.conf. Au bootstrap, SEUL le primaire est dans `control` ;
-# cp2/cp3 rejoignent ensuite (phase_join_control_plane).
-phase_bootstrap_ha() {
-    local cp_ip=$1 vip=$2 vip_iface=$3
-    preflight
-    log "Phase bootstrap-ha — CP primaire ${CP} derrière la VIP ${vip}"
-    mkdir -p "${WORKDIR}"
-
-    # Inventaire : SEUL le primaire en control (les autres CP joignent après).
-    write_inventory "${INVENTORY}" "${CP}" ""
-
-    # Variables communes : la VIP est le control_plane_endpoint (certSANs + hosts),
-    # kube-vip paramétré (VIP + interface). control_plane_ip = advertise du primaire.
-    local -a ha_vars=(
-        -e "control_plane_ip=${cp_ip}"
-        -e "control_plane_endpoint=${vip}"
-        -e "kube_vip_address=${vip}"
-        -e "kube_vip_interface=${vip_iface}"
-        -e "control_plane_vip=${vip}"
-    )
-
-    # 1. Pré-init : checks → cri → kubeadm → control-planes (PAS encore init).
-    local pb
-    for pb in checks cri kubeadm control-planes; do
-        log "  ansible-playbook ${pb}.yaml"
-        ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/${pb}.yaml" "${ha_vars[@]}"
-    done
-
-    # 2. kube-vip AVANT l'init, en super-admin.conf (amorçage k8s ≥ 1.29).
-    log "  ansible-playbook kube-vip.yaml (amorçage : super-admin.conf)"
-    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/kube-vip.yaml" \
-        "${ha_vars[@]}" -e "kube_vip_kubeconfig_path=/etc/kubernetes/super-admin.conf"
-
-    # 3. Init du CP primaire (controlPlaneEndpoint = VIP). La VIP répond via kube-vip.
-    log "  ansible-playbook initialisation.yaml (kubeadm init via VIP)"
-    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/initialisation.yaml" "${ha_vars[@]}"
-
-    # 4. Bascule kube-vip sur admin.conf (régime permanent ; super-admin.conf est
-    #    sensible et non distribué). Re-render idempotent du manifeste statique.
-    log "  ansible-playbook kube-vip.yaml (régime : admin.conf)"
-    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/kube-vip.yaml" \
-        "${ha_vars[@]}" -e "kube_vip_kubeconfig_path=/etc/kubernetes/admin.conf"
-
-    # 5. CNI (Cilium) — local-path, donc plage LB-IPAM + L2 dérivées du réseau.
-    local lb_prefix="${cp_ip%.*}"
-    apply_gwapi_crds_in_vm "${CP}" "${GWAPI_VERSION}"
-    run_cni "${CP}" \
-        "LB_IPAM_RANGE_START=${lb_prefix}.240" \
-        "LB_IPAM_RANGE_STOP=${lb_prefix}.250" \
-        "L2_INTERFACE=${vip_iface}"
-    fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc
-
-    # GATE : le primaire est Ready (1 nœud à ce stade).
-    retry 300 10 nodes_ready_all \
-        || die "CP primaire non Ready : $("${KUBECTL[@]}" get nodes 2>&1)"
-    ok "CP primaire ${CP} Ready derrière la VIP ${vip}"
-}
-
-# ── Phase join-control-plane — promeut UN CP additionnel (ha-3cp, #250) ──────
-# Args : CP_À_PROMOUVOIR VIP. Pose kube-vip (admin.conf) sur le nœud puis joue
-# join-control-plane.yaml limité à ce nœud (le rôle prépare la certificate-key
-# fraîche sur le primaire). La gate etcd est portée par l'appelant (run_ha_3cp).
-phase_join_control_plane() {
-    local cp=$1 vip=$2
-    preflight
-    log "Phase join-control-plane — promotion de ${cp} (VIP ${vip})"
-
-    # Ajouter le nœud au groupe control de l'inventaire (il devient CP membre).
-    # On reconstruit l'inventaire control = primaire + CP déjà promus + ce cp.
-    local control="${CP}" entry vm
-    for entry in "${NODES[@]}"; do
-        vm="${entry%%:*}"
-        [ "${vm}" = "${CP}" ] && continue
-        # Inclure les CP déjà promus (marqueur cp-joined.log) + le cp courant.
-        if [ "${vm}" = "${cp}" ] || vm_sh "${vm}" test -f cp-joined.log 2>/dev/null; then
-            control="${control} ${vm}"
-        fi
-    done
-    write_inventory "${INVENTORY}" "${control}" ""
-
-    local -a ha_vars=(
-        -e "control_plane_endpoint=${vip}"
-        -e "kube_vip_address=${vip}"
-        -e "kube_vip_interface=${HA_VIP_IFACE:-$(vm_uservv2_iface "${CP}")}"
-    )
-
-    # kube-vip (admin.conf — la VIP est déjà portée par le primaire) sur ce nœud,
-    # puis join --control-plane limité à ce nœud.
-    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/kube-vip.yaml" \
-        "${ha_vars[@]}" -e "kube_vip_kubeconfig_path=/etc/kubernetes/admin.conf" --limit "${cp}"
-    ansible-playbook -i "${INVENTORY}" "${REPO}/bootstrap/join-control-plane.yaml" \
-        "${ha_vars[@]}" --limit "${cp},${CP}"
-
-    retry 300 10 nodes_ready_all \
-        || die "${cp} non Ready après promotion : $("${KUBECTL[@]}" get nodes 2>&1)"
-    ok "${cp} promu control-plane (derrière la VIP ${vip})"
 }
 
 # ── Phase bootstrap-fault — ARRÊT INJECTÉ : prouve le rescue (ADR 0050/0052 §5) ─
@@ -1495,25 +1429,38 @@ status_last_run() {
 }
 
 # ── Down — détruit VMs + disques nommés ──────────────────────────────────────
+# phase_down [vm…] — détruit les VMs nommées (+ leurs disques). Sans argument :
+# les NODES du harnais (banc complet). AVEC arguments (noms de VM) : seulement
+# celles-ci — c'est ainsi que `topology.py destroy` cible les VMs de la STACK active
+# (déléguée ici, limactl reste du bash, ADR 0049). Ne retire le WORKDIR que pour un
+# démontage COMPLET (sans liste explicite).
 phase_down() {
     require_lima
-    log "Destruction du banc Lima (VMs + disques nommés)"
-    local entry vm d
-    for entry in "${NODES[@]}"; do
-        vm="${entry%%:*}"
+    local targets=("$@") vm d
+    if [ ${#targets[@]} -eq 0 ]; then
+        local entry
+        for entry in "${NODES[@]}"; do targets+=("${entry%%:*}"); done
+        log "Destruction du banc Lima (VMs + disques nommés)"
+    else
+        log "Destruction des VMs : ${targets[*]} (+ disques nommés)"
+    fi
+    for vm in "${targets[@]}"; do
         lima_delete_node "${vm}"
         for d in $(node_disks "${vm}"); do
             lima_disk_delete "${d}"
         done
     done
-    rm -rf "${WORKDIR}"
-    ok "banc démonté — rien ne subsiste"
+    # WORKDIR (inventaire/artefacts du banc) : retiré seulement pour un démontage
+    # complet — une destruction ciblée (stack) ne touche pas l'état du harnais.
+    [ $# -eq 0 ] && rm -rf "${WORKDIR}"
+    ok "VMs démontées — rien ne subsiste"
 }
 
 # ── Chemins d'installation (ADR 0045) ───────────────────────────────────────
 # Quatre chemins nommés, du plus court au plus complet. Chacun monte d'abord le
-# SOCLE (up → bootstrap → stockage, avec cache #219), puis ses couches
-# applicatives. L'observabilité (monitoring) est posée TÔT (avant gitops/dataops)
+# SOCLE (up → bootstrap [+ ceph+sc en mode Ceph], avec cache #219), puis — pour les
+# chemins store+ en local-path — la couche stockage (run_storage_simple), puis ses
+# couches applicatives. Le chemin `socle`/base reste NU (k8s + CNI, sans stockage). L'observabilité (monitoring) est posée TÔT (avant gitops/dataops)
 # pour capter leur démarrage, et fournit le backing S3 SeaweedFS que dataops
 # consomme en mode léger. Axe orthogonal : WITH_HARDENING=1 durcit l'hôte sur
 # n'importe quel chemin (#240). L'agrégat `all` est supprimé (ADR 0045 §3).
@@ -1522,8 +1469,14 @@ phase_down() {
 # ne consigner QUE les runs from-scratch (drift L49).
 SOCLE_BUILT=0
 
-# Monte le socle (up → bootstrap → stockage selon profil), avec cache du socle
-# (#219). Pose SOCLE_BUILT=1 si le socle a RÉELLEMENT été bâti (pas réutilisé).
+# Monte le socle, avec cache du socle (#219). Pose SOCLE_BUILT=1 si le socle a
+# RÉELLEMENT été bâti (pas réutilisé).
+#
+# Le socle de BASE = up → bootstrap (k8s + CNI SEULS) : le STOCKAGE n'en fait PAS
+# partie (ADR 0039 : `storage` ∈ profil store, pas base ; aligné sur plan.py). En
+# mode Ceph le socle pose ceph+sc (indissociable de ce backend). En local-path, la
+# couche `storage-simple` est posée SÉPARÉMENT par les chemins store+ (atlas…) via
+# run_storage_simple — le chemin `socle` (profil base) ne la pose PAS.
 run_socle() {
     local profil
     profil=$(metro_profil "${WITH_CEPH:-0}")
@@ -1540,11 +1493,18 @@ run_socle() {
         time_phase sc phase_sc
         log "🎉 Socle monté (mode Ceph) : up → bootstrap → ceph → storageClasses."
     else
-        time_phase storage-simple phase_storage_simple
-        log "🎉 Socle monté (mode rapide) : up → bootstrap → storage-simple."
+        log "🎉 Socle de base monté (k8s + CNI) : up → bootstrap (stockage = couche store+)."
     fi
     metro_cache_save "${profil}"
     SOCLE_BUILT=1
+}
+
+# Couche STOCKAGE local-path (storage-simple), posée par les chemins store+ APRÈS le
+# socle (atlas…). Le chemin `socle`/base ne l'appelle pas. No-op en mode Ceph (le
+# stockage Ceph est déjà dans run_socle).
+run_storage_simple() {
+    [ "${WITH_CEPH:-0}" = 1 ] && return 0
+    time_phase storage-simple phase_storage_simple
 }
 
 # Consigne le run SI from-scratch (socle réellement bâti). Un run sur cache (#219)
@@ -1580,7 +1540,12 @@ run_hardening_if_requested() {
     # État : le suffixe reflète ce que l'hôte EST, détecté via SSH (refus franc si
     # injoignable/incohérent). Couvre aussi un hôte durci hors de CE run.
     detect_hardening_state
-    [ "${HARDENING_STATE:-plain}" = hardened ] && TARGET="${TARGET}+hardening"
+    # `if` (et non `[ … ] && …`) : sous `set -e`, un `[ … ] && …` FAUX en DERNIÈRE
+    # instruction d'une fonction propage son rc=1 → abort du chemin alors que tout a
+    # réussi (8e/9e bug du run : socle monté, nœud Ready, puis rc=1 sur l'hôte `plain`).
+    if [ "${HARDENING_STATE:-plain}" = hardened ]; then
+        TARGET="${TARGET}+hardening"
+    fi
 }
 
 # ── Chemin ha-3cp — control-plane HA hyperconvergé (ADR 0047/0055, #250) ─────
@@ -1610,6 +1575,15 @@ run_ha_3cp() {
     NODES=("cp1:control" "cp2:control" "cp3:control")
     CP=cp1  # CP primaire (init + kubeconfig + cni)
 
+    # RAM allégée : un CP local-path (etcd + apiserver + kubelet, PAS d'OSD/Ceph)
+    # tient bien en deçà des 8 GiB du défaut léger. On vise 5 GiB/CP (3×5 = 15 GiB
+    # au lieu de 3×8 = 24). NB : 4 GiB ALLOUÉS ne laissent que ~3922 MB VISIBLES
+    # (overhead firmware) → sous le plancher de 4096 MB asserté par k8s-pre-install ;
+    # 5 GiB donne ~4900 MB visibles, au-dessus. Abaisser ce plancher pour un CP
+    # SANS OSD (le 4096 vise le dimensionnement Ceph) est un suivi à mesurer (#250).
+    # N'écrase PAS un VM_MEMORY fourni explicitement par l'opérateur.
+    [ -z "${VM_MEMORY_SET}" ] && VM_MEMORY=5GiB
+
     time_phase up phase_up
 
     # IP user-v2 du primaire (advertise + /etc/hosts). La VIP = même /24, hors DHCP
@@ -1623,39 +1597,73 @@ run_ha_3cp() {
     [ -n "${vip_iface}" ] || die "${CP} : interface user-v2 introuvable (VIP)"
     ok "ha-3cp : VIP ${vip} sur ${vip_iface} (CP primaire ${CP} ${cp_ip})"
 
-    time_phase bootstrap-ha "phase_bootstrap_ha ${cp_ip} ${vip} ${vip_iface}"
+    # Inventaire (primaire seul en control au bootstrap ; les CP rejoignent ensuite,
+    # l'orchestration Python le reconstruit via --limit). HA_CP_IP/HA_VIP exportés
+    # pour la sous-commande Python et le rappel ha-cni.
+    write_inventory "${INVENTORY}" "${CP}" ""
+    export HA_CP_IP="${cp_ip}" HA_VIP="${vip}" HA_VIP_IFACE="${vip_iface}"
 
-    # Promotion des CP additionnels, UN À UN, gate etcd entre chaque.
-    local cp expected=1
-    for cp in $(ha_cp_join_order cp1 cp2 cp3); do
-        ha_gate_etcd_health "${expected}"
-        time_phase "join-cp-${cp}" "phase_join_control_plane ${cp} ${vip}"
-        expected=$((expected + 1))
-    done
-    ha_gate_etcd_health "${expected}"  # quorum final à 3
+    # Délégation de l'ORCHESTRATION ANSIBLE à Python (« Python parle Ansible »,
+    # ADR 0063) : topology.py ha-3cp lance les playbooks via runner.launch_phase,
+    # gère l'amorçage (super-admin→admin), les gates VIP/etcd, et rappelle ici
+    # `ha-cni` pour la CNI (qui reste du bash, ADR 0049). Le provisioning VM et la
+    # CNI restent à run-phases.sh ; le « cerveau » HA est en Python testé.
+    time_phase bootstrap-ha \
+        uv run python "${REPO}/scripts/topology.py" ha-3cp \
+        --nodes cp1,cp2,cp3 --cp-ip "${cp_ip}" --vip "${vip}" \
+        --vip-iface "${vip_iface}" --inventory "${INVENTORY}"
 
     time_phase storage-simple phase_storage_simple
     log "🎉 Chemin 'ha-3cp' : 3 CP hyperconvergés derrière la VIP ${vip} (local-path)."
 }
 
-# ha_gate_etcd_health EXPECTED — gate la santé etcd (classify_etcd_health) AVANT
-# de promouvoir le CP suivant. Lit `etcdctl endpoint health --cluster` sur le CP
-# primaire (toolbox kubeadm) ; refuse de continuer si le quorum est dégradé.
-ha_gate_etcd_health() {
-    local expected=$1 out verdict
-    log "  gate etcd : quorum sain à ${expected} membre(s) avant promotion ?"
-    out=$(vm_sh "${CP}" sudo sh -c \
-        'ETCDCTL_API=3 etcdctl \
-           --endpoints=https://127.0.0.1:2379 \
-           --cacert=/etc/kubernetes/pki/etcd/ca.crt \
-           --cert=/etc/kubernetes/pki/etcd/server.crt \
-           --key=/etc/kubernetes/pki/etcd/server.key \
-           endpoint health --cluster' 2>/dev/null) || true
-    verdict=$(classify_etcd_health "${out}" "${expected}")
-    case "${verdict%%|*}" in
-        ok) ok "  ${verdict#*|}" ;;
-        *)  die "ha-3cp : ${verdict#*|}" ;;
-    esac
+# ha_cni VIP_IFACE LB_PREFIX — pose Cilium sur le CP primaire (rappelé par la
+# sous-commande Python ha-3cp ; la CNI reste du bash, ADR 0049). Dérive la plage
+# LB-IPAM du /24 du primaire ; fetch le kubeconfig local après.
+phase_ha_cni() {
+    local vip_iface=$1 lb_prefix=$2
+    apply_gwapi_crds_in_vm "${CP}" "${GWAPI_VERSION}"
+    # exposition.mode (ADR 0071) rend les CRs Gateway/LB-IPAM CONSÉQUENTS : seul le mode
+    # `gateway` les pose (CILIUM_EXPO_ENABLED=1) ; `hostport`/`none` ne les posent pas
+    # (l'exposition passe par hostPort sur les workloads, ou rien). EXPOSITION_MODE est
+    # passé par `topology.py up` (topo.exposition_mode) ; défaut `gateway` si absent.
+    local expo_enabled
+    expo_enabled=$([ "${EXPOSITION_MODE:-gateway}" = gateway ] && echo 1 || echo 0)
+    run_cni "${CP}" \
+        "CILIUM_EXPO_ENABLED=${expo_enabled}" \
+        "LB_IPAM_RANGE_START=${lb_prefix}.240" \
+        "LB_IPAM_RANGE_STOP=${lb_prefix}.250" \
+        "L2_INTERFACE=${vip_iface}"
+    fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc
+}
+
+# NB : l'orchestration HA (bootstrap primaire, gates VIP/etcd, promotion des CP)
+# vit désormais en PYTHON (cluster_topology/ha.py via runner.launch_phase, ADR
+# 0063), déléguée par run_ha_3cp ; seuls le provisioning VM et la CNI (phase_ha_cni)
+# restent du bash ici (orchestration de CLI, ADR 0049).
+
+# emit_facts — CONTRAT MACHINE pour topology.py (inversion de frontière, ADR 0049/0056).
+# Imprime sur stdout, en KEY=VALUE byte-stable, les faits du banc que Python consomme :
+# l'IP user-v2 du CP primaire (advertiseAddress), son interface L2 (LB-IPAM/CNI), et la
+# VIP dérivée si la topo est HA (> 1 nœud control). Réutilise les briques irréductibles
+# vm_uservv2_ip/iface (limactl shell). Python DEMANDE ces faits ; le bash ne pilote plus.
+emit_facts() {
+    require_lima
+    local cp_ip l2_if n_control=0 entry
+    cp_ip=$(vm_uservv2_ip "${CP}")
+    [ -n "${cp_ip}" ] || die "${CP} : pas d'IP user-v2 (banc non provisionné ?)"
+    l2_if=$(vm_uservv2_iface "${CP}")
+    [ -n "${l2_if}" ] || die "${CP} : interface user-v2 introuvable"
+    printf 'CP_IP=%s\n' "${cp_ip}"
+    printf 'L2_IFACE=%s\n' "${l2_if}"
+    # HA = plus d'un nœud `control` dans NODES → on émet la VIP (même règle que run_ha_3cp).
+    for entry in "${NODES[@]}"; do
+        [ "${entry##*:}" = control ] && n_control=$((n_control + 1))
+    done
+    if [ "${n_control}" -gt 1 ]; then
+        printf 'VIP=%s\n' "${cp_ip%.*}.40"
+        printf 'VIP_IFACE=%s\n' "${l2_if}"
+    fi
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -1688,6 +1696,50 @@ case "${1:-}" in
         log "🎉 Chemin 'socle' : socle monté (profil $(metro_profil "${WITH_CEPH:-0}"))."
         record_if_fresh "${run_start}"
         ;;
+    # ── metrics : socle léger → metrics-server SEUL (palier fin, ADR 0068). ──────
+    # Plus petit cran d'observabilité : l'API `kubectl top` sans Prometheus/Grafana
+    # (obs). metrics-server n'a pas de dépendance stockage → posé juste après le
+    # socle, sans storage-simple. Cache socle #219 : up/bootstrap réutilisés.
+    metrics)
+        TARGET=metrics
+        if [ "${WITH_CEPH:-0}" = 1 ]; then
+            die "chemin 'metrics' = palier léger (ADR 0068) ; ne pas combiner avec WITH_CEPH=1"
+        fi
+        chemin_prelude
+        run_start=$(date +%s)
+        run_socle
+        run_hardening_if_requested
+        time_phase metrics-server phase_metrics_server
+        log "🎉 Chemin 'metrics' : socle → metrics-server (kubectl top opérant)."
+        record_if_fresh "${run_start}"
+        ;;
+    # ── layers : séquence ARBITRAIRE de phases, ORDONNÉE par topology.py (ADR 0069). ─
+    # L'arm générique des paliers SANS preset dédié (ex. [gitops, metrics]). Python
+    # fournit l'ordre (resolve_layers, tri topo du graphe atomique) ; bash EXÉCUTE,
+    # ne re-trie PAS (ADR 0063 : bash exécute, Python décide). Le préfixe socle
+    # (up,bootstrap[,ceph,sc]) est délégué à run_socle pour préserver le cache #219 +
+    # le verdict SOCLE_BUILT/record_if_fresh ; le reste boucle sur les phases unitaires.
+    layers)
+        [ -n "${2:-}" ] || die "usage : layers <phase1,phase2,…> (séquence ordonnée par topology.py)"
+        TARGET=layers
+        chemin_prelude
+        run_start=$(date +%s)
+        IFS=',' read -r -a _seq <<< "$2"
+        # Backend dérivé du préfixe : `ceph` dans la séquence ⇒ socle Ceph.
+        case ",$2," in *",ceph,"*) WITH_CEPH=1 ;; esac
+        run_socle
+        run_hardening_if_requested
+        # Sauter le préfixe socle déjà monté par run_socle (up/bootstrap[,ceph,sc]) ;
+        # boucler sur la queue applicative restante (chaque phase = un arm unitaire).
+        for _p in "${_seq[@]}"; do
+            case "${_p}" in
+                up | bootstrap | ceph | sc) continue ;; # posés par run_socle
+                *) time_phase "${_p}" "phase_${_p//-/_}" ;;
+            esac
+        done
+        log "🎉 Chemin 'layers' : socle → ${2//,/ → }."
+        record_if_fresh "${run_start}"
+        ;;
     # ── atlas : socle léger → monitoring → gitops → dataops (ADR 0044/0045). ──
     # Observabilité d'abord (capte la suite + pose SeaweedFS) ; puis socle GitOps
     # (Gitea + Argo CD) ; puis l'INFRA DataOps (CNPG/Dagster/Marquez vides — les
@@ -1702,6 +1754,7 @@ case "${1:-}" in
         run_start=$(date +%s)
         run_socle
         run_hardening_if_requested
+        run_storage_simple  # couche stockage local-path (atlas = dataops, crée des PVC)
         # metrics-server AVANT monitoring : palier 1 autonome (#252), rend
         # `kubectl top` opérant dès le socle — un dev atlas voit l'usage CPU/RAM.
         time_phase metrics-server phase_metrics_server
@@ -1712,7 +1765,7 @@ case "${1:-}" in
         # l'image émetteur (buildée par dataops) et cible le ns dagster (monté
         # par dataops). Argo CD réconcilie ensuite le workflow depuis Gitea.
         time_phase gitops-seed phase_gitops_seed
-        log "🎉 Chemin 'atlas' : metrics-server → monitoring → gitops → dataops → gitops-seed."
+        log "🎉 Chemin 'atlas' : storage-simple → metrics-server → monitoring → gitops → dataops → gitops-seed."
         log "ℹ️  Preuve e2e des workflows atlas par GitOps : scénario 27 (#231)."
         log "👉 Accès dev (URLs *.cluster.lan + secrets + .env atlas) : test/lima/access.sh (ADR 0048)."
         record_if_fresh "${run_start}"
@@ -1785,11 +1838,20 @@ case "${1:-}" in
         run_hardening_if_requested
         record_if_fresh "${run_start}"
         ;;
-    # Phases ha-3cp atomiques (diagnostic / re-jeu ciblé d'une promotion).
-    bootstrap-ha) [ "$#" -ge 4 ] || die "usage : bootstrap-ha <cp_ip> <vip> <vip_iface>"; time_phase bootstrap-ha "phase_bootstrap_ha $2 $3 $4" ;;
-    join-control-plane) [ -n "${3:-}" ] || die "usage : join-control-plane <cp> <vip>"; time_phase "join-cp-$2" "phase_join_control_plane $2 $3" ;;
+    # ha-cni : rappel interne de la sous-commande Python ha-3cp (la CNI reste bash,
+    # ADR 0049). Args : <vip_iface> <lb_prefix>.
+    ha-cni) [ -n "${3:-}" ] || die "usage : ha-cni <vip_iface> <lb_prefix>"; phase_ha_cni "$2" "$3" ;;
+    # facts — contrat machine : imprime CP_IP/L2_IFACE (+ VIP/VIP_IFACE si HA) que
+    # topology.py consomme (inversion de frontière, ADR 0049/0056). Brique LUE par Python.
+    facts) emit_facts ;;
+    # inventory <control_csv> [workers_csv] — réécrit l'inventaire (control + workers).
+    # Brique générique appelée par topology.py (write_inventory reste bash, byte-stable).
+    inventory) [ -n "${2:-}" ] || die "usage : inventory <control_csv> [workers_csv]"; mkdir -p "${WORKDIR}"; write_inventory "${INVENTORY}" "$(echo "$2" | tr ',' ' ')" "$(echo "${3:-}" | tr ',' ' ')" ;;
+    # ha-inventory <cp1,cp2,…> — ALIAS de compat (= inventory <cp> sans workers, HA
+    # hyperconvergé). Conservé le temps de la transition (rappel ha-3cp). Préférer `inventory`.
+    ha-inventory) [ -n "${2:-}" ] || die "usage : ha-inventory <cp1,cp2,…>"; mkdir -p "${WORKDIR}"; write_inventory "${INVENTORY}" "$(echo "$2" | tr ',' ' ')" "" ;;
     status) phase_status ;;
-    down) phase_down ;;
+    down) phase_down "${@:2}" ;;
     # Rollback d'UNE phase (ADR 0054, #274) : défait ce que `<phase>` a monté.
     # BANC_JETABLE=1 requis (destructif total). Ex : BANC_JETABLE=1 ... rollback ceph
     rollback) [ -n "${2:-}" ] || die "usage : rollback <phase> (ceph|sc|datalake|metrics-server|monitoring|dataops|gitops|gitops-seed)"; phase_rollback "$2" ;;

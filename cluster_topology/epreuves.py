@@ -339,6 +339,20 @@ EPREUVES: list[Epreuve] = [
         "dataops",
         None,
     ),
+    # ha-3cp : survie du control-plane à 1 panne (VIP kube-vip + quorum etcd).
+    # chaos/résilience comme 19-21 ; terrain SSH (limactl + etcdctl host-side) ;
+    # exige multi-nœuds (3 CP — la topologie ha-3cp ; se SKIP au runtime hors
+    # ha-3cp). Local-path (HA ⊥ stockage) → backend_req=None. ADR 0047/0055, #250.
+    Epreuve(
+        "30",
+        "ha-3cp : survie à 1 panne CP (VIP + quorum etcd)",
+        "chaos",
+        "résilience",
+        TOPO_MULTI,
+        TERRAIN_SSH,
+        "base",
+        None,
+    ),
 ]
 
 

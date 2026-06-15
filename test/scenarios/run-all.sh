@@ -65,8 +65,9 @@ wait_health_ok() {
 }
 
 # Scénarios destructifs (changent l'état du cluster) → attente HEALTH_OK après.
-# 03/04/05 = résilience ; 19/20/21 = chaos (ADR 0025).
-is_destructive() { case "$1" in 03|04|05|19|20|21) return 0 ;; *) return 1 ;; esac; }
+# 03/04/05 = résilience ; 19/20/21 = chaos (ADR 0025) ; 30 = panne CP HA (ha-3cp,
+# local-path → wait_health_ok no-op sans Ceph ; le scénario se restaure lui-même).
+is_destructive() { case "$1" in 03|04|05|19|20|21|30) return 0 ;; *) return 1 ;; esac; }
 
 # Scénarios qui interrogent/attaquent les nœuds par SSH (pas kubectl) et n'ont
 # pas leur place dans un run kubectl-only :

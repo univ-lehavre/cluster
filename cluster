@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# Raccourci de l'outil déclaratif : `cluster <args>` == `topology.py <args>`.
+# Wrapper versionné (ADR 0049 : bash pour l'orchestration CLI) qui DÉLÈGUE tous ses
+# arguments à scripts/topology.py via `uv run` (l'environnement uv du dépôt). Permet
+# `cluster up`, `cluster preview`, `cluster stack ls`… au lieu de la commande longue.
+#
+#   ./cluster up --yes
+#   cluster preview              # si la racine du dépôt est dans le PATH
+#
+# Résout sa propre racine (fonctionne depuis n'importe quel CWD) ; `uv run` lit le
+# pyproject.toml du dépôt, donc l'invocation marche hors du venv actif.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+exec uv run --project "${HERE}" python "${HERE}/scripts/topology.py" "$@"

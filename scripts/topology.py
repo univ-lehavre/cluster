@@ -18,24 +18,33 @@ le besoin » (model.py / ADR 0049 — lisibilité néophyte, coût de diversité
 sous-commandes triviales n'en justifient aucune ; l'ADR 0056 §2 cite « typer/click »
 comme illustration de style, pas comme exigence d'outillage.
 
-Usage :
-  uv run python scripts/topology.py validate [-f topology.yaml]
-  uv run python scripts/topology.py generate [--kind prod|lima] [--what inventory|run-params]
-  uv run python scripts/topology.py status [--real [--hosts cp1 node1]]
-  uv run python scripts/topology.py diff [--kind prod|lima --against PATH]
-  uv run python scripts/topology.py epreuves [--all] [--type unit|intég|chaos]   (P4)
-  uv run python scripts/topology.py runs [--target atlas|storage-real|…]          (P4)
-  uv run python scripts/topology.py next [--target …] [--apply]                   (P5)
-  uv run python scripts/topology.py metrics [--last]                               (P6)
-  uv run python scripts/topology.py smoke [--namespace …]                          (P6)
-  uv run python scripts/topology.py roundtrip --phase monitoring|gitops|…          (P6+)
+Usage — gestion des stacks (catalogue, calque `pulumi stack`) :
+  uv run python scripts/topology.py stack new <nom> [--activate] [--no-input]
+  uv run python scripts/topology.py stack ls
+  uv run python scripts/topology.py stack select <nom>
+  uv run python scripts/topology.py stack validate [-f topology.yaml]
+Usage — cycle de vie (top-level, calque Pulumi) :
+  uv run python scripts/topology.py preview [--target …]      (voir : VOULU+RÉEL+PLAN)
+  uv run python scripts/topology.py up [--yes]               (monter TOUTE la séquence)
+  uv run python scripts/topology.py next [--target …]        (appliquer la couche suivante)
+  uv run python scripts/topology.py destroy [--yes]          (calque pulumi destroy)
+Usage — artefacts (dériver/constater, groupe `artifact`) :
+  uv run python scripts/topology.py artifact generate [--kind prod|lima] [--what …]
+  uv run python scripts/topology.py artifact diff [--kind prod|lima --against PATH]
+  uv run python scripts/topology.py artifact runs [--target atlas|…]               (P4)
+  uv run python scripts/topology.py artifact metrics [--last]                       (P6)
+Usage — épreuves & réversibilité (groupe `test`) :
+  uv run python scripts/topology.py test scenarios [--all] [--type unit|intég|chaos] (P4)
+  uv run python scripts/topology.py test smoke [--namespace …]                       (P6)
+  uv run python scripts/topology.py test roundtrip --phase monitoring|gitops|…       (P6+)
 
-P4 ajoute deux commandes READ-ONLY : `epreuves` (liste filtrée par la topologie,
-exig. 6 — ne lance rien) et `runs` (lit l'historique + fraîcheur, exig. 10-12 —
-ne réécrit rien). P5 ajoute `next` : suggère la prochaine phase (diff voulu−réel) ;
-`--apply` la LANCE via ansible-runner — décision humaine explicite, jamais
-d'auto-apply (ADR 0063). Sans --apply, `next` est informatif (code 0). P6 ajoute
-`metrics` (expose les métriques DÉJÀ consignées, exig. 8 — ne mesure rien de neuf)
+P4 ajoute deux commandes READ-ONLY : `test scenarios` (liste filtrée par la
+topologie, exig. 6 — ne lance rien) et `artifact runs` (lit l'historique +
+fraîcheur, exig. 10-12 — ne réécrit rien). P5 : `preview` MONTRE le plan complet
+(VOULU+RÉEL+PLAN, read-only) et `up` l'APPLIQUE — la 1re couche manquante via
+ansible-runner ; lancer `up` EST la décision humaine (jamais d'auto-enchaînement,
+ADR 0063). P6 ajoute `artifact metrics` (expose les métriques DÉJÀ consignées,
+exig. 8 — ne mesure rien de neuf)
 et `smoke` (test de réversibilité créer→vérifier→détruire sur un cluster vivant,
 exig. 7 — couche kubernetes isolée, code 1 si non réversible). `roundtrip`
 généralise `smoke` à une COUCHE entière (détruire→vérifier→reconstruire→vérifier),
@@ -56,7 +65,10 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import difflib
+import glob
+import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -65,30 +77,62 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import yaml  # noqa: E402
 
 from cluster_topology import (  # noqa: E402
+    QUESTION_LB_MODE,
+    QUESTIONS,
     PlanError,
+    ScaffoldError,
     TopologyError,
+    build_topology_dict,
+    catalog_entry,
+    classify_refresh,
+    consumes_storage,
+    default_target,
     derive_run_params,
+    diff_phases,
+    expected_phase_sequence,
     filter_epreuves,
     format_metrics,
     load_runs,
     load_topology,
     metrics_of,
+    observed_done_phases,
+    phase_label,
+    plan_init,
     render_lima_inventory,
     render_prod_inventory,
+    resolve_layers,
     suggest_next,
     verdict_for_run,
 )
+from cluster_topology import bootstrap as _bootstrap  # noqa: E402
+from cluster_topology import ha as _ha  # noqa: E402
 from cluster_topology import roundtrip as _roundtrip  # noqa: E402
 from cluster_topology import runner as _runner  # noqa: E402
+from cluster_topology import scale as _scale  # noqa: E402
 from cluster_topology import smoke as _smoke  # noqa: E402
-from cluster_topology.history import last_run_for_target, latest_run  # noqa: E402
+from cluster_topology.history import (  # noqa: E402
+    last_run_for_target,
+    last_run_for_topology,
+    latest_run,
+)
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
+# Catalogue de topologies (ADR 0056 + 0023) : `topologies/` versionne les modèles
+# génériques `*.example.yaml` et abrite les topologies réelles gitignorées ;
+# `topology.yaml` (racine) est un SYMLINK gitignoré vers l'entrée activée.
+_CATALOG_DIR = os.path.join(_ROOT, "topologies")
 _DEFAULT_TOPOLOGY = os.path.join(_ROOT, "topology.yaml")
-_EXAMPLE_TOPOLOGY = os.path.join(_ROOT, "topology.example.yaml")
+_EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "socle.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
-_STATE_SH = os.path.join(_ROOT, "bootstrap", "state.sh")
 _RUNS_HISTORY = os.path.join(_ROOT, "test", "lima", "runs-history.yaml")
+# Kubeconfig du banc Lima, écrit par run-phases.sh (KUBECONFIG_LOCAL = WORKDIR/kubeconfig).
+# `preview` lit l'état RÉEL du cluster via kubectl ; sans KUBECONFIG exporté, il retombe
+# ICI (sinon il interroge ~/.kube/config — pas le banc — et voit 0 nœud Ready alors que
+# le socle est monté : faux « à installer », scorie de fidélité du RÉEL).
+_BENCH_KUBECONFIG = os.path.join(_ROOT, "test", "lima", ".work", "kubeconfig")
+# Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
+# un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha._vm_exec).
+_REFRESH_TIMEOUT_S = 8
 # Chemins nommés connus de l'historique (ADR 0045 §6) pour le verdict par chemin.
 _CHEMINS_NOMMES = ["atlas", "storage-real", "cluster-dataops"]
 
@@ -96,21 +140,42 @@ _CHEMINS_NOMMES = ["atlas", "storage-real", "cluster-dataops"]
 def _resolve(path: str | None) -> str:
     """Chemin du topology.yaml à charger.
 
-    Source de vérité : `topology.yaml` (config locale gitignorée, ADR 0023). En
-    son absence on retombe sur `topology.example.yaml` (exemple générique
-    versionné) AVEC un avis explicite sur stderr — sinon un opérateur croirait
-    générer depuis sa topo réelle et obtiendrait l'exemple.
+    Source de vérité : `topology.yaml` (config locale gitignorée, ADR 0023), un
+    SYMLINK vers l'entrée activée du catalogue `topologies/<x>` — le repointer
+    active une autre topologie. Le catalogue `topologies/` versionne les modèles
+    génériques `*.example.yaml` et abrite les topologies réelles gitignorées.
+    En l'absence du symlink on retombe sur `topologies/socle.example.yaml`
+    (exemple générique versionné) AVEC un avis explicite sur stderr — sinon un
+    opérateur croirait générer depuis sa topo réelle et obtiendrait l'exemple.
     """
     if path is not None:
         return path
     if os.path.exists(_DEFAULT_TOPOLOGY):
         return _DEFAULT_TOPOLOGY
     print(
-        "topology.yaml absent — utilisation de topology.example.yaml "
+        "topology.yaml absent — utilisation de topologies/socle.example.yaml "
         "(exemple générique versionné, ADR 0023).",
         file=sys.stderr,
     )
     return _EXAMPLE_TOPOLOGY
+
+
+def _active_stack_name(file_arg: str | None) -> str | None:
+    """Nom de la stack ciblée pour les artefacts d'historique (`runs`/`metrics`).
+
+    `-f` explicite → la topo donnée ; sinon la stack active (`topology.yaml`). On NE
+    retombe PAS sur l'exemple silencieusement : si aucune stack n'est activée, renvoie
+    None (l'appelant bascule sur la vue globale). Toute erreur de lecture → None
+    (informatif, jamais bloquant — `runs`/`metrics` sont read-only, code 0)."""
+    path = (
+        file_arg if file_arg else (_DEFAULT_TOPOLOGY if os.path.exists(_DEFAULT_TOPOLOGY) else None)
+    )
+    if path is None:
+        return None
+    try:
+        return load_topology(path).catalog.get("topology")
+    except (TopologyError, FileNotFoundError, OSError):
+        return None
 
 
 def _render_inventory(topo, kind: str, lima_home: str | None) -> str:
@@ -129,8 +194,8 @@ class _UsageError(Exception):
 # ── Sous-commandes (chacune renvoie un code de sortie) ──────────────────────
 
 
-def cmd_validate(args: argparse.Namespace) -> int:
-    """Charge + valide topology.yaml et force la dérivation backend/profil.
+def cmd_stack_validate(args: argparse.Namespace) -> int:
+    """`stack validate` : charge + valide topology.yaml et force la dérivation backend/profil.
 
     Porte d'entrée CI du contrat : tout verdict de schéma (rôle inconnu,
     HA-sans-VIP, backend/profil inconnu) est levé par le paquet (TopologyError)
@@ -146,6 +211,438 @@ def cmd_validate(args: argparse.Namespace) -> int:
         f"kind={topo.target_kind})."
     )
     return 0
+
+
+def cmd_default_target(args: argparse.Namespace) -> int:
+    """Imprime le CHEMIN NOMMÉ dérivé de la topologie ACTIVE (topology.yaml).
+
+    C'est le pont qui rend la SÉLECTION déclarative : run-phases.sh (sans
+    argument) lit ce chemin et le monte, au lieu d'exiger le nom en dur. Activer
+    une topologie = poser/éditer `topology.yaml` ; l'outil en dérive le chemin
+    (ADR 0056). Sortie = le seul nom du chemin (consommable par `$(...)`).
+    """
+    topo = load_topology(_resolve(args.file))
+    print(default_target(topo))
+    return 0
+
+
+def _ask(question, *, no_input: bool) -> str:
+    """Pose UNE question de l'assistant et renvoie la réponse (ou le défaut).
+
+    Sous `--no-input` (CI, pas de TTY) : renvoie le défaut sans prompter. Sinon :
+    affiche le libellé + l'aide + les choix (avec le défaut entre crochets) ; une
+    entrée vide retient le défaut ; un choix hors enum re-demande (la validation
+    finale reste à build_topology_dict/load_topology, mais on guide ici)."""
+    if no_input:
+        return question.default
+    choices = f" ({'|'.join(question.choices)})" if question.choices else ""
+    suffix = f" [{question.default}]"
+    while True:
+        if question.help:
+            print(f"  — {question.help}", file=sys.stderr)
+        answer = input(f"{question.prompt}{choices}{suffix} : ").strip()
+        if not answer:
+            return question.default
+        if question.choices and answer not in question.choices:
+            print(f"    `{answer}` hors choix ; valides : {question.choices}", file=sys.stderr)
+            continue
+        return answer
+
+
+def _confirm(prompt: str, *, default: bool, no_input: bool) -> bool:
+    """Question oui/non. Sous --no-input : renvoie `default` sans prompter (CI).
+
+    Entrée vide → défaut. Accepte o/oui/y/yes (vrai) et n/non/no (faux), insensible
+    à la casse ; toute autre saisie re-demande."""
+    if no_input:
+        return default
+    hint = "O/n" if default else "o/N"
+    while True:
+        answer = input(f"{prompt} [{hint}] : ").strip().lower()
+        if not answer:
+            return default
+        if answer in ("o", "oui", "y", "yes"):
+            return True
+        if answer in ("n", "non", "no"):
+            return False
+        print("    réponds o(ui) ou n(on)", file=sys.stderr)
+
+
+def _activate_symlink(target_rel: str) -> None:
+    """Repointe le symlink d'activation topology.yaml → <target_rel> (relatif, gitignoré).
+
+    Remplace un lien/fichier existant. Chemin RELATIF au dépôt (le symlink vit à la
+    racine, à côté de topologies/) — robuste à un déplacement du clone."""
+    link = os.path.join(_ROOT, "topology.yaml")
+    if os.path.islink(link) or os.path.exists(link):
+        os.unlink(link)
+    os.symlink(target_rel, link)
+
+
+def cmd_stack_new(args: argparse.Namespace) -> int:
+    """`stack new <nom>` : crée une topologie (stack) dans le catalogue via un ASSISTANT.
+
+    Verbe du groupe `stack` (on n'a pas de notion de « projet » Pulumi, donc pas de
+    `new` top-level ambigu — créer une STACK, pas un projet). Pose le minimum
+    décisionnel, écrit topologies/<nom>.yaml (réelle, gitignorée, ADR 0023/0056),
+    puis propose de l'activer.
+
+    Pose le MINIMUM décisionnel (profil, backend, terrain, cible, nb de CP/workers,
+    + mode LB si HA) dans les enums connus, construit un YAML minimal VALIDE
+    (build_topology_dict), le valide (load_topology, réutilisé), l'écrit dans
+    `topologies/<nom>.yaml` (topo RÉELLE gitignorée, jamais `.example`), puis PROPOSE
+    de l'activer (question en fin d'assistant ; `--activate` force le oui sans
+    demander). `--no-input` retient les défauts (CI). Refuse d'écraser sans `--force`.
+
+    Codes : 0 succès ; 1 schéma invalide (improbable, l'assistant borne les enums) ;
+    2 usage (nom invalide, cible présente sans --force, modèle/écriture impossibles).
+    """
+    try:
+        plan = plan_init(args.name, activate=args.activate)
+    except ScaffoldError as exc:
+        raise _UsageError(str(exc)) from exc
+
+    target_abs = os.path.join(_ROOT, plan.target)
+    if os.path.exists(target_abs) and not args.force:
+        raise _UsageError(
+            f"{plan.target} existe déjà — `--force` pour l'écraser (ou choisis un autre nom)"
+        )
+
+    # Assistant : on collecte les réponses du minimum, puis (si HA) le mode LB.
+    print(f"Assistant de création — topologie `{plan.name}` :", file=sys.stderr)
+    answers: dict[str, str] = {}
+    for question in QUESTIONS:
+        answers[question.key] = _ask(question, no_input=args.no_input)
+    try:
+        n_cp = int(answers.get("control_planes", "1"))
+    except ValueError:
+        n_cp = 1
+    if n_cp >= 2:  # HA → le modèle exige un control_plane_lb : on demande son mode.
+        answers[QUESTION_LB_MODE.key] = _ask(QUESTION_LB_MODE, no_input=args.no_input)
+
+    try:
+        data = build_topology_dict(plan.name, answers)
+    except ScaffoldError as exc:
+        raise _UsageError(str(exc)) from exc
+
+    # Bandeau d'en-tête : valeurs GÉNÉRIQUES par défaut (ADR 0023) ; l'opérateur
+    # remplace par ses vraies valeurs dans ce fichier gitignoré.
+    header = (
+        f"# topologies/{plan.name}.yaml — topologie RÉELLE (gitignorée, ADR 0023).\n"
+        f"# Générée par `topology.py init` (assistant). Ajuste nœuds/rôles/IP ;\n"
+        f"# `topology.py validate` revérifie le schéma. `status: cible` tant qu'aucun\n"
+        f"# run ne l'a montée (honnêteté ADR 0052).\n"
+    )
+    body = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+    # Écrire le fichier, puis le VALIDER via load_topology (qui lit un chemin et
+    # fait foi : cohérence HA↔VIP, rôles). En cas d'échec on retire le fichier pour
+    # ne pas laisser un scaffold invalide dans le catalogue.
+    try:
+        with open(target_abs, "w", encoding="utf-8") as f:
+            f.write(header + body)
+    except OSError as exc:
+        raise _UsageError(f"écriture impossible vers {plan.target} : {exc}") from exc
+
+    try:
+        topo = load_topology(target_abs)
+    except TopologyError as exc:
+        os.unlink(target_abs)  # ne pas laisser un scaffold invalide dans le catalogue
+        print(f"erreur : topologie générée invalide ({exc}) — fichier retiré", file=sys.stderr)
+        return 1
+
+    print(
+        f"✓ {plan.target} créée "
+        f"({len(topo.control_nodes)} control / {len(topo.worker_nodes)} worker)."
+    )
+
+    # Activation : on la PROPOSE une fois la topo créée (oui par défaut) plutôt que
+    # de l'exiger en flag. `--activate` force le oui sans demander ; `--no-input`
+    # retient le défaut (oui que si --activate, pour rester déterministe en CI).
+    if args.activate:
+        activate = True
+    elif args.no_input:
+        activate = False
+    else:
+        activate = _confirm(
+            f"Activer `{plan.name}` maintenant (topology.yaml → {plan.target}) ?",
+            default=True,
+            no_input=False,
+        )
+
+    if activate:
+        _activate_symlink(plan.target)
+        print(f"✓ activée : topology.yaml → {plan.target} (chemin dérivé : {default_target(topo)})")
+    else:
+        print(f"  pour l'activer : topology.py stack select {plan.name}")
+    return 0
+
+
+def cmd_stack_select(args: argparse.Namespace) -> int:
+    """`stack select` : active une topologie EXISTANTE (repointe le symlink topology.yaml).
+
+    Calque `pulumi stack select` : choisit la stack courante parmi le catalogue.
+
+    Résout `topologies/<nom>(.example).yaml` → VALIDE le schéma (garde-fou : on
+    n'active pas un fichier cassé, contrairement à `ln -sf`) → repointe le symlink →
+    confirme le chemin dérivé. Accepte un modèle versionné (`<nom>.example`) comme
+    cible (activer le banc générique est légitime).
+
+    Codes : 0 succès ; 1 fichier absent / schéma invalide ; 2 usage (nom invalide).
+    """
+    try:
+        target_rel = catalog_entry(args.name)
+    except ScaffoldError as exc:
+        raise _UsageError(str(exc)) from exc
+
+    target_abs = os.path.join(_ROOT, target_rel)
+    if not os.path.exists(target_abs):
+        # Aide : lister ce que le catalogue propose réellement.
+        catalog = sorted(
+            os.path.basename(p) for p in glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml"))
+        )
+        dispo = ", ".join(catalog) or "(catalogue vide)"
+        print(
+            f"erreur : {target_rel} introuvable dans le catalogue.\n  disponibles : {dispo}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Garde-fou : valider AVANT d'activer (ne pas pointer le symlink sur un fichier cassé).
+    topo = load_topology(target_abs)
+    _activate_symlink(target_rel)
+    print(f"✓ activée : topology.yaml → {target_rel} (chemin dérivé : {default_target(topo)})")
+    return 0
+
+
+def _real_vms() -> list[str]:
+    """Noms des VMs Lima EXISTANTES (toute stack), via `limactl list --format json`.
+
+    Lecture seule du réel (ADR 0056 §7 : on ne stocke pas de state, on le lit). Une
+    sortie illisible / `limactl` absent → liste vide (le refresh reste informatif,
+    il ne plante pas le poste sans Lima)."""
+    try:
+        out = subprocess.run(  # noqa: S603 — argv fixe, pas d'entrée shell
+            ["limactl", "list", "--format", "json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_REFRESH_TIMEOUT_S,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+    vms = []
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        # On ne retient que les VMs RUNNING (une VM Stopped n'occupe pas le cluster).
+        if obj.get("status") == "Running" and obj.get("name"):
+            vms.append(obj["name"])
+    return vms
+
+
+def _ready_nodes() -> list[str]:
+    """Noms des nœuds k8s à l'état Ready (`kubectl get nodes`). Vide si injoignable.
+
+    Kubeconfig : `KUBECONFIG` exporté s'il existe, sinon REPLI sur le kubeconfig du
+    banc (`_BENCH_KUBECONFIG`, écrit par run-phases.sh) — sans quoi `preview` lit
+    `~/.kube/config` (pas le banc) et voit 0 nœud Ready alors que le socle tourne."""
+    kubeconfig = os.environ.get("KUBECONFIG") or (
+        _BENCH_KUBECONFIG if os.path.exists(_BENCH_KUBECONFIG) else None
+    )
+    try:
+        out = subprocess.run(  # noqa: S603 — argv fixe, pas d'entrée shell
+            # --request-timeout borne l'attente côté kubectl (cluster injoignable) ;
+            # `timeout=` borne le subprocess lui-même (double garde-fou anti-blocage).
+            ["kubectl", "get", "nodes", "--no-headers", "--request-timeout=5s"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **({"KUBECONFIG": kubeconfig} if kubeconfig else {})},
+            timeout=_REFRESH_TIMEOUT_S,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+    ready = []
+    for ln in out.stdout.splitlines():
+        cols = ln.split()
+        # format : NAME STATUS ROLES AGE VERSION ; STATUS == "Ready" (pas NotReady).
+        if len(cols) >= 2 and cols[1] == "Ready":
+            ready.append(cols[0])
+    return ready
+
+
+# Signal d'infra CANONIQUE par couche applicative : la ressource k8s la plus
+# caractéristique dont la PRÉSENCE prouve que la couche est déployée. Constaté sur
+# le cluster (comme « nœud Ready ») pour que `preview` PLAN reflète le RÉEL des
+# couches, pas seulement l'historique (un run sur cache n'est pas consigné → faux
+# « à installer » alors que la couche TOURNE). Dérivé des `phase_targeted_resources`
+# (rollback-lib.sh, ADR 0066) — la même ressource que le rollback ciblerait.
+# Format : phase → (kind, name, namespace|None). Les phases sans signal stable
+# (storage-simple = StorageClass globale ; couches Ceph hors périmètre local-path)
+# restent jugées par l'historique.
+_LAYER_SIGNAL: dict[str, tuple[str, str, str | None]] = {
+    "metrics-server": ("deployment", "metrics-server", "kube-system"),
+    "storage-simple": ("deployment", "local-path-provisioner", "local-path-storage"),
+    "monitoring": ("namespace", "monitoring", None),
+    "gitops": ("namespace", "argocd", None),
+    "dataops": ("namespace", "dagster", None),
+    "gitops-seed": ("application", "atlas", "argocd"),
+}
+
+
+def _resource_exists(kind: str, name: str, namespace: str | None) -> bool:
+    """`True` si la ressource k8s existe sur le banc (kubectl get, borné). Toute
+    erreur (absente, cluster injoignable, kind inconnu) → False (prudent : on ne
+    marque « à-jour » que sur une présence CONSTATÉE)."""
+    kubeconfig = os.environ.get("KUBECONFIG") or (
+        _BENCH_KUBECONFIG if os.path.exists(_BENCH_KUBECONFIG) else None
+    )
+    argv = ["kubectl", "get", kind, name, "--request-timeout=5s"]
+    if namespace:
+        argv += ["-n", namespace]
+    try:
+        out = subprocess.run(  # noqa: S603 — argv fixe (table _LAYER_SIGNAL), pas d'entrée shell
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **({"KUBECONFIG": kubeconfig} if kubeconfig else {})},
+            timeout=_REFRESH_TIMEOUT_S,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0
+
+
+def _observed_layers(phases: list[str]) -> set[str]:
+    """Couches applicatives PROUVÉES déployées par l'état RÉEL du cluster (signal
+    d'infra présent). Ne teste QUE les phases de `phases` qui ont un signal connu
+    (_LAYER_SIGNAL) — un seul `kubectl get` par couche, borné. Le RÉEL prime sur
+    l'absence de trace d'historique (ADR 0052/0056 §7), comme pour up/bootstrap."""
+    done: set[str] = set()
+    for ph in phases:
+        sig = _LAYER_SIGNAL.get(ph)
+        if sig and _resource_exists(*sig):
+            done.add(ph)
+    return done
+
+
+def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
+    """Confirme la DESTRUCTION des VMs `vms`. --yes saute ; hors TTY sans --yes : refus.
+
+    Garde-fou anti-destruction silencieuse : sur un TTY, on invite l'opérateur
+    (liste les VMs) ; sans TTY (CI/script), on EXIGE --yes (sinon on ne détruit RIEN)."""
+    if assume_yes:
+        return True
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print(
+            "destruction refusée hors TTY sans --yes (pas de suppression silencieuse).",
+            file=sys.stderr,
+        )
+        return False
+    rep = input(f"⚠️  DÉTRUIRE définitivement les VMs {vms} (+ disques) ? [oui/non] ")
+    return rep.strip().lower() in ("oui", "o", "yes", "y")
+
+
+def cmd_destroy(args: argparse.Namespace) -> int:
+    """`destroy` : détruit les VMs de la stack active (calque `pulumi destroy`).
+
+    Cible les VMs RÉELLES qui appartiennent à la stack active (déclarées ET
+    existantes — `refresh`/classify_refresh) et délègue leur suppression à
+    `run-phases.sh down <vm…>` (limactl reste du bash, ADR 0049 ; façade fine comme
+    `status --real` → state.sh). Confirmation interactive obligatoire (--yes pour la
+    CI/non-interactif). NE touche PAS les VMs orphelines (autre stack) — destroy
+    défait CE QUE LA STACK a monté, pas le reste.
+
+    Codes : 0 succès (ou rien à détruire) ; 1 échec du down délégué ; 2 confirmation
+    refusée / hors TTY sans --yes."""
+    path = _resolve(args.file)
+    topo = load_topology(path)
+    stack = topo.catalog.get("topology", "—")
+    declared = topo.control_nodes + topo.worker_nodes
+    state = classify_refresh(stack, declared, _real_vms(), [])
+    # On ne détruit QUE les VMs de la stack RÉELLEMENT présentes (vms_present) ; les
+    # orphelines (autre stack) ne sont pas de notre ressort (destroy ≠ nettoyage).
+    targets = state.vms_present
+    if not targets:
+        print(f"stack `{stack}` : aucune VM à détruire (rien de monté pour cette stack).")
+        if state.vms_orphan:
+            print(
+                f"  (VMs orphelines présentes : {', '.join(state.vms_orphan)} — "
+                "d'une AUTRE stack, non détruites par `destroy`)"
+            )
+        return 0
+
+    print(f"stack `{stack}` — VMs à détruire : {', '.join(targets)}")
+    if not _confirm_destroy(targets, assume_yes=args.yes):
+        print("destruction annulée.", file=sys.stderr)
+        return 2
+
+    # Délégation à run-phases.sh down <vm…> (bash garde limactl, ADR 0049).
+    rc = subprocess.run(  # noqa: S603 — chemin codé, noms de VM contrôlés (topo validée)
+        ["bash", os.path.join(_ROOT, "test", "lima", "run-phases.sh"), "down", *targets],
+        check=False,
+    ).returncode
+    if rc != 0:
+        print(f"échec de la destruction (run-phases.sh down rc={rc}).", file=sys.stderr)
+        return 1
+    print(f"✓ stack `{stack}` détruite ({len(targets)} VM(s)).")
+    return 0
+
+
+def _active_target_rel() -> str | None:
+    """Cible du symlink d'activation `topology.yaml` (chemin relatif), ou None.
+
+    None = pas de symlink (aucune topo active → l'outil retombe sur l'exemple)."""
+    link = os.path.join(_ROOT, "topology.yaml")
+    if not os.path.islink(link):
+        return None
+    return os.readlink(link)
+
+
+def cmd_stack_ls(args: argparse.Namespace) -> int:
+    """`stack ls` : liste le catalogue, marque l'ACTIVE (★), donne le chemin dérivé.
+
+    Calque `pulumi stack ls` : énumère les stacks, repère la courante.
+
+    Read-only : énumère `topologies/*.y*ml` (topos réelles + modèles `.example`),
+    repère l'entrée pointée par le symlink `topology.yaml`, et dérive pour chacune
+    son chemin nommé (default_target). Une entrée illisible/invalide est signalée
+    sans faire échouer la liste (code 0 toujours — informatif)."""
+    entries = sorted(glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml")))
+    if not entries:
+        print("catalogue vide — `topology.py stack new <nom>` pour en créer une.")
+        return 0
+    active_rel = _active_target_rel()
+    active_base = os.path.basename(active_rel) if active_rel else None
+    print(f"Catalogue de topologies ({len(entries)}) — ★ = active :")
+    for path in entries:
+        base = os.path.basename(path)
+        name = base[: -len(".yaml")] if base.endswith(".yaml") else base[: -len(".yml")]
+        mark = "★" if base == active_base else " "
+        try:
+            derived = default_target(load_topology(path))
+        except (TopologyError, OSError, PlanError) as exc:
+            derived = f"(invalide : {exc})"
+        print(f"  {mark} {name:<22} → {derived}")
+    if active_base is None:
+        print("  (aucune active — `stack select <nom>` ; sinon l'outil utilise socle.example)")
+    return 0
+
+
+def cmd_stack(args: argparse.Namespace) -> int:
+    """Routeur du groupe `stack` (new | ls | select | validate). Façade de dispatch.
+
+    Calque `pulumi stack`. argparse garantit `stack_cmd` ∈ {new, ls, select, validate}
+    (sous-parser `required`) — on route vers la façade dédiée. Un `stack` sans verbe
+    est une erreur d'usage (argparse l'arrête en amont avec le help du groupe)."""
+    return _STACK_DISPATCH[args.stack_cmd](args)
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
@@ -213,36 +710,6 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 1
 
 
-def cmd_status(args: argparse.Namespace) -> int:
-    """État VOULU (lu depuis topology.yaml) ; --real délègue l'état réel à state.sh.
-
-    Sans --real : résumé de l'intention (nœuds, HA, backend, profil, exposition,
-    kind). Avec --real : subprocess vers bootstrap/state.sh (lecture seule, on ne
-    le réimplémente pas) en héritant l'environnement (EXPECT_CLUSTER/SSH_OPTS) ;
-    on ré-émet sa sortie et on PROPAGE son code (0/1/2 déjà alignés).
-    """
-    path = _resolve(args.file)
-    topo = load_topology(path)
-    lines = [
-        f"topologie       : {topo.catalog.get('topology', '—')} (kind={topo.target_kind})",
-        f"control-planes  : {', '.join(topo.control_nodes) or '—'}"
-        f"{'  [HA → VIP requise]' if topo.is_ha_control_plane else ''}",
-        f"workers         : {', '.join(topo.worker_nodes) or '—'}",
-        f"profil          : {topo.catalog.get('profile', 'base')}",
-        f"stockage        : {topo.storage.get('backend', 'local-path')}",
-        f"exposition      : {topo.exposition.get('mode', '—')}",
-    ]
-    print("\n".join(lines))
-    if not args.real:
-        return 0
-    # État réel : déléguer à state.sh (SSH+kubectl). Hérite l'env du shell.
-    # shell=False : args.hosts est passé LITTÉRALEMENT à bash (pas d'expansion
-    # shell), donc pas d'injection même si --hosts vient de la ligne de commande.
-    cmd = ["bash", _STATE_SH, *(args.hosts or [])]
-    completed = subprocess.run(cmd, check=False)  # noqa: S603 — shell=False, args littéraux
-    return completed.returncode
-
-
 def cmd_epreuves(args: argparse.Namespace) -> int:
     """Liste les épreuves JOUABLES filtrées par la topologie (exig. 6). Ne LANCE rien.
 
@@ -255,10 +722,32 @@ def cmd_epreuves(args: argparse.Namespace) -> int:
     jouables, exclues = filter_epreuves(topo)
     if args.type:
         jouables = [e for e in jouables if e.type == args.type]
-    print(f"Épreuves jouables ({len(jouables)}) — filtrées par la topologie déclarée :")
+
+    # Filtre RUNTIME (ADR 0069) : si le banc répond ET sans --declared, on constate
+    # quelles COUCHES sont réellement montées et on marque une épreuve « prête » (sa
+    # couche tourne) ou « couche à monter » (compatible topo, mais la couche n'est pas
+    # là). `profil_min` → phases requises via resolve_layers ; croisé avec _observed_layers.
+    backend = topo.storage.get("backend", "local-path")
+    runtime = not args.declared and os.path.exists(_BENCH_KUBECONFIG) and bool(_ready_nodes())
+    observed = _observed_layers(list(_LAYER_SIGNAL)) if runtime else set()
+
+    def _pretes(ep) -> bool:
+        # Couches requises par l'épreuve (hors socle up/bootstrap, toujours là si banc up).
+        besoin = set(resolve_layers([ep.profil_min], backend))
+        return besoin.issubset(observed)
+
+    mode = "état réel du banc" if runtime else "topologie déclarée"
+    print(f"Épreuves jouables ({len(jouables)}) — filtrées par {mode} :")
     for e in jouables:
-        print(f"  {e.num} [{e.type:<5}] {e.categorie:<13} {e.nom}")
-    print("  (jouable selon la topologie ; l'état réel est vérifié au lancement, P5)")
+        if runtime:
+            mark = "✓ prête      " if _pretes(e) else "○ couche à monter"
+            print(f"  {mark} {e.num} [{e.type:<5}] {e.categorie:<13} {e.nom}")
+        else:
+            print(f"  {e.num} [{e.type:<5}] {e.categorie:<13} {e.nom}")
+    if runtime:
+        print("  ✓ prête = sa couche tourne ; ○ = topo OK mais couche à monter (`cluster up`).")
+    else:
+        print("  (jouable selon la topologie ; l'état réel est vérifié au lancement, P5)")
     if args.all:
         print(f"\nÉpreuves exclues ({len(exclues)}) :")
         for e, raison in exclues:
@@ -289,6 +778,15 @@ def cmd_runs(args: argparse.Namespace) -> int:
         print(msg)
         return 0
     print(f"Historique : {len(runs)} run(s) consigné(s) dans {os.path.relpath(history, _ROOT)}")
+    # PAR DÉFAUT : la STACK ACTIVE (last_run_for_topology sur son nom), pas une liste
+    # de chemins codés — `artifact runs` doit parler de TA stack. `--all` rétablit la
+    # vue tous-chemins ; sans stack active on y retombe (pas de stack → vue globale).
+    stack = None if args.all else _active_stack_name(args.file)
+    if stack is not None:
+        run = last_run_for_topology(runs, stack)
+        _, msg = verdict_for_run(run, run.target if run else None, now)
+        print(f"  stack `{stack}` : {msg}")
+        return 0
     any_target = any(r.target for r in runs)
     if any_target:
         for chemin in _CHEMINS_NOMMES:
@@ -310,13 +808,396 @@ def _run_for_target(runs, target: str | None):
     return run if run is not None else latest_run(runs)
 
 
-def cmd_next(args: argparse.Namespace) -> int:
-    """Suggère la prochaine phase (diff voulu − réel) ; --apply la LANCE (ADR 0063).
+def cmd_env(args: argparse.Namespace) -> int:
+    """`env` : imprime la ligne `export KUBECONFIG=<banc>` à `eval` dans le shell.
 
-    Sans --apply : lecture informative, code 0 (la suggestion « il manque X » N'EST
-    PAS un échec — c'est le travail de `next`). Avec --apply : délègue à la couche
-    ansible-runner isolée (runner.launch_phase) ; décision humaine explicite (G2),
-    code propagé du run. JAMAIS d'auto-apply ni d'enchaînement de la séquence.
+    Un process NE PEUT PAS exporter une variable dans le shell PARENT (invariant
+    Unix) — d'où le patron `eval "$(topology.py env)"` (comme `ssh-agent`/`docker-env`).
+    Cela PERSISTE le kubeconfig du banc dans LE shell courant, pour que `kubectl`/
+    `cilium` directs (hors topology.py) visent le banc eux aussi. topology.py lui-même
+    n'en a pas besoin (main() pose déjà le défaut par process) — c'est un confort shell.
+
+    Sans `--force`, on respecte un KUBECONFIG déjà exporté (intention explicite) : on
+    n'imprime rien d'écrasant, juste un rappel commenté sur stderr. Si le banc n'a pas
+    de kubeconfig (pas encore monté), erreur d'usage."""
+    if not os.path.exists(_BENCH_KUBECONFIG):
+        raise _UsageError(
+            f"kubeconfig du banc absent ({_BENCH_KUBECONFIG}) — monter le socle d'abord "
+            "(`topology.py up`)"
+        )
+    bench = os.path.abspath(_BENCH_KUBECONFIG)
+    current = os.environ.get("KUBECONFIG")
+    if current and not args.force and os.path.abspath(current) != bench:
+        # KUBECONFIG déjà posé, ≠ banc : on NE l'écrase PAS (sauf --force). Rappel commenté
+        # (sur stdout pour rester `eval`-safe : un commentaire shell est inerte).
+        print(f"# KUBECONFIG déjà défini ({current}) — `env --force` pour viser le banc")
+        return 0
+    # Ligne eval-able. `eval "$(topology.py env)"` exporte dans le shell courant.
+    print(f"export KUBECONFIG={shlex.quote(bench)}")
+    return 0
+
+
+def cmd_access(args: argparse.Namespace) -> int:
+    """`access` : ouvre l'accès développeur au banc (URLs + secrets) — délègue à access.sh.
+
+    Façade fine (ADR 0049/0017) : l'orchestration (Gateways, forwards SSH, /etc/hosts
+    `*.cluster.lan`, secrets/tokens LUS du cluster, `.env` atlas) vit dans
+    `test/lima/access.sh` (ADR 0048), du bash irréductible (limactl/ssh). On délègue
+    via l'arm `run-phases.sh access`, en passant les options telles quelles
+    (`--stop` / `--print-hosts` / `--no-hosts`). Code 0/1 = celui de access.sh ; 2 si
+    le banc n'a pas de kubeconfig (socle non monté)."""
+    if not os.path.exists(_BENCH_KUBECONFIG):
+        raise _UsageError(
+            f"kubeconfig du banc absent ({_BENCH_KUBECONFIG}) — monter le cluster d'abord "
+            "(`cluster up`)"
+        )
+    # Reconstruit les flags d'access.sh depuis les options parsées (un set fixe, sûr).
+    flags = [
+        flag
+        for flag, on in (
+            ("--stop", args.stop),
+            ("--print-hosts", args.print_hosts),
+            ("--no-hosts", args.no_hosts),
+        )
+        if on
+    ]
+    runphases = os.path.join(_ROOT, "test", "lima", "run-phases.sh")
+    return subprocess.run(  # noqa: S603 — chemin codé, flags d'un set fixe
+        ["bash", runphases, "access", *flags],
+        check=False,
+    ).returncode
+
+
+def _kubectl(*args: str, timeout: int = _REFRESH_TIMEOUT_S):
+    """Lance `kubectl <args>` sur le banc (kubeconfig en repli), borné. Renvoie le
+    CompletedProcess (rc/stdout) ou None si injoignable — l'appelant décide."""
+    kubeconfig = os.environ.get("KUBECONFIG") or (
+        _BENCH_KUBECONFIG if os.path.exists(_BENCH_KUBECONFIG) else None
+    )
+    try:
+        return subprocess.run(  # noqa: S603 — argv contrôlé (table de workloads)
+            ["kubectl", *args, "--request-timeout=5s"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **({"KUBECONFIG": kubeconfig} if kubeconfig else {})},
+            timeout=timeout,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def _argocd_managed(name: str, namespace: str) -> bool:
+    """Le Deployment est-il réconcilié par ArgoCD ? (label app.kubernetes.io/managed-by).
+
+    Un workload managé ne se scale PAS en impératif (sync l'écrase — ADR 0046)."""
+    out = _kubectl(
+        "get",
+        "deployment",
+        name,
+        "-n",
+        namespace,
+        "-o",
+        "jsonpath={.metadata.labels.app\\.kubernetes\\.io/managed-by}",
+    )
+    return out is not None and out.returncode == 0 and out.stdout.strip() == "argocd"
+
+
+def cmd_scale(args: argparse.Namespace) -> int:
+    """`scale` : ajuste les replicas des workloads stateless au nombre de nœuds (ADR 0072).
+
+    Capacité RUNTIME : lit les nœuds Ready, dérive une cible par workload de
+    l'allowlist (`scale.plan_scale` — pur), et l'applique avec `--apply`. Sans
+    `--apply` : affiche le PLAN (read-only, comme `preview`). REFUSE un workload
+    managé par ArgoCD (un scale impératif serait écrasé au sync — ADR 0046). Code 0
+    si tout est appliqué/à-jour ; 1 si un `kubectl scale` échoue ; 2 si banc
+    injoignable (usage)."""
+    ready = _ready_nodes()
+    if not ready:
+        raise _UsageError(
+            "banc injoignable (aucun nœud Ready) — monter le cluster d'abord (`cluster up`)"
+        )
+    # Capacité d'exécution = nœuds Ready (le banc détaint les control → schedulables).
+    workers_ready = len(ready)
+    # Détecter les workloads managés par ArgoCD (refusés). On ne sonde QUE l'allowlist.
+    managed = frozenset(
+        wl.name for wl in _scale.SCALABLE_WORKLOADS if _argocd_managed(wl.name, wl.namespace)
+    )
+    plans = _scale.plan_scale(workers_ready, argocd_managed=managed)
+
+    print(f"scale — {workers_ready} nœud(s) Ready → cible de replicas :")
+    rc = 0
+    for plan in plans:
+        wl = plan.workload
+        if plan.skipped:
+            print(f"  ⊘ {wl.name:<10} (ns {wl.namespace}) — {plan.skipped}")
+            continue
+        if not args.apply:
+            print(f"  + {wl.name:<10} (ns {wl.namespace}) → {plan.target} replica(s)")
+            continue
+        out = _kubectl(
+            "scale", "deployment", wl.name, "-n", wl.namespace, f"--replicas={plan.target}"
+        )
+        if out is not None and out.returncode == 0:
+            print(f"  ✓ {wl.name:<10} → {plan.target} replica(s)")
+        else:
+            detail = (out.stderr.strip() if out else "kubectl injoignable") or "échec"
+            print(f"  ✗ {wl.name:<10} → échec : {detail}", file=sys.stderr)
+            rc = 1
+    if not args.apply:
+        print("→ PLAN (rien appliqué) — `cluster scale --apply` pour exécuter.")
+    return rc
+
+
+def cmd_preview(args: argparse.Namespace) -> int:
+    """`preview` : LA vue complète d'une stack — VOULU + RÉEL + PLAN (calque `pulumi preview`).
+
+    Une seule commande « où j'en suis + quoi faire » (absorbe l'ancien `status` et
+    l'ancien `refresh`), en trois sections :
+    - VOULU  : l'intention déclarée (nœuds/HA, profil, backend, exposition) ;
+    - RÉEL   : l'état lu du réel (VMs présentes/orphelines/à créer, nœuds Ready) —
+      non stocké (ADR 0056 §7), juste lu ;
+    - PLAN   : la séquence de couches à monter, chacune avec son libellé MÉTIER et son
+      état (`✓ à-jour`, `+ à installer` si inédit, `~ à rejouer` si run périmé), plus
+      les VMs orphelines `- à détruire d'abord`.
+
+    Read-only : ne LANCE ni ne DÉTRUIT rien (`next` applique ; `destroy` détruit). Code 0
+    (informatif) ; chemin incohérent avec le backend → usage (2)."""
+    path = _resolve(args.file)
+    topo = load_topology(path)
+    runs = load_runs(args.history or _RUNS_HISTORY)
+    now = int(dt.datetime.now(tz=dt.UTC).timestamp())
+    target = args.target  # None → default_target le déduit
+    try:
+        seq = expected_phase_sequence(topo, target)
+    except PlanError as exc:
+        raise _UsageError(str(exc)) from exc
+    resolved_target = target or default_target(topo)
+    stack_name = topo.catalog.get("topology", "—")
+
+    # ADR 0069 : `layers` explicite débordant le preset → la séquence VRAIE est celle
+    # des couches (resolve_layers), pas celle du preset de repli. PLAN reflète ce que
+    # `up` monterait réellement via l'arm `layers` (cohérence preview↔up).
+    if not target and topo.layers:
+        backend = topo.storage.get("backend", "local-path")
+        try:
+            resolved = resolve_layers(topo.declared_layers, backend)
+        except TopologyError as exc:
+            raise _UsageError(str(exc)) from exc
+        if resolved and not set(resolved).issubset(set(seq)):
+            socle = ["up", "bootstrap", "ceph", "sc"] if backend == "ceph" else ["up", "bootstrap"]
+            seq = socle + resolved
+            resolved_target = "layers"
+
+    print(f"stack : {stack_name}  →  chemin : {resolved_target}")
+
+    # ── VOULU (ex-`status`) : l'intention déclarée ───────────────────────────────
+    hc = set(topo.hyperconverged_nodes)
+    control_disp = ", ".join(f"{n}+worker" if n in hc else n for n in topo.control_nodes)
+    workers_disp = ", ".join(topo.worker_nodes) or (
+        "— (control hyperconvergés schedulent)" if hc else "—"
+    )
+    print("VOULU (déclaré) :")
+    print(
+        f"  control-planes : {control_disp or '—'}"
+        f"{'  [HA → VIP requise]' if topo.is_ha_control_plane else ''}"
+    )
+    print(f"  workers        : {workers_disp}")
+    # Couches voulues : `layers` déclaré (ADR 0069) sinon le `profil` (rétrocompat).
+    profile = topo.catalog.get("profile", "base")
+    couches_label = ", ".join(topo.layers) if topo.layers else f"profil {profile}"
+    # Le STOCKAGE n'est affiché que s'il est CONSOMMÉ par une vraie couche applicative.
+    # Profil scalaire : `consumes_storage(profile)` (le profil décide — `base` = nus,
+    # même backend ceph déclaré, ADR 0039). Layers : une couche storage-simple/datalake
+    # l'est (ceph/sc seuls = socle ceph, pas une consommation applicative → ignorés).
+    consomme_stockage = (
+        any(p in ("storage-simple", "datalake") for p in seq)
+        if topo.layers
+        else consumes_storage(profile)
+    )
+    storage_part = (
+        f"  ·  stockage : {topo.storage.get('backend', 'local-path')}" if consomme_stockage else ""
+    )
+    print(
+        f"  couches        : {couches_label}{storage_part}  ·  "
+        f"exposition : {topo.exposition.get('mode', '—')}"
+    )
+
+    # ── RÉEL (ex-`refresh`) : l'état lu du réel (non stocké, ADR 0056 §7) ─────────
+    declared = topo.control_nodes + topo.worker_nodes
+    real = classify_refresh(stack_name, declared, _real_vms(), _ready_nodes())
+    print("RÉEL (lu, non stocké) :")
+    print(f"  VMs présentes  : {', '.join(real.vms_present) or '—'}")
+    print(f"  VMs à créer    : {', '.join(real.vms_missing) or '—'}")
+    if real.vms_orphan:
+        print(f"  ⚠ orphelines   : {', '.join(real.vms_orphan)} (d'une autre stack)")
+    print(f"  nœuds Ready    : {', '.join(real.nodes_ready) or '—'}")
+
+    # ── PLAN : la séquence de couches à monter ───────────────────────────────────
+    run = last_run_for_topology(runs, stack_name)
+    freshness, _ = verdict_for_run(run, resolved_target, now)
+    done = set(run.phases) if run is not None else set()
+    a_appliquer = set(diff_phases(seq, done, freshness))
+    # Le RÉEL PRIME sur l'absence de trace (ADR 0052/0056 §7) : un cluster qui TOURNE
+    # ne « s'installe » pas, même si l'historique ne le matche pas (run non consigné /
+    # ancien label de topologie). On retire les phases socle (up/bootstrap) observées
+    # faites du RÉEL, ET les couches applicatives dont le signal d'infra est présent
+    # sur le banc (metrics-server déployé, ns monitoring/argocd…) — sinon une couche
+    # montée sur cache socle (non consignée) s'afficherait « à installer » à tort.
+    a_appliquer -= observed_done_phases(declared, real.vms_present, real.nodes_ready)
+    a_appliquer -= _observed_layers([p for p in seq if p in a_appliquer])
+    # jamais monté ≠ rejeu : `jamais` (aucun run de la stack) → « à installer » (inédit) ;
+    # `perime` (run existant mais plus frais) → « à rejouer ».
+    rejeu = freshness == "perime"
+    inedit = freshness == "jamais"
+    print("PLAN (à monter) :")
+    if real.vms_orphan:
+        for vm in real.vms_orphan:
+            print(f"  - détruire {vm:<22} VM d'une autre stack (à retirer d'abord)")
+    for phase in seq:
+        label = phase_label(phase)
+        if phase in a_appliquer:
+            mark, etat = ("~", "à rejouer") if rejeu else ("+", "à installer")
+        else:
+            mark, etat = "✓", "à-jour"
+        print(f"  {mark} {label:<42} ({etat})")
+    n = len(a_appliquer)
+    head = []
+    if real.vms_orphan:
+        head.append(f"{len(real.vms_orphan)} VM(s) à détruire d'abord")
+    if n:
+        verbe = "à rejouer" if rejeu else "à installer"
+        head.append(f"{n} couche(s) {verbe}")
+    if not head:
+        print("→ rien à appliquer (stack à jour, terrain propre).")
+    else:
+        suffix = "" if inedit else " — `next` pour appliquer la couche suivante"
+        print(f"→ {' ; '.join(head)} (rien lancé{suffix}).")
+    return 0
+
+
+def _confirm_apply(target: str, *, assume_yes: bool) -> bool:
+    """Confirme le montage COMPLET du chemin `target` avant de déléguer à run-phases.sh.
+
+    --yes saute ; hors TTY sans --yes : refus (un montage complet n'est jamais
+    silencieux). Sur TTY : invite explicite (le chemin nommé monte toute la séquence)."""
+    if assume_yes:
+        return True
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("montage refusé hors TTY sans --yes (pas de montage silencieux).", file=sys.stderr)
+        return False
+    rep = input(f"Monter TOUTE la séquence du chemin `{target}` ? [oui/non] ")
+    return rep.strip().lower() in ("oui", "o", "yes", "y")
+
+
+def cmd_up(args: argparse.Namespace) -> int:
+    """`up` : monte la stack active de bout en bout (calque `pulumi up`).
+
+    L'ENTRÉE déclarative complète (inversion de frontière, ADR 0049/0056) : lit la
+    stack active → DÉRIVE le chemin nommé (default_target) → affiche le PLAN (les
+    couches) → CONFIRME → DÉLÈGUE le montage COMPLET à `run-phases.sh <chemin>` (la
+    séquence PROUVÉE au banc, ADR 0034 — Python n'orchestre pas mieux limactl/le
+    bootstrap que bash ; il en est l'entrée, pas le moteur). Le code de sortie du
+    montage est propagé.
+
+    Là où `next` monte UNE couche (1er drift), `up` monte TOUTE la séquence. Code 0
+    si le montage réussit ; 1 si run-phases.sh échoue ; 2 (usage) si confirmation
+    refusée / chemin incohérent avec le backend."""
+    path = _resolve(args.file)
+    topo = load_topology(path)
+    target = args.target or default_target(topo)
+    try:
+        seq = expected_phase_sequence(topo, target)
+    except PlanError as exc:
+        raise _UsageError(str(exc)) from exc
+    stack_name = topo.catalog.get("topology", "—")
+
+    # ADR 0069 : si les `layers` déclarés veulent des couches que le PRESET dérivé ne
+    # monte pas (palier non-préfixe, ex. [gitops, metrics] → preset socle), on bascule
+    # sur l'arm GÉNÉRIQUE `layers <seq>` — Python fournit l'ordre (resolve_layers, tri
+    # du graphe atomique), bash exécute. Sans --target explicite seulement (un --target
+    # force le preset). Le socle (up/bootstrap) préfixe la séquence passée à l'arm.
+    # On ne résout les couches (qui interroge le graphe) QUE si `layers` est
+    # EXPLICITEMENT déclaré ET qu'aucun --target n'est forcé : un profil scalaire
+    # (rétrocompat) passe par son preset sans ce détour.
+    layers_seq: list[str] | None = None
+    if not args.target and topo.layers:
+        backend = topo.storage.get("backend", "local-path")
+        try:
+            resolved = resolve_layers(topo.declared_layers, backend)
+        except TopologyError as exc:
+            raise _UsageError(str(exc)) from exc
+        # Couches voulues NON couvertes par la séquence du preset → arm `layers`.
+        if resolved and not set(resolved).issubset(set(seq)):
+            socle = ["up", "bootstrap", "ceph", "sc"] if backend == "ceph" else ["up", "bootstrap"]
+            layers_seq = socle + resolved
+            seq = layers_seq  # le PLAN affiché reflète la vraie séquence montée
+
+    # Affiche le PLAN (les couches à monter) avant de confirmer — comme `preview`.
+    print(f"stack : {stack_name}  →  chemin : {target}")
+    print("Couches à monter (séquence complète) :")
+    for phase in seq:
+        print(f"  + {phase_label(phase)}")
+
+    if not _confirm_apply(target, assume_yes=args.yes):
+        print("montage annulé.", file=sys.stderr)
+        return 2
+
+    # NODES_OVERRIDE : la TOPOLOGIE pilote les nœuds du banc (inversion de frontière,
+    # ADR 0056 — la stack active décide, le harnais exécute). On bâtit le csv "nom:rôle"
+    # dans l'ordre déclaré : un nœud `control` (même control+worker, le banc le détaint)
+    # → `:control` ; un worker pur → `:worker`. ha-3cp garde son override interne (3 CP).
+    nodes_override = ",".join(
+        f"{n.name}:{'control' if n.has_role('control') else 'worker'}" for n in topo.nodes
+    )
+
+    # Délégation à run-phases.sh <chemin> : la séquence prouvée au banc (provisioning
+    # VM + bootstrap + orchestration ha-3cp + apps), bash garde le moteur (ADR 0049).
+    # STACK_NAME : le NOM de la stack active (= topologie déclarée). run-phases.sh le
+    # consigne dans `topologie:` de l'historique — c'est la CLÉ que `last_run_for_topology`
+    # matche pour le verdict de fraîcheur PAR STACK (deux stacks dérivant le même chemin
+    # ne partagent pas leur verdict). Sans lui, le bash écrivait un littéral générique
+    # qui ne matchait jamais la stack → PLAN « à installer » alors que la stack est montée.
+    # Preset nommé (run-phases.sh <chemin>) OU arm générique `layers <seq>` (palier
+    # non-préfixe) : dans les deux cas bash exécute, Python a décidé l'ordre.
+    runphases = os.path.join(_ROOT, "test", "lima", "run-phases.sh")
+    if layers_seq is not None:
+        argv = ["bash", runphases, "layers", ",".join(layers_seq)]
+        libelle = f"layers [{', '.join(topo.declared_layers)}]"
+    else:
+        argv = ["bash", runphases, target]
+        libelle = f"chemin `{target}`"
+    print(f"→ montage {libelle} ({len(topo.nodes)} nœud(s)) via run-phases.sh…")
+    rc = subprocess.run(  # noqa: S603 — chemin codé, séquence dérivée d'une topo validée
+        argv,
+        check=False,
+        env={
+            **os.environ,
+            "NODES_OVERRIDE": nodes_override,
+            "STACK_NAME": stack_name,
+            # exposition.mode CONSÉQUENT (ADR 0071) : le banc pose les CRs Gateway
+            # seulement en mode `gateway` ; `hostport`/`none` les omettent.
+            "EXPOSITION_MODE": topo.exposition_mode,
+        },
+    ).returncode
+    if rc != 0:
+        print(f"échec du montage ({libelle} rc={rc}).", file=sys.stderr)
+        return 1
+    print(f"✓ stack `{stack_name}` montée ({libelle}).")
+    return 0
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    """`next` : applique la PROCHAINE couche manquante du plan (1er drift).
+
+    PAS le calque `pulumi up` complet (qui provisionnerait les VMs et monterait TOUTE
+    la séquence) — `next` ne monte qu'UNE couche unitaire via ansible-runner (parité
+    state.sh : le 1er drift). Lancer `next` EST la décision humaine (G2, ADR 0063) ;
+    ré-invoquer `next` monte la suivante (jamais d'auto-enchaînement silencieux). Le
+    vrai `up` (entrée complète : provisioning + orchestration) reste à coder.
+
+    Code 0 si la couche est montée (ou rien à monter) ; 1 si le run échoue ; 2 (usage)
+    si la couche n'est pas un play unitaire / inventaire absent / chemin incohérent.
     """
     path = _resolve(args.file)
     topo = load_topology(path)
@@ -334,12 +1215,9 @@ def cmd_next(args: argparse.Namespace) -> int:
 
     print(sugg.message)
     if sugg.phase is None:
-        return 0
-    if not args.apply:
-        print(f"  pour lancer : topology.py next --target {sugg.target} --apply")
-        return 0
+        return 0  # rien à monter (stack à jour)
 
-    # --apply : décision humaine explicite. La phase doit avoir un playbook unitaire.
+    # Lancer `up` EST la décision. La couche doit avoir un playbook unitaire.
     if sugg.playbook is None:
         raise _UsageError(
             f"la phase `{sugg.phase}` n'est pas un play unitaire lançable "
@@ -378,6 +1256,179 @@ def cmd_next(args: argparse.Namespace) -> int:
     return 0 if result.rc == 0 else 1
 
 
+def cmd_ha_3cp(args: argparse.Namespace) -> int:
+    """Orchestre le montage HA `ha-3cp` (ADR 0047/0055, #250) — la partie ANSIBLE.
+
+    Les VM (limactl) et la CNI restent à run-phases.sh (orchestration de CLI, bash,
+    ADR 0049) ; cette commande reçoit `--cp-ip/--vip/--vip-iface` déjà dérivés du
+    banc, câble `ha.run_ha_3cp` au RÉEL : `launch` → runner.launch_phase (le MÊME
+    montage que `next --apply`), gates → limactl/kubectl, `run_cni` → un rappel vers
+    run-phases.sh. La logique (séquence, super-admin→admin, gates etcd) est testée
+    sans banc (tests/test_ha.py) ; ce câblage est la seule I/O réelle.
+    """
+    import time
+
+    private_data_dir = os.path.join(_ROOT, "bootstrap")
+    # L'inventaire du banc est généré par run-phases.sh dans son WORKDIR (chemin
+    # ABSOLU passé via --inventory) — pas dans bootstrap/. On l'utilise tel quel ;
+    # un chemin relatif est résolu depuis bootstrap/ (compat usage hors banc).
+    inventory = (
+        args.inventory
+        if os.path.isabs(args.inventory)
+        else os.path.join(private_data_dir, args.inventory)
+    )
+    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
+    if not os.path.exists(inventory):
+        raise _UsageError(
+            f"inventaire absent : {inventory} (généré par run-phases.sh avant la délégation)"
+        )
+    kubeconfig = os.environ.get("KUBECONFIG")
+
+    def launch(playbook: str, extravars: dict, limit: str | None = None):
+        # playbook = 'kube-vip.yaml' → relatif à private_data_dir/<project> ;
+        # bootstrap/*.yaml sont à la racine du private_data_dir.
+        return _runner.launch_phase(
+            playbook,
+            extravars,
+            private_data_dir,
+            inventory,
+            ansible_config=ansible_cfg,
+            kubeconfig=kubeconfig,
+            target_kind="lima",
+            limit=limit,
+        )
+
+    def _runphases(*cmd: str) -> int:
+        """Rappel d'un sous-commande de run-phases.sh (bash garde VM/CNI/inventaire,
+        ADR 0049). Renvoie le code de sortie."""
+        return subprocess.run(  # noqa: S603 — chemin codé, arguments contrôlés
+            ["bash", os.path.join(_ROOT, "test", "lima", "run-phases.sh"), *cmd],
+            check=False,
+        ).returncode
+
+    def set_inventory(control_hosts: list[str]) -> None:
+        # L'écriture d'inventaire reste du bash (write_inventory, format byte-stable).
+        # On réécrit l'inventaire avec les CP membres (primaire en tête) avant un join.
+        rc = _runphases("ha-inventory", ",".join(control_hosts))
+        if rc != 0:
+            raise _ha.HaError(f"réécriture de l'inventaire (control={control_hosts}) en échec")
+
+    # run_cni : la CNI reste portée par run-phases.sh (bash). On la rappelle via le
+    # sous-commande dédiée `ha-cni <vip-iface> <lb-prefix>` (cf. dispatch).
+    def run_cni():
+        rc = _runphases("ha-cni", args.vip_iface, args.cp_ip.rsplit(".", 1)[0])
+        if rc != 0:
+            raise _ha.HaError(f"CNI (run-phases.sh ha-cni) en échec (rc={rc})")
+
+    def ready_count() -> int:
+        out = subprocess.run(  # noqa: S603 — kubectl, pas d'entrée shell
+            ["kubectl", "get", "nodes", "--no-headers"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **({"KUBECONFIG": kubeconfig} if kubeconfig else {})},
+        )
+        return sum(1 for ln in out.stdout.splitlines() if " Ready " in f" {ln} ")
+
+    nodes = args.nodes.split(",")
+    print(f"→ ha-3cp : {len(nodes)} CP derrière la VIP {args.vip} (Ansible via Python/runner)")
+    try:
+        result = _ha.run_ha_3cp(
+            nodes,
+            args.cp_ip,
+            args.vip,
+            args.vip_iface,
+            launch=launch,
+            run_cni=run_cni,
+            set_inventory=set_inventory,
+            ready_count=ready_count,
+            sleep=time.sleep,
+        )
+    except _runner.RunnerUnavailable as exc:
+        raise _UsageError(str(exc)) from exc
+    for step in result.steps:
+        mark = "✓" if step.ok else "✗"
+        print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
+    return 0 if result.built else 1
+
+
+def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
+    """Orchestre le socle k8s (`bootstrap`) — la partie ANSIBLE (interne, ADR 0063).
+
+    Migration de bootstrap_node_sequence vers Python : lance les playbooks du socle
+    (checks→…→join-workers) via runner.launch_phase (le MÊME montage que ha-3cp), avec
+    `-e control_plane_ip=<cp_ip>`. `join-workers` est SAUTÉ si l'inventaire n'a aucun
+    worker (control unique). L'inventaire, la dérivation de cp_ip/iface, la CNI
+    (Cilium dans la VM) et le kubeconfig restent à run-phases.sh (briques bash, ADR
+    0049) ; cette commande reçoit cp_ip/inventaire déjà dérivés du banc et rappelle
+    `ha-cni <iface> <lb-prefix>` pour la CNI. La logique (séquence, fail-fast) est
+    testée sans banc (tests/test_bootstrap.py)."""
+    private_data_dir = os.path.join(_ROOT, "bootstrap")
+    inventory = (
+        args.inventory
+        if os.path.isabs(args.inventory)
+        else os.path.join(private_data_dir, args.inventory)
+    )
+    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
+    if not os.path.exists(inventory):
+        raise _UsageError(
+            f"inventaire absent : {inventory} (généré par run-phases.sh avant la délégation)"
+        )
+    kubeconfig = os.environ.get("KUBECONFIG")
+
+    def launch(playbook: str, extravars: dict):
+        return _runner.launch_phase(
+            playbook,
+            extravars,
+            private_data_dir,
+            inventory,
+            ansible_config=ansible_cfg,
+            kubeconfig=kubeconfig,
+            target_kind="lima",
+        )
+
+    def run_cni() -> int:
+        # CNI (+ GW API CRDs + kubeconfig) : brique bash réutilisée (ha-cni <iface>
+        # <lb-prefix>). lb_prefix = le /24 du cp_ip (ex. 10.0.0.5 → 10.0.0). L'arm
+        # `ha-cni` dérive le CP du 1er nœud `control` de NODES (plus de `CP=cp1` codé) ;
+        # NODES vient de NODES_OVERRIDE, posé par `up` et hérité tout au long de la
+        # chaîne (up → run-phases.sh → bootstrap-seq → ici). On le passe EXPLICITEMENT
+        # pour ne pas dépendre d'un héritage d'env silencieux (et garantir node1, pas cp1).
+        lb_prefix = args.cp_ip.rsplit(".", 1)[0]
+        return subprocess.run(  # noqa: S603 — chemin codé, arguments contrôlés
+            [
+                "bash",
+                os.path.join(_ROOT, "test", "lima", "run-phases.sh"),
+                "ha-cni",
+                args.l2_iface,
+                lb_prefix,
+            ],
+            check=False,
+            env={**os.environ},
+        ).returncode
+
+    # has_workers dérivé de l'inventaire (source de vérité écrite par run-phases.sh) :
+    # un control unique sans worker fait sauter join-workers.yaml (la DÉCISION est en
+    # Python, qui connaît la topo — pas en bash qui lance tout en aveugle).
+    with open(inventory, encoding="utf-8") as fh:
+        has_workers = _bootstrap.inventory_has_workers(fh.read())
+    n_pb = len(_bootstrap.bootstrap_playbooks(has_workers=has_workers))
+    print(f"→ bootstrap : socle k8s ({n_pb} playbooks via Python/runner, CP {args.cp_ip})")
+    try:
+        result = _bootstrap.run_bootstrap(
+            args.cp_ip, launch=launch, run_cni=run_cni, has_workers=has_workers
+        )
+    except _runner.RunnerUnavailable as exc:
+        raise _UsageError(str(exc)) from exc
+    except _bootstrap.BootstrapError as exc:
+        print(f"  ✗ {exc}", file=sys.stderr)
+        return 1
+    for step in result.steps:
+        mark = "✓" if step.ok else "✗"
+        print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
+    return 0 if result.built else 1
+
+
 def cmd_metrics(args: argparse.Namespace) -> int:
     """Expose les métriques DÉJÀ consignées dans runs-history.yaml (P6, exig. 8).
 
@@ -388,7 +1439,14 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     if not runs:
         print("aucun run consigné — pas de métriques à exposer.")
         return 0
-    selected = [latest_run(runs)] if args.last else runs
+    # PAR DÉFAUT : les runs de la STACK ACTIVE (filtrés par nom de stack), pas tout
+    # l'historique. `--all` rétablit tous les runs ; sans stack active on garde tout.
+    stack = None if args.all else _active_stack_name(args.file)
+    scope = [r for r in runs if r.topologie == stack] if stack is not None else runs
+    if not scope:
+        print(f"aucun run consigné pour la stack `{stack}` (— `--all` pour tout l'historique).")
+        return 0
+    selected = [scope[-1]] if args.last else scope  # dernier de la stack (fichier chronologique)
     blocs = [format_metrics(metrics_of(r)) for r in selected if r is not None]
     print("\n\n".join(blocs))
     return 0
@@ -438,17 +1496,58 @@ def cmd_roundtrip(args: argparse.Namespace) -> int:
     return 0 if result.reversible else 1
 
 
-_DISPATCH = {
-    "validate": cmd_validate,
+# Verbes du groupe `stack` (calque `pulumi stack` : GESTION des stacks).
+_STACK_DISPATCH = {
+    "new": cmd_stack_new,
+    "ls": cmd_stack_ls,
+    "select": cmd_stack_select,
+    "validate": cmd_stack_validate,
+}
+
+# Verbes du groupe `artifact` : dériver/constater les artefacts d'une topologie.
+# (`status` absorbé par `preview` — la section VOULU ; retiré du menu.)
+_ARTIFACT_DISPATCH = {
     "generate": cmd_generate,
     "diff": cmd_diff,
-    "status": cmd_status,
-    "epreuves": cmd_epreuves,
     "runs": cmd_runs,
-    "next": cmd_next,
     "metrics": cmd_metrics,
+}
+
+# Verbes du groupe `test` : épreuves jouables + réversibilité (scenarios = ex-epreuves).
+_TEST_DISPATCH = {
+    "scenarios": cmd_epreuves,
     "smoke": cmd_smoke,
     "roundtrip": cmd_roundtrip,
+}
+
+
+def cmd_artifact(args: argparse.Namespace) -> int:
+    """Routeur du groupe `artifact` (generate | status | diff | runs | metrics)."""
+    return _ARTIFACT_DISPATCH[args.artifact_cmd](args)
+
+
+def cmd_test(args: argparse.Namespace) -> int:
+    """Routeur du groupe `test` (scenarios | smoke | roundtrip)."""
+    return _TEST_DISPATCH[args.test_cmd](args)
+
+
+_DISPATCH = {
+    "stack": cmd_stack,  # calque `pulumi stack` (new | ls | select | validate)
+    # Cycle de vie au TOP-LEVEL. `preview` = voir (VOULU+RÉEL+PLAN, absorbe status+
+    # refresh) ; `next` = appliquer LA prochaine couche (le vrai `up` complet — VMs +
+    # orchestration de TOUTE la séquence — reste à coder).
+    "preview": cmd_preview,  # calque `pulumi preview`
+    "env": cmd_env,  # imprime `export KUBECONFIG=<banc>` à eval dans le shell
+    "access": cmd_access,  # accès dev (URLs + secrets) — délègue à access.sh (ADR 0048)
+    "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
+    "up": cmd_up,  # calque `pulumi up` : monte TOUTE la séquence (délègue à run-phases.sh)
+    "next": cmd_next,  # applique la PROCHAINE couche (1er drift, granularité fine)
+    "destroy": cmd_destroy,  # calque `pulumi destroy`
+    # Groupes noun-verb (annexe rangée) : artefacts dérivés/constatés + épreuves.
+    "artifact": cmd_artifact,
+    "test": cmd_test,
+    "ha-3cp": cmd_ha_3cp,  # interne (routée à part dans main, hors menu)
+    "bootstrap-seq": cmd_bootstrap_seq,  # interne : socle k8s en Python (migration)
 }
 
 
@@ -470,9 +1569,16 @@ def _run(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog="topology",
-        description="Façade CLI/CI de l'outil déclaratif des topologies (ADR 0056, P3-P4).",
+        prog="cluster",
+        description=(
+            "Monte et inspecte un cluster Kubernetes décrit dans un fichier. "
+            "Tu décris ce que tu veux (nœuds, couches) ; l'outil le construit. "
+            "Commandes courantes : `cluster preview` (voir ce qui serait fait), "
+            "`cluster up` (construire), `cluster destroy` (tout supprimer)."
+        ),
     )
+    # ha-3cp n'est PAS un sous-parser ici (commande interne routée à part dans main) :
+    # le menu ne liste donc que les commandes publiques, sans `==SUPPRESS==` parasite.
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def _add_file(p: argparse.ArgumentParser) -> None:
@@ -480,15 +1586,71 @@ def _build_parser() -> argparse.ArgumentParser:
             "-f",
             "--file",
             default=None,
-            help="chemin du topology.yaml (défaut : topology.yaml, sinon topology.example.yaml)",
+            help="chemin de la topologie (défaut : symlink topology.yaml, "
+            "sinon topologies/socle.example.yaml)",
         )
         # --no-input accepté partout (uniformité CI) ; sans interactivité, no-op.
         p.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
 
-    p_val = sub.add_parser("validate", help="valide le schéma de topology.yaml")
-    _add_file(p_val)
+    # `default-target` reste retiré du menu pour l'instant (reviendra avec topology.py
+    # up, son consommateur) ; cmd_default_target reste dans le module, juste plus
+    # exposé. La fonction default_target() de plan.py reste utilisée en interne
+    # (stack ls/select, new).
 
-    p_gen = sub.add_parser("generate", help="dérive un artefact (inventaire ou run-params)")
+    # Groupe `stack` (calque `pulumi stack`) : new | ls | select | validate. Pas de
+    # `new` top-level — on n'a pas de notion de « projet » Pulumi, donc créer = créer
+    # une STACK (verbe du groupe), pas un projet.
+    p_stack = sub.add_parser(
+        "stack",
+        help="choisir/créer/lister les configurations de cluster (new · ls · select · validate)",
+    )
+    stack_sub = p_stack.add_subparsers(dest="stack_cmd", required=True)
+
+    p_stack_new = stack_sub.add_parser(
+        "new", help="créer une nouvelle configuration (assistant question/réponse)"
+    )
+    p_stack_new.add_argument(
+        "name", help="nom de la topologie (→ topologies/<nom>.yaml, gitignorée)"
+    )
+    p_stack_new.add_argument(
+        "--activate",
+        action="store_true",
+        help="activer sans demander (sinon la question est posée en fin d'assistant)",
+    )
+    p_stack_new.add_argument(
+        "--force", action="store_true", help="écraser topologies/<nom>.yaml s'il existe"
+    )
+    p_stack_new.add_argument(
+        "--no-input",
+        action="store_true",
+        help="non interactif : défauts + pas d'activation sauf --activate (CI)",
+    )
+
+    stack_sub.add_parser("ls", help="lister les configurations ; ★ = active")
+
+    p_stack_sel = stack_sub.add_parser(
+        "select", help="rendre une configuration active (celle que up/preview utiliseront)"
+    )
+    p_stack_sel.add_argument(
+        "name", help="nom de l'entrée du catalogue (ex : 3-nodes-1-cp, socle.example)"
+    )
+
+    p_stack_val = stack_sub.add_parser(
+        "validate", help="vérifier qu'un fichier de config est valide"
+    )
+    _add_file(p_stack_val)
+
+    # ── Groupe `artifact` (noun-verb) : dériver/constater les artefacts ───────────
+    p_artifact = sub.add_parser(
+        "artifact",
+        help="fichiers générés + historique : inventaire (generate), écarts (diff), "
+        "runs passés (runs), durées/ressources (metrics)",
+    )
+    artifact_sub = p_artifact.add_subparsers(dest="artifact_cmd", required=True)
+
+    p_gen = artifact_sub.add_parser(
+        "generate", help="produire l'inventaire Ansible (ou les paramètres) depuis la config"
+    )
     _add_file(p_gen)
     p_gen.add_argument(
         "--kind",
@@ -509,7 +1671,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_gen.add_argument("-o", "--output", default=None, help="fichier de sortie (défaut : stdout)")
 
-    p_diff = sub.add_parser("diff", help="vérifie l'invariant byte-identique (code 1 si dérive)")
+    p_diff = artifact_sub.add_parser(
+        "diff", help="vérifier que l'inventaire généré n'a pas dérivé (échoue si différence)"
+    )
     _add_file(p_diff)
     p_diff.add_argument(
         "--kind",
@@ -526,32 +1690,85 @@ def _build_parser() -> argparse.ArgumentParser:
         "--lima-home", default=os.environ.get("HOME"), help="$HOME du poste (si --kind lima)"
     )
 
-    p_sta = sub.add_parser("status", help="état voulu (et --real → state.sh)")
-    _add_file(p_sta)
-    p_sta.add_argument(
-        "--real",
-        action="store_true",
-        help="constater l'état réel via bootstrap/state.sh (SSH+kubectl)",
+    p_runs = artifact_sub.add_parser(
+        "runs", help="montrer les montages passés de la config active (et s'ils sont récents)"
     )
-    p_sta.add_argument(
-        "--hosts", nargs="*", default=None, help="hôtes passés à state.sh (défaut : tous)"
-    )
-
-    p_epr = sub.add_parser("epreuves", help="liste les épreuves jouables filtrées par la topologie")
-    _add_file(p_epr)
-    p_epr.add_argument("--all", action="store_true", help="montrer aussi les exclues + la raison")
-    p_epr.add_argument(
-        "--type", choices=["unit", "intég", "chaos"], default=None, help="filtrer par type"
-    )
-
-    p_runs = sub.add_parser("runs", help="lit l'historique des runs + verdict de fraîcheur")
     p_runs.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_runs.add_argument("--target", default=None, help="chemin nommé ciblé (atlas, storage-real…)")
+    p_runs.add_argument(
+        "-f", "--file", default=None, help="topologie (défaut : stack active topology.yaml)"
+    )
+    p_runs.add_argument(
+        "--all", action="store_true", help="tous les chemins nommés (pas que la stack)"
+    )
     p_runs.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
     )
 
-    p_next = sub.add_parser("next", help="suggère la prochaine phase (et --apply la lance)")
+    p_prev = sub.add_parser(
+        "preview",
+        help="voir SANS rien changer : ce qui est voulu, ce qui tourne, ce qu'il reste à monter",
+    )
+    _add_file(p_prev)
+    p_prev.add_argument(
+        "--target", default=None, help="chemin nommé visé (défaut : déduit de la stack active)"
+    )
+    p_prev.add_argument(
+        "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
+    )
+
+    p_env = sub.add_parser(
+        "env",
+        help='brancher kubectl sur le cluster du banc : eval "$(cluster env)" dans ton shell',
+    )
+    p_env.add_argument(
+        "--force", action="store_true", help="imprime le banc même si KUBECONFIG est déjà défini"
+    )
+
+    p_access = sub.add_parser(
+        "access",
+        help="ouvrir l'accès dev : URLs des services + identifiants (--stop pour fermer)",
+    )
+    # Options déclarées explicitement (apparaissent dans `cluster access --help` ;
+    # argparse.REMAINDER ne capture pas les `--flags` en tête — limite connue).
+    p_access.add_argument("--stop", action="store_true", help="ferme les forwards SSH ouverts")
+    p_access.add_argument(
+        "--print-hosts", action="store_true", help="imprime le bloc /etc/hosts à coller"
+    )
+    p_access.add_argument(
+        "--no-hosts",
+        action="store_true",
+        help="ne touche pas /etc/hosts (forwards + secrets seuls)",
+    )
+
+    p_scale = sub.add_parser(
+        "scale",
+        help="ajuster les replicas des services au nombre de nœuds (PLAN ; --apply exécute)",
+    )
+    p_scale.add_argument(
+        "--apply", action="store_true", help="applique le scaling (sinon : affiche le PLAN seul)"
+    )
+
+    p_destroy = sub.add_parser(
+        "destroy", help="supprimer les machines (VMs) de la configuration active"
+    )
+    _add_file(p_destroy)
+    p_destroy.add_argument(
+        "--yes", action="store_true", help="sauter la confirmation (requis hors TTY pour détruire)"
+    )
+
+    p_up = sub.add_parser(
+        "up", help="construire le cluster en entier (machines + toutes les couches)"
+    )
+    _add_file(p_up)
+    p_up.add_argument(
+        "--target", default=None, help="chemin nommé visé (défaut : dérivé de la stack active)"
+    )
+    p_up.add_argument("--yes", action="store_true", help="sauter la confirmation (requis hors TTY)")
+
+    p_next = sub.add_parser(
+        "next", help="monter UNE seule couche : la prochaine qui manque (avancée pas à pas)"
+    )
     _add_file(p_next)
     p_next.add_argument(
         "--target", default=None, help="chemin nommé visé (défaut : déduit du profil+backend)"
@@ -559,28 +1776,53 @@ def _build_parser() -> argparse.ArgumentParser:
     p_next.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
     )
-    p_next.add_argument(
-        "--apply",
-        action="store_true",
-        help="LANCER la phase suggérée via ansible-runner (décision humaine, ADR 0063)",
-    )
 
-    p_met = sub.add_parser("metrics", help="expose les métriques consignées (durées, cpu/ram)")
+    p_met = artifact_sub.add_parser(
+        "metrics", help="montrer durées et ressources (CPU/RAM) des montages de la config active"
+    )
     p_met.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
-    p_met.add_argument("--last", action="store_true", help="seulement le dernier run")
+    p_met.add_argument("--last", action="store_true", help="seulement le dernier run (de la stack)")
+    p_met.add_argument(
+        "-f", "--file", default=None, help="topologie (défaut : stack active topology.yaml)"
+    )
+    p_met.add_argument("--all", action="store_true", help="tous les runs (pas que la stack active)")
     p_met.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
     )
 
-    p_smk = sub.add_parser("smoke", help="smoke-test de réversibilité (créer→vérifier→détruire)")
+    # ── Groupe `test` (noun-verb) : épreuves jouables + réversibilité ─────────────
+    p_test = sub.add_parser(
+        "test",
+        help="vérifier le cluster : scénarios jouables (scenarios), test rapide (smoke), "
+        "monter→détruire→remonter une couche (roundtrip)",
+    )
+    test_sub = p_test.add_subparsers(dest="test_cmd", required=True)
+
+    p_epr = test_sub.add_parser(
+        "scenarios", help="lister les scénarios de test compatibles avec la config active"
+    )
+    _add_file(p_epr)
+    p_epr.add_argument("--all", action="store_true", help="montrer aussi les exclus + la raison")
+    p_epr.add_argument(
+        "--declared",
+        action="store_true",
+        help="filtrer sur la topologie déclarée seule (sans constater l'état réel du banc)",
+    )
+    p_epr.add_argument(
+        "--type", choices=["unit", "intég", "chaos"], default=None, help="filtrer par type"
+    )
+
+    p_smk = test_sub.add_parser(
+        "smoke", help="test rapide que le cluster répond (crée puis supprime un objet jetable)"
+    )
     p_smk.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_smk.add_argument(
         "--namespace", default=None, help="nom du namespace jetable (défaut : topology-smoke)"
     )
 
-    p_rt = sub.add_parser(
+    p_rt = test_sub.add_parser(
         "roundtrip",
-        help="round-trip d'une couche + sa clôture : détruire→vérifier→reconstruire→vérifier",
+        help="éprouver une couche en la détruisant puis la remontant (DESTRUCTIF, banc jetable)",
     )
     p_rt.add_argument(
         "--phase",
@@ -598,11 +1840,71 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="sauter la confirmation interactive (requis hors TTY pour détruire)",
     )
+
+    # ha-3cp : commande INTERNE (appelée par run-phases.sh avec --cp-ip/--vip dérivés
     return ap
 
 
+def _build_ha_parser() -> argparse.ArgumentParser:
+    """Parser DÉDIÉ à la commande interne `ha-3cp` (hors du menu public).
+
+    ha-3cp est appelée par run-phases.sh avec --cp-ip/--vip dérivés du banc — ce
+    n'est pas un verbe du menu. On la garde HORS du parser principal (sinon argparse
+    l'expose dans le --help et la liste des choix). Routée à part dans main() ; sera
+    absorbée par `up` (inversion de frontière, ADR 0063)."""
+    ap = argparse.ArgumentParser(prog="topology ha-3cp")
+    ap.add_argument("--nodes", default="cp1,cp2,cp3", help="CP, le 1er = primaire (csv)")
+    ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
+    ap.add_argument("--vip", required=True, help="VIP de l'API (kube-vip)")
+    ap.add_argument("--vip-iface", required=True, dest="vip_iface", help="interface L2 de la VIP")
+    ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
+    return ap
+
+
+def _build_bootstrap_parser() -> argparse.ArgumentParser:
+    """Parser DÉDIÉ à la commande interne `bootstrap-seq` (hors du menu public).
+
+    Appelée par run-phases.sh:phase_bootstrap avec --cp-ip/--l2-iface/--inventory
+    dérivés du banc — orchestre les 6 playbooks du socle en Python (migration de
+    bootstrap_node_sequence). Interne, routée à part dans main() comme ha-3cp."""
+    ap = argparse.ArgumentParser(prog="topology bootstrap-seq")
+    ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
+    ap.add_argument("--l2-iface", required=True, dest="l2_iface", help="interface L2 (LB-IPAM/CNI)")
+    ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
+    return ap
+
+
+# Commandes INTERNES (hors menu) : nom → (builder de parser dédié). Routées à part
+# dans main() pour ne PAS polluer le --help / la liste des choix du menu public.
+_INTERNAL_PARSERS = {
+    "ha-3cp": _build_ha_parser,
+    "bootstrap-seq": _build_bootstrap_parser,
+}
+
+
+def _default_kubeconfig_to_bench() -> None:
+    """Sans KUBECONFIG exporté, pointe le banc Lima par défaut (`_BENCH_KUBECONFIG`).
+
+    `topology.py` est l'entrée du banc (ADR 0049/0056) : ses commandes « état réel »
+    (smoke/scenarios/roundtrip/preview) interrogent le cluster via le client kubernetes
+    OU kubectl, qui lisent `KUBECONFIG`/`~/.kube/config`. Sans ce défaut, elles visent
+    le contexte courant du poste (souvent l'endpoint prod-exemple de hosts.example.yaml)
+    et échouent/`—` alors que le banc tourne. On NE force PAS si l'opérateur a déjà
+    exporté KUBECONFIG (intention explicite respectée)."""
+    if not os.environ.get("KUBECONFIG") and os.path.exists(_BENCH_KUBECONFIG):
+        os.environ["KUBECONFIG"] = _BENCH_KUBECONFIG
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    _default_kubeconfig_to_bench()
+    # Les commandes internes sont interceptées AVANT le parser principal (hors menu).
+    args_list = sys.argv[1:] if argv is None else argv
+    if args_list and args_list[0] in _INTERNAL_PARSERS:
+        cmd = args_list[0]
+        args = _INTERNAL_PARSERS[cmd]().parse_args(args_list[1:])
+        args.cmd = cmd
+        return _run(args)
+    args = _build_parser().parse_args(args_list)
     return _run(args)
 
 

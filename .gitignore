@@ -5,6 +5,7 @@ node_modules/
 .venv/
 __pycache__/
 .ruff_cache/
+.pytest_cache/
 
 # macOS
 .DS_Store
@@ -29,6 +30,18 @@ secrets/
 # décrit une plateforme d'EXEMPLE ; les spécificités vivent ici). Les modèles
 # génériques `*.example.yaml` restent versionnés.
 bootstrap/hosts.yaml
+
+# Catalogue de topologies (ADR 0023/0056) : les topologies RÉELLES
+# `topologies/*.yaml` sont NON versionnées ; seuls les modèles génériques
+# `*.example.*` (yaml, README…) restent versionnés.
+/topologies/*
+!/topologies/*.example.yaml
+!/topologies/*.example.*
+
+# topology.yaml (racine) = symlink d'activation vers une topo du catalogue —
+# repointé pour activer (`ln -sf topologies/<x>.example.yaml topology.yaml`),
+# JAMAIS versionné.
+/topology.yaml
 
 # Snapshots etcd rapatriés hors-nœud (etcd-fetch.yaml) — contiennent TOUS les
 # Secrets du cluster, ne JAMAIS versionner.
@@ -58,6 +71,13 @@ docs/.vitepress/dist/
 
 # Ansible runtime cache
 .ansible/
+
+# ansible-runner (P5, ADR 0063) : private_data_dir = bootstrap/ → runner y crée
+# artifacts/ (logs par run) et env/ (cmdline/envvars/extravars RÉUTILISÉS d'un run
+# à l'autre). Artefacts locaux, JAMAIS versionnés — et un env/cmdline résiduel
+# fausserait les runs suivants (ex. --syntax-check collé pour tous).
+bootstrap/artifacts/
+bootstrap/env/
 
 # OpenTofu / Terraform — provisioning cloud (ADR 0032). L'état contient des
 # identités réelles → JAMAIS versionné (ADR 0023) ; idem les *.tfvars réels

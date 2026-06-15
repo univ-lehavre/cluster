@@ -256,19 +256,10 @@ write_inventory() {
     } > "${inv}"
 }
 
-# Déroule la séquence de bootstrap Ansible sur un inventaire. SANS `os-upgrade`
-# (image Lima _images/debian-13 fraîche, contrairement au banc Vagrant qui le
-# rejoue). Args supplémentaires (-e ...) passés tels quels — le banc passe
-# control_plane_ip ; un spike multi-cluster ajoute pod_subnet/service_subnet.
-bootstrap_node_sequence() {
-    local inv=$1
-    shift
-    local pb
-    for pb in checks cri kubeadm control-planes initialisation join-workers; do
-        log "  ansible-playbook ${pb}.yaml"
-        ansible-playbook -i "${inv}" "${REPO}/bootstrap/${pb}.yaml" "$@"
-    done
-}
+# NB : la séquence des 6 playbooks du socle (checks→…→join-workers) est désormais
+# orchestrée EN PYTHON (cluster_topology/bootstrap.py, via runner.launch_phase ;
+# « Python parle Ansible », ADR 0063), appelée par topology.py bootstrap-seq. La
+# fonction bash bootstrap_node_sequence a été retirée (plus aucun appelant).
 
 # Pose Cilium via le VRAI bootstrap/cni.sh, exécuté DANS la VM. Variables d'env
 # supplémentaires (ex. CILIUM_CLUSTER_NAME/ID/POD_CIDR pour le mesh) passées en

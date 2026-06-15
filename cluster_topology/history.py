@@ -180,6 +180,21 @@ def last_run_for_target(runs: list[Run], target: str) -> Run | None:
     return match
 
 
+def last_run_for_topology(runs: list[Run], topologie: str) -> Run | None:
+    """Dernier run de CETTE stack (match exact sur `topologie`). None si aucun.
+
+    Contrairement à `last_run_for_target` (match par chemin nommé), on match sur le
+    NOM de la stack — deux stacks dérivant le même chemin ne partagent PAS leur
+    verdict. Aucune retombée sur le dernier run global : une stack jamais montée
+    (aucun run à son nom) renvoie None (→ tout est à jouer), pas le run d'une autre
+    topologie. C'est ce que `preview` exige pour ne pas mentir (status: cible)."""
+    match = None
+    for run in runs:
+        if run.topologie == topologie and run.date:
+            match = run  # fichier chronologique → le dernier retenu est le plus récent
+    return match
+
+
 def latest_run(runs: list[Run]) -> Run | None:
     """Dernier run daté du fichier (le plus récent), tous chemins confondus."""
     dated = [r for r in runs if r.date]

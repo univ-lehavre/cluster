@@ -3,9 +3,9 @@
 Un `profile` déclaré dans topology.yaml est une **intention de haut niveau** ;
 l'outil en DÉDUIT, par des fonctions PURES :
 
-  1. les **briques requises**, par inclusion cumulative `base ⊂ store ⊂ obs ⊂
-     dataops` (ADR 0039) — déclarer `dataops` exige store + obs + base, dans
-     l'ordre (graphe de dépendances) ;
+  1. les **briques requises**, par inclusion cumulative `base ⊂ metrics ⊂ store ⊂
+     obs ⊂ dataops` (ADR 0039/0068) — déclarer `dataops` exige metrics + store +
+     obs + base, dans l'ordre (graphe de dépendances) ;
   2. les **paramètres fins dérivés** du backend de stockage (storageClass,
      backing S3, endpoint, ceph_osd_expected) — ce que `run-phases.sh` calcule
      aujourd'hui en bash et passe en `-e` de run. L'outil reproduit CES MÊMES
@@ -23,11 +23,14 @@ from cluster_topology.model import Topology, TopologyError
 # ── Inclusion cumulative des profils (ADR 0039) ─────────────────────────────
 # Chaque profil inclut les précédents. L'ordre EST le graphe de dépendances de
 # déploiement (un store avant l'obs qui le consomme, etc.).
-PROFILE_CHAIN = ["base", "store", "obs", "dataops"]
+PROFILE_CHAIN = ["base", "metrics", "store", "obs", "dataops"]
 
 # Briques (phases) qu'apporte CHAQUE niveau, au-delà du précédent (ADR 0039 table).
+# `metrics` (ADR 0068) : metrics-server seul, sans dépendance stockage → placé AVANT
+# `store` ; `obs` en hérite (le monitoring suppose l'API ressources présente).
 PROFILE_BRICKS = {
     "base": ["bootstrap"],
+    "metrics": ["metrics-server"],  # API kubectl top (ADR 0068)
     "store": ["storage"],  # local-path OU ceph+sc+datalake (selon storage.backend)
     "obs": ["monitoring"],
     "dataops": ["dataops"],
@@ -46,6 +49,15 @@ def required_profiles(profile: str) -> list[str]:
         )
     idx = PROFILE_CHAIN.index(profile)
     return PROFILE_CHAIN[: idx + 1]
+
+
+def consumes_storage(profile: str) -> bool:
+    """Le profil pose-t-il une couche de STOCKAGE ? (brique `storage` ∈ `store`).
+
+    `base` = Kubernetes + CRI (containerd) + CNI (Cilium), SANS stockage (ADR 0039 :
+    `storage` est rattaché à `store`, pas à `base`). Un profil ≥ store consomme du
+    stockage. Sert à ne montrer le backend que là où il est ACTIF (preview/VOULU)."""
+    return "store" in required_profiles(profile)
 
 
 # ── Dimensions fines dérivées du backend de stockage (run-phases.sh) ────────

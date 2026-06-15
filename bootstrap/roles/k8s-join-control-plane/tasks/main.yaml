@@ -58,8 +58,11 @@
   become_method: ansible.builtin.sudo
   block:
     - name: Wait for the API VIP to be reachable
+      # Par l'IP RÉELLE de la VIP (control_plane_vip) : le /etc/hosts `cluster-api`
+      # du nœud à promouvoir n'est pas garanti posé à ce stade. Défaut sur le
+      # hostname si la VIP n'est pas fournie (compat mono-CP improbable ici).
       ansible.builtin.wait_for:
-        host: '{{ control_plane_endpoint }}'
+        host: '{{ control_plane_vip | default(control_plane_endpoint, true) }}'
         port: '{{ control_plane_port }}'
         timeout: 60
 

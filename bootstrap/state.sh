@@ -52,6 +52,16 @@ fi
 declare -i ok_n=0 fail_n=0 skip_n=0 reachable_n=0
 next_step=""
 
+# Action de PROVISIONING d'un nœud absent, selon le terrain (EXPECT_CLUSTER).
+# Un hôte injoignable n'est PAS forcément « OS à installer » : sur le banc Lima la
+# VM n'existe pas encore (à CRÉER, pas à installer). On nomme l'action selon le
+# terrain ; à défaut, une formulation générique qui ne présume rien (ADR 0023).
+case "${EXPECT_CLUSTER:-}" in
+    lima | banc | *lima*) provision_action="créer la VM" ;;
+    prod | baremetal | *prod*) provision_action="installer l'OS" ;;
+    *) provision_action="provisionner le nœud (créer la VM / installer l'OS)" ;;
+esac
+
 # ssh_q / ssh_ok / ssh_script : voir lib/ssh-report.sh (sourcé plus haut).
 
 kubectl_q() { kubectl "$@" 2>/dev/null; }
@@ -141,12 +151,12 @@ for h in "${hosts[@]}"; do
         reachable+=("$h")
         reachable_n+=1
     else
-        mark skip "$h non joignable — install OS + bootstrap/first-access.sh $h"
+        mark skip "$h non joignable — ${provision_action} + bootstrap/first-access.sh $h"
     fi
 done
 
 if [ "$reachable_n" -eq 0 ]; then
-    printf '\n%sAucun hôte joignable.%s Étape : installer l'\''OS + déposer la clé.\n' "$R" "$N"
+    printf '\n%sAucun hôte joignable.%s Étape : %s + déposer la clé.\n' "$R" "$N" "${provision_action}"
     exit 2
 fi
 

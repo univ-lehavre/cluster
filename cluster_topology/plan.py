@@ -32,38 +32,93 @@ from cluster_topology.model import Topology
 @dataclass(frozen=True)
 class PhaseSpec:
     playbook: str | None  # chemin relatif au repo, ou None si pas un play unitaire
-    note: str = ""
+    note: str = ""  # note DÉVELOPPEUR (diagnostic --apply : « script, pas un play »…)
+    label: str = ""  # libellé MÉTIER lisible de la couche installée (pour `preview`)
 
 
 PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
-    "up": PhaseSpec(None, "provision Lima (script, pas un play)"),
-    "bootstrap": PhaseSpec(None, "socle k8s complet (enchaînement de plays)"),
-    "ceph": PhaseSpec("bootstrap/ceph-cluster.yaml", "operator + cluster Rook-Ceph"),
-    "sc": PhaseSpec("bootstrap/ceph-storageclasses.yaml", "StorageClasses Ceph"),
-    "storage-simple": PhaseSpec("bootstrap/local-path.yaml", "local-path provisioner"),
-    "metrics-server": PhaseSpec("bootstrap/metrics-server.yaml"),
-    "datalake": PhaseSpec("bootstrap/ceph-datalake.yaml", "RGW + bucket datalake"),
-    "monitoring": PhaseSpec("bootstrap/monitoring.yaml", "kube-prometheus-stack + Loki"),
-    "gitops": PhaseSpec("bootstrap/gitops.yaml", "Gitea + Argo CD"),
-    "dataops": PhaseSpec("bootstrap/dataops.yaml", "registry + CNPG + Dagster + Marquez"),
-    "gitops-seed": PhaseSpec(None, "init Gitea (données, ADR 0044 — script)"),
+    "up": PhaseSpec(None, "provision Lima (script, pas un play)", "créer les VMs"),
+    "bootstrap": PhaseSpec(
+        None,
+        "socle k8s complet (enchaînement de plays)",
+        "Kubernetes + CRI containerd + CNI Cilium",
+    ),
+    "bootstrap-ha": PhaseSpec(
+        None, "amorçage HA (kube-vip + init derrière la VIP)", "Kubernetes HA (kube-vip)"
+    ),
+    "join-cp": PhaseSpec(
+        None, "promotion des CP additionnels (join + quorum etcd)", "control-planes additionnels"
+    ),
+    "ceph": PhaseSpec(
+        "bootstrap/ceph-cluster.yaml", "operator + cluster Rook-Ceph", "stockage Ceph (Rook)"
+    ),
+    "sc": PhaseSpec(
+        "bootstrap/ceph-storageclasses.yaml", "StorageClasses Ceph", "StorageClasses Ceph"
+    ),
+    "storage-simple": PhaseSpec(
+        "bootstrap/local-path.yaml", "local-path provisioner", "stockage local-path"
+    ),
+    "metrics-server": PhaseSpec(
+        "bootstrap/metrics-server.yaml", "", "metrics-server (kubectl top)"
+    ),
+    "datalake": PhaseSpec(
+        "bootstrap/ceph-datalake.yaml", "RGW + bucket datalake", "datalake S3 (RGW)"
+    ),
+    "monitoring": PhaseSpec(
+        "bootstrap/monitoring.yaml",
+        "kube-prometheus-stack + Loki",
+        "observabilité (Prometheus + Grafana + Loki)",
+    ),
+    "gitops": PhaseSpec("bootstrap/gitops.yaml", "Gitea + Argo CD", "GitOps (Gitea + Argo CD)"),
+    "dataops": PhaseSpec(
+        "bootstrap/dataops.yaml",
+        "registry + CNPG + Dagster + Marquez",
+        "DataOps (registry + CNPG + Dagster + Marquez)",
+    ),
+    "gitops-seed": PhaseSpec(
+        None, "init Gitea (données, ADR 0044 — script)", "init GitOps (seed Gitea)"
+    ),
     # hardening lance bootstrap/security/secure.yml AVEC --tags audit,detection et
     # un préflight d'env (phase_hardening, run-phases.sh) que `--apply` ne pose pas
     # — non lançable comme play unitaire ici, déléguée au chemin nommé run-phases.sh.
-    "hardening": PhaseSpec(None, "durcissement hôte (secure.yml + tags/env, via run-phases.sh)"),
-    "smoke-s3": PhaseSpec(None, "épreuve S3 jetable (harnais)"),
-    "wordpress": PhaseSpec(None, "montage WordPress jetable (harnais)"),
+    "hardening": PhaseSpec(
+        None, "durcissement hôte (secure.yml + tags/env, via run-phases.sh)", "durcissement hôte"
+    ),
+    "smoke-s3": PhaseSpec(None, "épreuve S3 jetable (harnais)", "épreuve S3 (jetable)"),
+    "wordpress": PhaseSpec(None, "montage WordPress jetable (harnais)", "WordPress (jetable)"),
 }
 
+
+def phase_label(phase: str) -> str:
+    """Libellé MÉTIER lisible d'une phase (couche installée), pour `preview`.
+
+    Repli sur le nom technique si aucun label n'est défini (phase inconnue de la
+    table) — préserve l'information plutôt que de masquer."""
+    spec = PHASE_PLAYBOOK.get(phase)
+    return spec.label if spec and spec.label else phase
+
+
 # ── Séquences ordonnées des chemins nommés (transcription de run-phases.sh) ──
-# Le socle préfixe chaque chemin : up → bootstrap → (ceph+sc | storage-simple).
+# Le socle de BASE = up → bootstrap (k8s + CNI SEULS). Le STOCKAGE n'en fait PAS
+# partie : c'est la brique du profil `store` (ADR 0039 : base ⊂ store ; PROFILE_BRICKS
+# rattache `storage` à store, pas à base). En mode Ceph le socle pose ceph+sc (le
+# stockage Ceph est indissociable du socle de ce backend) ; en local-path, la couche
+# `storage-simple` est ajoutée par les chemins qui en ont besoin (cf. _STORAGE_LAYER).
 # `hardening` s'insère APRÈS le socle (run_hardening_if_requested) si demandé.
 _SOCLE_CEPH = ["up", "bootstrap", "ceph", "sc"]
-_SOCLE_LIGHT = ["up", "bootstrap", "storage-simple"]
+_SOCLE_LIGHT = ["up", "bootstrap"]
+# Couche stockage local-path, insérée APRÈS le socle léger pour les chemins dont le
+# profil consomme du stockage (store+). Le chemin `socle` (profil base) ne la pose PAS.
+_STORAGE_LAYER = ["storage-simple"]
+# Chemins local-path qui EXIGENT le stockage (profil store+ : leurs apps créent des PVC).
+_LOCAL_PATH_NEEDS_STORAGE = {"atlas"}
 
-# Phases propres à chaque chemin, APRÈS le socle (+ hardening éventuel).
+# Phases propres à chaque chemin, APRÈS le socle (+ stockage + hardening éventuel).
 _PATH_TAIL: dict[str, list[str]] = {
     "socle": [],
+    # `metrics` (ADR 0068) : palier fin = socle + metrics-server seul (sans stockage,
+    # sans monitoring). default_target le dérive pour profile=metrics.
+    "metrics": ["metrics-server"],
     "atlas": ["metrics-server", "monitoring", "gitops", "dataops", "gitops-seed"],
     "storage-real": ["datalake", "smoke-s3", "wordpress"],
     "cluster-dataops": ["datalake", "monitoring", "dataops"],
@@ -73,7 +128,15 @@ _PATH_TAIL: dict[str, list[str]] = {
 # Chemins qui exigent le backend Ceph (WITH_CEPH=1 dans run-phases.sh).
 _CEPH_PATHS = {"storage-real", "cluster-dataops", "atlas-ceph"}
 
-KNOWN_TARGETS = frozenset(_PATH_TAIL)
+# ha-3cp : control-plane HA hyperconvergé (ADR 0047/0055). Séquence À PART : le
+# « socle » n'est PAS up→bootstrap→storage mais l'amorçage HA (bootstrap du CP
+# primaire derrière la VIP + promotion des CP additionnels), porté par le chemin
+# nommé run-phases.sh ha-3cp qui DÉLÈGUE l'orchestration Ansible à Python
+# (cluster_topology/ha.py). On l'expose comme chemin connu (sélection via
+# default_target) avec sa séquence propre — pas un socle+tail.
+_HA_3CP_SEQUENCE = ["up", "bootstrap-ha", "join-cp", "storage-simple"]
+
+KNOWN_TARGETS = frozenset(_PATH_TAIL) | {"ha-3cp"}
 
 
 class PlanError(ValueError):
@@ -95,16 +158,35 @@ def _hardening_requested(topo: Topology) -> bool:
 
 
 def default_target(topo: Topology) -> str:
-    """Chemin nommé déduit du profil + backend si l'appelant n'en fournit pas.
+    """Chemin nommé DÉDUIT de la topologie déclarée (ADR 0056 : une topologie se
+    déclare, l'outil en dérive le chemin — pas une commande impérative à flags).
 
-    `dataops` + ceph → `atlas-ceph` (chaîne complète Ceph) ; `dataops` + local-path
-    → `atlas` ; un profil non-dataops → `socle` (on ne présume pas d'un chemin
-    applicatif). Heuristique de confort : l'opérateur peut toujours forcer `--target`.
-    """
-    profile = topo.catalog.get("profile", "base")
+    HA D'ABORD : plus d'un control-plane (`is_ha_control_plane`) → `ha-3cp`, quel
+    que soit le reste (la HA est une propriété du CONTROL-PLANE, orthogonale aux
+    couches). Sinon on mappe l'ENSEMBLE de couches résolu (`declared_layers` →
+    resolve_layers, ADR 0069) sur le PRESET nommé correspondant — c'est ce que `up`
+    passe à run-phases.sh (parité bash, presets conservés). Un set sans preset
+    dédié sera monté par l'arm générique `layers` (Lot B) ; en attendant on retombe
+    sur le plus proche. `layers` absent → dérivé du profil (rétrocompat ADR 0039)."""
+    if topo.is_ha_control_plane:
+        return "ha-3cp"
     backend = _backend_of(topo)
-    if profile == "dataops":
+    # On mappe sur le DÉCLARÉ (aliases/phases bruts, PUR — pas de resolve_layers qui
+    # shellerait le graphe) : le preset est une décision sur CE qui est demandé, pas
+    # sur la clôture. `base` est filtré (socle implicite). Les noms de phase comptent
+    # comme leur couche (gitops-seed ⇒ dataops+gitops déjà présents par construction).
+    layers = {layer for layer in topo.declared_layers if layer != "base"}
+    # dataops (toute la pile applicative) → atlas / atlas-ceph (le preset complet).
+    if "dataops" in layers:
         return "atlas-ceph" if backend == "ceph" else "atlas"
+    # metrics SEUL (palier fin, ADR 0068) → preset `metrics`.
+    if layers in ({"metrics"}, {"metrics-server"}):
+        return "metrics"
+    # base nu (rien de déclaré au-delà) → socle.
+    if not layers:
+        return "socle"
+    # Tout autre set (store/obs/paliers non-préfixe) : pas de preset dédié → l'arm
+    # générique `layers` (Lot B) le montera ; `socle` est le repli sûr d'ici là.
     return "socle"
 
 
@@ -119,6 +201,17 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     target = target or default_target(topo)
     if target not in KNOWN_TARGETS:
         raise PlanError(f"chemin `{target}` inconnu (connus : {sorted(KNOWN_TARGETS)})")
+    if target == "ha-3cp":
+        # Chemin HA à séquence propre (amorçage VIP + joins), backend local-path
+        # imposé (HA ⊥ stockage, #250). Le durcissement reste appliquable en amont.
+        if _backend_of(topo) == "ceph":
+            raise PlanError(
+                "chemin `ha-3cp` = local-path (HA ⊥ stockage, #250) ; pas de backend ceph"
+            )
+        seq = list(_HA_3CP_SEQUENCE)
+        if _hardening_requested(topo):
+            seq.insert(2, "hardening")  # après bootstrap-ha, avant les joins
+        return seq
     backend = _backend_of(topo)
     if target in _CEPH_PATHS and backend != "ceph":
         raise PlanError(f"chemin `{target}` exige le backend ceph (déclaré : `{backend}`)")
@@ -129,6 +222,12 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     seq = list(socle)
     if _hardening_requested(topo):
         seq.append("hardening")
+    # Couche stockage local-path : ajoutée APRÈS le socle pour les chemins store+ qui
+    # en ont besoin (le Ceph l'a déjà dans son socle ; le chemin `socle`/base ne la
+    # pose pas — base = k8s+CNI nus, ADR 0039). Avant la queue applicative (les apps
+    # consomment le stockage).
+    if backend != "ceph" and target in _LOCAL_PATH_NEEDS_STORAGE:
+        seq.extend(_STORAGE_LAYER)
     seq.extend(_PATH_TAIL[target])
     return seq
 
@@ -143,6 +242,30 @@ def diff_phases(expected: list[str], done: set[str], freshness: str) -> list[str
     if freshness in ("perime", "jamais"):
         return list(expected)
     return [p for p in expected if p not in done]
+
+
+def observed_done_phases(
+    declared_nodes: list[str], real_vms: list[str], ready_nodes: list[str]
+) -> set[str]:
+    """Phases du socle PROUVÉES faites par l'ÉTAT RÉEL (pas par l'historique).
+
+    L'historique peut manquer (run non consigné, run sous un ancien label de
+    topologie) alors que le cluster TOURNE : PLAN doit alors refléter le RÉEL, pas
+    mentir « à installer » (ADR 0052/0056 §7 — le réel prime sur l'absence de trace).
+
+    - `up` (créer les VMs) : faite si TOUTES les VMs déclarées existent (rien à créer).
+    - `bootstrap` (k8s + CRI + CNI) : faite si AU MOINS un nœud est Ready (l'API
+      répond, la CNI tourne) — un cluster Ready ne se « réinstalle » pas.
+
+    PUR (listes en entrée, set en sortie) : testable sans cluster. Ne couvre QUE les
+    phases observables côté infra (up/bootstrap) ; les couches applicatives
+    (storage/monitoring/…) gardent le verdict par historique (état runtime non lu ici)."""
+    done: set[str] = set()
+    if declared_nodes and all(n in real_vms for n in declared_nodes):
+        done.add("up")
+    if ready_nodes:
+        done.add("bootstrap")
+    return done
 
 
 @dataclass

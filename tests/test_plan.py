@@ -19,6 +19,8 @@ from cluster_topology.plan import (  # noqa: E402
     default_target,
     diff_phases,
     expected_phase_sequence,
+    observed_done_phases,
+    phase_label,
     suggest_next,
 )
 
@@ -87,8 +89,16 @@ class ExpectedSequence(unittest.TestCase):
         )
 
     def test_socle_light(self):
+        # base = socle NU (k8s + CNI) ; le stockage n'est PAS dans base (ADR 0039 :
+        # storage ∈ store, pas base). Plus de storage-simple ici.
         seq = expected_phase_sequence(_topo(profile="base", backend="local-path"), "socle")
-        self.assertEqual(seq, ["up", "bootstrap", "storage-simple"])
+        self.assertEqual(seq, ["up", "bootstrap"])
+
+    def test_atlas_local_path_keeps_storage_before_apps(self):
+        # atlas (dataops, local-path) consomme du stockage → storage-simple est ajouté
+        # APRÈS le socle nu, AVANT les apps (monitoring/dataops créent des PVC).
+        seq = expected_phase_sequence(_topo(backend="local-path"), "atlas")
+        self.assertEqual(seq[:3], ["up", "bootstrap", "storage-simple"])
 
     def test_hardening_inserted_after_socle(self):
         seq = expected_phase_sequence(
@@ -122,6 +132,84 @@ class TargetValidation(unittest.TestCase):
     def test_default_target_base_is_socle(self):
         self.assertEqual(default_target(_topo(profile="base", backend="local-path")), "socle")
 
+    def test_default_target_metrics(self):
+        # ADR 0068 : profile metrics → chemin `metrics` (socle + metrics-server seul).
+        self.assertEqual(default_target(_topo(profile="metrics", backend="local-path")), "metrics")
+
+    def _topo_layers(self, layers, backend="local-path"):
+        return topology_from_dict(
+            {
+                "catalog": {"topology": "t"},
+                "layers": layers,
+                "nodes": [{"name": "cp1", "roles": ["control", "worker"]}],
+                "storage": {"backend": backend},
+                "target_kind": "lima",
+            }
+        )
+
+    def test_layers_dataops_derives_atlas(self):
+        # ADR 0069 : layers prime sur profile ; [dataops] → atlas (local-path).
+        self.assertEqual(default_target(self._topo_layers(["dataops"])), "atlas")
+        self.assertEqual(default_target(self._topo_layers(["dataops"], "ceph")), "atlas-ceph")
+
+    def test_layers_metrics_derives_metrics(self):
+        self.assertEqual(default_target(self._topo_layers(["metrics"])), "metrics")
+
+    def test_layers_empty_is_socle(self):
+        self.assertEqual(default_target(self._topo_layers([])), "socle")
+
+    def test_layers_non_prefix_falls_back_to_socle(self):
+        # [gitops, metrics] : pas de preset dédié → socle (l'arm `layers` montera, Lot B).
+        self.assertEqual(default_target(self._topo_layers(["gitops", "metrics"])), "socle")
+
+    def test_metrics_sequence_is_socle_plus_metrics_server(self):
+        seq = expected_phase_sequence(_topo(profile="metrics", backend="local-path"))
+        self.assertEqual(seq, ["up", "bootstrap", "metrics-server"])
+
+    def _ha_topo(self):
+        # Topologie HA déclarée : 3 control-planes hyperconvergés + VIP (la
+        # déclaration de #333). Le modèle exige control_plane_lb dès > 1 CP.
+        return topology_from_dict(
+            {
+                "catalog": {"topology": "ha-3cp", "profile": "base"},
+                "nodes": [
+                    {"name": "cp1", "roles": ["control", "worker"]},
+                    {"name": "cp2", "roles": ["control", "worker"]},
+                    {"name": "cp3", "roles": ["control", "worker"]},
+                ],
+                "network": {"control_plane_lb": {"mode": "kube-vip-arp"}},
+                "storage": {"backend": "local-path"},
+                "target_kind": "lima",
+            }
+        )
+
+    def test_ha_topology_derives_ha_3cp(self):
+        # > 1 CP DÉCLARÉ → default_target dérive ha-3cp (sélection par topologie,
+        # pas commande à flags — ADR 0056). HA prime sur le profil applicatif.
+        self.assertEqual(default_target(self._ha_topo()), "ha-3cp")
+
+    def test_ha_3cp_sequence(self):
+        seq = expected_phase_sequence(self._ha_topo())
+        self.assertEqual(seq, ["up", "bootstrap-ha", "join-cp", "storage-simple"])
+
+    def test_ha_3cp_rejects_ceph_backend(self):
+        # ha-3cp = local-path (HA ⊥ stockage). Un backend ceph déclaré est refusé.
+        ceph_ha = topology_from_dict(
+            {
+                "catalog": {"topology": "ha-3cp", "profile": "base"},
+                "nodes": [
+                    {"name": "cp1", "roles": ["control"]},
+                    {"name": "cp2", "roles": ["control"]},
+                    {"name": "cp3", "roles": ["control"]},
+                ],
+                "network": {"control_plane_lb": {"mode": "kube-vip-arp"}},
+                "storage": {"backend": "ceph"},
+                "target_kind": "lima",
+            }
+        )
+        with self.assertRaises(PlanError):
+            expected_phase_sequence(ceph_ha, "ha-3cp")
+
 
 class DiffPhases(unittest.TestCase):
     SEQ = ["up", "bootstrap", "ceph", "sc", "datalake"]
@@ -139,6 +227,29 @@ class DiffPhases(unittest.TestCase):
 
     def test_jamais_replays_whole_sequence(self):
         self.assertEqual(diff_phases(self.SEQ, set(), "jamais"), self.SEQ)
+
+
+class ObservedDonePhases(unittest.TestCase):
+    """Le RÉEL prime : un cluster qui tourne marque up/bootstrap faits (ADR 0052/0056)."""
+
+    def test_vm_present_marks_up_done(self):
+        # Toutes les VMs déclarées existent → 'up' fait, même sans nœud Ready.
+        done = observed_done_phases(["node1"], real_vms=["node1"], ready_nodes=[])
+        self.assertIn("up", done)
+        self.assertNotIn("bootstrap", done)
+
+    def test_node_ready_marks_bootstrap_done(self):
+        # Au moins un nœud Ready → 'bootstrap' fait (k8s + CNI tournent).
+        done = observed_done_phases(["node1"], real_vms=["node1"], ready_nodes=["lima-node1"])
+        self.assertEqual(done, {"up", "bootstrap"})
+
+    def test_missing_vm_leaves_up_to_do(self):
+        # Une VM déclarée absente → 'up' PAS fait (il reste à créer).
+        done = observed_done_phases(["node1", "node2"], real_vms=["node1"], ready_nodes=[])
+        self.assertNotIn("up", done)
+
+    def test_no_node_no_vm_is_empty(self):
+        self.assertEqual(observed_done_phases(["node1"], real_vms=[], ready_nodes=[]), set())
 
 
 class SuggestNext(unittest.TestCase):
@@ -183,6 +294,16 @@ class PhaseTable(unittest.TestCase):
             phases.update(expected_phase_sequence(topo_ceph, tgt))
         phases.update(expected_phase_sequence(topo_light, "atlas"))
         self.assertTrue(phases.issubset(set(PHASE_PLAYBOOK)))
+
+    def test_phase_label_is_human_readable(self):
+        # Libellé métier pour preview : up → « créer les VMs », bootstrap → k8s+CNI.
+        self.assertEqual(phase_label("up"), "créer les VMs")
+        self.assertIn("Kubernetes", phase_label("bootstrap"))
+        self.assertIn("local-path", phase_label("storage-simple"))
+
+    def test_phase_label_falls_back_to_name(self):
+        # Phase inconnue de la table → repli sur le nom (pas de masquage).
+        self.assertEqual(phase_label("frobnicate"), "frobnicate")
 
 
 if __name__ == "__main__":

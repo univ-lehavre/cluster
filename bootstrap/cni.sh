@@ -37,6 +37,11 @@ CILIUM_CLUSTER_ID="${CILIUM_CLUSTER_ID:-}"
 # l'interface est celle du réseau privé inter-nœuds. Défauts = réseau privé
 # d'exemple générique (10.0.0.0/22, cf. CLAUDE.md), à surcharger par terrain.
 CILIUM_EXPO_ENABLED="${CILIUM_EXPO_ENABLED:-1}"
+# Hubble UI (ADR 0073) : OPT-IN, désactivé par défaut (=0) — l'ADR 0019 excluait
+# l'UI (surface web sans valeur mono-admin) ; 0073 la rend activable sans la rendre
+# défaut. =1 ajoute le sous-chart hubble-ui à la release Cilium (même version, même
+# ns kube-system). Exposition via Gateway (platform/cilium-expo/), jamais en Service brut.
+HUBBLE_UI_ENABLED="${HUBBLE_UI_ENABLED:-0}"
 LB_IPAM_RANGE_START="${LB_IPAM_RANGE_START:-10.0.0.240}"
 LB_IPAM_RANGE_STOP="${LB_IPAM_RANGE_STOP:-10.0.0.250}"
 L2_INTERFACE="${L2_INTERFACE:-eth0}"
@@ -90,7 +95,8 @@ CILIUM_ARGS=(
   # Chiffrement transparent WireGuard (pod-to-pod) — ADR 0019.
   --set encryption.enabled=true
   --set encryption.type=wireguard
-  # Observabilité réseau : Hubble + Relay, sans UI — ADR 0019.
+  # Observabilité réseau : Hubble + Relay (ADR 0019). UI optionnelle (ADR 0073,
+  # HUBBLE_UI_ENABLED=1 — ajoutée plus bas), désactivée par défaut.
   --set hubble.enabled=true
   --set hubble.relay.enabled=true
   # ── Exposition tout-Cilium (ADR 0020) ──────────────────────────────────
@@ -118,6 +124,12 @@ CILIUM_ARGS=(
   # ingressController.enabled (API Ingress historique, distincte).
   --set gatewayAPI.enabled=true
 )
+# Hubble UI (ADR 0073) : posé UNIQUEMENT si HUBBLE_UI_ENABLED=1 (opt-in, défaut 0).
+# Même release/version Cilium que hubble.relay → pas de dispersion de versions
+# (ADR 0019/0020). Convergent : rejouer cni.sh avec/ sans le flag aligne la ConfigMap.
+if [ "${HUBBLE_UI_ENABLED}" = 1 ]; then
+  CILIUM_ARGS+=(--set hubble.ui.enabled=true)
+fi
 # Identité de cluster (mesh) : posée UNIQUEMENT si renseignée. cluster.name vide
 # laisse Cilium sur son défaut « default » et n'active aucune fonction mesh.
 if [ -n "${CILIUM_CLUSTER_NAME}" ]; then

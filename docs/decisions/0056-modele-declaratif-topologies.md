@@ -65,7 +65,7 @@ une API ([ADR 0032](0032-opentofu-provisioning-cloud.md)).
 
 ### 1. Le fichier `topology.yaml` — source unique
 
-Versionné en `topology.example.yaml` (générique,
+Versionné en `topologies/socle.example.yaml` (générique,
 [ADR 0023](0023-plateforme-exemple-generique.md)), réel gitignoré. Il capture
 les dimensions aujourd'hui éparpillées, regroupées :
 
@@ -454,6 +454,11 @@ structure le delta à coder (VIP, rôle kube-vip, groupe `control` multi-CP).
 
 ## Conséquences
 
+> **Amendé par [ADR 0069](0069-topology-layers-dag-grain-phase.md)** : la
+> déclaration des couches passe du profil scalaire (chaîne totale) à
+> `topology.layers` (ensemble ordonné par le DAG de dépendances réelles) —
+> `layers` est la forme explicite du graphe de dépendances que ce modèle décrit.
+
 - **Source unique de vérité** : une topologie se lit/écrit en un endroit ; fin
   de la double déclaration `NODES` ↔ inventaire et des `-e` épars.
 - **Topologies cibles enfin encodables** : `multi-node-4`, `ha-3cp` deviennent
@@ -465,8 +470,8 @@ structure le delta à coder (VIP, rôle kube-vip, groupe `control` multi-CP).
 - **Implémentation INCRÉMENTALE** (paliers indépendants, chacun prouvé par run,
   [ADR 0034](0034-validation-e2e-from-scratch.md)/[0052](0052-reproductibilite-des-resultats.md))
   :
-  1. **Modéliser sans générer** : écrire `topology.example.yaml` pour les
-     topologies déjà décrites (multi-node-3 léger/Ceph, ha-3cp) — schéma de
+  1. **Modéliser sans générer** : écrire `topologies/socle.example.yaml` pour
+     les topologies déjà décrites (multi-node-3 léger/Ceph, ha-3cp) — schéma de
      données pur, révèle les deltas.
   2. **Générateur read-only Lima** : `topology.yaml` → inventaire + NODES +
      profils, critère **byte-identique** à l'actuel pour `multi-node-3`.
@@ -481,6 +486,15 @@ structure le delta à coder (VIP, rôle kube-vip, groupe `control` multi-CP).
   spéculative — n'encoder que les dimensions réellement utilisées).
 - **`cni.sh` à résorber** (pilotage depuis le poste) — tracé comme conséquence,
   pas bloquant pour les premiers paliers.
+
+> **Addendum 2026-06-14 — emplacement du catalogue.** Le catalogue vit dans
+> `topologies/` : les modèles génériques y sont versionnés en `*.example.yaml`
+> (`socle.example.yaml`, `ha-3cp.example.yaml`), les topologies réelles
+> `topologies/*.yaml` sont gitignorées. À la racine, `topology.yaml` est un
+> **symlink d'activation** (gitignoré) pointant la topologie en vigueur
+> (`ln -sf topologies/<x>.example.yaml topology.yaml`) ; en son absence l'outil
+> retombe sur `topologies/socle.example.yaml`. La décision (un fichier décrit,
+> Ansible converge) est inchangée — seul l'emplacement physique est précisé.
 
 ## Alternatives écartées
 

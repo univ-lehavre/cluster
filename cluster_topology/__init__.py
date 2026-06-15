@@ -6,7 +6,7 @@ Ansible aujourd'hui ; group_vars de profil et table de nœuds Lima ensuite).
 Ansible reste le moteur de convergence (ADR 0056 §7) — l'outil ne réimplémente
 jamais la convergence ni un état réconcilié.
 
-Paliers P0-P2 (plan-modele-declaratif) : modéliser (`topology.example.yaml`) ;
+Paliers P0-P2 (plan-modele-declaratif) : modéliser (`topologies/socle.example.yaml`) ;
 générer les DEUX inventaires BYTE-IDENTIQUES à l'existant — prod
 (`bootstrap/hosts.example.yaml`) et banc Lima (sortie de `write_inventory`,
 test/lima/lib.sh) ; DÉRIVER le profil (inclusion cumulative ADR 0039 + faisceau
@@ -17,8 +17,17 @@ diff) relève de P3 et vit dans `scripts/topology.py` (façade fine, hors paquet
 """
 
 from cluster_topology.epreuves import EPREUVES, Epreuve, filter_epreuves
+from cluster_topology.facts import parse_facts
+from cluster_topology.gates import (
+    GateError,
+    GateResult,
+    gate_nodes_ready,
+    gate_osds_up,
+    gate_pvc_bound,
+)
 from cluster_topology.generator import render_lima_inventory, render_prod_inventory
 from cluster_topology.history import Run, load_runs, verdict_for_run
+from cluster_topology.layers import layers_from_profile, resolve_layers
 from cluster_topology.metrics import RunMetrics, format_metrics, metrics_of
 from cluster_topology.model import Topology, TopologyError, load_topology
 from cluster_topology.plan import (
@@ -26,11 +35,26 @@ from cluster_topology.plan import (
     PlanError,
     Suggestion,
     default_target,
+    diff_phases,
     expected_phase_sequence,
+    observed_done_phases,
+    phase_label,
     suggest_next,
 )
-from cluster_topology.profile import derive_run_params
+from cluster_topology.profile import consumes_storage, derive_run_params
+from cluster_topology.refresh import RefreshState, classify_refresh
 from cluster_topology.roundtrip import RoundtripResult, run_roundtrip
+from cluster_topology.scaffold import (
+    QUESTION_LB_MODE,
+    QUESTIONS,
+    InitPlan,
+    Question,
+    ScaffoldError,
+    build_topology_dict,
+    catalog_entry,
+    plan_init,
+    validate_name,
+)
 
 __all__ = [
     "Topology",
@@ -39,9 +63,16 @@ __all__ = [
     "render_prod_inventory",
     "render_lima_inventory",
     "derive_run_params",
+    "consumes_storage",
     "Epreuve",
     "EPREUVES",
     "filter_epreuves",
+    "parse_facts",
+    "GateError",
+    "GateResult",
+    "gate_pvc_bound",
+    "gate_nodes_ready",
+    "gate_osds_up",
     "Run",
     "load_runs",
     "verdict_for_run",
@@ -49,11 +80,27 @@ __all__ = [
     "PlanError",
     "KNOWN_TARGETS",
     "default_target",
+    "diff_phases",
     "expected_phase_sequence",
+    "layers_from_profile",
+    "observed_done_phases",
+    "phase_label",
+    "resolve_layers",
     "suggest_next",
     "RunMetrics",
     "metrics_of",
     "format_metrics",
     "RoundtripResult",
     "run_roundtrip",
+    "RefreshState",
+    "classify_refresh",
+    "InitPlan",
+    "Question",
+    "QUESTIONS",
+    "QUESTION_LB_MODE",
+    "ScaffoldError",
+    "build_topology_dict",
+    "catalog_entry",
+    "plan_init",
+    "validate_name",
 ]

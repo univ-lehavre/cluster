@@ -7,8 +7,9 @@
 # profil, table de nœuds + profils Lima). Aucun moteur à état par-dessus k8s : le
 # générateur est SANS ÉTAT, Ansible reste le moteur de convergence (ADR 0056 §7).
 #
-# Ce `topology.example.yaml` est VERSIONNÉ avec des valeurs GÉNÉRIQUES (ADR 0023) ;
-# le `topology.yaml` réel est gitignoré. Minimum à écrire : `{ profile, terrain }`
+# Ce `topologies/socle.example.yaml` est VERSIONNÉ avec des valeurs GÉNÉRIQUES
+# (ADR 0023) ; le `topology.yaml` réel (symlink d'activation du catalogue) est
+# gitignoré. Minimum à écrire : `{ profile, terrain }`
 # — tout le reste se dérive (invariant : profil prod → entrées byte-identiques à
 # l'inventaire actuel, ADR 0056 §3, palier P1 du plan-modele-declaratif).
 #

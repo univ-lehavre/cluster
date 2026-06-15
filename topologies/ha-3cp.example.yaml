@@ -1,8 +1,8 @@
 # code: language=yaml
 #
-# topology-ha-3cp.example.yaml — DÉCLARATION de la topologie HA `ha-3cp`
+# topologies/ha-3cp.example.yaml — DÉCLARATION de la topologie HA `ha-3cp`
 # (ADR 0056, palier P7 / issue #250). Valeurs GÉNÉRIQUES (ADR 0023) ; le
-# topology.yaml réel reste gitignoré.
+# topology.yaml réel (symlink d'activation du catalogue) reste gitignoré.
 #
 # `ha-3cp` sort du SPOF « 1 control-plane » (ADR 0002) : plusieurs CP derrière
 # une VIP, quorum etcd. Deux variantes partagent la MÊME mécanique HA (VIP +

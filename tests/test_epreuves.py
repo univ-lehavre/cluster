@@ -42,9 +42,9 @@ def _topo(profile="dataops", backend="ceph", nodes=None, kind="prod"):
 
 
 class Catalogue(unittest.TestCase):
-    def test_couvre_les_29_scenarios_du_glob(self):
+    def test_couvre_les_scenarios_du_glob(self):
         # Garde-fou anti-dérive : EPREUVES doit couvrir EXACTEMENT les fichiers
-        # test/scenarios/NN-*.sh (ajouter un scénario 30 force une entrée ici).
+        # test/scenarios/NN-*.sh (ajouter un scénario 31 force une entrée ici).
         on_disk = {
             re.match(r"(\d{2})-", f).group(1)
             for f in os.listdir(_SCENARIOS_DIR)
@@ -53,9 +53,9 @@ class Catalogue(unittest.TestCase):
         in_catalog = {e.num for e in EPREUVES}
         self.assertEqual(in_catalog, on_disk)
 
-    def test_29_entrees_uniques(self):
-        self.assertEqual(len(EPREUVES), 29)
-        self.assertEqual(len({e.num for e in EPREUVES}), 29)
+    def test_entrees_uniques(self):
+        self.assertEqual(len(EPREUVES), 30)
+        self.assertEqual(len({e.num for e in EPREUVES}), 30)
 
     def test_champs_dans_le_vocabulaire(self):
         for e in EPREUVES:
@@ -70,7 +70,9 @@ class Filtrage(unittest.TestCase):
         nums_ex = {e.num for e, _ in exclues}
         # En prod, seuls les offensifs (17/18/19/20/21) sont exclus.
         self.assertEqual(nums_ex, {"17", "18", "19", "20", "21"})
-        self.assertEqual(len(jouables), 24)
+        # 25 jouables : +30 (ha-3cp, jouable au catalogue car multi/local-path ;
+        # se SKIP au runtime si le banc n'a pas 3 CP).
+        self.assertEqual(len(jouables), 25)
 
     def test_backend_local_path_exclut_les_ceph(self):
         _, exclues = filter_epreuves(_topo(backend="local-path"))
