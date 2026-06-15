@@ -8,12 +8,16 @@
 # TLS bordure cert-manager). C'est le chemin exact qu'un lien du portail emprunte.
 #
 # Les hostnames `*.cluster.lan` sont des PLACEHOLDERS non résolus en DNS cluster
-# (l'admin réseau pose les vrais) : on sonde donc l'IP du Gateway (LB Cilium) via
+# (l'admin réseau pose les vrais) : on sonde donc l'IP qui sert le Gateway via
 # `curl --resolve host:443:IP` qui pose à la fois le SNI TLS ET l'en-tête Host
-# (le Gateway Envoy choisit le certificat par SNI — sans SNI il RESET). TLS
-# auto-signé toléré (CA interne). « Atteignable » = code < 400, ou 401/403
-# (protégé mais vivant) — cf. classify_ui_http. Échec = timeout, 404 (route
-# morte), 5xx (backend cassé).
+# (le Gateway Envoy choisit le certificat par SNI — sans SNI il RESET). En mode
+# `gateway`-hostNetwork (ADR 0071), l'Envoy bind 80/443 sur l'IP DU NŒUD (plus de
+# Service LoadBalancer) → on sonde l'InternalIP du control-plane. TLS auto-signé
+# toléré (CA interne). « Atteignable » = code < 400, ou 401/403 (protégé mais
+# vivant) — cf. classify_ui_http. Échec = timeout, 404 (route morte), 5xx.
+#
+# C'est aussi la preuve du MULTIPLEXAGE SNI : plusieurs HTTPRoute (grafana, argocd,
+# gitea…) partagent le 443 du nœud, chacun routé par hostname (ADR 0071 §risque 2).
 #
 # INDÉPENDANT du déploiement. SKIP NEUTRE si aucun HTTPRoute — sauf STRICT_UI=1.
 #
@@ -46,10 +50,18 @@ fi
 log "✓ HTTPRoute découverts :"
 printf '%s\n' "${routes}" | sed 's/^/    /'
 
-# IP du Gateway Cilium (LB-IPAM). On prend la 1re IP d'un Service de type
-# LoadBalancer dans le namespace d'un Gateway (Cilium crée un Service par Gateway).
+# IP servant le Gateway. En mode hostNetwork (ADR 0071, défaut), l'Envoy bind sur
+# l'IP du nœud → InternalIP du control-plane (la même pour TOUS les hostnames :
+# c'est le 443 partagé qui multiplexe par SNI). En chemin LB-IPAM optionnel
+# (CILIUM_LB_IPAM_ENABLED=1), on retombe sur l'IP LoadBalancer du Service Gateway.
+# Calculée UNE fois (indépendante du ns en hostNetwork).
 gw_ip() {
-    local ns=$1
+    local ns=$1 ip
+    # 1) hostNetwork : IP du nœud control-plane (cas par défaut).
+    ip=$(kubectl get nodes -l node-role.kubernetes.io/control-plane \
+        -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+    [ -n "${ip}" ] && { printf '%s\n' "${ip}"; return; }
+    # 2) repli LB-IPAM : 1re IP d'un Service LoadBalancer du ns du Gateway.
     kubectl -n "${ns}" get svc -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.status.loadBalancer.ingress[0].ip}{"\n"}{end}' 2>/dev/null \
         | grep -E '^[0-9]' | head -1
 }
@@ -61,7 +73,7 @@ while read -r nsroute host; do
     ns=${nsroute%%/*}
     ip=$(gw_ip "${ns}")
     if [ -z "${ip}" ]; then
-        log "$(classify_ui_http "${host}" "" | sed 's/^[^|]*|//') (pas d'IP LB dans ${ns})"
+        log "$(classify_ui_http "${host}" "" | sed 's/^[^|]*|//') (pas d'IP nœud/LB pour ${ns})"
         fails=$((fails + 1)); continue
     fi
     # Sonde HTTPS via l'IP du Gateway. INDISPENSABLE : envoyer le SNI TLS =
