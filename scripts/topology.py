@@ -457,6 +457,62 @@ def _ready_nodes() -> list[str]:
     return ready
 
 
+# Signal d'infra CANONIQUE par couche applicative : la ressource k8s la plus
+# caractéristique dont la PRÉSENCE prouve que la couche est déployée. Constaté sur
+# le cluster (comme « nœud Ready ») pour que `preview` PLAN reflète le RÉEL des
+# couches, pas seulement l'historique (un run sur cache n'est pas consigné → faux
+# « à installer » alors que la couche TOURNE). Dérivé des `phase_targeted_resources`
+# (rollback-lib.sh, ADR 0066) — la même ressource que le rollback ciblerait.
+# Format : phase → (kind, name, namespace|None). Les phases sans signal stable
+# (storage-simple = StorageClass globale ; couches Ceph hors périmètre local-path)
+# restent jugées par l'historique.
+_LAYER_SIGNAL: dict[str, tuple[str, str, str | None]] = {
+    "metrics-server": ("deployment", "metrics-server", "kube-system"),
+    "storage-simple": ("deployment", "local-path-provisioner", "local-path-storage"),
+    "monitoring": ("namespace", "monitoring", None),
+    "gitops": ("namespace", "argocd", None),
+    "dataops": ("namespace", "dagster", None),
+    "gitops-seed": ("application", "atlas", "argocd"),
+}
+
+
+def _resource_exists(kind: str, name: str, namespace: str | None) -> bool:
+    """`True` si la ressource k8s existe sur le banc (kubectl get, borné). Toute
+    erreur (absente, cluster injoignable, kind inconnu) → False (prudent : on ne
+    marque « à-jour » que sur une présence CONSTATÉE)."""
+    kubeconfig = os.environ.get("KUBECONFIG") or (
+        _BENCH_KUBECONFIG if os.path.exists(_BENCH_KUBECONFIG) else None
+    )
+    argv = ["kubectl", "get", kind, name, "--request-timeout=5s"]
+    if namespace:
+        argv += ["-n", namespace]
+    try:
+        out = subprocess.run(  # noqa: S603 — argv fixe (table _LAYER_SIGNAL), pas d'entrée shell
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **({"KUBECONFIG": kubeconfig} if kubeconfig else {})},
+            timeout=_REFRESH_TIMEOUT_S,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0
+
+
+def _observed_layers(phases: list[str]) -> set[str]:
+    """Couches applicatives PROUVÉES déployées par l'état RÉEL du cluster (signal
+    d'infra présent). Ne teste QUE les phases de `phases` qui ont un signal connu
+    (_LAYER_SIGNAL) — un seul `kubectl get` par couche, borné. Le RÉEL prime sur
+    l'absence de trace d'historique (ADR 0052/0056 §7), comme pour up/bootstrap."""
+    done: set[str] = set()
+    for ph in phases:
+        sig = _LAYER_SIGNAL.get(ph)
+        if sig and _resource_exists(*sig):
+            done.add(ph)
+    return done
+
+
 def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
     """Confirme la DESTRUCTION des VMs `vms`. --yes saute ; hors TTY sans --yes : refus.
 
@@ -801,8 +857,12 @@ def cmd_preview(args: argparse.Namespace) -> int:
     a_appliquer = set(diff_phases(seq, done, freshness))
     # Le RÉEL PRIME sur l'absence de trace (ADR 0052/0056 §7) : un cluster qui TOURNE
     # ne « s'installe » pas, même si l'historique ne le matche pas (run non consigné /
-    # ancien label de topologie). On retire les phases socle observées faites du RÉEL.
+    # ancien label de topologie). On retire les phases socle (up/bootstrap) observées
+    # faites du RÉEL, ET les couches applicatives dont le signal d'infra est présent
+    # sur le banc (metrics-server déployé, ns monitoring/argocd…) — sinon une couche
+    # montée sur cache socle (non consignée) s'afficherait « à installer » à tort.
     a_appliquer -= observed_done_phases(declared, real.vms_present, real.nodes_ready)
+    a_appliquer -= _observed_layers([p for p in seq if p in a_appliquer])
     # jamais monté ≠ rejeu : `jamais` (aucun run de la stack) → « à installer » (inédit) ;
     # `perime` (run existant mais plus frais) → « à rejouer ».
     rejeu = freshness == "perime"
