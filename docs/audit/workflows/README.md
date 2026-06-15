@@ -48,3 +48,8 @@ findings qu'un succès.
   — éventail (16 lecteurs + synthèse adversariale) qui a confirmé 5 arêtes de
   stockage bloc manquantes (`→ sc`) avant que `roundtrip.py` ne consomme le
   graphe (Lot 1).
+- [2026-06-15 — Audit « maximiser l'usage des outils CNCF » (Kyverno)](2026-06-15-audit-cncf-kyverno.md)
+  — éventail + revue adversariale (60 agents, 2 passages) qui a confronté chaque
+  opportunité CNCF aux garde-fous d'adoption (ADR 0049/0057/0061) : tête de file
+  **Kyverno CLI statique en CI** ; seul autre gain net **Longhorn** (déjà acté
+  ADR 0064). _Réflexion, pas une décision._
