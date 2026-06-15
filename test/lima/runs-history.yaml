@@ -153,3 +153,42 @@ runs:
       cpu_core_s: 664
       ram_peak_mib: 9340
       ram_mean_mib: 6087
+  - id: 2026-06-14T18-local-path-a3f3100
+    target: socle
+    date: 2026-06-14T18:43:05Z
+    branche: fix/ha-3cp-run-corrections
+    commit: a3f3100
+    profil: local-path
+    topologie: multi-node-3
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 794
+    phases:
+      up: 83
+      bootstrap: 711
+  - id: 2026-06-14T19-local-path-6691241
+    target: socle
+    date: 2026-06-14T19:14:17Z
+    branche: fix/ha-3cp-run-corrections
+    commit: 6691241
+    profil: local-path
+    topologie: mono-node
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 287
+    phases:
+      up: 0
+      bootstrap: 286
+  - id: 2026-06-15T07-local-path-760bd5c
+    target: socle
+    date: 2026-06-15T07:34:25Z
+    branche: fix/ha-3cp-run-corrections
+    commit: 760bd5c
+    profil: local-path
+    topologie: 1cp
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 414
+    phases:
+      up: 35
+      bootstrap: 379
