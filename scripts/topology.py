@@ -159,6 +159,24 @@ def _resolve(path: str | None) -> str:
     return _EXAMPLE_TOPOLOGY
 
 
+def _active_stack_name(file_arg: str | None) -> str | None:
+    """Nom de la stack ciblée pour les artefacts d'historique (`runs`/`metrics`).
+
+    `-f` explicite → la topo donnée ; sinon la stack active (`topology.yaml`). On NE
+    retombe PAS sur l'exemple silencieusement : si aucune stack n'est activée, renvoie
+    None (l'appelant bascule sur la vue globale). Toute erreur de lecture → None
+    (informatif, jamais bloquant — `runs`/`metrics` sont read-only, code 0)."""
+    path = (
+        file_arg if file_arg else (_DEFAULT_TOPOLOGY if os.path.exists(_DEFAULT_TOPOLOGY) else None)
+    )
+    if path is None:
+        return None
+    try:
+        return load_topology(path).catalog.get("topology")
+    except (TopologyError, FileNotFoundError, OSError):
+        return None
+
+
 def _render_inventory(topo, kind: str, lima_home: str | None) -> str:
     """Rend l'inventaire selon le `kind` (prod ou lima). Façade sur le paquet."""
     if kind == "lima":
@@ -737,6 +755,15 @@ def cmd_runs(args: argparse.Namespace) -> int:
         print(msg)
         return 0
     print(f"Historique : {len(runs)} run(s) consigné(s) dans {os.path.relpath(history, _ROOT)}")
+    # PAR DÉFAUT : la STACK ACTIVE (last_run_for_topology sur son nom), pas une liste
+    # de chemins codés — `artifact runs` doit parler de TA stack. `--all` rétablit la
+    # vue tous-chemins ; sans stack active on y retombe (pas de stack → vue globale).
+    stack = None if args.all else _active_stack_name(args.file)
+    if stack is not None:
+        run = last_run_for_topology(runs, stack)
+        _, msg = verdict_for_run(run, run.target if run else None, now)
+        print(f"  stack `{stack}` : {msg}")
+        return 0
     any_target = any(r.target for r in runs)
     if any_target:
         for chemin in _CHEMINS_NOMMES:
@@ -1270,7 +1297,14 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     if not runs:
         print("aucun run consigné — pas de métriques à exposer.")
         return 0
-    selected = [latest_run(runs)] if args.last else runs
+    # PAR DÉFAUT : les runs de la STACK ACTIVE (filtrés par nom de stack), pas tout
+    # l'historique. `--all` rétablit tous les runs ; sans stack active on garde tout.
+    stack = None if args.all else _active_stack_name(args.file)
+    scope = [r for r in runs if r.topologie == stack] if stack is not None else runs
+    if not scope:
+        print(f"aucun run consigné pour la stack `{stack}` (— `--all` pour tout l'historique).")
+        return 0
+    selected = [scope[-1]] if args.last else scope  # dernier de la stack (fichier chronologique)
     blocs = [format_metrics(metrics_of(r)) for r in selected if r is not None]
     print("\n\n".join(blocs))
     return 0
@@ -1504,10 +1538,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_runs = artifact_sub.add_parser(
-        "runs", help="lit l'historique des runs + verdict de fraîcheur"
+        "runs", help="lit l'historique des runs de la stack active + verdict de fraîcheur"
     )
     p_runs.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_runs.add_argument("--target", default=None, help="chemin nommé ciblé (atlas, storage-real…)")
+    p_runs.add_argument(
+        "-f", "--file", default=None, help="topologie (défaut : stack active topology.yaml)"
+    )
+    p_runs.add_argument(
+        "--all", action="store_true", help="tous les chemins nommés (pas que la stack)"
+    )
     p_runs.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
     )
@@ -1557,10 +1597,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_met = artifact_sub.add_parser(
-        "metrics", help="expose les métriques consignées (durées, cpu/ram)"
+        "metrics", help="expose les métriques consignées de la stack active (durées, cpu/ram)"
     )
     p_met.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
-    p_met.add_argument("--last", action="store_true", help="seulement le dernier run")
+    p_met.add_argument("--last", action="store_true", help="seulement le dernier run (de la stack)")
+    p_met.add_argument(
+        "-f", "--file", default=None, help="topologie (défaut : stack active topology.yaml)"
+    )
+    p_met.add_argument("--all", action="store_true", help="tous les runs (pas que la stack active)")
     p_met.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
     )

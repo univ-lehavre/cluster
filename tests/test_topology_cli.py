@@ -559,10 +559,51 @@ runs:
     def test_exposes_consigned_metrics(self):
         hist = _tmp(self._HIST)
         self.addCleanup(os.unlink, hist)
-        code, out, _ = _capture(["artifact", "metrics", "--history", hist])
+        # --all : métriques de TOUT l'historique fourni (sans le filtre stack-active,
+        # qui viserait la stack réelle ≠ la topologie de ce fixture).
+        code, out, _ = _capture(["artifact", "metrics", "--history", hist, "--all"])
         self.assertEqual(code, 0)
         self.assertIn("cpu_core_s=272", out)
         self.assertIn("12m39s", out)  # 759 s
+
+    def test_defaults_to_active_stack(self):
+        # PAR DÉFAUT (-f pointe une topo `multi-node-3`), metrics ne montre QUE les runs
+        # de cette stack (filtre par nom de stack) — pas tout l'historique.
+        hist = _tmp(
+            "runs:\n"
+            "  - {id: a, date: 2026-06-01T00:00:00Z, profil: ceph, topologie: multi-node-3,"
+            " total_s: 100, phases: {up: 100}}\n"
+            "  - {id: b, date: 2026-06-02T00:00:00Z, profil: local-path, topologie: other,"
+            " total_s: 200, phases: {up: 200}}\n"
+        )
+        self.addCleanup(os.unlink, hist)
+        topo = _tmp(
+            "catalog: {topology: multi-node-3, profile: base}\n"
+            "nodes:\n  - {name: cp1, roles: [control]}\n"
+            "storage: {backend: ceph}\ntarget_kind: lima\n"
+        )
+        self.addCleanup(os.unlink, topo)
+        code, out, _ = _capture(["artifact", "metrics", "--history", hist, "-f", topo])
+        self.assertEqual(code, 0)
+        self.assertIn("multi-node-3", out)
+        self.assertNotIn("topologie: other", out)  # l'autre stack est exclue
+
+    def test_no_run_for_active_stack(self):
+        # Stack active sans run consigné → message explicite, code 0 (informatif).
+        hist = _tmp(
+            "runs:\n  - {id: a, date: 2026-06-01T00:00:00Z, profil: ceph,"
+            " topologie: other, total_s: 100, phases: {up: 100}}\n"
+        )
+        self.addCleanup(os.unlink, hist)
+        topo = _tmp(
+            "catalog: {topology: absente, profile: base}\n"
+            "nodes:\n  - {name: cp1, roles: [control]}\n"
+            "storage: {backend: ceph}\ntarget_kind: lima\n"
+        )
+        self.addCleanup(os.unlink, topo)
+        code, out, _ = _capture(["artifact", "metrics", "--history", hist, "-f", topo])
+        self.assertEqual(code, 0)
+        self.assertIn("aucun run", out)
 
     def test_empty_history(self):
         hist = _tmp("runs: []\n")
