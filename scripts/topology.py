@@ -1496,7 +1496,21 @@ _INTERNAL_PARSERS = {
 }
 
 
+def _default_kubeconfig_to_bench() -> None:
+    """Sans KUBECONFIG exporté, pointe le banc Lima par défaut (`_BENCH_KUBECONFIG`).
+
+    `topology.py` est l'entrée du banc (ADR 0049/0056) : ses commandes « état réel »
+    (smoke/scenarios/roundtrip/preview) interrogent le cluster via le client kubernetes
+    OU kubectl, qui lisent `KUBECONFIG`/`~/.kube/config`. Sans ce défaut, elles visent
+    le contexte courant du poste (souvent l'endpoint prod-exemple de hosts.example.yaml)
+    et échouent/`—` alors que le banc tourne. On NE force PAS si l'opérateur a déjà
+    exporté KUBECONFIG (intention explicite respectée)."""
+    if not os.environ.get("KUBECONFIG") and os.path.exists(_BENCH_KUBECONFIG):
+        os.environ["KUBECONFIG"] = _BENCH_KUBECONFIG
+
+
 def main(argv: list[str] | None = None) -> int:
+    _default_kubeconfig_to_bench()
     # Les commandes internes sont interceptées AVANT le parser principal (hors menu).
     args_list = sys.argv[1:] if argv is None else argv
     if args_list and args_list[0] in _INTERNAL_PARSERS:
