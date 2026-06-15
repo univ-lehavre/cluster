@@ -1689,6 +1689,23 @@ case "${1:-}" in
         log "🎉 Chemin 'socle' : socle monté (profil $(metro_profil "${WITH_CEPH:-0}"))."
         record_if_fresh "${run_start}"
         ;;
+    # ── metrics : socle léger → metrics-server SEUL (palier fin, ADR 0068). ──────
+    # Plus petit cran d'observabilité : l'API `kubectl top` sans Prometheus/Grafana
+    # (obs). metrics-server n'a pas de dépendance stockage → posé juste après le
+    # socle, sans storage-simple. Cache socle #219 : up/bootstrap réutilisés.
+    metrics)
+        TARGET=metrics
+        if [ "${WITH_CEPH:-0}" = 1 ]; then
+            die "chemin 'metrics' = palier léger (ADR 0068) ; ne pas combiner avec WITH_CEPH=1"
+        fi
+        chemin_prelude
+        run_start=$(date +%s)
+        run_socle
+        run_hardening_if_requested
+        time_phase metrics-server phase_metrics_server
+        log "🎉 Chemin 'metrics' : socle → metrics-server (kubectl top opérant)."
+        record_if_fresh "${run_start}"
+        ;;
     # ── atlas : socle léger → monitoring → gitops → dataops (ADR 0044/0045). ──
     # Observabilité d'abord (capte la suite + pose SeaweedFS) ; puis socle GitOps
     # (Gitea + Argo CD) ; puis l'INFRA DataOps (CNPG/Dagster/Marquez vides — les

@@ -132,6 +132,14 @@ class TargetValidation(unittest.TestCase):
     def test_default_target_base_is_socle(self):
         self.assertEqual(default_target(_topo(profile="base", backend="local-path")), "socle")
 
+    def test_default_target_metrics(self):
+        # ADR 0068 : profile metrics → chemin `metrics` (socle + metrics-server seul).
+        self.assertEqual(default_target(_topo(profile="metrics", backend="local-path")), "metrics")
+
+    def test_metrics_sequence_is_socle_plus_metrics_server(self):
+        seq = expected_phase_sequence(_topo(profile="metrics", backend="local-path"))
+        self.assertEqual(seq, ["up", "bootstrap", "metrics-server"])
+
     def _ha_topo(self):
         # Topologie HA déclarée : 3 control-planes hyperconvergés + VIP (la
         # déclaration de #333). Le modèle exige control_plane_lb dès > 1 CP.

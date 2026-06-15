@@ -116,6 +116,9 @@ _LOCAL_PATH_NEEDS_STORAGE = {"atlas"}
 # Phases propres à chaque chemin, APRÈS le socle (+ stockage + hardening éventuel).
 _PATH_TAIL: dict[str, list[str]] = {
     "socle": [],
+    # `metrics` (ADR 0068) : palier fin = socle + metrics-server seul (sans stockage,
+    # sans monitoring). default_target le dérive pour profile=metrics.
+    "metrics": ["metrics-server"],
     "atlas": ["metrics-server", "monitoring", "gitops", "dataops", "gitops-seed"],
     "storage-real": ["datalake", "smoke-s3", "wordpress"],
     "cluster-dataops": ["datalake", "monitoring", "dataops"],
@@ -162,8 +165,10 @@ def default_target(topo: Topology) -> str:
     HA D'ABORD : plus d'un control-plane (`is_ha_control_plane`) → `ha-3cp`, quel
     que soit le profil applicatif (la HA est une propriété du CONTROL-PLANE,
     orthogonale aux apps ; le banc ha-3cp prouve la mécanique en local-path).
-    Sinon : `dataops`+ceph → `atlas-ceph` ; `dataops`+local-path → `atlas` ; un
-    profil non-dataops → `socle`. L'opérateur peut toujours forcer `--target`.
+    Sinon : `dataops`+ceph → `atlas-ceph` ; `dataops`+local-path → `atlas` ;
+    `metrics` → `metrics` (palier fin, ADR 0068) ; un profil sans chemin propre
+    (`base`/`store`/`obs` non encore outillés) → `socle`. L'opérateur peut toujours
+    forcer `--target`.
     """
     if topo.is_ha_control_plane:
         return "ha-3cp"
@@ -171,6 +176,8 @@ def default_target(topo: Topology) -> str:
     backend = _backend_of(topo)
     if profile == "dataops":
         return "atlas-ceph" if backend == "ceph" else "atlas"
+    if profile == "metrics":
+        return "metrics"  # palier fin : socle + metrics-server (ADR 0068)
     return "socle"
 
 

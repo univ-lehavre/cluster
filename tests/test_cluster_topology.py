@@ -261,13 +261,16 @@ class LimaInventoryByteExact(unittest.TestCase):
 
 
 class ProfileInclusion(unittest.TestCase):
-    """P2 : inclusion cumulative base ⊂ store ⊂ obs ⊂ dataops (ADR 0039)."""
+    """P2 : inclusion cumulative base ⊂ metrics ⊂ store ⊂ obs ⊂ dataops (ADR 0039/0068)."""
 
     def test_cumulative_chain(self):
         self.assertEqual(required_profiles("base"), ["base"])
-        self.assertEqual(required_profiles("store"), ["base", "store"])
-        self.assertEqual(required_profiles("obs"), ["base", "store", "obs"])
-        self.assertEqual(required_profiles("dataops"), ["base", "store", "obs", "dataops"])
+        self.assertEqual(required_profiles("metrics"), ["base", "metrics"])
+        self.assertEqual(required_profiles("store"), ["base", "metrics", "store"])
+        self.assertEqual(required_profiles("obs"), ["base", "metrics", "store", "obs"])
+        self.assertEqual(
+            required_profiles("dataops"), ["base", "metrics", "store", "obs", "dataops"]
+        )
 
     def test_unknown_profile_rejected(self):
         with self.assertRaises(TopologyError):
@@ -316,7 +319,7 @@ class StorageDerivationParity(unittest.TestCase):
             )
         )
         rp = derive_run_params(topo)
-        self.assertEqual(rp["profiles"], ["base", "store", "obs", "dataops"])
+        self.assertEqual(rp["profiles"], ["base", "metrics", "store", "obs", "dataops"])
         self.assertEqual(rp["registry_storage_class"], "rook-ceph-block-replicated")
         self.assertEqual(rp["cnpg_storage_class"], "rook-ceph-block-replicated")
         self.assertEqual(rp["monitoring_storage_class"], "rook-ceph-block-replicated")
@@ -331,7 +334,7 @@ class StorageDerivationParity(unittest.TestCase):
             _base(catalog={"profile": "obs"}, storage={"backend": "local-path"})
         )
         rp = derive_run_params(topo)
-        self.assertEqual(rp["profiles"], ["base", "store", "obs"])
+        self.assertEqual(rp["profiles"], ["base", "metrics", "store", "obs"])
         self.assertEqual(rp["cnpg_storage_class"], "local-path")
         self.assertEqual(rp["cnpg_s3_backing"], "seaweedfs")
         self.assertFalse(rp["argocd_apply_gateway"])

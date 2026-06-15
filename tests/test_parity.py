@@ -33,6 +33,8 @@ from cluster_topology.plan import expected_phase_sequence  # noqa: E402
 _ARMS = {
     # chemin : (profile, backend, séquence attendue)
     "socle": ("base", "local-path", ["up", "bootstrap"]),
+    # metrics (ADR 0068) : socle léger + metrics-server seul (arm `metrics)` run-phases.sh).
+    "metrics": ("metrics", "local-path", ["up", "bootstrap", "metrics-server"]),
     "atlas": (
         "dataops",
         "local-path",
