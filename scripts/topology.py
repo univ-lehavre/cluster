@@ -721,10 +721,32 @@ def cmd_epreuves(args: argparse.Namespace) -> int:
     jouables, exclues = filter_epreuves(topo)
     if args.type:
         jouables = [e for e in jouables if e.type == args.type]
-    print(f"Épreuves jouables ({len(jouables)}) — filtrées par la topologie déclarée :")
+
+    # Filtre RUNTIME (ADR 0069) : si le banc répond ET sans --declared, on constate
+    # quelles COUCHES sont réellement montées et on marque une épreuve « prête » (sa
+    # couche tourne) ou « couche à monter » (compatible topo, mais la couche n'est pas
+    # là). `profil_min` → phases requises via resolve_layers ; croisé avec _observed_layers.
+    backend = topo.storage.get("backend", "local-path")
+    runtime = not args.declared and os.path.exists(_BENCH_KUBECONFIG) and bool(_ready_nodes())
+    observed = _observed_layers(list(_LAYER_SIGNAL)) if runtime else set()
+
+    def _pretes(ep) -> bool:
+        # Couches requises par l'épreuve (hors socle up/bootstrap, toujours là si banc up).
+        besoin = set(resolve_layers([ep.profil_min], backend))
+        return besoin.issubset(observed)
+
+    mode = "état réel du banc" if runtime else "topologie déclarée"
+    print(f"Épreuves jouables ({len(jouables)}) — filtrées par {mode} :")
     for e in jouables:
-        print(f"  {e.num} [{e.type:<5}] {e.categorie:<13} {e.nom}")
-    print("  (jouable selon la topologie ; l'état réel est vérifié au lancement, P5)")
+        if runtime:
+            mark = "✓ prête      " if _pretes(e) else "○ couche à monter"
+            print(f"  {mark} {e.num} [{e.type:<5}] {e.categorie:<13} {e.nom}")
+        else:
+            print(f"  {e.num} [{e.type:<5}] {e.categorie:<13} {e.nom}")
+    if runtime:
+        print("  ✓ prête = sa couche tourne ; ○ = topo OK mais couche à monter (`cluster up`).")
+    else:
+        print("  (jouable selon la topologie ; l'état réel est vérifié au lancement, P5)")
     if args.all:
         print(f"\nÉpreuves exclues ({len(exclues)}) :")
         for e, raison in exclues:
@@ -1683,6 +1705,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_file(p_epr)
     p_epr.add_argument("--all", action="store_true", help="montrer aussi les exclus + la raison")
+    p_epr.add_argument(
+        "--declared",
+        action="store_true",
+        help="filtrer sur la topologie déclarée seule (sans constater l'état réel du banc)",
+    )
     p_epr.add_argument(
         "--type", choices=["unit", "intég", "chaos"], default=None, help="filtrer par type"
     )

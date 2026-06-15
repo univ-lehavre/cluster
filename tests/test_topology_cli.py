@@ -207,10 +207,31 @@ class Diff(unittest.TestCase):
 
 class Epreuves(unittest.TestCase):
     def test_lists_playable(self):
-        code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE])
+        # --declared : mode statique déterministe (pas de dépendance au banc réel).
+        code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE, "--declared"])
         self.assertEqual(code, 0)
         self.assertIn("jouables", out)
+        self.assertIn("topologie déclarée", out)
         self.assertIn("vérifié au lancement, P5", out)  # n'en lance aucune
+
+    def test_runtime_marks_layers(self):
+        # Banc joignable : marque ✓ prête / ○ couche à monter selon les couches RÉELLES.
+        orig_ready, orig_obs, orig_exists = (
+            cli._ready_nodes,
+            cli._observed_layers,
+            cli.os.path.exists,
+        )
+        cli._ready_nodes = lambda: ["node1"]  # banc up
+        cli._observed_layers = lambda phases: {"metrics-server"}  # seul metrics monté
+        cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else orig_exists(p)
+        self.addCleanup(setattr, cli, "_ready_nodes", orig_ready)
+        self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
+        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
+        code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE])
+        self.assertEqual(code, 0)
+        self.assertIn("état réel du banc", out)
+        self.assertIn("prête", out)
+        self.assertIn("couche à monter", out)  # une couche non montée → marquée
 
     def test_all_shows_excluded(self):
         code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE, "--all"])
