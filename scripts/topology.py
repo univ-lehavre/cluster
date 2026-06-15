@@ -68,6 +68,7 @@ import difflib
 import glob
 import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -699,6 +700,35 @@ def _run_for_target(runs, target: str | None):
     return run if run is not None else latest_run(runs)
 
 
+def cmd_env(args: argparse.Namespace) -> int:
+    """`env` : imprime la ligne `export KUBECONFIG=<banc>` à `eval` dans le shell.
+
+    Un process NE PEUT PAS exporter une variable dans le shell PARENT (invariant
+    Unix) — d'où le patron `eval "$(topology.py env)"` (comme `ssh-agent`/`docker-env`).
+    Cela PERSISTE le kubeconfig du banc dans LE shell courant, pour que `kubectl`/
+    `cilium` directs (hors topology.py) visent le banc eux aussi. topology.py lui-même
+    n'en a pas besoin (main() pose déjà le défaut par process) — c'est un confort shell.
+
+    Sans `--force`, on respecte un KUBECONFIG déjà exporté (intention explicite) : on
+    n'imprime rien d'écrasant, juste un rappel commenté sur stderr. Si le banc n'a pas
+    de kubeconfig (pas encore monté), erreur d'usage."""
+    if not os.path.exists(_BENCH_KUBECONFIG):
+        raise _UsageError(
+            f"kubeconfig du banc absent ({_BENCH_KUBECONFIG}) — monter le socle d'abord "
+            "(`topology.py up`)"
+        )
+    bench = os.path.abspath(_BENCH_KUBECONFIG)
+    current = os.environ.get("KUBECONFIG")
+    if current and not args.force and os.path.abspath(current) != bench:
+        # KUBECONFIG déjà posé, ≠ banc : on NE l'écrase PAS (sauf --force). Rappel commenté
+        # (sur stdout pour rester `eval`-safe : un commentaire shell est inerte).
+        print(f"# KUBECONFIG déjà défini ({current}) — `env --force` pour viser le banc")
+        return 0
+    # Ligne eval-able. `eval "$(topology.py env)"` exporte dans le shell courant.
+    print(f"export KUBECONFIG={shlex.quote(bench)}")
+    return 0
+
+
 def cmd_preview(args: argparse.Namespace) -> int:
     """`preview` : LA vue complète d'une stack — VOULU + RÉEL + PLAN (calque `pulumi preview`).
 
@@ -1215,6 +1245,7 @@ _DISPATCH = {
     # refresh) ; `next` = appliquer LA prochaine couche (le vrai `up` complet — VMs +
     # orchestration de TOUTE la séquence — reste à coder).
     "preview": cmd_preview,  # calque `pulumi preview`
+    "env": cmd_env,  # imprime `export KUBECONFIG=<banc>` à eval dans le shell
     "up": cmd_up,  # calque `pulumi up` : monte TOUTE la séquence (délègue à run-phases.sh)
     "next": cmd_next,  # applique la PROCHAINE couche (1er drift, granularité fine)
     "destroy": cmd_destroy,  # calque `pulumi destroy`
@@ -1374,6 +1405,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_prev.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : test/lima/)"
+    )
+
+    p_env = sub.add_parser(
+        "env", help='imprime `export KUBECONFIG=<banc>` (eval "$(topology env)" dans le shell)'
+    )
+    p_env.add_argument(
+        "--force", action="store_true", help="imprime le banc même si KUBECONFIG est déjà défini"
     )
 
     p_destroy = sub.add_parser(
