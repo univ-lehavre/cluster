@@ -1425,8 +1425,13 @@ def _run(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog="topology",
-        description="Façade CLI/CI de l'outil déclaratif des topologies (ADR 0056, P3-P4).",
+        prog="cluster",
+        description=(
+            "Monte et inspecte un cluster Kubernetes décrit dans un fichier. "
+            "Tu décris ce que tu veux (nœuds, couches) ; l'outil le construit. "
+            "Commandes courantes : `cluster preview` (voir ce qui serait fait), "
+            "`cluster up` (construire), `cluster destroy` (tout supprimer)."
+        ),
     )
     # ha-3cp n'est PAS un sous-parser ici (commande interne routée à part dans main) :
     # le menu ne liste donc que les commandes publiques, sans `==SUPPRESS==` parasite.
@@ -1453,12 +1458,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # une STACK (verbe du groupe), pas un projet.
     p_stack = sub.add_parser(
         "stack",
-        help="gère les stacks (new | ls | select | validate) — calque `pulumi stack`",
+        help="choisir/créer/lister les configurations de cluster (new · ls · select · validate)",
     )
     stack_sub = p_stack.add_subparsers(dest="stack_cmd", required=True)
 
     p_stack_new = stack_sub.add_parser(
-        "new", help="crée une topologie (stack) dans le catalogue via un assistant"
+        "new", help="créer une nouvelle configuration (assistant question/réponse)"
     )
     p_stack_new.add_argument(
         "name", help="nom de la topologie (→ topologies/<nom>.yaml, gitignorée)"
@@ -1477,26 +1482,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="non interactif : défauts + pas d'activation sauf --activate (CI)",
     )
 
-    stack_sub.add_parser("ls", help="liste le catalogue, marque l'active (★) + chemin dérivé")
+    stack_sub.add_parser("ls", help="lister les configurations ; ★ = active")
 
     p_stack_sel = stack_sub.add_parser(
-        "select", help="active une stack existante (repointe le symlink topology.yaml)"
+        "select", help="rendre une configuration active (celle que up/preview utiliseront)"
     )
     p_stack_sel.add_argument(
         "name", help="nom de l'entrée du catalogue (ex : 3-nodes-1-cp, socle.example)"
     )
 
-    p_stack_val = stack_sub.add_parser("validate", help="valide le schéma d'une topologie")
+    p_stack_val = stack_sub.add_parser(
+        "validate", help="vérifier qu'un fichier de config est valide"
+    )
     _add_file(p_stack_val)
 
     # ── Groupe `artifact` (noun-verb) : dériver/constater les artefacts ───────────
     p_artifact = sub.add_parser(
-        "artifact", help="dérive/constate les artefacts (generate | status | diff | runs | metrics)"
+        "artifact",
+        help="fichiers générés + historique : inventaire (generate), écarts (diff), "
+        "runs passés (runs), durées/ressources (metrics)",
     )
     artifact_sub = p_artifact.add_subparsers(dest="artifact_cmd", required=True)
 
     p_gen = artifact_sub.add_parser(
-        "generate", help="dérive un artefact (inventaire ou run-params)"
+        "generate", help="produire l'inventaire Ansible (ou les paramètres) depuis la config"
     )
     _add_file(p_gen)
     p_gen.add_argument(
@@ -1519,7 +1528,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gen.add_argument("-o", "--output", default=None, help="fichier de sortie (défaut : stdout)")
 
     p_diff = artifact_sub.add_parser(
-        "diff", help="vérifie l'invariant byte-identique (code 1 si dérive)"
+        "diff", help="vérifier que l'inventaire généré n'a pas dérivé (échoue si différence)"
     )
     _add_file(p_diff)
     p_diff.add_argument(
@@ -1538,7 +1547,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_runs = artifact_sub.add_parser(
-        "runs", help="lit l'historique des runs de la stack active + verdict de fraîcheur"
+        "runs", help="montrer les montages passés de la config active (et s'ils sont récents)"
     )
     p_runs.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_runs.add_argument("--target", default=None, help="chemin nommé ciblé (atlas, storage-real…)")
@@ -1553,7 +1562,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_prev = sub.add_parser(
-        "preview", help="montre le plan complet voulu→réel sans appliquer (calque `pulumi preview`)"
+        "preview",
+        help="voir SANS rien changer : ce qui est voulu, ce qui tourne, ce qu'il reste à monter",
     )
     _add_file(p_prev)
     p_prev.add_argument(
@@ -1564,21 +1574,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_env = sub.add_parser(
-        "env", help='imprime `export KUBECONFIG=<banc>` (eval "$(topology env)" dans le shell)'
+        "env",
+        help='brancher kubectl sur le cluster du banc : eval "$(cluster env)" dans ton shell',
     )
     p_env.add_argument(
         "--force", action="store_true", help="imprime le banc même si KUBECONFIG est déjà défini"
     )
 
     p_destroy = sub.add_parser(
-        "destroy", help="détruit les VMs de la stack active (calque `pulumi destroy`)"
+        "destroy", help="supprimer les machines (VMs) de la configuration active"
     )
     _add_file(p_destroy)
     p_destroy.add_argument(
         "--yes", action="store_true", help="sauter la confirmation (requis hors TTY pour détruire)"
     )
 
-    p_up = sub.add_parser("up", help="monte la stack active de bout en bout (calque `pulumi up`)")
+    p_up = sub.add_parser(
+        "up", help="construire le cluster en entier (machines + toutes les couches)"
+    )
     _add_file(p_up)
     p_up.add_argument(
         "--target", default=None, help="chemin nommé visé (défaut : dérivé de la stack active)"
@@ -1586,7 +1599,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_up.add_argument("--yes", action="store_true", help="sauter la confirmation (requis hors TTY)")
 
     p_next = sub.add_parser(
-        "next", help="applique la prochaine couche manquante du plan (1er drift)"
+        "next", help="monter UNE seule couche : la prochaine qui manque (avancée pas à pas)"
     )
     _add_file(p_next)
     p_next.add_argument(
@@ -1597,7 +1610,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_met = artifact_sub.add_parser(
-        "metrics", help="expose les métriques consignées de la stack active (durées, cpu/ram)"
+        "metrics", help="montrer durées et ressources (CPU/RAM) des montages de la config active"
     )
     p_met.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_met.add_argument("--last", action="store_true", help="seulement le dernier run (de la stack)")
@@ -1611,12 +1624,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── Groupe `test` (noun-verb) : épreuves jouables + réversibilité ─────────────
     p_test = sub.add_parser(
-        "test", help="épreuves jouables + réversibilité (scenarios | smoke | roundtrip)"
+        "test",
+        help="vérifier le cluster : scénarios jouables (scenarios), test rapide (smoke), "
+        "monter→détruire→remonter une couche (roundtrip)",
     )
     test_sub = p_test.add_subparsers(dest="test_cmd", required=True)
 
     p_epr = test_sub.add_parser(
-        "scenarios", help="liste les scénarios jouables filtrés par la topologie"
+        "scenarios", help="lister les scénarios de test compatibles avec la config active"
     )
     _add_file(p_epr)
     p_epr.add_argument("--all", action="store_true", help="montrer aussi les exclus + la raison")
@@ -1625,7 +1640,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p_smk = test_sub.add_parser(
-        "smoke", help="smoke-test de réversibilité (créer→vérifier→détruire)"
+        "smoke", help="test rapide que le cluster répond (crée puis supprime un objet jetable)"
     )
     p_smk.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")
     p_smk.add_argument(
@@ -1634,7 +1649,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_rt = test_sub.add_parser(
         "roundtrip",
-        help="round-trip d'une couche + sa clôture : détruire→vérifier→reconstruire→vérifier",
+        help="éprouver une couche en la détruisant puis la remontant (DESTRUCTIF, banc jetable)",
     )
     p_rt.add_argument(
         "--phase",
