@@ -181,11 +181,10 @@ time_phase() {
     return "${rc}"
 }
 
-# derive_topology_label : étiquette de topologie DÉRIVÉE de NODES (honnêteté de Run,
-# ADR 0052) — l'historique doit refléter les nœuds RÉELS du run, pas un littéral. On
-# compte les rôles `control`/`worker` de NODES (qui suit NODES_OVERRIDE) :
-#   1 control seul        → mono-node      (ex. topo 1cp)
-#   ≥2 control            → ha-<n>cp       (ex. ha-3cp)
+# derive_topology_label : étiquette de FORME dérivée de NODES (honnêteté de Run, ADR
+# 0052) — REPLI quand le nom de stack n'est pas fourni (invocation bash directe, sans
+# l'entrée topology.py). On compte les rôles `control`/`worker` de NODES :
+#   1 control seul        → mono-node      ;  ≥2 control → ha-<n>cp
 #   1 control + N workers → multi-node-<n> (défaut historique : multi-node-3 = 1+2)
 derive_topology_label() {
     local entry role n_control=0 n_worker=0 total=${#NODES[@]}
@@ -211,7 +210,10 @@ derive_topology_label() {
 record_full_run() {
     local total=$1 profil block topo
     profil=$(metro_profil "${WITH_CEPH:-0}")
-    topo=$(derive_topology_label) # étiquette RÉELLE (NODES), pas un littéral (ADR 0052)
+    # `topologie:` = NOM de la stack (STACK_NAME, posé par `topology.py up`) — la CLÉ
+    # que `last_run_for_topology` matche pour le verdict de fraîcheur PAR STACK. À
+    # défaut (run bash direct), repli sur l'étiquette de FORME dérivée de NODES.
+    topo="${STACK_NAME:-$(derive_topology_label)}"
     # Échantillonnage Prometheus sur la fenêtre du run (best-effort, non bloquant).
     block=$(METRO_METRICS_BLOCK='' metro_sample_prometheus "${total}" || true)
     # TARGET (chemin nommé courant, suffixe +hardening inclus) consigné pour la

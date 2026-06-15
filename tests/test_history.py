@@ -115,8 +115,9 @@ class LoadRuns(unittest.TestCase):
     def test_real_history_parses(self):
         runs = load_runs(_REAL_HISTORY)
         self.assertGreaterEqual(len(runs), 7)
-        # rétrocompat : les entrées réelles n'ont pas de `target`.
-        self.assertTrue(all(r.target is None for r in runs))
+        # `target` est optionnel : les entrées anciennes n'en ont pas (None), les
+        # récentes (consignées par record_full_run avec TARGET) en portent un (str).
+        self.assertTrue(all(r.target is None or isinstance(r.target, str) for r in runs))
         self.assertTrue(all(r.date for r in runs))
 
     def test_empty_or_missing_runs_key(self):

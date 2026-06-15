@@ -121,6 +121,11 @@ _DEFAULT_TOPOLOGY = os.path.join(_ROOT, "topology.yaml")
 _EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "socle.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
 _RUNS_HISTORY = os.path.join(_ROOT, "test", "lima", "runs-history.yaml")
+# Kubeconfig du banc Lima, écrit par run-phases.sh (KUBECONFIG_LOCAL = WORKDIR/kubeconfig).
+# `preview` lit l'état RÉEL du cluster via kubectl ; sans KUBECONFIG exporté, il retombe
+# ICI (sinon il interroge ~/.kube/config — pas le banc — et voit 0 nœud Ready alors que
+# le socle est monté : faux « à installer », scorie de fidélité du RÉEL).
+_BENCH_KUBECONFIG = os.path.join(_ROOT, "test", "lima", ".work", "kubeconfig")
 # Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
 # un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha._vm_exec).
 _REFRESH_TIMEOUT_S = 8
@@ -420,8 +425,14 @@ def _real_vms() -> list[str]:
 
 
 def _ready_nodes() -> list[str]:
-    """Noms des nœuds k8s à l'état Ready (`kubectl get nodes`). Vide si injoignable."""
-    kubeconfig = os.environ.get("KUBECONFIG")
+    """Noms des nœuds k8s à l'état Ready (`kubectl get nodes`). Vide si injoignable.
+
+    Kubeconfig : `KUBECONFIG` exporté s'il existe, sinon REPLI sur le kubeconfig du
+    banc (`_BENCH_KUBECONFIG`, écrit par run-phases.sh) — sans quoi `preview` lit
+    `~/.kube/config` (pas le banc) et voit 0 nœud Ready alors que le socle tourne."""
+    kubeconfig = os.environ.get("KUBECONFIG") or (
+        _BENCH_KUBECONFIG if os.path.exists(_BENCH_KUBECONFIG) else None
+    )
     try:
         out = subprocess.run(  # noqa: S603 — argv fixe, pas d'entrée shell
             # --request-timeout borne l'attente côté kubectl (cluster injoignable) ;
@@ -843,11 +854,16 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     # Délégation à run-phases.sh <chemin> : la séquence prouvée au banc (provisioning
     # VM + bootstrap + orchestration ha-3cp + apps), bash garde le moteur (ADR 0049).
+    # STACK_NAME : le NOM de la stack active (= topologie déclarée). run-phases.sh le
+    # consigne dans `topologie:` de l'historique — c'est la CLÉ que `last_run_for_topology`
+    # matche pour le verdict de fraîcheur PAR STACK (deux stacks dérivant le même chemin
+    # ne partagent pas leur verdict). Sans lui, le bash écrivait un littéral générique
+    # qui ne matchait jamais la stack → PLAN « à installer » alors que la stack est montée.
     print(f"→ montage du chemin `{target}` ({len(topo.nodes)} nœud(s)) via run-phases.sh…")
     rc = subprocess.run(  # noqa: S603 — chemin codé, target dérivé d'une topo validée
         ["bash", os.path.join(_ROOT, "test", "lima", "run-phases.sh"), target],
         check=False,
-        env={**os.environ, "NODES_OVERRIDE": nodes_override},
+        env={**os.environ, "NODES_OVERRIDE": nodes_override, "STACK_NAME": stack_name},
     ).returncode
     if rc != 0:
         print(f"échec du montage (run-phases.sh {target} rc={rc}).", file=sys.stderr)
