@@ -1171,7 +1171,14 @@ def cmd_up(args: argparse.Namespace) -> int:
     rc = subprocess.run(  # noqa: S603 — chemin codé, séquence dérivée d'une topo validée
         argv,
         check=False,
-        env={**os.environ, "NODES_OVERRIDE": nodes_override, "STACK_NAME": stack_name},
+        env={
+            **os.environ,
+            "NODES_OVERRIDE": nodes_override,
+            "STACK_NAME": stack_name,
+            # exposition.mode CONSÉQUENT (ADR 0071) : le banc pose les CRs Gateway
+            # seulement en mode `gateway` ; `hostport`/`none` les omettent.
+            "EXPOSITION_MODE": topo.exposition_mode,
+        },
     ).returncode
     if rc != 0:
         print(f"échec du montage ({libelle} rc={rc}).", file=sys.stderr)

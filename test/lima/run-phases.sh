@@ -1623,7 +1623,14 @@ run_ha_3cp() {
 phase_ha_cni() {
     local vip_iface=$1 lb_prefix=$2
     apply_gwapi_crds_in_vm "${CP}" "${GWAPI_VERSION}"
+    # exposition.mode (ADR 0071) rend les CRs Gateway/LB-IPAM CONSÉQUENTS : seul le mode
+    # `gateway` les pose (CILIUM_EXPO_ENABLED=1) ; `hostport`/`none` ne les posent pas
+    # (l'exposition passe par hostPort sur les workloads, ou rien). EXPOSITION_MODE est
+    # passé par `topology.py up` (topo.exposition_mode) ; défaut `gateway` si absent.
+    local expo_enabled
+    expo_enabled=$([ "${EXPOSITION_MODE:-gateway}" = gateway ] && echo 1 || echo 0)
     run_cni "${CP}" \
+        "CILIUM_EXPO_ENABLED=${expo_enabled}" \
         "LB_IPAM_RANGE_START=${lb_prefix}.240" \
         "LB_IPAM_RANGE_STOP=${lb_prefix}.250" \
         "L2_INTERFACE=${vip_iface}"
