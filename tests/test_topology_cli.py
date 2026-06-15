@@ -553,18 +553,34 @@ runs:
         )
         self.assertEqual(code, 1)  # run KO → code 1
 
-    def test_non_playbook_layer_is_usage_error(self):
-        # Une couche sans play unitaire (up/bootstrap, sur rejeu depuis zéro) ne s'applique pas.
-        orig = cli._runner.launch_phase
-        cli._runner.launch_phase = lambda *a, **k: None
-        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
+    def test_upstream_phase_delegates_to_socle(self):
+        # Phase AMONT (up/bootstrap, depuis un historique vide) : pas de play unitaire,
+        # mais `next` la RÉALISE en déléguant au socle via run-phases.sh (cohérence avec
+        # preview : next fait toujours « la prochaine étape », VMs comprises). On stube
+        # le subprocess pour vérifier l'argv `run-phases.sh socle` (code 0).
+        import subprocess as sp
+
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(argv)
+            return sp.CompletedProcess(args=argv, returncode=0)
+
+        orig = cli.subprocess.run
+        cli.subprocess.run = fake_run
+        self.addCleanup(setattr, cli.subprocess, "run", orig)
         hist = _tmp(self._EMPTY_HIST)
         self.addCleanup(os.unlink, hist)
-        code, _, err = _capture(
+        code, out, _ = _capture(
             ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
         )
-        self.assertEqual(code, 2)
-        self.assertIn("usage", err)
+        self.assertEqual(code, 0)
+        # un appel run-phases.sh socle a bien été émis
+        self.assertTrue(
+            any("run-phases.sh" in str(a) and "socle" in a for a in calls),
+            f"attendu un appel `run-phases.sh socle`, vu : {calls}",
+        )
+        self.assertIn("socle", out)
 
 
 class Metrics(unittest.TestCase):

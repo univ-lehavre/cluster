@@ -1247,6 +1247,31 @@ def _confirm_apply(target: str, *, assume_yes: bool) -> bool:
     return rep.strip().lower() in ("oui", "o", "yes", "y")
 
 
+def _nodes_override(topo) -> str:
+    """csv `nom:rôle` des nœuds déclarés (la TOPOLOGIE pilote le banc, ADR 0056).
+
+    Un nœud `control` (même control+worker, le banc le détaint) → `:control` ; un
+    worker pur → `:worker`. Partagé par `up` et `next` (délégation socle)."""
+    return ",".join(
+        f"{n.name}:{'control' if n.has_role('control') else 'worker'}" for n in topo.nodes
+    )
+
+
+def _runphases_env(topo, stack_name: str) -> dict[str, str]:
+    """Env passé à run-phases.sh (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) — partagé
+    par `up` (chemin complet) et `next` (délégation des phases amont up/bootstrap).
+    Garantit que les deux entrées lancent le banc avec les MÊMES paramètres dérivés."""
+    return {
+        **os.environ,
+        "NODES_OVERRIDE": _nodes_override(topo),
+        "STACK_NAME": stack_name,
+        # exposition.mode CONSÉQUENT (ADR 0020/0071) : Gateway en hostNetwork (80/443
+        # sur l'IP du nœud) en mode `gateway` (défaut) ; `none` n'arme rien. Alias
+        # lb-ipam/hostport déjà résolus par exposition_mode.
+        "EXPOSITION_MODE": topo.exposition_mode,
+    }
+
+
 def cmd_up(args: argparse.Namespace) -> int:
     """`up` : monte la stack active de bout en bout (calque `pulumi up`).
 
@@ -1301,12 +1326,8 @@ def cmd_up(args: argparse.Namespace) -> int:
         return 2
 
     # NODES_OVERRIDE : la TOPOLOGIE pilote les nœuds du banc (inversion de frontière,
-    # ADR 0056 — la stack active décide, le harnais exécute). On bâtit le csv "nom:rôle"
-    # dans l'ordre déclaré : un nœud `control` (même control+worker, le banc le détaint)
-    # → `:control` ; un worker pur → `:worker`. ha-3cp garde son override interne (3 CP).
-    nodes_override = ",".join(
-        f"{n.name}:{'control' if n.has_role('control') else 'worker'}" for n in topo.nodes
-    )
+    # ADR 0056 — la stack active décide, le harnais exécute). ha-3cp garde son
+    # override interne (3 CP). Construit avec `next` via le helper partagé.
 
     # Délégation à run-phases.sh <chemin> : la séquence prouvée au banc (provisioning
     # VM + bootstrap + orchestration ha-3cp + apps), bash garde le moteur (ADR 0049).
@@ -1328,16 +1349,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     rc = subprocess.run(  # noqa: S603 — chemin codé, séquence dérivée d'une topo validée
         argv,
         check=False,
-        env={
-            **os.environ,
-            "NODES_OVERRIDE": nodes_override,
-            "STACK_NAME": stack_name,
-            # exposition.mode CONSÉQUENT (ADR 0020/0071 réécrit) : le banc expose le
-            # Gateway en hostNetwork (80/443 sur l'IP du nœud) en mode `gateway` (le
-            # défaut) ; `none` n'arme aucune bordure. `exposition_mode` a déjà résolu
-            # les alias historiques lb-ipam/hostport → gateway.
-            "EXPOSITION_MODE": topo.exposition_mode,
-        },
+        env=_runphases_env(topo, stack_name),
     ).returncode
     if rc != 0:
         print(f"échec du montage ({libelle} rc={rc}).", file=sys.stderr)
@@ -1376,7 +1388,27 @@ def cmd_next(args: argparse.Namespace) -> int:
     if sugg.phase is None:
         return 0  # rien à monter (stack à jour)
 
-    # Lancer `up` EST la décision. La couche doit avoir un playbook unitaire.
+    # Phases AMONT (up = créer les VMs, bootstrap = socle k8s + CNI) : pas de playbook
+    # unitaire — elles relèvent du provisioning bash (limactl, cni.sh, ADR 0049). `next`
+    # les RÉALISE quand même, en déléguant au socle via run-phases.sh (cohérence : next
+    # fait toujours « la prochaine étape de preview », VMs comprises). Le socle provisionne
+    # les VMs ET monte k8s+CNI ensemble (des VMs sans k8s ne servent à rien) ; un nœud
+    # déjà Ready le rend idempotent. Au `next` suivant, la 1re couche applicative se monte.
+    if sugg.phase in ("up", "bootstrap"):
+        stack_name = topo.catalog.get("topology", "—")
+        runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
+        print(f"→ {sugg.phase} : montage du socle (VMs + Kubernetes + CNI) via run-phases.sh…")
+        rc = subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
+            ["bash", runphases, "socle"],
+            check=False,
+            env=_runphases_env(topo, stack_name),
+        ).returncode
+        if rc != 0:
+            print(f"échec du montage du socle (rc={rc}).", file=sys.stderr)
+            return 1
+        print(f"✓ socle monté — relancer `next` pour la couche suivante ({stack_name}).")
+        return 0
+    # Toute autre phase sans playbook unitaire (cas théorique) reste une erreur d'usage.
     if sugg.playbook is None:
         raise _UsageError(
             f"la phase `{sugg.phase}` n'est pas un play unitaire lançable "
