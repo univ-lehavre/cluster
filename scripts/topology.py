@@ -139,6 +139,11 @@ _RUNS_HISTORY = os.path.join(_ROOT, "bench", "lima", "runs-history.yaml")
 # ICI (sinon il interroge ~/.kube/config — pas le banc — et voit 0 nœud Ready alors que
 # le socle est monté : faux « à installer », scorie de fidélité du RÉEL).
 _BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
+# Inventaire Ansible du BANC Lima, écrit par run-phases.sh (write_inventory → WORKDIR/
+# inventory.yaml ; target_kind: lima, hôtes node1/node2). DISTINCT de bootstrap/hosts.yaml
+# (l'inventaire PROD). `next` doit viser CELUI-CI pour une topo lima — sinon un montage
+# banc SSH sur la prod (faille ADR 0053). Choisi par `_inventory_for(topo)`.
+_BENCH_INVENTORY = os.path.join(_ROOT, "bench", "lima", ".work", "inventory.yaml")
 # Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
 # un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha._vm_exec).
 _REFRESH_TIMEOUT_S = 8
@@ -251,6 +256,20 @@ def _render_inventory(topo, kind: str, lima_home: str | None) -> str:
             raise _UsageError("--kind lima exige --lima-home (chemin du $HOME du poste)")
         return render_lima_inventory(topo, lima_home)
     return render_prod_inventory(topo)
+
+
+def _inventory_for(topo: Topology) -> str:
+    """Chemin de l'inventaire Ansible de la TOPOLOGIE active (ADR 0053).
+
+    Le cœur de l'isolation : un montage `next` vise l'inventaire de SA cible —
+    `bench/lima/.work/inventory.yaml` (target_kind: lima, généré par le banc) pour une
+    topo lima, `bootstrap/hosts.yaml` (prod) sinon. Sans ça, `next` utilisait TOUJOURS
+    l'inventaire prod codé en dur → un montage banc SSHait sur la prod (faille
+    constatée). La garde `_assert_inventory_safe` reste le filet ; ICI on choisit
+    d'emblée le BON inventaire."""
+    if topo.target_kind == "lima":
+        return _BENCH_INVENTORY
+    return os.path.join(_ROOT, "bootstrap", "hosts.yaml")
 
 
 class _UsageError(Exception):
@@ -1803,14 +1822,23 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
             "(déléguée au chemin nommé run-phases.sh) — la lancer via run-phases.sh"
         )
     private_data_dir = os.path.join(_ROOT, "bootstrap")
-    inventory = os.path.join(private_data_dir, "hosts.yaml")
+    # Inventaire de la TOPOLOGIE active (ADR 0053) : banc Lima pour une topo lima, prod
+    # sinon. PLUS de chemin prod codé en dur — c'est ce qui faisait SSHer `next` (topo
+    # banc) sur la prod. La garde _assert_inventory_safe reste le filet en aval.
+    inventory = _inventory_for(topo)
     ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
     # L'inventaire réel est gitignoré (ADR 0023) — sans lui, ansible-runner
     # prendrait le chemin pour un nom d'hôte (erreur cryptique). On l'arrête net.
     if not os.path.exists(inventory):
+        rel = os.path.relpath(inventory, _ROOT)
+        if topo.target_kind == "lima":
+            raise _UsageError(
+                f"inventaire du banc absent : {rel} — monter le banc d'abord "
+                "(`bench/lima/run-phases.sh up`, qui génère l'inventaire Lima)"
+            )
         raise _UsageError(
-            f"inventaire absent : {os.path.relpath(inventory, _ROOT)} "
-            "— le générer (`topology.py generate -o bootstrap/hosts.yaml`) "
+            f"inventaire absent : {rel} "
+            "— le générer (`cluster artifact generate -o bootstrap/hosts.yaml`) "
             "ou le copier depuis bootstrap/hosts.example.yaml"
         )
     _assert_bench_target(f"cluster next ({phase})")

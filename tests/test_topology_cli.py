@@ -694,7 +694,8 @@ storage:
   backend: local-path
 target_kind: lima
 """
-    # Inventaire PROD résiduel (le cas exact de la faille) : target_kind prod, dirqual.
+    # Inventaire PROD résiduel (le cas exact de la faille) : target_kind prod, hôtes
+    # génériques cp1/node1 + IP d'exemple 10.0.0.0/22 (ADR 0023).
     _INV_PROD = """\
 cloud:
   children:
@@ -704,10 +705,10 @@ cloud:
     target_kind: prod
 control:
   hosts:
-    dirqual1: {ansible_host: 10.67.2.11}
+    cp1: {ansible_host: 10.0.0.11}
 workers:
   hosts:
-    dirqual2: {ansible_host: 10.67.2.12}
+    node1: {ansible_host: 10.0.0.12}
 """
 
     def setUp(self):
@@ -729,9 +730,12 @@ workers:
             rc=0, status="successful"
         )
         self.addCleanup(setattr, cli._runner, "launch_phase", orig_lp)
-        # Écrit l'inventaire PROD à l'emplacement réel (sauvegarde/restaure l'existant).
-        self._inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
+        # Une topo lima vise `_BENCH_INVENTORY` : on y écrit un inventaire CONTAMINÉ par
+        # des hôtes PROD (target_kind prod, cp1/node1) pour prouver que la garde refuse
+        # même via le chemin banc (sauvegarde/restaure l'existant du banc réel).
+        self._inv = cli._BENCH_INVENTORY
         self._backup = self._inv + ".test-backup"
+        os.makedirs(os.path.dirname(self._inv), exist_ok=True)
         if os.path.exists(self._inv):
             os.rename(self._inv, self._backup)
             self.addCleanup(lambda: os.rename(self._backup, self._inv))
@@ -745,7 +749,9 @@ workers:
         setattr(cli, name, fn)
         self.addCleanup(setattr, cli, name, orig)
 
-    def test_lima_topo_refuses_prod_inventory(self):
+    def test_lima_topo_refuses_prod_contaminated_inventory(self):
+        # Garde en aval : même si l'inventaire banc est contaminé par des hôtes prod,
+        # la garde target_kind refuse (filet ultime, indépendant du choix d'inventaire).
         topo = _tmp(self._TOPO_LIMA)
         hist = _tmp("runs: []\n")
         self.addCleanup(os.unlink, topo)
@@ -754,9 +760,32 @@ workers:
             ["next", "-f", topo, "--target", "atlas", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 2)  # REFUS (usage)
-        self.assertIn("dirqual1", err)  # nomme les hôtes prod menacés
+        self.assertIn("cp1", err)  # nomme les hôtes prod menacés
         self.assertIn("0053", err)  # cite la doctrine d'isolation
         self.assertEqual(self.launched, [])  # ansible-runner JAMAIS lancé sur la prod
+
+    def test_lima_topo_uses_bench_inventory(self):
+        # CŒUR du fix : une topo lima vise l'inventaire BANC (target_kind: lima), pas
+        # le prod codé en dur. Ici l'inventaire banc est PROPRE → la garde passe et
+        # ansible-runner est lancé sur le BANC (inventaire = _BENCH_INVENTORY).
+        clean_banc_inv = (
+            "cloud:\n  vars:\n    target_kind: lima\n"
+            "control:\n  hosts:\n    node1: {ansible_host: lima-node1}\n"
+            "workers:\n  hosts:\n    node2: {ansible_host: lima-node2}\n"
+        )
+        with open(self._inv, "w", encoding="utf-8") as f:
+            f.write(clean_banc_inv)
+        topo = _tmp(self._TOPO_LIMA)
+        hist = _tmp("runs: []\n")
+        self.addCleanup(os.unlink, topo)
+        self.addCleanup(os.unlink, hist)
+        code, _, _ = _capture(
+            ["next", "-f", topo, "--target", "atlas", "--history", hist, "--yes"]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.launched), 1)  # lancé — sur le banc, pas la prod
+        # l'inventaire passé à launch_phase est bien celui du BANC
+        self.assertIn(".work/inventory.yaml", str(self.launched[0]))
 
 
 class NextMenu(unittest.TestCase):

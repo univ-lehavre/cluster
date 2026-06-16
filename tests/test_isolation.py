@@ -1,7 +1,8 @@
 """Tests de la garde d'isolation de cible Ansible (cluster_topology/isolation.py, ADR 0053).
 
 Pur : dict d'inventaire + intention → verdict. Reproduit la FAILLE constatée (intention
-banc `lima` sur un inventaire prod `dirqual` → REFUS) et les cas sûrs.
+banc `lima` sur un inventaire prod → REFUS) et les cas sûrs. Valeurs génériques (ADR
+0023) : nœuds prod `cp1`/`node1…`, plage `10.0.0.0/22`.
 """
 
 import os
@@ -12,19 +13,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from cluster_topology.isolation import classify_inventory_target  # noqa: E402
 
-# Inventaire PROD réel (extrait de bootstrap/hosts.yaml) : groupe cloud, target_kind prod,
-# hôtes dirqual1-4 + un control_host localhost.
+# Inventaire PROD (forme de bootstrap/hosts.yaml) : groupe cloud, target_kind prod,
+# hôtes génériques cp1/node1-3 (ADR 0023) + un control_host localhost.
 _PROD_INV = {
     "cloud": {
         "children": {"control": None, "workers": None},
         "vars": {"ansible_user": "debian", "target_kind": "prod"},
     },
-    "control": {"hosts": {"dirqual1": {"ansible_host": "10.67.2.11"}}},
+    "control": {"hosts": {"cp1": {"ansible_host": "10.0.0.11"}}},
     "workers": {
         "hosts": {
-            "dirqual2": {"ansible_host": "10.67.2.12"},
-            "dirqual3": {"ansible_host": "10.67.2.13"},
-            "dirqual4": {"ansible_host": "10.67.2.14"},
+            "node1": {"ansible_host": "10.0.0.12"},
+            "node2": {"ansible_host": "10.0.0.13"},
+            "node3": {"ansible_host": "10.0.0.14"},
         }
     },
     "control_host": {"hosts": {"localhost": {"ansible_connection": "local"}}},
@@ -49,7 +50,7 @@ class TheBreach(unittest.TestCase):
         ok, raison = classify_inventory_target(_PROD_INV, "lima")
         self.assertFalse(ok)  # REFUS — c'est ce qui aurait stoppé `next dataops`
         self.assertIn("prod", raison)
-        self.assertIn("dirqual1", raison)  # nomme les hôtes prod menacés
+        self.assertIn("cp1", raison)  # nomme les hôtes prod menacés
 
     def test_prod_intent_on_prod_inventory_is_allowed(self):
         # Usage prod légitime : intention prod + inventaire prod → SÛR.

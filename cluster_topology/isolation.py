@@ -83,7 +83,7 @@ def classify_inventory_target(inventory: dict, intended_kind: str) -> tuple[bool
        PEUT SSHer sur des nœuds (potentiellement la prod). Fail-closed.
 
     Exemple de la faille : intended=`lima` (banc), inventaire `target_kind: prod` +
-    hôtes dirqual1-4 → règle 3 → REFUSÉ (ce qui aurait stoppé `next dataops`)."""
+    hôtes prod (cp1/node1…) → règle 3 → REFUSÉ (ce qui aurait stoppé `next dataops`)."""
     remote = _remote_hosts(inventory)
     if not remote:
         return True, "inventaire local (aucun hôte distant à SSHer)"
