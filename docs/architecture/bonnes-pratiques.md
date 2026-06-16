@@ -49,6 +49,40 @@ relever de plusieurs cultures.
 
 Détail et justification : [ADR 0062](../decisions/0062-cultures-ingenierie.md).
 
+### Mapping aux référentiels externes notés/normés
+
+Les passages d'audit du 2026-06-16 ont confronté le dépôt à des **référentiels
+externes** ([notations cyber](../audit/2026-06-16-audit-notations-cyber.md),
+[notations & normes externes](../audit/2026-06-16-audit-notations-normes-externes.md)).
+Plusieurs étaient **revendiqués de fait mais non mappés** : on les explicite
+ici, contrôle par contrôle, conformément à
+l'[ADR 0080](../decisions/0080-notations-et-badges-readme.md). Les référentiels
+**déjà câblés** (SemVer, Keep a Changelog, Conventional Commits, Diátaxis) sont
+couverts par les sections par mécanisme ci-dessous ; les référentiels
+**écartés** (DORA sans prod, ISO 27001/25010, SRE error-budget) le sont par
+choix tracé (cf. passages d'audit).
+
+**FAIR** (Findable / Accessible / Interoperable / Reusable) — le dépôt-objet-de-
+recherche, pas les données (côté `atlas`,
+[ADR 0041](../decisions/0041-gouvernance-completude-dataops.md)) :
+
+| Facette       | Statut   | Preuve                                                                             |
+| ------------- | -------- | ---------------------------------------------------------------------------------- |
+| Findable      | ✅ fort  | DOI Zenodo concept (`CITATION.cff`), badge DOI au README, dépôt public             |
+| Accessible    | ✅ fort  | dépôt public, `LICENSE` (MIT) + `NOTICE`, releases taguées, archive Zenodo pérenne |
+| Interoperable | 🔶 moyen | formats ouverts (YAML/Markdown), `CITATION.cff` ; pas de métadonnées schema.org    |
+| Reusable      | ✅ fort  | licence claire, `CITATION.cff` + provenance, ADR Nygard, manifeste                 |
+
+**OpenGitOps** (CNCF, 4 principes) — le dépôt revendique « GitOps » sans citer
+le référentiel ; il le **satisfait** sur la couche applicative :
+
+| Principe              | Statut               | Preuve                                                                                                                            |
+| --------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Déclaratif            | ✅ PASS              | manifestes K8s, Argo CD Applications                                                                                              |
+| Versionné & immuable  | ✅ PASS              | Git source de vérité, merge-commit, images par digest ([ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md)) |
+| Tiré automatiquement  | ✅ PASS (applicatif) | Argo CD + Gitea (pull) ; bootstrap impératif assumé                                                                               |
+| Réconcilié en continu | ✅ PASS (applicatif) | Argo CD self-heal ; `bootstrap/state.sh` (drift 7 couches) côté infra                                                             |
+
 ## Reproductibilité, validation & preuves
 
 | Pratique                                                                                                                                                                                                                                                                                                       | Source                       |
