@@ -1365,6 +1365,44 @@ def _node_exec(node: str, argv: list[str], *, inventory_path: str, timeout: int 
         return None
 
 
+def _fetch_kubeconfig(
+    node: str,
+    *,
+    inventory_path: str,
+    server: str,
+    out_path: str,
+    context_name=None,
+    tls_server_name=None,
+) -> None:
+    """Rapatrie le kubeconfig depuis le control-plane `node` et le RÉÉCRIT pour le poste
+    (ADR 0081 étape 2 — résout le chicken-and-egg : `discover` n'exige plus un kubeconfig).
+
+    Lit `/etc/kubernetes/admin.conf` via `_node_exec` (transport résolu de l'inventaire), le
+    transforme par la logique PURE `kubeconfig.rewrite_kubeconfig` (endpoint + noms + SAN), et
+    l'écrit en `out_path` (chmod 600). Lève `_UsageError` si la lecture échoue."""
+    from nestor import kubeconfig as _kc
+
+    argv = ["sudo", "cat", "/etc/kubernetes/admin.conf"]
+    out = _node_exec(node, argv, inventory_path=inventory_path)
+    if out is None or out.returncode != 0 or not (out.stdout or "").strip():
+        detail = (out.stderr or "").strip() if out else "nœud injoignable"
+        raise _UsageError(
+            f"kubeconfig introuvable sur `{node}` ({detail}) — le control-plane est-il "
+            "bootstrappé, et le nœud joignable via l'inventaire actif ?"
+        )
+    try:
+        rewritten = _kc.rewrite_kubeconfig(
+            out.stdout, server=server, context_name=context_name, tls_server_name=tls_server_name
+        )
+    except ValueError as exc:
+        raise _UsageError(f"kubeconfig rapatrié invalide : {exc}") from exc
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(rewritten)
+    os.chmod(out_path, 0o600)
+    print(f"✓ kubeconfig rapatrié de `{node}` → {out_path} (endpoint {server})")
+
+
 def cmd_scale(args: argparse.Namespace) -> int:
     """`scale` : ajuste les replicas des workloads stateless au nombre de nœuds (ADR 0072).
 
@@ -1447,7 +1485,26 @@ def cmd_discover(args: argparse.Namespace) -> int:
     kubectl (rôles, namespaces, CRDs, StorageClass, Gateway) puis assemble par la
     logique PURE (`discover.assemble`). Émet (1) le YAML reconstruit (stdout ou `-o`),
     (2) l'INCONNU (jamais ignoré — ADR 0052/0074 §2), (3) un bilan de SANTÉ (§3).
-    Read-only. Code 0 si le cluster est joignable ; 2 (usage) sinon."""
+    Read-only. Code 0 si le cluster est joignable ; 2 (usage) sinon.
+
+    `--cp <node>` (ADR 0081 étape 2) : AVANT de sonder, rapatrie le kubeconfig depuis ce
+    control-plane (via node_exec) et l'écrit (`--kubeconfig-out`, défaut le KUBECONFIG actif)
+    — résout le chicken-and-egg (plus besoin d'un kubeconfig préalable)."""
+    if args.cp:
+        inv = _inventory_for(load_topology(_resolve(args.file)))
+        out_path = (
+            args.kubeconfig_out
+            or os.environ.get("KUBECONFIG")
+            or os.path.join(os.path.expanduser("~"), ".kube", "config")
+        )
+        _fetch_kubeconfig(
+            args.cp,
+            inventory_path=inv,
+            server=args.server,
+            out_path=out_path,
+            context_name=args.name,
+        )
+        os.environ["KUBECONFIG"] = out_path  # les sondes suivantes l'utilisent
     if not _ready_nodes():
         raise _UsageError(
             "banc injoignable (aucun nœud Ready) — exporter KUBECONFIG ou `nestor env`, "
@@ -3016,6 +3073,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--name",
         default="discovered",
         help="nom de la topologie reconstruite (défaut : discovered)",
+    )
+    _add_file(p_discover)
+    p_discover.add_argument(
+        "--cp",
+        default=None,
+        help="rapatrier d'abord le kubeconfig depuis ce control-plane (nœud de l'inventaire, "
+        "ADR 0081) — résout le chicken-and-egg",
+    )
+    p_discover.add_argument(
+        "--kubeconfig-out",
+        default=None,
+        help="où écrire le kubeconfig rapatrié (défaut : $KUBECONFIG ou ~/.kube/config)",
+    )
+    p_discover.add_argument(
+        "--server",
+        default="https://127.0.0.1:6443",
+        help="endpoint réécrit dans le kubeconfig rapatrié (défaut : port-forward Lima)",
     )
 
     p_refresh = sub.add_parser(
