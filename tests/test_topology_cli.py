@@ -1102,6 +1102,14 @@ class LayerHealthSignal(unittest.TestCase):
         got = cli._observed_layers(["metrics-server", "monitoring"])
         self.assertEqual(got, {"metrics-server"})
 
+    def test_gitops_seed_signal_targets_atlas_workflows(self):
+        # Régression : gitops-seed pose l'Application `atlas-workflows`, PAS `atlas`. Avec le
+        # mauvais nom, la couche n'était jamais vue faite → next la re-proposait en boucle.
+        kind, name, ns, ready = cli._LAYER_SIGNAL["gitops-seed"]
+        self.assertEqual((kind, name, ns), ("application", "atlas-workflows", "argocd"))
+        self._stub_kubectl({("application", "atlas-workflows"): (0, "")})
+        self.assertEqual(cli._observed_layers(["gitops-seed"]), {"gitops-seed"})
+
 
 class NextHealthGate(unittest.TestCase):
     """#355 : gate de santé ACTIVE après montage — `next` attend le dernier maillon Ready."""
@@ -1173,6 +1181,41 @@ class NextHealthGate(unittest.TestCase):
             rc = cli._monter_phase(topo, "monitoring", {})
         self.assertEqual(rc, 1)
         self.assertIn("PAS saine", err.getvalue())
+
+    def test_gitops_seed_delegates_to_runphases_not_usage_error(self):
+        # Régression : `next` proposait gitops-seed (playbook None) puis _monter_phase
+        # levait « pas un play unitaire » → menu incohérent. Une phase SANS playbook mais
+        # AVEC un arm run-phases.sh doit être DÉLÉGUÉE (bash run-phases.sh <phase>), pas
+        # refusée. On stube subprocess.run pour capter la délégation.
+        topo = cli.load_topology(_EXAMPLE)
+        captured = {}
+
+        class _CP:
+            returncode = 0
+
+        def fake_run(argv, **kw):
+            captured["argv"] = argv
+            return _CP()
+
+        orig = cli.subprocess.run
+        cli.subprocess.run = fake_run
+        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = cli._monter_phase(topo, "gitops-seed", {})
+        self.assertEqual(rc, 0)
+        # délégué à `bash <run-phases.sh> gitops-seed`, JAMAIS un play ansible-runner.
+        self.assertEqual(captured["argv"][0], "bash")
+        self.assertEqual(captured["argv"][-1], "gitops-seed")
+
+    def test_phase_without_playbook_and_without_arm_is_usage_error(self):
+        # garde-fou inverse : une phase sans play unitaire NI arm → erreur d'usage nette.
+        topo = cli.load_topology(_EXAMPLE)
+        orig = cli._has_runphases_arm
+        cli._has_runphases_arm = lambda phase: False
+        self.addCleanup(setattr, cli, "_has_runphases_arm", orig)
+        with self.assertRaises(cli._UsageError):
+            cli._monter_phase(topo, "gitops-seed", {})
 
 
 class Metrics(unittest.TestCase):

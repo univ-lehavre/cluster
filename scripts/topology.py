@@ -646,7 +646,11 @@ _LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool]] = {
     "monitoring": ("statefulset", "loki", "monitoring", True),
     "gitops": ("deployment", "argocd-server", "argocd", True),
     "dataops": ("deployment", "dagster-dagster-webserver", "dagster", True),
-    "gitops-seed": ("application", "atlas", "argocd", False),
+    # gitops-seed pose l'Application Argo CD `atlas-workflows` (PAS `atlas` : cf. le
+    # manifeste atlas-workflow-sample/application.example.yaml + le scénario 27). Avec le
+    # mauvais nom, `_observed_layers` ne la voyait jamais faite → `next` la re-proposait en
+    # boucle même après un montage réussi.
+    "gitops-seed": ("application", "atlas-workflows", "argocd", False),
 }
 
 # Kinds dont la SANTÉ se lit via `status.readyReplicas` (workloads répliqués).
@@ -1788,10 +1792,24 @@ def _nodes_override(topo) -> str:
     )
 
 
+def _has_runphases_arm(phase: str) -> bool:
+    """`True` si run-phases.sh a un arm `<phase>)` lançable (ADR 0066 : run-phases.sh reste
+    la SOURCE — on ne duplique pas la liste des arms en Python). On grep le case-dispatch du
+    script pour l'arm EXACT. Prudent : toute erreur de lecture → False (refus net)."""
+    runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
+    try:
+        with open(runphases, encoding="utf-8") as fh:
+            body = fh.read()
+    except OSError:
+        return False
+    return f"\n    {phase}) " in body or f"\n        {phase}) " in body
+
+
 def _runphases_env(topo, stack_name: str) -> dict[str, str]:
     """Env passé à run-phases.sh (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) — partagé
-    par `up` (chemin complet) et `next` (délégation des phases amont up/bootstrap).
-    Garantit que les deux entrées lancent le banc avec les MÊMES paramètres dérivés."""
+    par `up` (chemin complet) et `next` (délégation des phases sans play unitaire :
+    up/bootstrap/gitops-seed/hardening/…). Garantit que les deux entrées lancent le banc
+    avec les MÊMES paramètres dérivés."""
     return {
         **os.environ,
         "NODES_OVERRIDE": _nodes_override(topo),
@@ -1920,9 +1938,17 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
     Extrait de cmd_next pour être partagé par le chemin « 1re couche » et le menu
     multi-couches : une fois la phase CHOISIE, son montage est identique."""
     playbook_rel = phase_playbook(phase)
-    # Phases AMONT (`up`/`bootstrap`) : pas de playbook unitaire — provisioning bash
-    # (limactl, cni.sh, ADR 0049). On délègue à l'arm run-phases.sh du MÊME nom.
-    if phase in ("up", "bootstrap"):
+    # Phases SANS playbook unitaire (`up`/`bootstrap` : provisioning bash limactl/cni.sh,
+    # ADR 0049 ; `gitops-seed` : script d'init Gitea ; `hardening`/`smoke-s3`/`wordpress` :
+    # tags/env/harnais) → DÉLÉGUÉES à l'arm run-phases.sh du MÊME nom. On le DÉRIVE de
+    # `playbook is None` (et de l'existence d'un arm) au lieu d'une liste codée : sinon le
+    # menu propose une couche (gitops-seed) que `next` refuse ensuite de monter — incohérent.
+    if playbook_rel is None:
+        if not _has_runphases_arm(phase):
+            raise _UsageError(
+                f"la phase `{phase}` n'a ni play unitaire ni arm run-phases.sh — "
+                "non lançable via `nestor next`"
+            )
         _assert_bench_target(f"nestor next ({phase})")
         stack_name = topo.catalog.get("topology", "—")
         runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
@@ -1937,12 +1963,6 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
             return 1
         print(f"✓ `{phase}` terminée — relancer `next` pour l'étape suivante ({stack_name}).")
         return 0
-    # Toute autre phase sans playbook unitaire (cas théorique) = erreur d'usage.
-    if playbook_rel is None:
-        raise _UsageError(
-            f"la phase `{phase}` n'est pas un play unitaire lançable "
-            "(déléguée au chemin nommé run-phases.sh) — la lancer via run-phases.sh"
-        )
     private_data_dir = os.path.join(_ROOT, "bootstrap")
     # Inventaire de la TOPOLOGIE active (ADR 0053) : banc Lima pour une topo lima, prod
     # sinon. PLUS de chemin prod codé en dur — c'est ce qui faisait SSHer `next` (topo
@@ -2074,8 +2094,12 @@ def cmd_next(args: argparse.Namespace) -> int:
         raise _UsageError(str(exc)) from exc
 
     if not montables:
-        # Rien à monter : suggest_next porte le message « à jour » détaillé.
-        sugg = suggest_next(topo, target, done, etat_frais, run_params=run_params)
+        # Rien à monter : suggest_next porte le message « à jour » détaillé. Il faut lui
+        # passer `done | observed` (PAS `done` seul, l'historique) — sinon `next`
+        # CONTREDIT `preview` : une couche faite mais non consignée (run non consigné /
+        # cache socle) ressortirait comme « 1er drift non encore joué » alors que preview
+        # la voit ✓ à-jour. Le RÉEL prime (ADR 0052/0056 §7), comme dans `cmd_preview`.
+        sugg = suggest_next(topo, target, done | observed, etat_frais, run_params=run_params)
         print(sugg.message)
         return 0
 
