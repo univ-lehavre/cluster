@@ -11,6 +11,94 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.36.0](https://github.com/univ-lehavre/cluster/compare/v2.35.0...v2.36.0) (2026-06-16)
+
+
+### Features
+
+* **banc:** phase_ha_cni gateway-hostnetwork + access.sh gate l7 (ADR 0071) ([8428376](https://github.com/univ-lehavre/cluster/commit/8428376a7daeacf0b4bcd97f0a5dd4bb9b8e80f2))
+* **cli:** commande cluster access (delegue a access.sh, ADR 0048) ([46d9aee](https://github.com/univ-lehavre/cluster/commit/46d9aeed1741e447e0691b26489f3b166a4722c4))
+* **cli:** wrapper 'cluster' — raccourci de topology.py ([134e551](https://github.com/univ-lehavre/cluster/commit/134e5515f0448735142186ba33abb0143912c14e))
+* **cluster:** outil déclaratif topology.py + corrections de banc + ADR 0068-0074 ([b760901](https://github.com/univ-lehavre/cluster/commit/b760901e9c1220b0e1965505458700dc57d093d6))
+* **cni:** gateway en hostnetwork 80/443 (lb-ipam optionnel, ADR 0071) ([73d1e26](https://github.com/univ-lehavre/cluster/commit/73d1e26c6c8022da09a5812347609344292cca03))
+* **cni:** hubble-ui activable opt-in dans cni.sh (ADR 0073) ([bc5604f](https://github.com/univ-lehavre/cluster/commit/bc5604f535df31e3915f9b7cad912e1d14933dad))
+* **model:** exposition.mode valide + canonique (ADR 0071, gateway|hostport|none) ([0895f1d](https://github.com/univ-lehavre/cluster/commit/0895f1d39334ec178b5a95ae7ae6d0705db3fb32))
+* **rollback:** graphe atomique conditionnel au backend (storage local-path) ([cc947c3](https://github.com/univ-lehavre/cluster/commit/cc947c3acc2aee4d4de0486c89285c64b5b28615))
+* **topology:** arm bash layers + routage cmd_up (Lot B, ADR 0069) ([7ffc98a](https://github.com/univ-lehavre/cluster/commit/7ffc98a2955de2951533377a56b39d1c236a776b))
+* **topology:** briques moteur Python — idempotence (.stats) + gates k8s natifs ([c89019e](https://github.com/univ-lehavre/cluster/commit/c89019e149c7ec6efd6b59dc25c8fbcb57ad6eb5))
+* **topology:** cluster discover — reconstruire une topologie depuis un cluster réel (ADR 0074) ([8a8d17c](https://github.com/univ-lehavre/cluster/commit/8a8d17c2d81720142968e4f3071b8ac7f4e1b0db))
+* **topology:** commande cluster discover (reconstruire une topologie, ADR 0074) ([852fed0](https://github.com/univ-lehavre/cluster/commit/852fed07e6e4344a2a725088f2b46771d85ee967))
+* **topology:** commande cluster scale (replicas = f(noeuds Ready), ADR 0072) ([d404bf8](https://github.com/univ-lehavre/cluster/commit/d404bf8030650202ccb7fc432a7be9fe53ef51b5))
+* **topology:** commande context create|list|activate (catalogue + active) ([ca36da2](https://github.com/univ-lehavre/cluster/commit/ca36da2c24b336df80d4a21daf91369d424786e5))
+* **topology:** commande destroy — détruit les VMs de la stack active (calque pulumi destroy) ([6475fe5](https://github.com/univ-lehavre/cluster/commit/6475fe5c8c4bb61036ccbca60f8080dd4b6ad72c))
+* **topology:** commande env — exporte le KUBECONFIG du banc dans le shell ([0551801](https://github.com/univ-lehavre/cluster/commit/0551801b556a57026416df064a7246c7040239e3))
+* **topology:** commande preview — plan complet voulu→réel (calque pulumi preview) ([93efb6f](https://github.com/univ-lehavre/cluster/commit/93efb6fbbcc485d9190b302e1921599f624809e1))
+* **topology:** commande stack refresh — état réel lu à la demande (calque pulumi refresh) ([fb0cb75](https://github.com/univ-lehavre/cluster/commit/fb0cb7555d601e2568c78577a74690d42bd57017))
+* **topology:** commande up — monte la stack de bout en bout (délègue à run-phases.sh) ([a2fa6d1](https://github.com/univ-lehavre/cluster/commit/a2fa6d1490753badc8744e85dd03b8e466e20741))
+* **topology:** exposition.mode consequent dans le banc (ADR 0071) ([727e7d1](https://github.com/univ-lehavre/cluster/commit/727e7d15c5c0e9cfb340124c109642906099791a))
+* **topology:** inversion de frontière étape 0+1 — filet de parité + contrat machine facts ([733fc46](https://github.com/univ-lehavre/cluster/commit/733fc460710d1ffaeecddc66abe2613d1cf79a2c))
+* **topology:** la topologie pilote les nœuds du banc (up → NODES_OVERRIDE) ([57ec804](https://github.com/univ-lehavre/cluster/commit/57ec804b5f8605692becd3d590036c5cfe5fae21))
+* **topology:** model.layers + default_target derive des couches (Lot A, ADR 0069) ([9e33fa0](https://github.com/univ-lehavre/cluster/commit/9e33fa0e3e62da156dfc789df76ecff16f0f0465))
+* **topology:** orchestrer le socle k8s en Python (bootstrap-seq, migration ADR 0063) ([f40bf85](https://github.com/univ-lehavre/cluster/commit/f40bf8589336cf74e79eb38689dbd2749c6a0d87))
+* **topology:** preview affiche les layers + exemple pedagogique (Lot C, ADR 0069) ([6a1d1b1](https://github.com/univ-lehavre/cluster/commit/6a1d1b1d295e98d8f0accffc2ea850ebbb7415cc))
+* **topology:** preview v2 — couches lisibles, jamais≠rejeu, VMs à détruire d'abord ([9f018f2](https://github.com/univ-lehavre/cluster/commit/9f018f22d1ba3b8642d9e928720518c834c896d0))
+* **topology:** profil metrics — palier fin base⊂metrics⊂store (ADR 0068) ([7cb4066](https://github.com/univ-lehavre/cluster/commit/7cb4066d281e318a40ac5e59de43079430218156))
+* **topology:** resolve_layers — derive l'ordre des couches du graphe (ADR 0069) ([7672267](https://github.com/univ-lehavre/cluster/commit/767226716411af4dcf183851a6da7b0857f03271))
+* **topology:** test scenarios filtre sur les couches reellement montees ([a245036](https://github.com/univ-lehavre/cluster/commit/a24503671e5d628677058eefeb49d2d4634dba51))
+
+
+### Bug Fixes
+
+* **banc:** scénario 28 sonde l'IP du nœud (gateway-hostNetwork, ADR 0071) ([fda92ca](https://github.com/univ-lehavre/cluster/commit/fda92cacaf648d165f26cecf67cf794c8789f662))
+* **banc:** scénario 28 sonde l'IP du nœud (gateway-hostNetwork, ADR 0071) ([e11ce82](https://github.com/univ-lehavre/cluster/commit/e11ce82ca286c4afa26be0fabc53fc9bb46cf187))
+* **bench:** renommer test/ en bench/ dans .gitignore et .prettierignore ([9a66e59](https://github.com/univ-lehavre/cluster/commit/9a66e599413d7b4702421bfc5169901afb57ef01))
+* **ha-3cp:** ha-cni derive le CP (plus de cp1 code) + join-workers saute si pas de worker ([e046781](https://github.com/univ-lehavre/cluster/commit/e046781f3421c8356deb284ee54c0b6b9914e034))
+* **ha-3cp:** run_hardening_if_requested ne propage plus rc=1 sur hote plain (9e bug) ([a3f3100](https://github.com/univ-lehavre/cluster/commit/a3f31005706e9edb826a9ae3682df9958a299a85))
+* **k8s-install:** idempotence du keyring + cache apt (10e bug, changed=0 au rejeu) ([8fcd757](https://github.com/univ-lehavre/cluster/commit/8fcd757500b392e5ef4595f841538909647e2051))
+* **metrologie:** topologie du run derivee de NODES, plus de 'multi-node-3' code ([6691241](https://github.com/univ-lehavre/cluster/commit/6691241c3a7968cfaf8471506f4656007939d94d))
+* **runner:** purger env/* d'ansible-runner avant chaque run (anti-contamination) ([f40b8ed](https://github.com/univ-lehavre/cluster/commit/f40b8edf6859f530e23f86579b0509c825fd9a2e))
+* **state:** message de joignabilité fidèle au terrain (créer la VM ≠ installer l'OS) ([dae806c](https://github.com/univ-lehavre/cluster/commit/dae806c1e643957ca845759c1aa3967b1b504726))
+* **topology:** artifact runs/metrics ciblent la stack active par defaut ([680e407](https://github.com/univ-lehavre/cluster/commit/680e40778ebf5654504031405dd081613ad0e27a))
+* **topology:** defaut KUBECONFIG sur le banc pour les commandes etat reel ([cea3f72](https://github.com/univ-lehavre/cluster/commit/cea3f72ac7f40816678b16cdcf460f42af09f8f0))
+* **topology:** le plan de preview reconcilie avec le reel (le cluster qui tourne prime) ([760bd5c](https://github.com/univ-lehavre/cluster/commit/760bd5cd0471d6e72536e65850be46e4a42038ac))
+* **topology:** masquer complètement ha-3cp du menu (commande interne) ([858f420](https://github.com/univ-lehavre/cluster/commit/858f4201677cdc89f5d22953c5beadb746928734))
+* **topology:** preview lit l'etat reel du banc (kubeconfig + nom de stack) ([4d09148](https://github.com/univ-lehavre/cluster/commit/4d091489f9a83fd1485e9d9dcf59fe317a3965bd))
+* **topology:** preview matche le run par nom de stack (plus de faux « à-jour ») ([62929d3](https://github.com/univ-lehavre/cluster/commit/62929d3b2c7f87cf6f4549b402fb360aef7633ad))
+* **topology:** preview PLAN constate le reel des couches applicatives ([5bbceda](https://github.com/univ-lehavre/cluster/commit/5bbcedaf7e0837cfaa1455c71f7c0c0b77b5c563))
+* **topology:** preview VOULU omet le stockage en base + libellé base avec CRI + drift CI ([36d73ef](https://github.com/univ-lehavre/cluster/commit/36d73efcb7b5122538909f1a38ad83e7bf10d1cc))
+* **topology:** status fidèle à la topo (hyperconvergence + hôtes --real dérivés) ([3fe50eb](https://github.com/univ-lehavre/cluster/commit/3fe50ebd93279ac59997d13a304118ef966ccd6a))
+
+
+### Refactor
+
+* **bench:** renommer test/ en bench/ (ADR 0070) ([fa17be1](https://github.com/univ-lehavre/cluster/commit/fa17be1583f27ba7e1674507d5e12b3fbf0f5377))
+* **bench:** renommer test/ en bench/ (ADR 0070) ([a54ef6a](https://github.com/univ-lehavre/cluster/commit/a54ef6a80c39dda11fd3e358b368cd8ad7e57fd0))
+* **exposition:** mode unique gateway en hostNetwork (ADR 0071, hostport/lb-ipam absorbés) ([1e495ab](https://github.com/univ-lehavre/cluster/commit/1e495abdd9dbfcd9f380c85db07f93fa2bbdd502))
+* **topology:** aligner les commandes sur Pulumi (new + stack ls|select) ([eb12b49](https://github.com/univ-lehavre/cluster/commit/eb12b49dc0b80532bc0609c1ca52e37283c9346f))
+* **topology:** base = socle nu (stockage hors du socle de base, ADR 0039) ([fbbc132](https://github.com/univ-lehavre/cluster/commit/fbbc132deb88b735aeff5c16e5bd066a5053e60e))
+* **topology:** catalogue gitignore topologies/ + symlink d'activation ([a537bb3](https://github.com/univ-lehavre/cluster/commit/a537bb3b95050722058286f701f725553f0def52))
+* **topology:** exposition mode unique gateway (hostport absorbé en alias) ([a97f1cb](https://github.com/univ-lehavre/cluster/commit/a97f1cbedf5719329732fcaf67c8e0f125d657ba))
+* **topology:** groupes artifact + test, epreuves→scenarios, ha-3cp masquée ([0670169](https://github.com/univ-lehavre/cluster/commit/0670169f90a1a140fc44835e349390e8cffaffe8))
+* **topology:** menu plat type Pulumi — refresh au top-level ([2cdeaf8](https://github.com/univ-lehavre/cluster/commit/2cdeaf8357ec30569c7389d6bf1a5964d4d9e998))
+* **topology:** new devient stack new (pas de notion de projet) ([a40398e](https://github.com/univ-lehavre/cluster/commit/a40398ec994383f13b3541a0ff23da7ce5a27ab8))
+* **topology:** preview = voir (voulu+réel+plan), up = appliquer ; ménage du menu ([ba333ad](https://github.com/univ-lehavre/cluster/commit/ba333adc5c100399e8e25e1ca6d19b32aec5de5a))
+* **topology:** renommer la commande up en next (up ne tenait pas sa promesse) ([34e56a3](https://github.com/univ-lehavre/cluster/commit/34e56a318d5c29ef6b71c6b34b18bded8726a00f))
+* **topology:** retirer validate et default-target du menu CLI ([5e39545](https://github.com/univ-lehavre/cluster/commit/5e39545837e3fbb78d230aa62c62e6e4d8d51cad))
+
+
+### Documentation
+
+* **adr:** 0069 topology.layers — couches en DAG grain phase ([dea5ee1](https://github.com/univ-lehavre/cluster/commit/dea5ee1a5f314b5fbbac26a9a57e61d7e8f5fc4e))
+* **adr:** 0070 renommer test/ en bench/ ; bootstrap/ a plat ([17a2f9e](https://github.com/univ-lehavre/cluster/commit/17a2f9e581e6d6580541b80f68aa56609828a02e))
+* **adr:** 0071 NodePort, 0072 cluster scale, 0073 hubble-ui (Proposed) ([97d9a11](https://github.com/univ-lehavre/cluster/commit/97d9a115087255430ff3eb67cb0c418e1ef88e62))
+* **adr:** 0071 reecrit autour de hostport (NodePort abandonne) ([4dce3a9](https://github.com/univ-lehavre/cluster/commit/4dce3a9ee72c214fa4f322c72c6b538c450563de))
+* **adr:** 0074 cluster discover — reconstruire un topology.yaml depuis un cluster reel ([68d2a2d](https://github.com/univ-lehavre/cluster/commit/68d2a2d8a56f6fbe34a6aa7b14ea698f6766a8f4))
+* **adr:** 0074 enrichi — taxonomie des kinds sondes + bilan de sante ([ed0d195](https://github.com/univ-lehavre/cluster/commit/ed0d195d52dcb35e91499a3e9d5dd7d58dfb289d))
+* **adr:** 0075 kyverno cli statique en ci + audit cncf ([89f1d35](https://github.com/univ-lehavre/cluster/commit/89f1d35be584275cf04897ab610afbf74f9a5cd1))
+* **adr:** 0075 kyverno cli statique en ci + audit cncf ([9036aff](https://github.com/univ-lehavre/cluster/commit/9036aff28e59cf32accc0446b819542de287c772)), closes [#347](https://github.com/univ-lehavre/cluster/issues/347)
+* **bootstrap:** réindexer le README par phase + note 4 « topology » (ADR 0070) ([764458a](https://github.com/univ-lehavre/cluster/commit/764458a5386d29cf3f5552b405e2ad630e128a59))
+* **cli:** menu cluster --help en langage clair, sans jargon ([1cc0bb8](https://github.com/univ-lehavre/cluster/commit/1cc0bb8b327ea8a391afecae02df2811ccaf9040))
+
 ## [2.35.0](https://github.com/univ-lehavre/cluster/compare/v2.34.1...v2.35.0) (2026-06-14)
 
 
