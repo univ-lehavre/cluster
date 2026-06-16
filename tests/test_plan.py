@@ -160,9 +160,20 @@ class TargetValidation(unittest.TestCase):
     def test_layers_empty_is_socle(self):
         self.assertEqual(default_target(self._topo_layers([])), "socle")
 
-    def test_layers_non_prefix_falls_back_to_socle(self):
-        # [gitops, metrics] : pas de preset dédié → socle (l'arm `layers` montera, Lot B).
-        self.assertEqual(default_target(self._topo_layers(["gitops", "metrics"])), "socle")
+    def test_layers_non_prefix_derives_layers_path(self):
+        # [gitops, metrics] : pas de preset NOMMÉ → chemin générique `layers` (ADR 0069,
+        # Lot B), dont la séquence est dérivée de resolve_layers (graphe atomique).
+        self.assertEqual(default_target(self._topo_layers(["gitops", "metrics"])), "layers")
+
+    def test_store_ceph_layers_sequence_includes_datalake(self):
+        # Régression du « plan faux » : profil store + ceph → chemin layers, séquence
+        # socle ceph + datalake (RGW). Avant : repli socle → ceph,sc SANS datalake.
+        t = self._topo_layers(["store"], "ceph")
+        self.assertEqual(default_target(t), "layers")
+        seq = expected_phase_sequence(t, "layers")
+        self.assertEqual(seq, ["up", "bootstrap", "ceph", "sc", "datalake"])
+        # pas de doublon ceph/sc (filtrés du préfixe socle).
+        self.assertEqual(seq.count("ceph"), 1)
 
     def test_metrics_sequence_is_socle_plus_metrics_server(self):
         seq = expected_phase_sequence(_topo(profile="metrics", backend="local-path"))

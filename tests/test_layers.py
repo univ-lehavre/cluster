@@ -70,8 +70,14 @@ class ResolveLayersCeph(unittest.TestCase):
         seq = resolve_layers(["dataops"], "ceph")
         self.assertEqual(seq, ["ceph", "sc", "datalake", "dataops"])
 
-    def test_store_ceph_is_ceph_sc(self):
-        self.assertEqual(resolve_layers(["store"], "ceph"), ["ceph", "sc"])
+    def test_store_ceph_is_ceph_sc_datalake(self):
+        # `store` en ceph = pile stockage COMPLÈTE : bloc (ceph+sc) ET objet RGW (datalake).
+        # ADR 0039 : le profil store offre bloc + objet, pas seulement le bloc.
+        self.assertEqual(resolve_layers(["store"], "ceph"), ["ceph", "sc", "datalake"])
+
+    def test_store_local_path_is_storage_simple(self):
+        # en local-path : pas de RGW (datalake ceph-only) → provisioner bloc seul.
+        self.assertEqual(resolve_layers(["store"], "local-path"), ["storage-simple"])
 
 
 class BackendGuard(unittest.TestCase):

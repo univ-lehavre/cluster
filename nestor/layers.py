@@ -46,8 +46,8 @@ LAYER_PHASES: dict[str, list[str]] = {
 }
 
 # Phases applicatives composables au grain phase (queue, hors socle up/bootstrap).
-# `storage` est le jeton abstrait du stockage (résolu par backend en storage-simple
-# ou ceph/sc). datalake/smoke-s3/wordpress n'existent qu'en backend ceph.
+# `storage` est le jeton abstrait du stockage (résolu par backend en storage-simple,
+# ou ceph+sc+datalake — bloc ET objet RGW). smoke-s3/wordpress n'existent qu'en ceph.
 _QUEUE_PHASES = frozenset(
     {
         "storage-simple",
@@ -113,10 +113,13 @@ def _expand_to_phases(declared: list[str]) -> list[str]:
 
 def _expand_alias(phase: str, backend: str) -> list[str]:
     """Composants d'une phase via component_expand_alias (backend-conditionnel), ou
-    [phase] si la phase est hors graphe roundtrip. Le jeton abstrait `storage` se
-    résout en la couche stockage du backend (storage-simple | ceph+sc)."""
+    [phase] si la phase est hors graphe roundtrip. Le jeton abstrait `storage` (profil
+    `store`) se résout en la pile stockage COMPLÈTE du backend : en local-path le
+    provisioner `storage-simple` (bloc seul, pas de RGW) ; en ceph le bloc (`ceph`+`sc`)
+    ET l'objet (`datalake` = RGW S3) — `store` offre bloc + objet (ADR 0039). Le tri
+    topologique (resolve_layers) ordonne ceph→sc→datalake."""
     if phase == "storage":
-        return ["storage-simple"] if backend != "ceph" else ["ceph", "sc"]
+        return ["storage-simple"] if backend != "ceph" else ["ceph", "sc", "datalake"]
     comps = _rb(f"component_expand_alias {phase!r}", backend).split()
     return comps or [phase]
 

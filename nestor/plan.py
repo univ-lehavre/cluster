@@ -150,7 +150,11 @@ _CEPH_PATHS = {"storage-real", "cluster-dataops", "atlas-ceph"}
 # default_target) avec sa séquence propre — pas un socle+tail.
 _HA_3CP_SEQUENCE = ["up", "bootstrap-ha", "join-cp", "storage-simple"]
 
-KNOWN_TARGETS = frozenset(_PATH_TAIL) | {"ha-3cp"}
+# `layers` : chemin GÉNÉRIQUE (ADR 0069) pour les profils SANS preset nommé (store, obs,
+# paliers non-préfixe). Sa queue n'est PAS statique : elle est DÉRIVÉE de resolve_layers
+# (graphe atomique backend-conditionnel) dans expected_phase_sequence. L'arm `layers)` de
+# run-phases.sh l'exécute (ordre fourni par Python). Pas dans _PATH_TAIL (tail calculée).
+KNOWN_TARGETS = frozenset(_PATH_TAIL) | {"ha-3cp", "layers"}
 
 
 class PlanError(ValueError):
@@ -199,9 +203,11 @@ def default_target(topo: Topology) -> str:
     # base nu (rien de déclaré au-delà) → socle.
     if not layers:
         return "socle"
-    # Tout autre set (store/obs/paliers non-préfixe) : pas de preset dédié → l'arm
-    # générique `layers` (Lot B) le montera ; `socle` est le repli sûr d'ici là.
-    return "socle"
+    # Tout autre set (store/obs/paliers non-préfixe) : pas de preset NOMMÉ → l'arm
+    # générique `layers` (ADR 0069, Lot B), dont la séquence est DÉRIVÉE de resolve_layers
+    # (graphe atomique backend-conditionnel). C'est ce qui rend `store` complet (ceph+sc+
+    # datalake en ceph) au lieu du repli `socle` tronqué.
+    return "layers"
 
 
 def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[str]:
@@ -236,6 +242,17 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     seq = list(socle)
     if _hardening_requested(topo):
         seq.append("hardening")
+    if target == "layers":
+        # Chemin GÉNÉRIQUE (ADR 0069) : la queue est DÉRIVÉE des couches déclarées via le
+        # graphe atomique backend-conditionnel (resolve_layers), pas une table figée. On
+        # retire le préfixe socle (up/bootstrap[,ceph,sc]) déjà posé ci-dessus — resolve_
+        # layers rend la queue applicative, mais `storage`→ceph,sc,datalake en ceph inclut
+        # ceph+sc qui SONT dans le socle Ceph : on les filtre pour ne pas les doubler.
+        from nestor.layers import resolve_layers
+
+        queue = [p for p in resolve_layers(topo.declared_layers, backend) if p not in seq]
+        seq.extend(queue)
+        return seq
     # Couche stockage local-path : ajoutée APRÈS le socle pour les chemins store+ qui
     # en ont besoin (le Ceph l'a déjà dans son socle ; le chemin `socle`/base ne la
     # pose pas — base = k8s+CNI nus, ADR 0039). Avant la queue applicative (les apps
