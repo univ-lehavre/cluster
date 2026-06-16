@@ -4,7 +4,7 @@
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Date**     | 2026-06-15                                                                                                                                                                                                           |
 | **Type**     | cartographie en éventail + revue adversariale (opportunités confrontées à la gouvernance d'adoption)                                                                                                                 |
-| **Fonde**    | _réflexion_ — alimente de futurs ADR (Kyverno CLI en CI ; passage de [ADR 0064](../../decisions/0064-longhorn-option-stockage-catalogue.md) à `Accepted`). **Aucune décision ici.**                                  |
+| **Fonde**    | _réflexion_ — alimente de futurs ADR (Kyverno CLI en CI ; passage de [ADR 0064](../decisions/0064-longhorn-option-stockage-catalogue.md) à `Accepted`). **Aucune décision ici.**                                     |
 | **Éventail** | 2 passages, **60 agents** au total (passage 1 : 20 agents, 6 axes ; passage 2 : 40 agents, 6 familles non couvertes), chaque opportunité vérifiée sur fichiers puis jugée adversarialement contre ADR 0049/0057/0061 |
 | **Verdict**  | 12/13 opportunités retenues au passage 1 ; **1/33** candidat retenu au passage 2 (Longhorn, déjà acté). Tête de file : **Kyverno CLI statique en CI** (zéro composant runtime, comble un trou de couverture réel).   |
 
@@ -12,18 +12,18 @@
 
 La question posée — « maximiser l'usage des outils CNCF, notamment Kyverno » —
 heurte de front le **biais adoptif borné**
-([ADR 0061](../../decisions/0061-posture-adoption-bonnes-pratiques.md)) : «
+([ADR 0061](../decisions/0061-posture-adoption-bonnes-pratiques.md)) : «
 maximiser » n'est pas un but ; **ne rien empiler contre une décision tenue ou
 pour un besoin inexistant** l'est. Le workflow sépare donc deux choses qu'un
 audit naïf confond : (1) où une brique CNCF **comble un trou vérifié** ou
 **remplace du code maison**, et (2) où elle ne ferait qu'**empiler**. Chaque
 opportunité a été ouverte sur les fichiers réels, puis confrontée à
-[ADR 0049](../../decisions/0049-doctrine-choix-outil-par-action.md) (un outil
-par action),
-[ADR 0057](../../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) (ADR
-si structurant) et au coût mono-admin non-HA. Cette note prolonge et précise la
+[ADR 0049](../decisions/0049-doctrine-choix-outil-par-action.md) (un outil par
+action),
+[ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) (ADR si
+structurant) et au coût mono-admin non-HA. Cette note prolonge et précise la
 réflexion ouverte par
-[`../2026-05-29/note-runtime-admission.md`](../2026-05-29/note-runtime-admission.md)
+[`2026-05-29/note-runtime-admission.md`](2026-05-29/note-runtime-admission.md)
 (« réflexion, pas une décision »).
 
 ## Synthèse (assainie — valeurs génériques, ADR 0023)
@@ -55,7 +55,7 @@ trous **vérifiés sur fichiers** qu'un `kyverno apply` en CI (100 % offline,
    de grandeur mesuré : ~43 images digest-pinnées vs ~10 tag-only. → policy
    `require-image-digest` (validate).
 2. **L'invariant d'exposition
-   ([ADR 0020](../../decisions/0020-exposition-reseau-tout-cilium.md)) ne tourne
+   ([ADR 0020](../decisions/0020-exposition-reseau-tout-cilium.md)) ne tourne
    que contre un cluster vivant.** Il est codé impérativement dans
    `bootstrap/state.sh` (couche 7b, gardée par `cluster_target_ready`). Un
    `type: LoadBalancer` hors-Gateway n'est vu qu'**après** déploiement — preuve
@@ -87,7 +87,7 @@ gains statiques.
 2. Remplir `argocd-notifications-cm` (vide) + NetworkPolicy egress (amende
    0022).
 3. Finding « labels Pod Security » dans `scripts/check_gouvernance.py` — **ferme
-   le gap [ADR 0014](../../decisions/0014-durcissement-kubeadm-init.md) sans
+   le gap [ADR 0014](../decisions/0014-durcissement-kubeadm-init.md) sans
    Kyverno**.
 4. **Kyverno CLI statique en CI** (les 2 policies, même `lint:kyverno`) — **ADR
    dédié**.
@@ -106,9 +106,9 @@ familles non couvertes par le passage 1 (autoscaling/coût, packaging/templating
 workflow/événements, résilience/multi-tenant, storage/data-mesh, dev
 inner-loop), ~33 candidats. **Un seul gain net réel : Longhorn** (CNCF
 incubating) — et il est **déjà instruit par le dépôt**
-([ADR 0064](../../decisions/0064-longhorn-option-stockage-catalogue.md)
-`Proposed`, et `docs/plans/plan-stockage-longhorn.md`) : il comble le créneau «
-bloc répliqué multi-nœuds simple, sans datalake » entre `local-path` et Ceph.
+([ADR 0064](../decisions/0064-longhorn-option-stockage-catalogue.md) `Proposed`,
+et `docs/plans/plan-stockage-longhorn.md`) : il comble le créneau « bloc
+répliqué multi-nœuds simple, sans datalake » entre `local-path` et Ceph.
 **Action réelle : faire passer 0064 de `Proposed` à `Accepted`, pas adopter un
 outil de plus.** ADR 0064 §4 impose un profil de stockage à la fois (alternative
 à Ceph, pas brique en plus).
@@ -130,12 +130,11 @@ Cette trace est une **réflexion qui alimente des ADR, pas une décision** (stat
 identique à `note-runtime-admission.md`). Toute brique structurante — nouvel
 outil de toolchain, garde-fou CI normatif, composant runtime — passe d'abord par
 un **ADR `Accepted`**
-([ADR 0057](../../decisions/0057-gouvernance-documentaire-adr-plan-issue.md)),
-puis un plan vivant, avant tout code. Le biais adoptif
-([ADR 0061](../../decisions/0061-posture-adoption-bonnes-pratiques.md))
-**incline** vers l'adoption d'une bonne pratique CNCF mais ne dispense jamais
-des trois garde-fous : (1) ne contredire aucun ADR `Accepted` — sinon le
-superseder d'abord, (2) gain net > coût de la diversité (pondéré mono-admin),
-(3) ADR si structurant. Le rapport brut des deux passages (chemins absolus,
-sorties non génériques) n'est pas consigné — seule la synthèse assainie l'est
-(ADR 0023).
+([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md)), puis
+un plan vivant, avant tout code. Le biais adoptif
+([ADR 0061](../decisions/0061-posture-adoption-bonnes-pratiques.md)) **incline**
+vers l'adoption d'une bonne pratique CNCF mais ne dispense jamais des trois
+garde-fous : (1) ne contredire aucun ADR `Accepted` — sinon le superseder
+d'abord, (2) gain net > coût de la diversité (pondéré mono-admin), (3) ADR si
+structurant. Le rapport brut des deux passages (chemins absolus, sorties non
+génériques) n'est pas consigné — seule la synthèse assainie l'est (ADR 0023).

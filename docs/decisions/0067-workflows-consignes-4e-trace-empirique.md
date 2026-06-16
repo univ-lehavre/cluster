@@ -2,7 +2,16 @@
 
 ## Statut
 
-Accepted (2026-06-13)
+Superseded (2026-06-16) par [ADR 0078](0078-passages-audit-famille-unique.md).
+Accepted le 2026-06-13.
+
+> **Pourquoi superseded.** Cet ADR traitait les workflows multi-agents consignés
+> comme une **4ᵉ trace empirique distincte**, matérialisée par un sous-dossier
+> `docs/audit/workflows/`. L'ADR 0078 acte qu'un passage d'audit **issu d'un
+> workflow** n'est pas une famille à part mais une **propriété de méthode** du
+> passage : tous les passages vivent à plat dans `docs/audit/`. La doctrine de
+> fond (consigner la synthèse + les findings vérifiés, append-only, renvoi aux
+> ADR, honnêteté) **reste valable** — elle est reprise et généralisée par 0078.
 
 ## Contexte
 

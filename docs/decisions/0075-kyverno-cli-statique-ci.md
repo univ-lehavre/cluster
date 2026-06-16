@@ -5,7 +5,7 @@
 Proposed (2026-06-15).
 
 **Fonde sur** l'audit
-[`docs/audit/workflows/2026-06-15-audit-cncf-kyverno.md`](../audit/workflows/2026-06-15-audit-cncf-kyverno.md)
+[`docs/audit/2026-06-15-audit-cncf-kyverno.md`](../audit/2026-06-15-audit-cncf-kyverno.md)
 (éventail + revue adversariale, 60 agents, 2 passages) qui a confronté chaque
 opportunité CNCF aux garde-fous d'adoption et désigné **Kyverno CLI statique en
 CI** comme le gain le moins cher et le plus défendable. Prolonge la réflexion

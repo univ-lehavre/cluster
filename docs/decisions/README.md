@@ -86,7 +86,7 @@ Format léger inspiré de Michael Nygard :
 | 0064 | [Longhorn comme option de stockage du catalogue (3ᵉ profil)](0064-longhorn-option-stockage-catalogue.md)                             | Proposed           |
 | 0065 | [Variables d'environnement : intention vs état détectable](0065-variables-env-intention-vs-etat.md)                                  | Accepted           |
 | 0066 | [Rollback atomique : composants + graphe de dépendances unique](0066-rollback-atomique-graphe-composants.md)                         | Accepted           |
-| 0067 | [Workflows multi-agents consignés : 4ᵉ trace empirique](0067-workflows-consignes-4e-trace-empirique.md)                              | Accepted           |
+| 0067 | [Workflows multi-agents consignés : 4ᵉ trace empirique](0067-workflows-consignes-4e-trace-empirique.md)                              | Superseded (0078)  |
 | 0068 | [Profil `metrics` : palier fin entre `base` et `store`](0068-profil-metrics-palier-fin.md)                                           | Accepted           |
 | 0069 | [`topology.layers` : déclaration explicite des couches (DAG, grain phase)](0069-topology-layers-dag-grain-phase.md)                  | Accepted           |
 | 0070 | [Renommer `test/` en `bench/` ; garder `bootstrap/` à plat](0070-renommer-test-en-bench-bootstrap-plat.md)                           | Accepted           |
@@ -97,3 +97,4 @@ Format léger inspiré de Michael Nygard :
 | 0075 | [Kyverno CLI en CI : valider nos invariants de manifeste en statique](0075-kyverno-cli-statique-ci.md)                               | Proposed           |
 | 0076 | [`cluster refresh` : matérialiser une évolution voulue du réel dans la déclaration](0076-cluster-refresh-reel-vers-declaration.md)   | Accepted           |
 | 0077 | [`cluster next` : menu des couches montables (dépendances réelles vs convention)](0077-cluster-next-menu-couches-montables.md)       | Accepted           |
+| 0078 | [Passages d'audit : une seule famille, la méthode est une propriété](0078-passages-audit-famille-unique.md)                          | Accepted           |

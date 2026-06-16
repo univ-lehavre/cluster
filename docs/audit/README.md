@@ -14,24 +14,31 @@ Chaque passage applique la grille ci-dessous à une date. On garde l'historique
 (on voit l'évolution des notes) ; un nouveau passage **n'écrase pas** les
 précédents.
 
-| Passage                                     | Synthèse                               | Déclencheur            |
-| ------------------------------------------- | -------------------------------------- | ---------------------- |
-| **[2026-05-29](2026-05-29/00-synthese.md)** | premier passage (13 dimensions notées) | audit initial du dépôt |
+| Passage                                                                             | Synthèse                                                         | Déclencheur                           |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
+| **[2026-05-29](2026-05-29/00-synthese.md)**                                         | premier passage (13 dimensions notées)                           | audit initial du dépôt                |
+| **[2026-06-13 — périmètres atomiques](2026-06-13-verification-graphe-atomique.md)** | cartographie multi-agents (5 agents) : 23 composants + 30 arêtes | avant l'encodage du graphe (ADR 0066) |
+| **[2026-06-13 — arêtes de stockage](2026-06-13-verification-aretes-stockage.md)**   | éventail (16 lecteurs + synthèse adversariale) : 5 arêtes bloc   | avant `roundtrip.py` (Lot 1)          |
+| **[2026-06-15 — outils CNCF / Kyverno](2026-06-15-audit-cncf-kyverno.md)**          | éventail + revue adversariale (60 agents) : Kyverno CLI en tête  | réflexion d'adoption (ADR 0075)       |
+| **[2026-06-16 — notations de cybersécurité](2026-06-16-audit-notations-cyber.md)**  | Scorecard / CIS / NIST-ANSSI : 3 référentiels applicables        | issue #354 (manques actionnables)     |
 
 > ⚠️ Le passage du **2026-05-29** est **antérieur à l'installation de
 > production** et à ~45 ADR ultérieurs : ses notes /5 reflètent l'état **à cette
 > date**, pas l'état courant. Un futur passage les réactualisera (sur jalon —
 > cf. _Cadence_).
 
-## Workflows multi-agents consignés (4ᵉ trace empirique)
+## Une seule famille de passages — la méthode est une propriété
 
-Les **[workflows multi-agents consignés](workflows/)** — cartographies en
-éventail et revues adversariales qui ont fondé une décision structurante — sont
-la **4ᵉ trace empirique** du dépôt
-([ADR 0067](../decisions/0067-workflows-consignes-4e-trace-empirique.md)), à
-côté des passages d'audit ci-dessus, de `RESULTS.md` et du registre des drifts
-(ADR 0058 §6). On y consigne la **synthèse + les findings vérifiés** (pas les
-rapports bruts, ADR 0023), datés et non réécrits.
+Un passage peut appliquer la **grille /5** complète (comme le 2026-05-29) ou
+**cibler** un angle (un référentiel externe, une famille d'outils) ; il peut
+être conduit à la main ou **issu d'un workflow multi-agents** (cartographie en
+éventail, revue adversariale). **Ces variantes ne sont pas des familles
+distinctes** : être issu d'un workflow est une **propriété de méthode** (champ
+_Type_ / _Éventail_ de l'en-tête), pas un type d'artefact à part
+([ADR 0078](../decisions/0078-passages-audit-famille-unique.md), qui supersède
+l'ADR 0067). Tous vivent côte à côte ici, datés et non réécrits ; tous
+**renvoient aux ADR** pour les _pourquoi_ et leurs **manques deviennent des
+issues**.
 
 ## La grille (permanente)
 

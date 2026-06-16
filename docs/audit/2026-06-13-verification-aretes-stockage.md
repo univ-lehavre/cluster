@@ -4,7 +4,7 @@
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **Date**     | 2026-06-13                                                                                                                           |
 | **Type**     | cartographie en éventail + revue adversariale                                                                                        |
-| **Fonde**    | [ADR 0066](../../decisions/0066-rollback-atomique-graphe-composants.md) Lot 1 — `roundtrip.py` consomme le graphe                    |
+| **Fonde**    | [ADR 0066](../decisions/0066-rollback-atomique-graphe-composants.md) Lot 1 — `roundtrip.py` consomme le graphe                       |
 | **Éventail** | 17 agents (16 lecteurs, 1 composant chacun + synthèse adversariale)                                                                  |
 | **Verdict**  | **5 arêtes de stockage BLOC manquantes confirmées** (`→ sc`) ; 11 fausses alertes réfutées ; clôture dérivée == ancien `_DEPENDENTS` |
 
@@ -71,6 +71,6 @@ une arête directe).
   `_DEPENDENTS` (régression impossible).
 
 > 2ᵉ entrée de la 4ᵉ trace empirique
-> ([ADR 0067](../../decisions/0067-workflows-consignes-4e-trace-empirique.md)),
+> ([ADR 0067](../decisions/0067-workflows-consignes-4e-trace-empirique.md)),
 > après
 > [la vérification du graphe atomique](2026-06-13-verification-graphe-atomique.md).
