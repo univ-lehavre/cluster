@@ -19,6 +19,7 @@ from nestor.discover import (  # noqa: E402
     Unknown,
     assemble,
     build_topology,
+    classify_backend_drift,
     classify_health,
     classify_namespaces,
     detect_backend,
@@ -79,6 +80,39 @@ class DetectBackend(unittest.TestCase):
 
     def test_nothing_defaults_to_localpath(self):
         self.assertEqual(detect_backend([]), "local-path")
+
+
+class ClassifyBackendDrift(unittest.TestCase):
+    """#356 : signaler un backend réel qui CONTREDIT le déclaré (≠ detect_backend)."""
+
+    def test_ceph_sc_but_declared_localpath_is_drift(self):
+        # Le cas vécu : bascule ceph→local-path, rook-ceph résiduel orphelin.
+        self.assertEqual(
+            classify_backend_drift("local-path", ["rook-ceph.rbd.csi.ceph.com"]), "ceph"
+        )
+
+    def test_localpath_sc_but_declared_ceph_is_drift(self):
+        self.assertEqual(classify_backend_drift("ceph", ["rancher.io/local-path"]), "local-path")
+
+    def test_real_matches_declared_no_drift(self):
+        self.assertIsNone(classify_backend_drift("ceph", ["rook-ceph.rbd.csi.ceph.com"]))
+        self.assertIsNone(classify_backend_drift("local-path", ["rancher.io/local-path"]))
+
+    def test_no_recognized_sc_no_drift(self):
+        # Cluster vide/injoignable (aucune SC reconnue) → pas de drift AFFIRMABLE (vs
+        # detect_backend qui retombe sur local-path et confondrait).
+        self.assertIsNone(classify_backend_drift("ceph", []))
+        self.assertIsNone(classify_backend_drift("local-path", []))
+        self.assertIsNone(classify_backend_drift("local-path", ["some.unknown/provisioner"]))
+
+    def test_ceph_residual_alongside_localpath_declared_localpath_is_drift(self):
+        # ceph ET local-path présents, déclaré local-path → ceph résiduel = drift.
+        self.assertEqual(
+            classify_backend_drift(
+                "local-path", ["rancher.io/local-path", "rook-ceph.rbd.csi.ceph.com"]
+            ),
+            "ceph",
+        )
 
 
 class DetectExposition(unittest.TestCase):

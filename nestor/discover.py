@@ -157,6 +157,30 @@ def detect_backend(storageclass_provisioners: list[str]) -> str:
     return "local-path"
 
 
+def classify_backend_drift(
+    declared_backend: str, storageclass_provisioners: list[str]
+) -> str | None:
+    """Backend RÉEL s'il CONTREDIT le déclaré, sinon None (PUR, #356 / ADR 0046).
+
+    `detect_backend` retombe sur `local-path` qu'il VOIE une SC local-path OU rien — donc
+    inutilisable pour un drift (on confondrait « cluster vide » et « vraie local-path »).
+    Ici on ne signale QUE sur un signal RECONNU qui contredit la déclaration :
+
+    - des SC ceph présentes (`rook-ceph`…) alors que `declared` ≠ ceph → renvoie `ceph`
+      (le cas vécu : backend basculé ceph→local-path, rook-ceph résiduel orphelin) ;
+    - des SC local-path SANS aucune SC ceph alors que `declared` == ceph → `local-path`.
+
+    Aucune SC reconnue (cluster vide/injoignable) → None (pas de drift affirmable). Le
+    backend réel == déclaré → None. Read-only ; la façade `preview` AVERTIT sur non-None."""
+    has_ceph = any(any(m in p for m in _CEPH_SC_MARKERS) for p in storageclass_provisioners)
+    has_local = any(any(m in p for m in _LOCALPATH_SC_MARKERS) for p in storageclass_provisioners)
+    if has_ceph and declared_backend != "ceph":
+        return "ceph"
+    if has_local and not has_ceph and declared_backend == "ceph":
+        return "local-path"
+    return None
+
+
 def detect_exposition(*, gateways_present: bool, crd_groups: list[str]) -> str:
     """Mode d'exposition constaté (PUR, ADR 0074 §1, aligné ADR 0020 « gateway unique »).
 

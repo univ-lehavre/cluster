@@ -536,6 +536,41 @@ runs:
         self.assertIn("nestor env", err)  # avertit d'aligner le shell
         self.assertIn("PROD", err)
 
+    def test_warns_on_backend_drift_ceph_residual(self):
+        # #356 : topo local-path (banc.example), mais des SC ceph observées sur le cluster
+        # → rook-ceph résiduel orphelin → preview AVERTIT (backend réel ≠ déclaré).
+        topo = _tmp(
+            "catalog: {topology: t}\n"
+            "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
+            "storage: {backend: local-path}\ntarget_kind: lima\n"
+        )
+        self.addCleanup(os.unlink, topo)
+        cli._ready_nodes = lambda: ["node1"]  # cluster joignable → on sonde les SC
+        orig_sc = cli._discover_sc_provisioners
+        cli._discover_sc_provisioners = lambda: ["rook-ceph.rbd.csi.ceph.com"]
+        self.addCleanup(setattr, cli, "_discover_sc_provisioners", orig_sc)
+        code, _, err = _capture(["preview", "-f", topo])
+        self.assertEqual(code, 0)
+        self.assertIn("backend RÉEL `ceph`", err)
+        self.assertIn("local-path", err)  # nomme le déclaré
+        self.assertIn("0046", err)  # cite la doctrine
+
+    def test_no_backend_drift_warning_when_cluster_down(self):
+        # Aucun nœud Ready → on NE sonde pas les SC → pas de faux drift.
+        topo = _tmp(
+            "catalog: {topology: t}\n"
+            "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
+            "storage: {backend: local-path}\ntarget_kind: lima\n"
+        )
+        self.addCleanup(os.unlink, topo)
+        cli._ready_nodes = lambda: []  # cluster down
+        orig_sc = cli._discover_sc_provisioners
+        cli._discover_sc_provisioners = lambda: ["rook-ceph.rbd.csi.ceph.com"]
+        self.addCleanup(setattr, cli, "_discover_sc_provisioners", orig_sc)
+        code, _, err = _capture(["preview", "-f", topo])
+        self.assertEqual(code, 0)
+        self.assertNotIn("backend RÉEL", err)
+
 
 class Next(unittest.TestCase):
     """`next` : applique LA prochaine couche manquante via runner (1er drift)."""
