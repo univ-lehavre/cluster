@@ -630,7 +630,9 @@ def _ready_nodes() -> list[str]:
 # — on vise la ressource DISCRIMINANTE que le rôle lui-même éprouve (sa gate Ready) :
 #   monitoring → StatefulSet loki Ready (platform-loki) — absent si SeaweedFS manque ;
 #   gitops     → Deployment argocd-server Ready (platform-argocd) ;
-#   dataops    → Deployment dagster Ready (platform-dagster) ;
+#   dataops    → Deployment dagster-dagster-webserver Ready (le chart Dagster nomme ses
+#                Deployments `dagster-daemon` + `dagster-dagster-webserver`, JAMAIS `dagster` ;
+#                le webserver est l'UI/API — la preuve que la couche RÉPOND) ;
 #   metrics-server / storage-simple → leur Deployment Ready.
 # Format : phase → (kind, name, namespace|None, ready). `ready=True` (workloads) exige
 # readyReplicas≥1 ; `ready=False` (Application Argo : CRD sans replicas) = présence.
@@ -642,7 +644,7 @@ _LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool]] = {
     "storage-simple": ("deployment", "local-path-provisioner", "local-path-storage", True),
     "monitoring": ("statefulset", "loki", "monitoring", True),
     "gitops": ("deployment", "argocd-server", "argocd", True),
-    "dataops": ("deployment", "dagster", "dagster", True),
+    "dataops": ("deployment", "dagster-dagster-webserver", "dagster", True),
     "gitops-seed": ("application", "atlas", "argocd", False),
 }
 
