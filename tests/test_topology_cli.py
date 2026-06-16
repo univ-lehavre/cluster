@@ -2210,6 +2210,8 @@ class Remove(unittest.TestCase):
         self.addCleanup(setattr, cli, "_discover_owned", orig_owned)
         self.addCleanup(setattr, cli, "_delete_namespace", cli._delete_namespace)
         cli._delete_namespace = lambda ns: (True, "finalisé")
+        self.addCleanup(setattr, cli, "_lingering_pods", cli._lingering_pods)
+        cli._lingering_pods = lambda ns: []  # défaut : aucun pod coincé (sondes sans cluster)
 
     def test_discover_deletes_roots_only_never_run_remove(self):
         # --discover supprime les RACINES (le GC cascade les possédés) et n'appelle JAMAIS
@@ -2378,6 +2380,48 @@ class Remove(unittest.TestCase):
         code, _, _ = _capture(["remove", "--phase", "dataops", "--discover", "--yes"])
         self.assertEqual(code, 0)
         self.assertEqual(sorted(finalized), ["dagster", "postgres"])
+
+    def test_discover_force_deletes_lingering_possede_pods(self):
+        # Régression (vécu banc) : un Pod POSSÉDÉ qui traîne (grace 1800s CNPG / conteneur
+        # vivant) n'est pas une racine → la 3e passe le force-delete AVANT de finaliser le ns.
+        self._stub_discovery(
+            ["postgres"],
+            [
+                {
+                    "kind": "Cluster",
+                    "name": "pg",
+                    "uid": "u-c",
+                    "namespace": "postgres",
+                    "ownerReferences": [],
+                }
+            ],
+        )
+        # 1er appel (boucle) → le pod traîne ; 2e appel (re-check post-force) → parti.
+        calls = {"postgres": 0}
+
+        def lingering(ns):
+            if ns != "postgres":
+                return []
+            calls["postgres"] += 1
+            return ["pg-1"] if calls["postgres"] == 1 else []
+
+        cli._lingering_pods = lingering
+        forced = []
+        self.addCleanup(setattr, cli, "_kubectl_delete", cli._kubectl_delete)
+        self.addCleanup(setattr, cli, "_probe_resource_stuck", cli._probe_resource_stuck)
+
+        def fake_delete(k, n, ns, **kw):
+            if k == "pod":
+                forced.append((n, kw.get("force_grace0")))
+            return (True, "supprimé")
+
+        cli._kubectl_delete = fake_delete
+        cli._probe_resource_stuck = lambda k, n, ns: None
+        code, out, _ = _capture(["remove", "--phase", "dataops", "--discover", "--yes"])
+        self.assertEqual(code, 0)
+        # le pod possédé pg-1 a été force-delete (--grace-period=0), pas seulement la racine.
+        self.assertIn(("pg-1", True), forced)
+        self.assertIn("force pod pg-1", out)
 
 
 class NodeExec(unittest.TestCase):

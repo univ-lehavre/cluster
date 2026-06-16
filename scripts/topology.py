@@ -2601,6 +2601,25 @@ def _kubectl_strip_finalizers(kind, name, namespace) -> tuple[bool, str]:
     return out.returncode == 0, "finalizers retirés" if out.returncode == 0 else "patch échoué"
 
 
+def _lingering_pods(namespace: str) -> list[str]:
+    """Noms des Pods de `namespace` EN COURS DE SUPPRESSION mais coincés (deletionTimestamp
+    posé) — à force-delete (ADR 0079 étape A). Couvre les pods POSSÉDÉS que la passe par
+    racines ne cible pas : un Pod CNPG (grace 1800s) ou à conteneur vivant survit longtemps à
+    son Deployment/Cluster supprimé (le GC respecte le grace). Vide si ns absent/injoignable."""
+    out = _kubectl("get", "pods", "-n", namespace, "-o", "json", "--ignore-not-found")
+    if out is None or out.returncode != 0 or not (out.stdout or "").strip():
+        return []
+    try:
+        data = json.loads(out.stdout)
+    except (ValueError, KeyError):
+        return []
+    return [
+        it["metadata"]["name"]
+        for it in data.get("items", [])
+        if it.get("metadata", {}).get("deletionTimestamp")
+    ]
+
+
 def _probe_resource_stuck(kind, name, namespace) -> dict | None:
     """Sonde l'état d'une cible qui traîne après delete → entrées pour `classify_stuck`
     (PUR). Renvoie {terminating, has_finalizers, container_alive}, ou None si la ressource
@@ -2745,6 +2764,21 @@ def _remove_by_discovery(phase: str, *, full: bool, assume_yes: bool) -> int:
     # les CRD restent (opérateur réutilisable par un re-`next`). Le nettoyage des CRD viendra
     # avec un signal d'appartenance opérateur fiable (étape ultérieure). La logique pure
     # `ownership.deletable_crds` est prête mais NON branchée tant que ce signal manque.
+
+    # 3e passe : débloquer les PODS POSSÉDÉS qui traînent (deletionTimestamp posé mais coincés).
+    # La passe par racines ne les cible pas — or un Pod CNPG (grace 1800s) ou à conteneur vivant
+    # survit longtemps à son Deployment/Cluster supprimé, et BLOQUE la finalisation du ns. On
+    # force (--grace-period=0) ; si le pod garde un finalizer dont le contrôleur est parti
+    # (ex. `batch.kubernetes.io/job-tracking` d'un Job déjà supprimé), le force ne suffit pas →
+    # on retire le finalizer. Dérivé de l'état (cas vécu après remove dataops : pg-1 grace 1800s,
+    # marquez conteneur vivant, atlas-workflow-sample finalizer Job orphelin).
+    for ns in namespaces:
+        for pod in _lingering_pods(ns):
+            ok, detail = _kubectl_delete("pod", pod, ns, force_grace0=True)
+            print(f"  ⟳ force pod {pod} (Terminating, grace long/conteneur vivant) — {detail}")
+            if pod in _lingering_pods(ns):  # toujours là → finalizer récalcitrant
+                ok, detail = _kubectl_strip_finalizers("pod", pod, ns)
+                print(f"  ⟳ finalizers pod {pod} (contrôleur parti) — {detail}")
 
     # Dernière passe : supprimer les NAMESPACES possédés (finalize si wedgé). C'est ce qui
     # manquait au chemin table (ns argocd/gitea coincés en Terminating, cas vécu) — ici, dérivé.
