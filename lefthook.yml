@@ -26,7 +26,14 @@ pre-commit:
       glob: '*.sh'
       run: shellcheck {staged_files}
 
-# Full-repo checks before pushing
+# Checks avant push. Les linters PAR FICHIER (prettier/yamllint/shellcheck) ne portent
+# que sur les fichiers du PUSH (`{push_files}`) — un push ne re-scanne plus tout le dépôt
+# (lent : ~70s prettier sur `**`). Garde-fou RAPIDE sur ce que le push introduit ; la CI
+# reste l'autorité EXHAUSTIVE (tout le dépôt, à chaque PR). Les checks de GRAPHE/SUITE
+# (bats/ansible-lint/kubeconform/jscpd) restent complets : pas de découpage fiable par
+# fichier (suite de tests, graphe de rôles, liste d'exclusions kubeconform, duplication
+# cross-fichiers). `glob` filtre l'extension ; lefthook SKIP la commande si aucun
+# `{push_files}` ne matche → un push de code Python ne lance ni prettier ni yamllint.
 pre-push:
   parallel: true
   commands:
@@ -38,21 +45,21 @@ pre-push:
           exit 1
         fi
     prettier:
-      run: pnpm exec prettier --check "**/*.{yaml,yml,md,json}"
+      glob: '*.{yaml,yml,md,json}'
+      run: pnpm exec prettier --check {push_files}
     yamllint:
-      run: yamllint .
+      glob: '*.{yaml,yml}'
+      run: yamllint {push_files}
     shellcheck:
+      glob: '*.sh'
+      run: shellcheck {push_files}
+    # Cibles shellcheck HORS glob `*.sh` (toujours vérifiées, peu coûteux) : template
+    # bash (.sh.j2, sans jinja), le wrapper `nestor.sh`, et les scripts Perl (#36).
+    shellcheck-extra:
       run: |
-        find . -name '*.sh' \
-          -not -path './node_modules/*' \
-          -not -path './.git/*' \
-          -not -path './.venv/*' \
-          -print0 | xargs -0 shellcheck
-        # Template bash (.sh.j2, sans jinja) + wrapper `cluster` (sans extension,
-        # non capté par le glob *.sh) + scripts Perl (audit P3 #36).
         shellcheck --shell=bash \
           bootstrap/roles/etcd-backup/templates/etcd-snapshot.sh.j2 \
-          cluster
+          nestor.sh
         for f in $(git ls-files '*.pl'); do perl -c "$f"; done
     bats:
       run: pnpm test:shell
