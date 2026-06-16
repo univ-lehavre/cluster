@@ -99,3 +99,4 @@ Format léger inspiré de Michael Nygard :
 | 0077 | [`cluster next` : menu des couches montables (dépendances réelles vs convention)](0077-cluster-next-menu-couches-montables.md)       | Accepted           |
 | 0078 | [Passages d'audit : une seule famille, la méthode est une propriété](0078-passages-audit-famille-unique.md)                          | Accepted           |
 | 0079 | [Découverte de l'appartenance réelle : socle commun `health` + `remove`](0079-rollback-par-decouverte-appartenance.md)               | Proposed           |
+| 0080 | [Notations externes & badges README : doctrine d'affichage](0080-notations-et-badges-readme.md)                                      | Accepted           |
