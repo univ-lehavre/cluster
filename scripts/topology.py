@@ -71,6 +71,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -691,6 +692,27 @@ def _resource_healthy(kind: str, name: str, namespace: str | None, ready: bool) 
         return int((out.stdout or "").strip() or "0") >= 1
     except (ValueError, AttributeError):
         return False
+
+
+def _wait_layer_healthy(
+    phase: str, *, retries: int = 30, delay: float = 4.0, sleep=time.sleep
+) -> bool:
+    """Attend (borné) que le DERNIER MAILLON de `phase` devienne sain (#355).
+
+    Gate de santé ACTIVE après un montage : `next` ne se contente pas du `rc=0` du play
+    (un play peut « réussir » alors que Loki ne devient jamais Ready — panne vécue). On
+    sonde `_resource_healthy` (le signal `_LAYER_SIGNAL` de la couche) jusqu'à ce qu'il
+    soit vrai ou épuisement (retries×delay, ~120s par défaut). True = sain ; False =
+    timeout. Une phase SANS signal connu (amont, gitops-seed…) → True (rien à gater).
+    `sleep` injecté → testable sans attente réelle."""
+    sig = _LAYER_SIGNAL.get(phase)
+    if not sig:
+        return True  # pas de maillon discriminant à éprouver pour cette phase
+    for _ in range(retries):
+        if _resource_healthy(*sig):
+            return True
+        sleep(delay)
+    return _resource_healthy(*sig)  # dernier essai après la dernière attente
 
 
 def _observed_layers(phases: list[str]) -> set[str]:
@@ -1893,7 +1915,24 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
     except _runner.RunnerUnavailable as exc:
         raise _UsageError(str(exc)) from exc
     print(f"  rc={result.rc} status={result.status}")
-    return 0 if result.rc == 0 else 1
+    if result.rc != 0:
+        return 1
+    # Gate de SANTÉ active (#355) : un play `rc=0` ne prouve pas que la couche est SAINE
+    # (Loki peut ne jamais devenir Ready — panne vécue). On attend (borné) que le dernier
+    # maillon devienne Ready ; sinon on rend rc≠0 (« montée mais pas saine ») plutôt qu'un
+    # faux succès. Phase sans signal connu → pas de gate (True).
+    if phase in _LAYER_SIGNAL:
+        kind, name, ns, _ = _LAYER_SIGNAL[phase]
+        print(f"→ attente que `{phase}` soit sain ({kind}/{name})…")
+        if not _wait_layer_healthy(phase):
+            print(
+                f"couche `{phase}` montée mais PAS saine ({kind}/{name} pas Ready) — "
+                "voir les pods/événements ; ré-essayer `nestor next` une fois la cause levée.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"✓ `{phase}` sain.")
+    return 0
 
 
 def cmd_next(args: argparse.Namespace) -> int:

@@ -63,6 +63,7 @@ def _deny_run(argv, *a, **k):
 
 
 _REAL_ASSERT_BENCH = cli._assert_bench_target  # garde d'isolation réelle
+_REAL_WAIT_HEALTHY = cli._wait_layer_healthy  # gate de santé réelle (#355)
 
 
 def setUpModule():
@@ -71,11 +72,16 @@ def setUpModule():
     # n'ont pas de vrai banc et ne doivent pas être bloqués par elle. La classe
     # `BenchTargetGuard` la RÉACTIVE explicitement pour la tester (cf. _REAL_ASSERT_BENCH).
     cli._assert_bench_target = lambda action: None
+    # Gate de santé (#355) neutralisée PAR DÉFAUT (renvoie sain) : sans banc, sonder le
+    # dernier maillon bouclerait 30×4s. Les tests de `next` stubent déjà launch_phase ;
+    # la gate elle-même est testée à part (NextHealthGate) avec sa propre stub.
+    cli._wait_layer_healthy = lambda phase, **kw: True
 
 
 def tearDownModule():
     cli.subprocess.run = _REAL_SUBPROCESS_RUN
     cli._assert_bench_target = _REAL_ASSERT_BENCH
+    cli._wait_layer_healthy = _REAL_WAIT_HEALTHY
 
 
 from nestor import (  # noqa: E402
@@ -1095,6 +1101,78 @@ class LayerHealthSignal(unittest.TestCase):
         )
         got = cli._observed_layers(["metrics-server", "monitoring"])
         self.assertEqual(got, {"metrics-server"})
+
+
+class NextHealthGate(unittest.TestCase):
+    """#355 : gate de santé ACTIVE après montage — `next` attend le dernier maillon Ready."""
+
+    def setUp(self):
+        # setUpModule neutralise `_wait_layer_healthy` (→ True) pour ne pas pendre les
+        # autres tests ; ICI on teste la VRAIE gate → on la restaure le temps de la classe.
+        orig = cli._wait_layer_healthy
+        cli._wait_layer_healthy = _REAL_WAIT_HEALTHY
+        self.addCleanup(setattr, cli, "_wait_layer_healthy", orig)
+
+    def test_wait_returns_true_when_healthy_first_try(self):
+        orig = cli._resource_healthy
+        cli._resource_healthy = lambda *sig: True
+        self.addCleanup(setattr, cli, "_resource_healthy", orig)
+        slept = []
+        ok = cli._wait_layer_healthy("monitoring", retries=5, delay=1, sleep=slept.append)
+        self.assertTrue(ok)
+        self.assertEqual(slept, [])  # sain au 1er essai → aucune attente
+
+    def test_wait_retries_then_succeeds(self):
+        orig = cli._resource_healthy
+        calls = {"n": 0}
+
+        def healthy(*sig):
+            calls["n"] += 1
+            return calls["n"] >= 3  # sain au 3e essai
+
+        cli._resource_healthy = healthy
+        self.addCleanup(setattr, cli, "_resource_healthy", orig)
+        slept = []
+        ok = cli._wait_layer_healthy("monitoring", retries=5, delay=1, sleep=slept.append)
+        self.assertTrue(ok)
+        self.assertEqual(len(slept), 2)  # 2 attentes avant le 3e essai
+
+    def test_wait_times_out_when_never_healthy(self):
+        orig = cli._resource_healthy
+        cli._resource_healthy = lambda *sig: False
+        self.addCleanup(setattr, cli, "_resource_healthy", orig)
+        ok = cli._wait_layer_healthy("monitoring", retries=3, delay=0, sleep=lambda _d: None)
+        self.assertFalse(ok)
+
+    def test_phase_without_signal_skips_gate(self):
+        # une phase sans _LAYER_SIGNAL (ex. amont/gitops-seed traité ailleurs) → True direct.
+        ok = cli._wait_layer_healthy("datalake", retries=1, delay=0, sleep=lambda _d: None)
+        self.assertTrue(ok)
+
+    def test_monter_phase_returns_1_when_layer_not_healthy(self):
+        # Gate intégrée : launch_phase rc=0 MAIS le maillon ne devient pas sain → rc=1.
+        from nestor.runner import RunResult
+
+        topo = cli.load_topology(_EXAMPLE)
+        orig_lp = cli._runner.launch_phase
+        cli._runner.launch_phase = lambda *a, **k: RunResult(rc=0, status="successful")
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig_lp)
+        # Restaure la vraie gate (setUpModule l'a neutralisée) mais on la fait échouer vite.
+        orig_wait = cli._wait_layer_healthy
+        cli._wait_layer_healthy = lambda phase, **kw: False
+        self.addCleanup(setattr, cli, "_wait_layer_healthy", orig_wait)
+        inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
+        created = not os.path.exists(inv)
+        if created:
+            with open(inv, "w", encoding="utf-8") as f:
+                f.write("# test\n")
+            self.addCleanup(os.unlink, inv)
+        out = io.StringIO()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli._monter_phase(topo, "monitoring", {})
+        self.assertEqual(rc, 1)
+        self.assertIn("PAS saine", err.getvalue())
 
 
 class Metrics(unittest.TestCase):
