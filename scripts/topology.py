@@ -1547,22 +1547,24 @@ def cmd_next(args: argparse.Namespace) -> int:
     except PlanError as exc:
         raise _UsageError(str(exc)) from exc
 
-    print(sugg.message)
     if sugg.phase is None:
+        print(sugg.message)
         return 0  # rien à monter (stack à jour)
 
-    # Confirmation AVANT de monter (la couche MUTE le banc, et `up`/`bootstrap`
-    # déclenchent un montage de socle complet). --yes saute (CI/non-TTY) ; hors TTY
-    # sans --yes, _confirm renvoie le défaut (False) → on refuse plutôt que d'agir
-    # à l'aveugle. Le libellé dit CE qui va être monté.
-    # Libellé de CE qui va être monté — `next` distingue les phases comme `preview` :
+    # Libellé HUMAIN de l'action — `next` distingue les phases comme `preview` :
     # `up` = créer les VMs SEULES, `bootstrap` = Kubernetes + CRI + CNI (pas tout le
-    # socle d'un coup ; ça, c'est `up` complet). Une couche applicative sinon.
+    # socle d'un coup). Une couche applicative sinon. On l'utilise pour le message ET
+    # la confirmation (cohérence : un seul vocabulaire, pas de jargon « 1er drift »).
     _libelles_amont = {
         "up": "créer les VMs",
         "bootstrap": "monter Kubernetes (CRI + kubeadm + CNI Cilium)",
     }
-    quoi = _libelles_amont.get(sugg.phase, f"la couche `{sugg.phase}`")
+    quoi = _libelles_amont.get(sugg.phase, f"monter la couche `{sugg.phase}`")
+    print(f"Prochaine étape sur `{target or default_target(topo)}` : {quoi}.")
+
+    # Confirmation AVANT de monter (l'étape MUTE le banc). --yes saute (CI/non-TTY) ;
+    # hors TTY sans --yes, _confirm renvoie le défaut (False) → on refuse plutôt que
+    # d'agir à l'aveugle.
     no_input = args.yes or not sys.stdin.isatty()
     if not _confirm(f"{quoi[0].upper()}{quoi[1:]} ?", default=args.yes, no_input=no_input):
         print("montage annulé.", file=sys.stderr)
