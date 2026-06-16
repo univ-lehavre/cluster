@@ -71,7 +71,7 @@
         namespace: '{{ monitoring_namespace }}'
       register: monitoring_operator
       until: >-
-        monitoring_operator.resources | length > 0
+        monitoring_operator.resources | default([]) | length > 0
         and (monitoring_operator.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ monitoring_ready_retries }}'
       delay: '{{ monitoring_ready_delay }}'

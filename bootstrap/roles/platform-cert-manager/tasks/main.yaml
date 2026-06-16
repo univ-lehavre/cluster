@@ -55,7 +55,7 @@
         namespace: '{{ cert_manager_namespace }}'
       register: cm_webhook
       until: >-
-        cm_webhook.resources | length > 0
+        cm_webhook.resources | default([]) | length > 0
         and (cm_webhook.resources[0].status.readyReplicas | default(0)) >= 1
       retries: '{{ cert_manager_ready_retries }}'
       delay: '{{ cert_manager_ready_delay }}'

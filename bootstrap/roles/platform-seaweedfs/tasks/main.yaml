@@ -18,7 +18,7 @@
         namespace: '{{ seaweedfs_namespace }}'
       register: seaweedfs_deploy
       until: >-
-        seaweedfs_deploy.resources | length > 0
+        seaweedfs_deploy.resources | default([]) | length > 0
         and (seaweedfs_deploy.resources[0].status.readyReplicas | default(0)) >= 1
       retries: '{{ seaweedfs_ready_retries }}'
       delay: '{{ seaweedfs_ready_delay }}'

@@ -79,7 +79,7 @@
         namespace: '{{ registry_namespace }}'
       register: registry_deploy
       until: >-
-        registry_deploy.resources | length > 0
+        registry_deploy.resources | default([]) | length > 0
         and (registry_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ registry_ready_retries }}'
       delay: '{{ registry_ready_delay }}'

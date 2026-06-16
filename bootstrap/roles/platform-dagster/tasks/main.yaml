@@ -49,7 +49,7 @@
     - name: Assert the CNPG dagster role password exists
       ansible.builtin.assert:
         that:
-          - dagster_role_secret.resources | length > 0
+          - dagster_role_secret.resources | default([]) | length > 0
           - dagster_role_secret.resources[0].data.password is defined
         fail_msg: >-
           Secret {{ cnpg_namespace }}/{{ dagster_cnpg_role_secret }} introuvable —
@@ -81,7 +81,7 @@
         namespace: '{{ dagster_namespace }}'
       register: dagster_deploy
       until: >-
-        dagster_deploy.resources | length > 0
+        dagster_deploy.resources | default([]) | length > 0
         and (dagster_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ dagster_ready_retries }}'
       delay: '{{ dagster_ready_delay }}'

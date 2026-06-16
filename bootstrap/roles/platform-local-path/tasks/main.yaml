@@ -18,7 +18,7 @@
         namespace: local-path-storage
       register: local_path_deploy
       until: >-
-        local_path_deploy.resources | length > 0
+        local_path_deploy.resources | default([]) | length > 0
         and (local_path_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ local_path_ready_retries }}'
       delay: '{{ local_path_ready_delay }}'

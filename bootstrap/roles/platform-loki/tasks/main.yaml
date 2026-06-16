@@ -89,8 +89,10 @@
         name: loki
         namespace: '{{ loki_namespace }}'
       register: loki_sts
+      # `| default([])` : robustesse si le k8s_info échoue (kubeconfig/API) — sinon le
+      # `until` planterait (« 'dict' has no attribute 'resources' ») au lieu de timeouter.
       until: >-
-        loki_sts.resources | length > 0
+        loki_sts.resources | default([]) | length > 0
         and (loki_sts.resources[0].status.readyReplicas | default(0)) >= 1
       retries: '{{ loki_ready_retries }}'
       delay: '{{ loki_ready_delay }}'

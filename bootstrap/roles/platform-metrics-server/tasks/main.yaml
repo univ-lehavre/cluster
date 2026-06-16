@@ -20,7 +20,7 @@
         namespace: kube-system
       register: metrics_server_deploy
       until: >-
-        metrics_server_deploy.resources | length > 0
+        metrics_server_deploy.resources | default([]) | length > 0
         and (metrics_server_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ metrics_server_ready_retries }}'
       delay: '{{ metrics_server_ready_delay }}'
@@ -33,7 +33,7 @@
         name: v1beta1.metrics.k8s.io
       register: metrics_apiservice
       until: >-
-        metrics_apiservice.resources | length > 0
+        metrics_apiservice.resources | default([]) | length > 0
         and (metrics_apiservice.resources[0].status.conditions
              | selectattr('type', 'equalto', 'Available')
              | selectattr('status', 'equalto', 'True') | list | length) > 0

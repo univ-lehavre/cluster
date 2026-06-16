@@ -33,7 +33,7 @@
         namespace: '{{ s3b_obc_namespace }}'
       register: s3b_obc_secret
       until: >-
-        s3b_obc_secret.resources | length > 0
+        s3b_obc_secret.resources | default([]) | length > 0
         and s3b_obc_secret.resources[0].data.AWS_ACCESS_KEY_ID is defined
       retries: 30
       delay: 5
@@ -45,7 +45,7 @@
         namespace: '{{ s3b_obc_namespace }}'
       register: s3b_obc_cm
       until: >-
-        s3b_obc_cm.resources | length > 0
+        s3b_obc_cm.resources | default([]) | length > 0
         and s3b_obc_cm.resources[0].data.BUCKET_NAME is defined
       retries: 30
       delay: 5
@@ -110,7 +110,7 @@
         namespace: '{{ s3b_namespace }}'
         wait: true
       when: >-
-        s3b_job_existing.resources | length > 0
+        s3b_job_existing.resources | default([]) | length > 0
         and (s3b_job_existing.resources[0].status.succeeded | default(0)) < 1
 
     - name: Create the S3 bucket(s) on SeaweedFS (mb Job)
@@ -118,7 +118,7 @@
         state: present
         template: s3-init-buckets.yaml.j2
       when: >-
-        s3b_job_existing.resources | length == 0
+        s3b_job_existing.resources | default([]) | length == 0
         or (s3b_job_existing.resources[0].status.succeeded | default(0)) < 1
 
     - name: Wait for the bucket Job to complete
@@ -128,7 +128,7 @@
         namespace: '{{ s3b_namespace }}'
       register: s3b_job
       until: >-
-        s3b_job.resources | length > 0
+        s3b_job.resources | default([]) | length > 0
         and (s3b_job.resources[0].status.succeeded | default(0)) >= 1
       retries: '{{ s3b_job_retries }}'
       delay: '{{ s3b_job_delay }}'

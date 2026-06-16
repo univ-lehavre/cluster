@@ -115,7 +115,7 @@
         namespace: rook-ceph
       register: ceph_csi_config
       until: >-
-        ceph_csi_config.resources | length > 0
+        ceph_csi_config.resources | default([]) | length > 0
         and '"monitors":["' in (ceph_csi_config.resources[0].data['csi-cluster-config-json'] | default(''))
       retries: '{{ ceph_csi_ready_retries }}'
       delay: '{{ ceph_csi_ready_delay }}'

@@ -24,7 +24,7 @@
     - name: Assert registry ClusterIP is available
       ansible.builtin.assert:
         that:
-          - registry_svc.resources | length > 0
+          - registry_svc.resources | default([]) | length > 0
           - registry_svc.resources[0].spec.clusterIP is defined
           - registry_svc.resources[0].spec.clusterIP | length > 0
         fail_msg: >-

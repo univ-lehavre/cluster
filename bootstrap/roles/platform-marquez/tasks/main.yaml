@@ -39,7 +39,7 @@
     - name: Assert the CNPG marquez role password exists
       ansible.builtin.assert:
         that:
-          - marquez_role_secret.resources | length > 0
+          - marquez_role_secret.resources | default([]) | length > 0
           - marquez_role_secret.resources[0].data.password is defined
         fail_msg: >-
           Secret {{ cnpg_namespace }}/{{ marquez_cnpg_role_secret }} introuvable —
@@ -71,7 +71,7 @@
         namespace: '{{ marquez_namespace }}'
       register: marquez_deploy
       until: >-
-        marquez_deploy.resources | length > 0
+        marquez_deploy.resources | default([]) | length > 0
         and (marquez_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ marquez_ready_retries }}'
       delay: '{{ marquez_ready_delay }}'

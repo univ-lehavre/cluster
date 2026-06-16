@@ -51,7 +51,7 @@
         namespace: '{{ gitea_namespace }}'
       register: gitea_deploy
       until: >-
-        gitea_deploy.resources | length > 0
+        gitea_deploy.resources | default([]) | length > 0
         and (gitea_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ gitea_ready_retries }}'
       delay: '{{ gitea_ready_delay }}'

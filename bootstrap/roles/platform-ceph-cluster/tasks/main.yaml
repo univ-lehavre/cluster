@@ -46,7 +46,7 @@
         namespace: rook-ceph
       register: ceph_operator_deploy
       until: >-
-        ceph_operator_deploy.resources | length > 0
+        ceph_operator_deploy.resources | default([]) | length > 0
         and (ceph_operator_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ ceph_operator_ready_retries }}'
       delay: '{{ ceph_operator_ready_delay }}'
@@ -119,7 +119,7 @@
         namespace: rook-ceph
       register: ceph_tools_deploy
       until: >-
-        ceph_tools_deploy.resources | length > 0
+        ceph_tools_deploy.resources | default([]) | length > 0
         and (ceph_tools_deploy.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ ceph_operator_ready_retries }}'
       delay: '{{ ceph_operator_ready_delay }}'
@@ -157,7 +157,7 @@
       # On exige AUSSI phase=Ready (le CR a convergé selon Rook), en plus de la
       # santé Ceph. C'est une LECTURE (changed_when:false préservé).
       until: >-
-        ceph_cluster_status.resources | length > 0
+        ceph_cluster_status.resources | default([]) | length > 0
         and (ceph_cr.status.phase | default('')) == 'Ready'
         and (
           (ceph_status.health | default('')) == 'HEALTH_OK'

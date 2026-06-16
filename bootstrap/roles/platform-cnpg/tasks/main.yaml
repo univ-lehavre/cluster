@@ -34,8 +34,9 @@
         name: cnpg-controller-manager
         namespace: '{{ cnpg_operator_namespace }}'
       register: cnpg_operator
+      # `| default([])` : robustesse si le k8s_info échoue (cf. la gate Cluster ci-dessous).
       until: >-
-        cnpg_operator.resources | length > 0
+        cnpg_operator.resources | default([]) | length > 0
         and (cnpg_operator.resources[0].status.readyReplicas | default(0)) == 1
       retries: '{{ cnpg_operator_ready_retries }}'
       delay: '{{ cnpg_operator_ready_delay }}'
@@ -112,8 +113,12 @@
         name: pg
         namespace: '{{ cnpg_namespace }}'
       register: cnpg_cluster
+      # `| default([])` : si le k8s_info ÉCHOUE (kubeconfig invalide, API transitoire),
+      # `register` n'a PAS de `.resources` → le `until` planterait (« 'dict' has no
+      # attribute 'resources' ») au lieu d'attendre/timeouter proprement. Le défaut rend
+      # la gate robuste (timeout net → rescue diagnostique), pas un crash de conditionnel.
       until: >-
-        cnpg_cluster.resources | length > 0
+        cnpg_cluster.resources | default([]) | length > 0
         and (cnpg_cluster.resources[0].status.phase | default('')) == 'Cluster in healthy state'
       retries: '{{ cnpg_cluster_healthy_retries }}'
       delay: '{{ cnpg_cluster_healthy_delay }}'

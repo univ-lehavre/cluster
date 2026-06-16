@@ -42,7 +42,7 @@
         namespace: rook-ceph
       register: ceph_rgw_deploy
       until: >-
-        ceph_rgw_deploy.resources | length > 0
+        ceph_rgw_deploy.resources | default([]) | length > 0
         and (ceph_rgw_deploy.resources[0].status.readyReplicas | default(0)) >= 1
       retries: '{{ ceph_rgw_ready_retries }}'
       delay: '{{ ceph_rgw_ready_delay }}'
