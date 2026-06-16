@@ -1610,6 +1610,22 @@ def cmd_preview(args: argparse.Namespace) -> int:
         print(f"  ⚠ orphelines   : {', '.join(real.vms_orphan)} (d'une autre stack)")
     print(f"  nœuds Ready    : {', '.join(real.nodes_ready) or '—'}")
 
+    # Drift de BACKEND (#356, ADR 0046) : le stockage RÉEL (StorageClass observées) peut
+    # CONTREDIRE le backend déclaré — typiquement un rook-ceph résiduel orphelin après
+    # bascule ceph→local-path. On ne sonde QUE si le cluster répond (nœuds Ready) ;
+    # `classify_backend_drift` ne renvoie un backend que sur un signal RECONNU qui
+    # contredit la déclaration (sinon None → pas de bruit).
+    if real.nodes_ready:
+        backend_reel = _discover.classify_backend_drift(
+            topo.storage.get("backend", "local-path"), _discover_sc_provisioners()
+        )
+        if backend_reel:
+            _warn(
+                f"backend RÉEL `{backend_reel}` ≠ déclaré "
+                f"`{topo.storage.get('backend', 'local-path')}` — résidu d'un backend non "
+                "défait (ADR 0046 : corriger en code/détruire l'ancien, pas entériner)."
+            )
+
     # ── PLAN : la séquence de couches à monter ───────────────────────────────────
     run = last_run_for_topology(runs, stack_name)
     freshness, _ = verdict_for_run(run, resolved_target, now)
