@@ -12,6 +12,38 @@ Ansible ne peut pas faire (poule/œuf, sans dépôt, destructif conscient).
 > sont génériques ([ADR 0023](decisions/0023-plateforme-exemple-generique.md)) —
 > surcharger avec les vraies valeurs de votre déploiement (config locale).
 
+## L'outil `cluster` — installer la commande
+
+`cluster` (l'outil déclaratif : `cluster up`/`preview`/`stack select`…) est une
+**fonction shell à sourcer**, pas un exécutable. Pourquoi ? Pour que
+`cluster stack select` et `cluster env` puissent **poser `KUBECONFIG` dans ton
+shell** — ce qu'un programme lancé ne peut pas faire (un enfant ne modifie pas
+l'environnement de son parent ; patron `nvm`/`pyenv`/`direnv`). La fonction
+délègue à l'implémentation `scripts/cluster-exec` et applique le
+`export KUBECONFIG=…` que ces sous-commandes impriment.
+
+**Installation** — sourcer le fichier `cluster` (racine du dépôt) dans ton
+profil :
+
+```bash
+echo 'source <racine-du-dépôt>/cluster' >> ~/.zshrc   # ou ~/.bashrc
+source ~/.zshrc                                        # (ou ouvrir un nouveau shell)
+```
+
+Ensuite, depuis n'importe quel dossier :
+
+```bash
+cluster up                  # monter le banc
+cluster preview             # voir l'état (VOULU/RÉEL/PLAN)
+cluster stack select banc   # activer une stack ET pointer KUBECONFIG (banc, ou
+                            #   /dev/null si pas de banc — jamais la prod, ADR 0053)
+```
+
+> **Sans sourcer** (usage ponctuel, sans la pose auto de `KUBECONFIG`) : appeler
+> l'implémentation directement — `scripts/cluster-exec preview`. La garde
+> d'isolation ([ADR 0053](decisions/0053-isolation-multi-cible-banc-prod.md))
+> protège la prod dans les deux cas.
+
 ## Prérequis & contexte — « quels sont MES hôtes ? »
 
 Plusieurs scripts (`bootstrap/state.sh`, `bootstrap/security/report.sh`…)

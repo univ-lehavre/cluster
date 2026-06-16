@@ -1,16 +1,43 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash
 #
-# Raccourci de l'outil déclaratif : `cluster <args>` == `topology.py <args>`.
-# Wrapper versionné (ADR 0049 : bash pour l'orchestration CLI) qui DÉLÈGUE tous ses
-# arguments à scripts/topology.py via `uv run` (l'environnement uv du dépôt). Permet
-# `cluster up`, `cluster preview`, `cluster stack ls`… au lieu de la commande longue.
+# `cluster` — fonction shell de l'outil déclaratif (à SOURCER, patron nvm/pyenv).
 #
-#   ./cluster up --yes
-#   cluster preview              # si la racine du dépôt est dans le PATH
+# Pourquoi une fonction et non un exécutable ? Un programme NE PEUT PAS modifier
+# l'environnement de son shell parent (invariant Unix) : seule une fonction sourcée
+# peut poser `KUBECONFIG` dans TON shell. La fonction délègue à l'implémentation
+# `scripts/cluster-exec` (le vrai outil, `uv run … topology.py`) et, pour les
+# sous-commandes qui désignent une cible (`stack select`, `env`), applique le
+# `export KUBECONFIG=…` qu'elles impriment — comme `direnv`/`zoxide`/`ssh-agent`.
 #
-# Résout sa propre racine (fonctionne depuis n'importe quel CWD) ; `uv run` lit le
-# pyproject.toml du dépôt, donc l'invocation marche hors du venv actif.
-set -euo pipefail
+# Installation : sourcer ce fichier dans ton profil, puis ouvrir un nouveau shell :
+#
+#   echo 'source /chemin/vers/cluster/cluster' >> ~/.zshrc   # ou ~/.bashrc
+#
+# Ensuite : `cluster up`, `cluster preview`, … fonctionnent ; `cluster stack select
+# banc` et `cluster env` posent en plus KUBECONFIG dans le shell (banc de la stack,
+# ou /dev/null si pas de banc — jamais la prod, ADR 0053).
 
-HERE=$(cd "$(dirname "$0")" && pwd)
-exec uv run --project "${HERE}" python "${HERE}/scripts/topology.py" "$@"
+# Racine du dépôt, résolue UNE FOIS au source (pas à chaque appel) — évite la syntaxe
+# zsh `${(%):-%x}` (non portable bash). bash expose le chemin sourcé dans
+# ${BASH_SOURCE} ; zsh dans $0 au moment du source.
+if [ -n "${BASH_SOURCE:-}" ]; then
+    _CLUSTER_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+else
+    _CLUSTER_ROOT=$(cd "$(dirname "$0")" && pwd)
+fi
+export _CLUSTER_ROOT
+
+cluster() {
+    local _bin="${_CLUSTER_ROOT}/scripts/cluster-exec"
+    # Sous-commandes qui IMPRIMENT un `export KUBECONFIG=…` (stdout) à appliquer au
+    # shell : `env` et `stack select`. On capture STDOUT (l'export) et on l'eval ;
+    # STDERR (messages humains) reste affiché. Le binaire n'imprime l'export que si
+    # stdout est capturé (non-TTY) — ici il l'est toujours (substitution de commande).
+    if [ "$1" = "env" ] || { [ "$1" = "stack" ] && [ "$2" = "select" ]; }; then
+        local _out
+        _out=$("${_bin}" "$@") || return $?
+        [ -n "${_out}" ] && eval "${_out}"
+        return 0
+    fi
+    "${_bin}" "$@"
+}

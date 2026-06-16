@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# `cluster-exec` — IMPLÉMENTATION de l'outil déclaratif (le binaire réel).
+#
+# Délègue tous ses arguments à scripts/topology.py via `uv run` (l'environnement uv
+# du dépôt). Appelé par la fonction shell `cluster` (fichier `cluster` à la racine, à
+# sourcer — patron nvm/pyenv : la fonction pose KUBECONFIG, ce binaire fait le
+# travail). Lançable directement aussi : `scripts/cluster-exec up --yes` (mais alors
+# `stack select`/`env` n'auto-posent pas KUBECONFIG — il faut la fonction pour ça).
+#
+# Résout la RACINE du dépôt (ce fichier est dans scripts/, la racine est un cran
+# au-dessus) ; `uv run` lit le pyproject.toml du dépôt → marche hors du venv actif.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+exec uv run --project "${ROOT}" python "${ROOT}/scripts/topology.py" "$@"

@@ -567,7 +567,7 @@ runs:
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
         code, _, _ = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 0)
         self.assertEqual(len(calls), 1)  # UNE couche montée, pas la séquence
@@ -584,7 +584,7 @@ runs:
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
         code, _, err = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 2)
         self.assertIn("inventaire absent", err)
@@ -599,7 +599,7 @@ runs:
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
         code, _, _ = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 1)  # run KO → code 1
 
@@ -622,7 +622,7 @@ runs:
         hist = _tmp(self._EMPTY_HIST)
         self.addCleanup(os.unlink, hist)
         code, out, _ = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 0)
         # un appel run-phases.sh socle a bien été émis
@@ -631,6 +631,21 @@ runs:
             f"attendu un appel `run-phases.sh socle`, vu : {calls}",
         )
         self.assertIn("socle", out)
+
+    def test_refuses_without_yes_off_tty(self):
+        # Hors TTY sans --yes : la confirmation refuse → code 2, RIEN n'est monté.
+        calls = []
+        orig = cli.subprocess.run
+        cli.subprocess.run = lambda *a, **k: calls.append(a) or subprocess.CompletedProcess(a, 0)
+        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        hist = _tmp(self._EMPTY_HIST)
+        self.addCleanup(os.unlink, hist)
+        code, _, err = _capture(
+            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("annulé", err)
+        self.assertEqual(calls, [])  # aucun montage lancé
 
 
 class Metrics(unittest.TestCase):
@@ -1203,6 +1218,34 @@ class ModuleGuard(unittest.TestCase):
         # une lecture kubectl get est neutralisée (CompletedProcess vide), pas bloquée.
         out = _deny_run(["kubectl", "get", "nodes"])
         self.assertEqual(out.returncode, 0)
+
+
+class WarnHelper(unittest.TestCase):
+    """_warn : jaune sur un terminal, brut dans un pipe/CI (pas de codes ANSI)."""
+
+    def _capture_warn(self, *, isatty):
+        class _Sink(io.StringIO):
+            def isatty(self_inner):
+                return isatty
+
+        sink = _Sink()
+        orig = sys.stderr
+        sys.stderr = sink
+        try:
+            cli._warn("message de test")
+        finally:
+            sys.stderr = orig
+        return sink.getvalue()
+
+    def test_colored_on_tty(self):
+        out = self._capture_warn(isatty=True)
+        self.assertIn("\033[1;33m", out)  # jaune gras
+        self.assertIn("message de test", out)
+
+    def test_plain_in_pipe(self):
+        out = self._capture_warn(isatty=False)
+        self.assertNotIn("\033[", out)  # aucun code ANSI dans un pipe/CI
+        self.assertIn("⚠ message de test", out)
 
 
 class Scale(unittest.TestCase):

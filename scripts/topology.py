@@ -136,6 +136,15 @@ _BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
 _REFRESH_TIMEOUT_S = 8
 
 
+def _warn(message: str) -> None:
+    """Avertissement sur STDERR, en JAUNE GRAS si stderr est un terminal (sinon brut,
+    pour ne pas polluer pipes/CI). Même convention que `warn()` de bench/lima/lib.sh."""
+    if sys.stderr.isatty():
+        print(f"\033[1;33m⚠ {message}\033[0m", file=sys.stderr)
+    else:
+        print(f"⚠ {message}", file=sys.stderr)
+
+
 def _bench_kubeconfig() -> str:
     """Le kubeconfig que `cluster` doit RÉELLEMENT utiliser, par priorité (ADR 0053) :
 
@@ -474,10 +483,9 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         cible = os.path.abspath(_BENCH_KUBECONFIG)
     else:
         cible = os.devnull
-        print(
-            "  cluster non installé — pas de connexion possible pour l'instant "
-            "(le monter : `cluster up`).",
-            file=sys.stderr,
+        _warn(
+            "cluster non installé — pas de connexion possible pour l'instant "
+            "(le monter : `cluster up`)."
         )
     # La ligne `export …` n'est utile QU'à `eval`. En appel direct (stdout = TTY), on
     # ne la déverse pas brute dans le terminal — on suggère plutôt `eval`. Si stdout
@@ -1259,10 +1267,9 @@ def cmd_preview(args: argparse.Namespace) -> int:
     # /dev/null (jamais la prod, ADR 0053) → la section RÉEL est VIDE. On le DIT
     # simplement plutôt que de laisser croire à un cluster éteint.
     if _active_kubeconfig() is None and not _context_targets_bench():
-        print(
-            "ℹ cluster non installé — pas de connexion possible pour l'instant "
-            "(le monter : `cluster up`). L'état réel ci-dessous est vide.",
-            file=sys.stderr,
+        _warn(
+            "cluster non installé — pas de connexion possible pour l'instant "
+            "(le monter : `cluster up`). L'état réel ci-dessous est vide."
         )
     path = _resolve(args.file)
     topo = load_topology(path)
@@ -1534,6 +1541,20 @@ def cmd_next(args: argparse.Namespace) -> int:
     print(sugg.message)
     if sugg.phase is None:
         return 0  # rien à monter (stack à jour)
+
+    # Confirmation AVANT de monter (la couche MUTE le banc, et `up`/`bootstrap`
+    # déclenchent un montage de socle complet). --yes saute (CI/non-TTY) ; hors TTY
+    # sans --yes, _confirm renvoie le défaut (False) → on refuse plutôt que d'agir
+    # à l'aveugle. Le libellé dit CE qui va être monté.
+    quoi = (
+        "le socle (VMs + Kubernetes + CNI)"
+        if sugg.phase in ("up", "bootstrap")
+        else f"la couche `{sugg.phase}`"
+    )
+    no_input = args.yes or not sys.stdin.isatty()
+    if not _confirm(f"Monter {quoi} ?", default=args.yes, no_input=no_input):
+        print("montage annulé.", file=sys.stderr)
+        return 2
 
     # Phases AMONT (up = créer les VMs, bootstrap = socle k8s + CNI) : pas de playbook
     # unitaire — elles relèvent du provisioning bash (limactl, cni.sh, ADR 0049). `next`
@@ -1909,19 +1930,53 @@ def _run(args: argparse.Namespace) -> int:
         return 1
 
 
+class _GroupedHelp(argparse.RawDescriptionHelpFormatter):
+    """Aide du parser RACINE : garde l'epilog (commandes groupées courantes/annexes)
+    mais MASQUE la liste détaillée des sous-commandes d'argparse — sinon le menu
+    afficherait DEUX listes (la native, à plat et illisible, + notre epilog groupé).
+    On neutralise donc le rendu des actions `_SubParsersAction`."""
+
+    def _format_action(self, action):
+        if isinstance(action, argparse._SubParsersAction):
+            return ""  # pas de liste détaillée : l'epilog groupé est la seule source
+        return super()._format_action(action)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="cluster",
+        formatter_class=_GroupedHelp,
         description=(
-            "Monte et inspecte un cluster Kubernetes décrit dans un fichier. "
-            "Tu décris ce que tu veux (nœuds, couches) ; l'outil le construit. "
-            "Commandes courantes : `cluster preview` (voir ce qui serait fait), "
-            "`cluster up` (construire), `cluster destroy` (tout supprimer)."
+            "Monte et inspecte un cluster Kubernetes décrit dans un fichier.\n"
+            "Tu décris ce que tu veux (nœuds, couches) ; l'outil le construit."
+        ),
+        # Liste des commandes GROUPÉES par usage (courantes vs annexes). argparse les
+        # mettrait sinon dans un seul mur illisible : le formatter `_GroupedHelp` masque
+        # la liste brute des sous-commandes et n'affiche QUE cet epilog. Détail d'une
+        # commande : `cluster <commande> -h`.
+        epilog=(
+            "Commandes courantes (dans l'ordre d'un workflow) :\n"
+            "  stack       choisir/créer/lister les configurations (new·ls·select·validate)\n"
+            "  preview     voir l'état sans rien changer (voulu / réel / à monter)\n"
+            "  next        monter UNE couche : la prochaine qui manque\n"
+            "  up          construire le cluster en entier (machines + couches)\n"
+            "  destroy     supprimer les machines (VMs) de la stack active\n"
+            "\n"
+            "Commandes annexes :\n"
+            '  env         brancher kubectl sur le banc : eval "$(cluster env)"\n'
+            "  access      ouvrir l'accès dev (URLs des services + identifiants)\n"
+            "  scale       ajuster les replicas au nombre de nœuds\n"
+            "  discover    reconstruire un topology.yaml depuis un cluster réel\n"
+            "  artifact    fichiers générés + historique (generate·diff·runs·metrics)\n"
+            "  test        vérifier le cluster (scenarios·smoke·roundtrip)\n"
+            "\n"
+            "Détail d'une commande : `cluster <commande> -h`."
         ),
     )
     # ha-3cp n'est PAS un sous-parser ici (commande interne routée à part dans main) :
     # le menu ne liste donc que les commandes publiques, sans `==SUPPRESS==` parasite.
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    # metavar="<commande>" : masque le mur `{stack,artifact,…}` dans la ligne d'usage.
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<commande>")
 
     def _add_file(p: argparse.ArgumentParser) -> None:
         p.add_argument(
@@ -2130,6 +2185,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_next.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
+    )
+    p_next.add_argument(
+        "--yes", action="store_true", help="monter sans demander confirmation (requis hors TTY)"
     )
 
     p_met = artifact_sub.add_parser(
