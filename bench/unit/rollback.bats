@@ -72,6 +72,15 @@ setup() {
     [[ "$output" == *"-n rook-ceph objectbucketclaim.objectbucket.io cnpg-backups"* ]]
 }
 
+@test "targeted : gitops-seed → Application atlas-workflows (PAS atlas = l'AppProject)" {
+    # Régression : le seed pose l'Application `atlas-workflows` ; viser `atlas` (= le nom
+    # de l'AppProject) ne supprimait RIEN → _phase_present voyait la couche encore montée
+    # → blocage du rollback de gitops. Cf. application.example.yaml + scénario 27.
+    run rollback_phase_targeted_resources gitops-seed
+    [[ "$output" == *"-n argocd applications.argoproj.io atlas-workflows"* ]]
+    [[ "$output" != *"applications.argoproj.io atlas"$'\n'* ]]
+}
+
 # ─── rollback_phase_crd_groups ──────────────────────────────────────────────
 
 @test "crd : ceph → ceph.rook.io" {
