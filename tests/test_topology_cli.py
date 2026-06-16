@@ -2417,7 +2417,8 @@ class NodeExec(unittest.TestCase):
 
     def test_lima_node_uses_limactl(self):
         cmd = self._capture_cmd(self._LIMA_INV, "node1")
-        self.assertEqual(cmd[:3], ["limactl", "shell", "lima-node1"])
+        # nom d'INSTANCE limactl = nom du nœud (node1), pas ansible_host (lima-node1).
+        self.assertEqual(cmd[:3], ["limactl", "shell", "node1"])
         self.assertEqual(cmd[-1], "hostname")
 
     def test_prod_node_uses_ssh_with_user_host(self):
@@ -2504,6 +2505,7 @@ class DiscoverNodeside(unittest.TestCase):
                 self.stderr = ""
 
         def fake(node, argv, **kw):
+            # clé = 1er mot de la sonde (containerd/sudo/sh/systemctl) ou la commande sh -c.
             key = argv[-1] if argv[0] == "sh" else argv[0]
             if key not in table:
                 return _CP("")  # true / sondes non stubées → ok vide
@@ -2520,7 +2522,7 @@ class DiscoverNodeside(unittest.TestCase):
         self._stub_probes(
             {
                 "containerd": "containerd github.com/... v1.7.27 x",
-                "ls /etc/cni/net.d/ 2>/dev/null": "05-cilium.conflist",
+                "sudo": "05-cilium.conflist",  # sudo ls /etc/cni/net.d (root-only)
                 "lsblk -dno NAME,SIZE 2>/dev/null": "vda 40G\nvdb 10G\n",
                 "systemctl": "active",  # auditd ET fail2ban → active
             }
