@@ -287,6 +287,28 @@ class RemoveNominal(unittest.TestCase):
         self.assertFalse(res.removed)
         self.assertEqual(res.steps[-1].nom, "vérifier supprimé")
 
+    def test_first_failure_does_not_abort_closure(self):
+        # #361 : un échec sur une couche (ex. gitops-seed wedgé) NE doit PAS empêcher de
+        # tenter les autres (gitops). On échoue rc=1 sur gitops-seed, rc=0 sinon.
+        attempted = []
+
+        def run_phase(args, *, env_extra=None):
+            attempted.append(args[1] if args[0] == "rollback" else args[0])
+            return 1 if args == ["rollback", "gitops-seed"] else 0
+
+        res = roundtrip.run_remove(
+            "gitops",
+            run_phase=run_phase,
+            signal_present=lambda s, **k: [],
+            confirm_fn=_yes,
+        )
+        # les DEUX couches ont été tentées (pas d'abandon au 1er échec).
+        self.assertEqual(attempted, ["gitops-seed", "gitops"])
+        # le verdict « supprimer » signale l'échec de gitops-seed.
+        supprimer = next(s for s in res.steps if s.nom == "supprimer")
+        self.assertFalse(supprimer.ok)
+        self.assertIn("gitops-seed", supprimer.detail)
+
 
 if __name__ == "__main__":
     unittest.main()

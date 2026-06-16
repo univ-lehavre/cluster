@@ -681,6 +681,11 @@ k8s_force_delete_ns() {
         log "  rollback : suppression du namespace ${ns} (force finalizers si bloqué)"
         "${KUBECTL[@]}" delete ns "${ns}" --wait=false --ignore-not-found > /dev/null 2>&1 || true
         if retry 10 2 _ns_absent "${ns}"; then continue; fi
+        # Pods coincés en Terminating (conteneur encore running — ex. pod CNPG dont
+        # l'opérateur ne confirme plus l'arrêt) : ils BLOQUENT la finalisation du ns.
+        # On les supprime de force (#361 — cas vécu : pg-1 1/2 Terminating 40 min).
+        "${KUBECTL[@]}" -n "${ns}" delete pods --all --force --grace-period=0 \
+            > /dev/null 2>&1 || true
         # Forcer les finalizers des CR coincés (OBC, CR Rook/CNPG/Barman).
         local kind
         for kind in ${_STUCK_CR_KINDS}; do

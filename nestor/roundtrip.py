@@ -357,14 +357,20 @@ def run_remove(
     if backend:
         rollback_env["STORAGE_BACKEND"] = backend
 
-    # 1. Détruire chaque couche de la clôture (ordre inverse : aval→amont).
+    # 1. Détruire chaque couche de la clôture (ordre inverse : aval→amont). On NE
+    # s'ARRÊTE PAS au 1er échec (#361) : une couche indépendante (dagster, marquez) ne
+    # doit pas être épargnée parce qu'une autre (postgres wedgé) a calé. On tente TOUTE
+    # la clôture et on agrège les échecs — verdict par couche.
     destroy_order = list(reversed(layers))
+    echecs = []
     for p in destroy_order:
         rc = run_phase(["rollback", p], env_extra=rollback_env)
         if rc != 0:
-            result.steps.append(RoundtripStep(f"supprimer {p}", False, f"rollback rc={rc}"))
-            return result
-    result.steps.append(RoundtripStep("supprimer", True, f"clôture défaite : {destroy_order}"))
+            echecs.append(f"{p} (rc={rc})")
+    if echecs:
+        result.steps.append(RoundtripStep("supprimer", False, f"échec(s) : {', '.join(echecs)}"))
+    else:
+        result.steps.append(RoundtripStep("supprimer", True, f"clôture défaite : {destroy_order}"))
 
     # 2. Vérifier supprimé : aucun signal d'infra de la clôture ne subsiste.
     full_signal = [s for p in layers for s in phase_signal(p)]
