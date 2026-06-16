@@ -2433,6 +2433,63 @@ class NodeExec(unittest.TestCase):
             cli._node_exec("ghost", ["hostname"], inventory_path=path)
 
 
+class FetchKubeconfig(unittest.TestCase):
+    """ADR 0081 étape 2 : _fetch_kubeconfig rapatrie + réécrit le kubeconfig (sans nœud)."""
+
+    _ADMIN = (
+        "apiVersion: v1\nkind: Config\n"
+        "clusters:\n  - name: kubernetes\n    cluster:\n      server: https://cluster-api:6443\n"
+        "users:\n  - name: kubernetes-admin\n    user: {}\n"
+        "contexts:\n  - name: kubernetes-admin@kubernetes\n"
+        "    context:\n      cluster: kubernetes\n      user: kubernetes-admin\n"
+        "current-context: kubernetes-admin@kubernetes\n"
+    )
+    _INV = "cloud:\n  vars:\n    target_kind: lima\ncontrol:\n  hosts:\n    node1: {}\n"
+
+    def test_fetches_rewrites_and_writes(self):
+        inv = _tmp(self._INV)
+        self.addCleanup(os.unlink, inv)
+        out_path = _tmp("")
+        self.addCleanup(os.unlink, out_path)
+        admin = self._ADMIN
+
+        class _CP:
+            returncode = 0
+            stdout = admin
+            stderr = ""
+
+        orig = cli._node_exec
+        cli._node_exec = lambda node, argv, **kw: _CP()
+        self.addCleanup(setattr, cli, "_node_exec", orig)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._fetch_kubeconfig(
+                "node1",
+                inventory_path=inv,
+                server="https://127.0.0.1:6443",
+                out_path=out_path,
+                context_name="banc",
+            )
+        with open(out_path, encoding="utf-8") as f:
+            written = yaml.safe_load(f)
+        # endpoint réécrit + contexte renommé (la transfo pure est testée à part).
+        self.assertEqual(written["clusters"][0]["cluster"]["server"], "https://127.0.0.1:6443")
+        self.assertEqual(written["clusters"][0]["name"], "banc")
+        self.assertEqual(os.stat(out_path).st_mode & 0o777, 0o600)
+
+    def test_unreachable_node_is_usage_error(self):
+        inv = _tmp(self._INV)
+        self.addCleanup(os.unlink, inv)
+        out_path = _tmp("")
+        self.addCleanup(os.unlink, out_path)
+        orig = cli._node_exec
+        cli._node_exec = lambda node, argv, **kw: None  # injoignable
+        self.addCleanup(setattr, cli, "_node_exec", orig)
+        with self.assertRaises(cli._UsageError):
+            cli._fetch_kubeconfig(
+                "node1", inventory_path=inv, server="https://x:6443", out_path=out_path
+            )
+
+
 class Dispatch(unittest.TestCase):
     def test_unknown_command_is_usage(self):
         with self.assertRaises(SystemExit) as ctx:
