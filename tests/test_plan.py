@@ -284,6 +284,16 @@ class SuggestNext(unittest.TestCase):
         s = suggest_next(topo, "atlas-ceph", {"up"}, "frais", run_params=rp)
         self.assertEqual(s.run_params, rp)
 
+    def test_observed_done_in_done_is_not_a_drift(self):
+        # Contrat consommé par cmd_next : il passe `done | observed` (pas l'historique
+        # seul). Une phase faite mais NON consignée (vue sur le cluster réel) ne doit donc
+        # PAS ressortir comme « 1er drift » — sinon `next` contredit `preview` (qui, lui,
+        # soustrait déjà l'observé). Ici toute la séquence est « done » via l'observé.
+        topo = _topo(backend="ceph")
+        seq = set(expected_phase_sequence(topo, "atlas-ceph"))
+        s = suggest_next(topo, "atlas-ceph", seq, "frais")
+        self.assertIsNone(s.phase)  # rien à proposer : cohérent avec preview « à jour »
+
 
 class PhaseTable(unittest.TestCase):
     def test_every_path_phase_is_in_table(self):
