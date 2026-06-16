@@ -164,10 +164,15 @@ def resolve_node_target(inventory: dict, node: str) -> NodeTarget:
         raise IsolationError(f"nœud `{node}` absent de l'inventaire")
     transport = "lima" if _inventory_target_kind(inventory) == "lima" else "ssh"
     user = attrs.get("ansible_user") or _group_var(inventory, "ansible_user")
+    # En LIMA, `limactl shell` attend le NOM D'INSTANCE = le nom logique du nœud (`node1`).
+    # `ansible_host` (ex. `lima-node1`) est le hostname SSH résolu par ~/.lima/<vm>/ssh.config,
+    # PAS le nom d'instance — `limactl shell lima-node1` échoue (« instance does not exist »).
+    # En SSH (prod), le host est bien `ansible_host` (IP/hostname joignable). Prouvé au banc.
+    host = node if transport == "lima" else str(attrs.get("ansible_host", node))
     return NodeTarget(
         node=node,
         transport=transport,
-        host=str(attrs.get("ansible_host", node)),
+        host=host,
         user=str(user) if user else None,
         ssh_args=attrs.get("ansible_ssh_common_args"),
     )

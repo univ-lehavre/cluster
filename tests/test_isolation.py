@@ -144,7 +144,9 @@ class ResolveNodeTarget(unittest.TestCase):
     def test_lima_node_resolves_to_limactl_transport(self):
         t = resolve_node_target(_BANC_GEN_INV, "node1")
         self.assertEqual(t.transport, "lima")  # banc → limactl, pas SSH
-        self.assertEqual(t.host, "lima-node1")
+        # en lima, le host = le NOM D'INSTANCE limactl (= nom du nœud), PAS ansible_host
+        # (lima-node1 est le hostname SSH ; `limactl shell lima-node1` n'existe pas).
+        self.assertEqual(t.host, "node1")
         self.assertEqual(t.user, "lima")  # remonté des vars du groupe cloud
         self.assertEqual(t.ssh_args, "-F /home/u/.lima/node1/ssh.config")
 

@@ -1413,16 +1413,21 @@ def _discover_nodeside(node: str, *, inventory_path: str):
     from nestor import nodeside
 
     def probe(argv: list[str]) -> str:
+        # On garde stdout dès que la commande a TOURNÉ (out ≠ None), QUEL QUE SOIT le rc :
+        # ces sondes ENCODENT l'état dans le rc (`systemctl is-active` rend rc=4 + stdout
+        # `inactive`). Filtrer sur rc==0 perdrait l'info (bug vu au banc : `inactive` jeté →
+        # durcissement faussement inconnu).
         out = _node_exec(node, argv, inventory_path=inventory_path)
-        return (out.stdout or "") if out is not None and out.returncode == 0 else ""
+        return (out.stdout or "") if out is not None else ""
 
     # joignabilité : une 1re sonde None (pas rc≠0) = nœud injoignable → on n'invente rien.
     first = _node_exec(node, ["true"], inventory_path=inventory_path)
     if first is None:
         return None
+    # CNI : /etc/cni/net.d est root-only (Permission denied sans sudo) → `sudo ls` (vu au banc).
     return nodeside.assemble_nodeside(
         cri_version=probe(["containerd", "--version"]),
-        cni_listing=probe(["sh", "-c", "ls /etc/cni/net.d/ 2>/dev/null"]),
+        cni_listing=probe(["sudo", "ls", "/etc/cni/net.d/"]),
         lsblk=probe(["sh", "-c", "lsblk -dno NAME,SIZE 2>/dev/null"]),
         auditd=probe(["systemctl", "is-active", "auditd"]),
         fail2ban=probe(["systemctl", "is-active", "fail2ban"]),
