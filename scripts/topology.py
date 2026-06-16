@@ -776,6 +776,53 @@ def _discover_namespaces() -> list[str]:
     return [ln.split("/", 1)[-1] for ln in out.stdout.split() if ln]
 
 
+def _discover_namespaced_kinds() -> list[str]:
+    """Types k8s namespacés LISTABLES (`api-resources`, ADR 0079 §6) — le balayage de base.
+
+    On itère ces types × namespace pour énumérer TOUT ce qui vit dans un ns (sans table
+    codée). Vide si injoignable. C'est le socle commun découverte (rollback + health)."""
+    out = _kubectl("api-resources", "--namespaced", "--verbs=list", "-o", "name")
+    if out is None or out.returncode != 0:
+        return []
+    return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
+
+
+def _discover_owned(namespaces: list[str]) -> list[dict]:
+    """Ressources RÉELLES des `namespaces` (kind/name/uid/ownerReferences), pour le graphe
+    d'appartenance (ADR 0079). Façade I/O (ADR 0049) : balaye api-resources × ns via
+    `kubectl get <types> -n <ns> -o json`, réduit chaque item au minimum que
+    `ownership.from_probe` consomme. Best-effort/borné : un type/ns illisible est sauté.
+    La LOGIQUE (graphe, ordre) est PURE dans `nestor/ownership.py`."""
+    kinds = _discover_namespaced_kinds()
+    if not kinds:
+        return []
+    items: list[dict] = []
+    kinds_csv = ",".join(kinds)
+    for ns in namespaces:
+        out = _kubectl("get", kinds_csv, "-n", ns, "-o", "json", "--ignore-not-found")
+        if out is None or out.returncode != 0 or not out.stdout.strip():
+            continue
+        try:
+            data = json.loads(out.stdout)
+        except (ValueError, KeyError):
+            continue
+        for it in data.get("items", []):
+            meta = it.get("metadata", {})
+            uid = meta.get("uid")
+            if not uid:
+                continue
+            items.append(
+                {
+                    "kind": it.get("kind", "?"),
+                    "name": meta.get("name", "?"),
+                    "uid": uid,
+                    "namespace": meta.get("namespace"),
+                    "ownerReferences": meta.get("ownerReferences") or [],
+                }
+            )
+    return items
+
+
 def _discover_crd_groups() -> list[str]:
     """Noms complets des CRD installées (`kubectl get crd`) — le PIVOT (ADR 0074 §1).
 
@@ -2305,6 +2352,36 @@ def cmd_roundtrip(args: argparse.Namespace) -> int:
     return 0 if result.reversible else 1
 
 
+def _remove_dry_run(phase: str) -> int:
+    """`remove --dry-run` (ADR 0079) : DÉCOUVRE et affiche l'ordre de teardown, sans rien
+    défaire. Aperçu read-only du rollback par découverte (slice 1, #372) : on sonde les
+    ressources réelles des namespaces de la clôture (`api-resources` + ownerReferences) et
+    on les ordonne (possédés→possesseurs) via le module PUR `ownership`. Read-only → pas de
+    garde mutante ; le rollback effectif (mutant) reste le chemin table, prouvé au banc."""
+    from nestor import ownership
+
+    try:
+        layers = _roundtrip.closure(phase)
+    except _roundtrip.RoundtripError as exc:
+        raise _UsageError(str(exc)) from exc
+    namespaces = sorted({ns for p in layers for ns in _roundtrip.phase_namespaces(p)})
+    print(f"Remove (dry-run) — couche `{phase}` → clôture {layers}")
+    if not namespaces:
+        print("  (aucun namespace possédé par cette clôture — rien à découvrir ici)")
+        return 0
+    print(f"  namespaces sondés : {', '.join(namespaces)}")
+    resources = ownership.from_probe(_discover_owned(namespaces))
+    if not resources:
+        print("  → aucune ressource découverte (cluster injoignable ou namespaces vides).")
+        return 0
+    print(f"  ordre de teardown DÉCOUVERT (possédés→possesseurs, {len(resources)} ressources) :")
+    for r in ownership.teardown_order(resources):
+        ns = f"-n {r.namespace} " if r.namespace else ""
+        print(f"    - {ns}{r.ref}")
+    print("→ dry-run : RIEN détruit (aperçu ADR 0079 ; le rollback effectif passe par la table).")
+    return 0
+
+
 def cmd_remove(args: argparse.Namespace) -> int:
     """`remove` : supprime UNE couche applicative et sa clôture descendante (inverse de `next`).
 
@@ -2319,7 +2396,15 @@ def cmd_remove(args: argparse.Namespace) -> int:
     run-phases.sh (jamais la prod). Le backend de la stack est THREADÉ à rollback-lib
     (STORAGE_BACKEND) pour cibler les bonnes ressources : sans lui, le rollback
     retomberait sur `ceph` et tenterait de supprimer une OBC absente en local-path.
-    Code 0 si supprimé, 1 si une étape échoue / confirmation refusée, 2 si usage."""
+
+    `--dry-run` (ADR 0079) : ne DÉTRUIT rien — DÉCOUVRE par introspection les ressources
+    réelles de la clôture (api-resources + ownerReferences) et affiche l'ordre de teardown
+    (possédés→possesseurs). Aperçu read-only du futur rollback par découverte ; le rollback
+    effectif passe encore par la table (rewire ultérieur, prouvé au banc).
+
+    Code 0 si supprimé/dry-run, 1 si une étape échoue / confirmation refusée, 2 si usage."""
+    if args.dry_run:
+        return _remove_dry_run(args.phase)
     _assert_bench_target(f"nestor remove ({args.phase})")
     topo = load_topology(_resolve(args.file))
     backend = topo.storage.get("backend", "local-path")
@@ -2708,6 +2793,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--full",
         action="store_true",
         help="autoriser une clôture de STOCKAGE (ceph/sc/datalake → ≈ démontage du socle)",
+    )
+    p_remove.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="ne rien détruire : DÉCOUVRIR et afficher l'ordre de teardown (ADR 0079)",
     )
     p_remove.add_argument(
         "--yes",
