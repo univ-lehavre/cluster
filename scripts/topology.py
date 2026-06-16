@@ -1435,11 +1435,12 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     puis FUSION en place (préserve commentaires/`status`, édition texte chirurgicale §4).
     `--dry-run` : diff seul, rien écrit. `--yes` : confirme (CI/hors-TTY).
 
-    Périmètre v1 (ADR 0076 §2) : `layers` (couches saines) + `storage.backend`. Les
+    Périmètre (ADR 0076 §2) : `layers` (couches saines) + `storage.backend`. Les
     différences de NŒUDS sont SIGNALÉES (pas fusionnées : le nom k8s `lima-node1` ≠ le
-    nom déclaré `node1` exige une normalisation — différée, issue #357). Le SCALE
-    (runtime, ADR 0072) n'est jamais rapatrié. Suppression (déclaré absent) signalée,
-    jamais appliquée sans `--prune` (§3, v2).
+    nom déclaré `node1` exige une normalisation — différée). Le SCALE (runtime, ADR 0072)
+    n'est jamais rapatrié. Suppression (couche déclarée mais absente du réel) : SIGNALÉE
+    par défaut, APPLIQUÉE seulement avec `--prune` (§3) — et jamais pour les nœuds (une
+    absence de nœud peut être une panne, pas un retrait voulu).
 
     Code 0 (à jour, ou fusion appliquée) ; 2 (usage : cluster injoignable, fichier non
     éditable sûrement) ; le refus de confirmation n'est pas une erreur (0, rien fait)."""
@@ -1479,15 +1480,28 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         print(f"`{os.path.basename(path)}` : déjà aligné sur le réel — rien à rapatrier.")
         return 0
 
-    # Diff AFFICHÉ (ADR 0046 : on regarde avant d'écrire). Les absences sont dans le plan
-    # (signalées) mais NON appliquées (pas de --prune en v1).
+    # Diff AFFICHÉ (ADR 0046 : on regarde avant d'écrire).
     print("Écart réel ↔ déclaration (refresh) :")
     for line in _refresh_plan.format_plan(plan):
         print(line)
 
-    if not plan.has_additions:
-        # Que des absences (rien à matérialiser) : on a SIGNALÉ, on n'écrit pas.
-        print("→ rien à matérialiser (seules des absences, signalées ci-dessus).")
+    with open(path, encoding="utf-8") as f:
+        source = f.read()
+
+    # `--prune` (ADR 0076 §3) : retire les couches déclarées-mais-absentes RÉELLEMENT
+    # écrites dans `layers:`. Suppression PROPOSÉE séparément, défaut prudent (jamais sans
+    # le flag). Les nœuds absents ne sont JAMAIS prunés (une absence peut être une panne).
+    a_pruner = _refresh_fuse.prunable_layers(source, plan) if args.prune else []
+    if a_pruner:
+        print(f"--prune : couche(s) à RETIRER de la déclaration : {', '.join(a_pruner)}")
+
+    if not plan.has_additions and not a_pruner:
+        # Aucun ajout ET (pas de --prune OU rien à pruner) : on a SIGNALÉ, on n'écrit pas.
+        if plan.nodes_absent or plan.layers_absent:
+            print(
+                "→ rien d'appliqué (seules des absences, signalées ci-dessus ; "
+                "`--prune` pour retirer les couches absentes)."
+            )
         return 0
 
     if args.dry_run:
@@ -1495,34 +1509,42 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         return 0
 
     # --yes confirme (CI) ; hors TTY sans --yes, _confirm renvoie le défaut (False) →
-    # refus plutôt qu'écrire à l'aveugle (ADR 0046 : jamais de matérialisation silencieuse).
+    # refus plutôt qu'écrire à l'aveugle (ADR 0046 : jamais de mutation silencieuse).
     no_input = args.yes or not sys.stdin.isatty()
-    question = "Matérialiser ces ajouts dans la déclaration ?"
-    if not _confirm(question, default=args.yes, no_input=no_input):
+    gestes = []
+    if plan.has_additions:
+        gestes.append("matérialiser ces ajouts")
+    if a_pruner:
+        gestes.append(f"RETIRER {', '.join(a_pruner)}")
+    if not _confirm(f"Appliquer ({' ; '.join(gestes)}) ?", default=args.yes, no_input=no_input):
         print("refresh annulé (rien écrit).", file=sys.stderr)
         return 0
 
-    # FUSION en place (édition texte, préserve le reste — ADR 0076 §4). Fail-closed :
-    # un fichier de forme inattendue lève FuseError → usage, JAMAIS de corruption.
-    with open(path, encoding="utf-8") as f:
-        source = f.read()
+    # ÉDITION en place (texte chirurgical, préserve le reste — §4) : ajouts (fuse) PUIS
+    # suppressions (prune). Fail-closed : forme inattendue → FuseError → usage, jamais de
+    # corruption. On chaîne sur le MÊME texte pour cumuler ajouts + prune en une écriture.
     try:
-        fused = _refresh_fuse.fuse_topology(source, plan)
+        edited = _refresh_fuse.fuse_topology(source, plan) if plan.has_additions else source
+        if a_pruner:
+            edited = _refresh_fuse.prune_topology(edited, plan)
     except _refresh_fuse.FuseError as exc:
-        raise _UsageError(f"fusion impossible ({exc}) — éditer `{path}` à la main") from exc
-    # On REVALIDE le résultat avant d'écrire (le fichier fusionné doit rester une topo
-    # valide — sinon on n'écrit pas et on signale). Import local : topology_from_dict
-    # n'est pas dans l'API du paquet, on le prend du modèle.
+        raise _UsageError(f"édition impossible ({exc}) — éditer `{path}` à la main") from exc
+    # On REVALIDE avant d'écrire (le résultat doit rester une topo valide). Import local :
+    # topology_from_dict n'est pas dans l'API du paquet, on le prend du modèle.
     from nestor.model import topology_from_dict
 
     try:
-        topology_from_dict(yaml.safe_load(fused))
+        topology_from_dict(yaml.safe_load(edited))
     except (TopologyError, yaml.YAMLError) as exc:
-        raise _UsageError(f"fusion produirait une topo invalide ({exc}) — annulé") from exc
+        raise _UsageError(f"l'édition produirait une topo invalide ({exc}) — annulé") from exc
     with open(path, "w", encoding="utf-8") as f:
-        f.write(fused)
-    n_lignes = len(_refresh_plan.format_plan(plan))
-    print(f"✓ `{os.path.basename(path)}` mis à jour ({n_lignes} ligne(s)).")
+        f.write(edited)
+    bilan = []
+    if plan.has_additions:
+        bilan.append(f"{len(_refresh_plan.format_plan(plan))} ajout(s)/changement(s) signalés")
+    if a_pruner:
+        bilan.append(f"{len(a_pruner)} couche(s) retirée(s)")
+    print(f"✓ `{os.path.basename(path)}` mis à jour ({' ; '.join(bilan)}).")
     return 0
 
 
@@ -2630,6 +2652,11 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_file(p_refresh)
     p_refresh.add_argument(
         "--dry-run", action="store_true", help="afficher le diff seulement (n'écrit rien)"
+    )
+    p_refresh.add_argument(
+        "--prune",
+        action="store_true",
+        help="retirer AUSSI les couches déclarées mais absentes du réel (défaut : signalées)",
     )
     p_refresh.add_argument(
         "--yes", action="store_true", help="confirmer la fusion (requis hors TTY)"

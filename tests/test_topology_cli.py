@@ -1996,6 +1996,39 @@ target_kind: lima
         self.assertIn("annulé", err)
         self.assertEqual(self._read(path), before)
 
+    # Topo avec une liste `layers:` LITTÉRALE (pour --prune) : monitoring y est écrit.
+    _TOPO_LAYERS = (
+        "catalog: {topology: banc, profile: dataops}\n"
+        "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
+        "layers: [metrics-server, monitoring]\n"
+        "storage: {backend: local-path}\ntarget_kind: lima\n"
+    )
+
+    def test_prune_removes_absent_layer(self):
+        # Le réel n'a QUE metrics-server (monitoring défait) → --prune retire monitoring.
+        self.addCleanup(setattr, cli, "resolve_layers", cli.resolve_layers)
+        cli.resolve_layers = lambda _d, _b: ["metrics-server", "monitoring"]
+        self._stub_real(layers=["metrics-server"], backend="local-path")
+        path = _tmp(self._TOPO_LAYERS)
+        self.addCleanup(os.unlink, path)
+        code, out, _ = _capture(["refresh", "-f", path, "--prune", "--yes"])
+        self.assertEqual(code, 0)
+        self.assertIn("retirée", out)
+        self.assertEqual(yaml.safe_load(self._read(path))["layers"], ["metrics-server"])
+
+    def test_absent_layer_signaled_not_pruned_without_flag(self):
+        # SANS --prune : la couche absente est SIGNALÉE, pas retirée (défaut prudent §3).
+        self.addCleanup(setattr, cli, "resolve_layers", cli.resolve_layers)
+        cli.resolve_layers = lambda _d, _b: ["metrics-server", "monitoring"]
+        self._stub_real(layers=["metrics-server"], backend="local-path")
+        path = _tmp(self._TOPO_LAYERS)
+        self.addCleanup(os.unlink, path)
+        before = self._read(path)
+        code, out, _ = _capture(["refresh", "-f", path, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertIn("--prune", out)  # invite à utiliser --prune
+        self.assertEqual(self._read(path), before)  # RIEN retiré
+
 
 class Remove(unittest.TestCase):
     """`remove` : supprime une couche via run_remove (délégué à run-phases.sh rollback)."""

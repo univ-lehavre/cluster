@@ -113,7 +113,7 @@ def fuse_topology(source: str, plan: RefreshPlan) -> str:
     """Applique les AJOUTS du plan au texte `source`, renvoie le texte fusionné (PUR).
 
     N'applique que `nodes_to_add` / `layers_to_add` / `backend_change`. Les absences du
-    plan sont ignorées ici (signalées par la façade, retirées seulement via --prune, v2).
+    plan sont ignorées ici (signalées par la façade, retirées seulement via --prune).
     Lève `FuseError` si le fichier sort des formes éditables sûrement (jamais de
     corruption silencieuse). Idempotent : rejouer sur un fichier déjà à jour (plan vide)
     renvoie le texte inchangé."""
@@ -124,4 +124,45 @@ def fuse_topology(source: str, plan: RefreshPlan) -> str:
     lines = _add_layers(lines, plan)
     if plan.backend_change:
         lines = _replace_backend(lines, plan.backend_change[1])
+    return "".join(lines)
+
+
+def prunable_layers(source: str, plan: RefreshPlan) -> list[str]:
+    """Couches `layers_absent` RÉELLEMENT présentes dans la liste inline `layers:` du
+    fichier (PUR). `--prune` ne retire QUE ce qui est LITTÉRALEMENT déclaré : les
+    `layers_absent` du plan sont au grain phase résolu, or `layers:` peut porter des
+    alias (`dataops`) — pruner une phase résolue absente du littéral serait un no-op
+    trompeur. On intersecte donc avec les jetons réellement écrits. Vide → rien à pruner."""
+    absent = set(plan.layers_absent)
+    if not absent:
+        return []
+    for ln in source.splitlines():
+        s = ln.strip()
+        if s.startswith("layers:") and "[" in s and "]" in s:
+            inner = s[s.index("[") + 1 : s.rindex("]")]
+            present = [x.strip() for x in inner.split(",") if x.strip()]
+            return [x for x in present if x in absent]
+    return []
+
+
+def prune_topology(source: str, plan: RefreshPlan) -> str:
+    """Retire du texte les couches `layers_absent` LITTÉRALEMENT présentes dans `layers:`
+    (PUR, ADR 0076 §3). Inverse de `_add_layers` : édite la liste inline en place. Si la
+    liste devient VIDE, on la rend `layers: []` (clé conservée, intention explicite). Ne
+    touche RIEN d'autre (nœuds absents non prunés : une absence de nœud peut être une
+    panne, pas un retrait voulu — §3). Idempotent. Lève FuseError sur forme inattendue."""
+    to_remove = set(prunable_layers(source, plan))
+    if not to_remove:
+        return source
+    lines = source.splitlines(keepends=True)
+    idx = next((i for i, ln in enumerate(lines) if ln.rstrip().startswith("layers:")), None)
+    if idx is None:
+        return source
+    line = lines[idx].rstrip("\n")
+    if "[" not in line or "]" not in line:
+        raise FuseError("clé `layers:` présente mais pas en liste inline `[…]` — édition manuelle")
+    inner = line[line.index("[") + 1 : line.rindex("]")]
+    kept = [x.strip() for x in inner.split(",") if x.strip() and x.strip() not in to_remove]
+    indent = lines[idx][: len(lines[idx]) - len(lines[idx].lstrip())]
+    lines[idx] = f"{indent}layers: [{', '.join(kept)}]\n"
     return "".join(lines)

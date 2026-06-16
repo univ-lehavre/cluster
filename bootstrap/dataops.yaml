@@ -84,6 +84,17 @@
 
 - name: Plateforme DataOps — étape nœuds (containerd + build d'images)
   hosts: cloud
+  # GARDE D'ISOLATION (ADR 0053, #359) : ce play SSH sur les nœuds (`cloud`) et
+  # reconfigure containerd → il DOIT vérifier que la topologie ciblée correspond à
+  # l'intention (EXPECTED_TARGET_KIND), comme tout play qui mute des nœuds (cf. cri.yaml).
+  # Son absence a laissé un montage banc s'exécuter sur la PROD (faille du 2026-06-16) :
+  # le pre_task échoue AVANT toute tâche distante si l'inventaire ne correspond pas.
+  pre_tasks:
+    - name: Audit-log — record playbook execution (+ garde target_kind)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: dataops.yaml
   tasks:
     - name: Configuration containerd pour le registry interne
       ansible.builtin.import_role:

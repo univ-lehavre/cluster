@@ -14,7 +14,12 @@ import yaml
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from nestor.model import topology_from_dict  # noqa: E402
-from nestor.refresh_fuse import FuseError, fuse_topology  # noqa: E402
+from nestor.refresh_fuse import (  # noqa: E402
+    FuseError,
+    fuse_topology,
+    prunable_layers,
+    prune_topology,
+)
 from nestor.refresh_plan import NodeChange, RefreshPlan  # noqa: E402
 
 _SRC = """\
@@ -126,6 +131,42 @@ class FuseFailClosed(unittest.TestCase):
         plan = RefreshPlan(layers_to_add=["monitoring"])
         with self.assertRaises(FuseError):
             fuse_topology(src, plan)
+
+
+class Prune(unittest.TestCase):
+    """#357 : `--prune` retire les couches déclarées-mais-absentes (réellement écrites)."""
+
+    _WITH_LAYERS = _SRC.replace("storage:", "layers: [metrics-server, monitoring]\nstorage:")
+
+    def test_prunable_only_literally_present(self):
+        # layers_absent au grain phase ; on ne prune QUE ce qui est écrit dans `layers:`.
+        plan = RefreshPlan(layers_absent=["monitoring", "gitops"])  # gitops PAS dans le fichier
+        self.assertEqual(prunable_layers(self._WITH_LAYERS, plan), ["monitoring"])
+
+    def test_prunable_empty_when_no_layers_key(self):
+        plan = RefreshPlan(layers_absent=["monitoring"])
+        self.assertEqual(prunable_layers(_SRC, plan), [])  # pas de clé layers → rien
+
+    def test_prune_removes_layer_keeps_rest(self):
+        plan = RefreshPlan(layers_absent=["monitoring"])
+        out = prune_topology(self._WITH_LAYERS, plan)
+        self.assertEqual(yaml.safe_load(out)["layers"], ["metrics-server"])
+        self.assertIn("# commentaire d'en-tête à préserver", out)  # reste intact
+        self.assertEqual(yaml.safe_load(out)["catalog"]["status"], "cible")
+
+    def test_prune_to_empty_list(self):
+        plan = RefreshPlan(layers_absent=["metrics-server", "monitoring"])
+        out = prune_topology(self._WITH_LAYERS, plan)
+        self.assertEqual(yaml.safe_load(out)["layers"], [])
+
+    def test_prune_noop_when_nothing_to_remove(self):
+        plan = RefreshPlan(layers_absent=["gitops"])  # absent du fichier → no-op
+        self.assertEqual(prune_topology(self._WITH_LAYERS, plan), self._WITH_LAYERS)
+
+    def test_prune_does_not_touch_nodes(self):
+        # nodes_absent ne déclenche AUCUNE suppression (§3 : absence ≠ retrait voulu).
+        plan = RefreshPlan(nodes_absent=["node2"], layers_absent=[])
+        self.assertEqual(prune_topology(self._WITH_LAYERS, plan), self._WITH_LAYERS)
 
 
 if __name__ == "__main__":
