@@ -76,7 +76,10 @@ rollback_phase_targeted_resources() {
             : ;;
         gitops-seed)
             # Données dans Gitea (org/repo) + Application Argo CD seed — best-effort.
-            printf -- '-n argocd applications.argoproj.io atlas\n' ;;
+            # L'Application posée par le seed s'appelle `atlas-workflows` (PAS `atlas` :
+            # ça, c'est l'AppProject, défait par le composant argocd). Cf. le manifeste
+            # atlas-workflow-sample/application.example.yaml + le scénario 27.
+            printf -- '-n argocd applications.argoproj.io atlas-workflows\n' ;;
         *) printf '\n' ;;
     esac
 }
@@ -281,7 +284,8 @@ component_targeted() {
             printf -- '-n argocd gateway.gateway.networking.k8s.io argocd\n'
             printf -- '-n argocd appproject.argoproj.io atlas\n' ;;
         gitops-seed)
-            printf -- '-n argocd applications.argoproj.io atlas\n' ;;
+            # Application `atlas-workflows` (PAS `atlas` = l'AppProject, cf. composant argocd).
+            printf -- '-n argocd applications.argoproj.io atlas-workflows\n' ;;
         *) printf '\n' ;;
     esac
 }
@@ -646,6 +650,12 @@ component_stuck_cr_kinds() {
                         printf '%s\n' cluster.postgresql.cnpg.io ;;
                     barmancloud.cnpg.io)
                         printf '%s\n' objectstore.barmancloud.cnpg.io ;;
+                    argoproj.io)
+                        # Argo CD : Application + AppProject portent un finalizer
+                        # (resources-finalizer.argocd.argoproj.io) que le contrôleur, en
+                        # train de mourir avec son ns, ne traite plus → ns `argocd` wedgé
+                        # en Terminating (cas vécu). On les force au teardown du banc.
+                        printf '%s\n' application.argoproj.io appproject.argoproj.io ;;
                 esac
             done
             # Producteurs d'OBC (s3-backing-*) EMPRUNTENT objectbucket.io sans le
@@ -662,10 +672,15 @@ component_stuck_cr_kinds() {
 
 # Kinds de CR connus pour bloquer une terminaison de ns par leurs finalizers
 # (banc jetable : on les force). Inclut le `Cluster` CNPG ET son `ObjectStore`
-# Barman (plugin barman-cloud) — ce dernier coinçait `postgres` en Terminating.
+# Barman (plugin barman-cloud) — ce dernier coinçait `postgres` en Terminating ;
+# et les CR Argo CD (Application/AppProject, finalizer resources-finalizer.argocd…)
+# — l'AppProject `atlas` coinçait `argocd` en Terminating (cas vécu, #372).
+# (component_stuck_cr_kinds DÉRIVE la même union par composant, ADR 0066 ; cette liste
+# reste l'amorce utilisée par k8s_force_delete_ns au grain PHASE — garder les deux alignées.)
 _STUCK_CR_KINDS="obc.objectbucket.io objectbucket.io cephcluster.ceph.rook.io \
 cephobjectstore.ceph.rook.io cephblockpool.ceph.rook.io cephfilesystem.ceph.rook.io \
-cluster.postgresql.cnpg.io objectstore.barmancloud.cnpg.io"
+cluster.postgresql.cnpg.io objectstore.barmancloud.cnpg.io \
+application.argoproj.io appproject.argoproj.io"
 
 # k8s_force_delete_ns NS…
 #   Supprime chaque namespace, en FORÇANT les finalizers récalcitrants (banc
@@ -802,7 +817,7 @@ _phase_present() {
         sc) sc_default_present ;;
         datalake) "${KUBECTL[@]}" -n rook-ceph get cephobjectstore datalake > /dev/null 2>&1 ;;
         wordpress) "${KUBECTL[@]}" get pvc -A 2> /dev/null | grep -q wordpress ;;
-        gitops-seed) "${KUBECTL[@]}" -n argocd get applications.argoproj.io -o name 2> /dev/null | grep -q . ;;
+        gitops-seed) "${KUBECTL[@]}" -n argocd get applications.argoproj.io atlas-workflows > /dev/null 2>&1 ;;
         *) return 1 ;;
     esac
 }

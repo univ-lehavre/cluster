@@ -2,14 +2,38 @@
 
 ## Statut
 
-Proposed (2026-06-16)
+Accepted (2026-06-16) — livraison INCRÉMENTALE.
 
 Fait évoluer le rollback par phase ([ADR 0054](0054-rollback-par-phase-banc.md))
 et son graphe atomique ([ADR 0066](0066-rollback-atomique-graphe-composants.md))
-: le « quoi défaire » serait DÉRIVÉ du cluster réel (introspection) au lieu
-d'être DÉCLARÉ dans une table. Applique au teardown l'esprit de
+: le « quoi défaire » est DÉRIVÉ du cluster réel (introspection) au lieu d'être
+DÉCLARÉ dans une table. Applique au teardown l'esprit de
 [`discover`](0074-cluster-discover-reconstruire-topologie.md) (lire le réel, ne
 rien présumer). Borné par [ADR 0046](0046-corriger-le-code-pas-l-etat.md).
+
+### État de la livraison (ce qui est PROUVÉ au banc vs à venir)
+
+- **ÉTAPE A — livrée et prouvée (local-path)** : `remove` défait par défaut, PAR
+  DÉCOUVERTE, tout le k8s NAMESPACÉ d'une clôture — supprime les RACINES (le GC
+  cascade les possédés), force les CR à finalizer, finalise les ns wedgés. Le
+  routage `closure_has_nodeside` (transitoire, dérivé de la table) envoie en
+  découverte toute clôture SANS node-side ; `--table`/`--discover` forcent un
+  chemin. **Preuve** : `remove dataops` retire postgres+dagster+marquez en UNE
+  passe, rc=0, ns finalisés ; rejeu rc=0 (idempotent). Fin de la classe de bugs
+  « nom/kind oublié dans la table » (Application `atlas`→`atlas-workflows`, CR
+  Argo CD à finaliser — tous trois vécus la même session).
+- **CRD cluster-scoped — REPORTÉES (limite découverte)** : on NE supprime PAS
+  les CRD par découverte. Le banc a montré que le lien **CRD→opérateur** n'est
+  pas découvrable de façon fiable (les `managedFields` d'une CRD/d'un CR portent
+  `OpenAPI-Generator`/`kube-apiserver`, pas le nom de l'opérateur) → impossible
+  de savoir si une CRD a un opérateur HORS clôture qu'on orphelinerait. Les CR
+  sont défaits ; les CRD restent (opérateur réutilisable par un re-`next`). À
+  reprendre quand un signal d'appartenance opérateur fiable existera.
+- **Node-side — REPORTÉ (irréductible SSH + banc Ceph)** : le wipe disque Ceph
+  (et la libération node-side d'un PV local-path coincé) reste au chemin TABLE,
+  non prouvable sans banc Ceph (ADR 0034/0052). C'est la SEULE raison pour
+  laquelle la table survit — l'objectif reste **zéro table** une fois ce socle
+  SSH disponible.
 
 ## Contexte
 

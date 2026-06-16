@@ -129,6 +129,21 @@ def phase_signal(phase: str) -> list[str]:
     return [f"ns/{n}" for n in phase_namespaces(phase)] + phase_targeted_resources(phase)
 
 
+def phase_has_nodeside(phase: str) -> bool:
+    """`phase` laisse-t-elle un état NODE-SIDE (disques Ceph, /var/lib/rook) que le delete
+    Kubernetes ne couvre pas ? (rollback_phase_has_nodeside → 'yes')."""
+    return _rollback_lib_call("rollback_phase_has_nodeside", phase).strip() == "yes"
+
+
+def closure_has_nodeside(phase: str) -> bool:
+    """La clôture de `phase` laisse-t-elle un état NODE-SIDE (disques Ceph) ? (ADR 0079 étape
+    A). La découverte défait tout le k8s NAMESPACÉ (CR + finalize ns) ; seul le node-side
+    reste irréductible (SSH, étape ultérieure, banc Ceph). Donc `remove` route vers la TABLE
+    ssi la clôture a du node-side — sinon DÉCOUVERTE. DÉRIVÉ de la table (has_nodeside) tant
+    que la découverte node-side n'existe pas (transitoire, ADR 0079)."""
+    return any(phase_has_nodeside(p) for p in closure(phase))
+
+
 # ── Couches d'exécution / vérification (isolées, stubables) ─────────────────
 
 
