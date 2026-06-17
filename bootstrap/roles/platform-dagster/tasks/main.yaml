@@ -14,6 +14,8 @@
 
     # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
     # allow ignoré). allow-marquez-egress = fix drift L19 (egress dagster→marquez) ;
+    # allow-mlflow-egress = egress dagster→mlflow:5000 (logging drift/CT, #407 — sans
+    # elle le logging best-effort timeout silencieusement) ;
     # allow-internet-egress = sortie 443/80 pour le sync d'un snapshot ouvert
     # (OpenAlex, aws s3 sync --no-sign-request), sans quoi l'ingestion atlas est
     # coupée par le default-deny (#256) ; allow-s3-egress = écriture du datalake
@@ -32,6 +34,7 @@
         - allow-postgres-egress.yaml
         - allow-registry-egress.yaml
         - allow-marquez-egress.yaml
+        - allow-mlflow-egress.yaml
         - allow-internet-egress.yaml
         - allow-s3-egress.yaml
         - allow-webserver-ingress.yaml

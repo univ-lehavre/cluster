@@ -38,6 +38,10 @@ export default defineConfig({
     '**/CHANGELOG.md',
     '**/LICENSE.md',
     'docs/.vitepress/**',
+    // Code source vendoré (gitignoré) : ses .md (CONTRIBUTING, vendor PHP…) ne sont pas
+    // de la doc et cassent le parse Vue de VitePress (srcDir='..' scanne le filesystem,
+    // pas git). Exclus comme node_modules.
+    'apps/redcap/source/**',
   ],
 
   // Map every README.md to its directory's index.md so URLs like /bench/,

@@ -1,0 +1,25 @@
+# Egress de Dagster vers le serveur MLflow (ns `mlflow`, port 5000) : les pods de
+# run du transform_job loguent runs/params/métriques (drift Evidently, re-trainings
+# du CT) sur mlflow:5000 via MLFLOW_TRACKING_URI. La policy mlflow/allow-web-ingress
+# autorise déjà l'ingress ; ici on ouvre l'EGRESS côté dagster (nécessaire sous
+# default-deny des deux côtés). Sans ce flux, le logging MLflow d'atlas timeout —
+# et comme il est best-effort (try/except → return False), l'échec est SILENCIEUX :
+# aucun run/drift visible dans l'UI MLflow, sans erreur (issue #407). Même piège que
+# allow-marquez-egress (validé sur banc, #167 / #148).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mlflow-egress
+  namespace: dagster
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mlflow
+      ports:
+        - protocol: TCP
+          port: 5000
