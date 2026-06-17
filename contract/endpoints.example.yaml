@@ -98,6 +98,11 @@ endpoints:
       Variable consommateur (pendant de OPENLINEAGE_URL pour Marquez) :
       MLFLOW_TRACKING_URI=http://mlflow.mlflow.svc.cluster.local:5000 — logguer
       runs/params/métriques et enregistrer les modèles depuis atlas.
+      Chaîne MLOps atlas (maturité 1→2) : la détection de DRIFT (Evidently, asset
+      check Dagster à côté des suites Great Expectations) logue ses métriques ici ;
+      l'entraînement CONTINU (schedule/sensor Dagster sur transform_job) trace ses
+      re-trainings dans les runs MLflow. AUCUNE ancre socle nouvelle : Evidently lit
+      les parquets du bucket S3 existant (backing OBC), pas d'infra dédiée.
 
   # ── Registry d'images interne (ns registry) ───────────────────────────────
   - id: registry
