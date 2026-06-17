@@ -81,6 +81,24 @@ endpoints:
       Orchestrateur livré VIDE ; le code (assets/code-locations) est déployé
       par atlas (ADR 0022/0026). Event log dans la base `dagster` (CNPG).
 
+  # ── Suivi de modèles (MLflow, ns mlflow) ──────────────────────────────────
+  - id: mlflow-tracking
+    service: mlflow
+    namespace: mlflow
+    fqdn: mlflow.mlflow.svc.cluster.local
+    port: 5000
+    protocol: http
+    auth: none # intra-cluster
+    layer: dataops
+    ui_hostname: mlflow.cluster.lan # exemple générique (Gateway + cert-manager)
+    source: platform/mlflow/mlflow.yaml
+    note: >-
+      Serveur de suivi de modèles (addon socle, précédent Dagster ADR 0026).
+      Backend store = base `mlflow` (CNPG) ; artefact store = bucket S3 (OBC).
+      Variable consommateur (pendant de OPENLINEAGE_URL pour Marquez) :
+      MLFLOW_TRACKING_URI=http://mlflow.mlflow.svc.cluster.local:5000 — logguer
+      runs/params/métriques et enregistrer les modèles depuis atlas.
+
   # ── Registry d'images interne (ns registry) ───────────────────────────────
   - id: registry
     service: registry
