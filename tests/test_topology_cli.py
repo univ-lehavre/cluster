@@ -137,6 +137,7 @@ def _example_as_lima(test):
     test.addCleanup(os.unlink, path)
     return path
 
+
 _INVALID_TOPO = """\
 catalog:
   topology: bancal
