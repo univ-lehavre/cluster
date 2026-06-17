@@ -98,19 +98,20 @@ API_PORT=6443
 #     marquez-web arm64) sans gaspiller (banc atlas léger).
 # 3×12 = 36 GiB sur un hôte 48 GiB : marge OK pour macOS. Surchargeable via VM_MEMORY.
 #
-# DISQUE : 20 GiB suffit en léger, mais le profil Ceph+dataops SATURE l'ephemeral-
-# storage à 20 GiB (évictions postgres/rgw/exporter sous le seuil ~2 GiB — drift
-# consigné). Ceph+dataops empile OSD + images applicatives + logs sur le rootfs.
-# → 40 GiB en mode Ceph (qcow2 thin-provisionné : n'occupe le disque hôte qu'à
-# l'usage réel). Surchargeable via VM_DISK.
+# DISQUE : 40 GiB par défaut (les DEUX backends). 20 GiB ne tenait que pour un banc
+# LÉGER (socle/metrics) ; dès qu'on empile la chaîne applicative — Ceph+dataops, OU
+# local-path+atlas (DataOps + MLflow + churn argocd) — l'ephemeral-storage du rootfs
+# sature à 20 GiB → DiskPressure → évictions en cascade (postgres/rgw/repo-server/mlflow
+# sous le seuil ~2 GiB ; 125 pods Evicted constatés en local-path le 2026-06-17, #391).
+# 40 GiB partout (qcow2 thin-provisionné : n'occupe le disque hôte qu'à l'usage réel,
+# donc gratuit pour un banc léger). Surchargeable via VM_DISK.
 VM_CPUS=2
 # Mémorise si VM_MEMORY a été FOURNI par l'opérateur (vs défaut dérivé) : un chemin
 # peut alors imposer son propre plancher SANS écraser un choix explicite (ha-3cp).
 VM_MEMORY_SET=${VM_MEMORY:+1}
 VM_MEMORY_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 12GiB || echo 8GiB)
 VM_MEMORY=${VM_MEMORY:-${VM_MEMORY_DEFAULT}}
-VM_DISK_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 40GiB || echo 20GiB)
-VM_DISK=${VM_DISK:-${VM_DISK_DEFAULT}}
+VM_DISK=${VM_DISK:-40GiB}
 
 # CRDs Gateway API (alignées sur Cilium 1.19.x — ADR 0006 ; cf. platform/cilium-expo).
 GWAPI_VERSION=1.4.1
