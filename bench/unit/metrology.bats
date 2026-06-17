@@ -276,8 +276,9 @@ YAML
     run metro_metrics_per_node_block <<<"$(printf 'cp1\t100\t900\t800\nnode1\t50\t400\t300')"
     [ "$status" -eq 0 ]
     [[ "$output" == *"par_noeud:"* ]]
-    [[ "$output" == *"cp1: { cpu_core_s: 100, ram_peak_mib: 900, ram_mean_mib: 800 }"* ]]
-    [[ "$output" == *"node1: { cpu_core_s: 50, ram_peak_mib: 400, ram_mean_mib: 300 }"* ]]
+    # accolades SANS espaces internes (yamllint refuse `{ ... }` ; runs-history est linté).
+    [[ "$output" == *"cp1: {cpu_core_s: 100, ram_peak_mib: 900, ram_mean_mib: 800}"* ]]
+    [[ "$output" == *"node1: {cpu_core_s: 50, ram_peak_mib: 400, ram_mean_mib: 300}"* ]]
 }
 
 @test "metro_metrics_per_node_block : stdin vide → AUCUN bloc (pas de par_noeud: vide)" {

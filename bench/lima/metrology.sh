@@ -185,7 +185,9 @@ metro_metrics_per_node_block() {
             printf '      par_noeud:\n'
             emitted=1
         fi
-        printf '        %s: { cpu_core_s: %s, ram_peak_mib: %s, ram_mean_mib: %s }\n' \
+        # Accolades SANS espaces internes (`{...}`) : yamllint (braces) refuse `{ ... }`,
+        # et runs-history est linté à chaque commit (un run consigné cassait sinon le commit).
+        printf '        %s: {cpu_core_s: %s, ram_peak_mib: %s, ram_mean_mib: %s}\n' \
             "${name}" "${cpu:-?}" "${peak:-?}" "${mean:-?}"
     done
 }
