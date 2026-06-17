@@ -88,3 +88,5 @@ bootstrap/env/
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+
+apps/redcap/source/
