@@ -46,6 +46,8 @@ def _topo(profile="dataops", backend="ceph", hardening=None, nodes=None):
 
 class ExpectedSequence(unittest.TestCase):
     def test_atlas_local_path_order(self):
+        # ADR 0083 : `atlas` = alias de la chaîne MLOps complète (ancien atlas + mlflow).
+        # Ordre dérivé du graphe atomique (resolve_layers), plus de table figée.
         seq = expected_phase_sequence(_topo(backend="local-path"), "atlas")
         self.assertEqual(
             seq,
@@ -58,10 +60,13 @@ class ExpectedSequence(unittest.TestCase):
                 "gitops",
                 "dataops",
                 "gitops-seed",
+                "mlflow",
             ],
         )
 
     def test_atlas_ceph_order(self):
+        # ADR 0083 : `atlas` en ceph = ancien atlas-ceph + metrics-server (sur-ensemble
+        # assumé) + mlflow. Dérivé via resolve_layers.
         seq = expected_phase_sequence(_topo(backend="ceph"), "atlas-ceph")
         self.assertEqual(
             seq,
@@ -71,10 +76,12 @@ class ExpectedSequence(unittest.TestCase):
                 "ceph",
                 "sc",
                 "datalake",
+                "metrics-server",
                 "monitoring",
                 "gitops",
                 "dataops",
                 "gitops-seed",
+                "mlflow",
             ],
         )
 
@@ -108,7 +115,7 @@ class ExpectedSequence(unittest.TestCase):
         )
         # hardening juste après le socle (run_hardening_if_requested), avant la queue.
         self.assertEqual(seq[:5], ["up", "bootstrap", "ceph", "sc", "hardening"])
-        self.assertEqual(seq[5], "datalake")
+        self.assertEqual(seq[5], "datalake")  # 1re couche de queue (graphe), inchangée
 
 
 class TargetValidation(unittest.TestCase):
@@ -120,23 +127,20 @@ class TargetValidation(unittest.TestCase):
         with self.assertRaises(PlanError):
             expected_phase_sequence(_topo(backend="local-path"), "storage-real")
 
-    def test_atlas_on_ceph_rejected(self):
-        # run-phases.sh refuse atlas + WITH_CEPH → utiliser atlas-ceph.
-        with self.assertRaises(PlanError):
-            expected_phase_sequence(_topo(backend="ceph"), "atlas")
+    def test_atlas_on_ceph_accepted(self):
+        # ADR 0083 : `atlas` est un alias backend-agnostique (plus le rejet historique
+        # atlas+WITH_CEPH). En ceph il dérive la pile Ceph + la chaîne MLOps.
+        seq = expected_phase_sequence(_topo(backend="ceph"), "atlas")
+        self.assertEqual(seq[:4], ["up", "bootstrap", "ceph", "sc"])
+        self.assertIn("mlflow", seq)
 
-    def test_default_target_dataops_ceph(self):
-        self.assertEqual(default_target(_topo(backend="ceph")), "atlas-ceph")
-
-    def test_default_target_dataops_local_path(self):
-        self.assertEqual(default_target(_topo(backend="local-path")), "atlas")
-
-    def test_default_target_base_is_socle(self):
-        self.assertEqual(default_target(_topo(profile="base", backend="local-path")), "socle")
-
-    def test_default_target_metrics(self):
-        # ADR 0068 : profile metrics → chemin `metrics` (socle + metrics-server seul).
-        self.assertEqual(default_target(_topo(profile="metrics", backend="local-path")), "metrics")
+    def test_default_target_always_layers(self):
+        # ADR 0083 : default_target rend TOUJOURS `layers` (plus de mapping vers presets).
+        # La séquence vient de resolve_layers + socle dérivé, pas d'un nom de chemin.
+        self.assertEqual(default_target(_topo(backend="ceph")), "layers")
+        self.assertEqual(default_target(_topo(backend="local-path")), "layers")
+        self.assertEqual(default_target(_topo(profile="base", backend="local-path")), "layers")
+        self.assertEqual(default_target(_topo(profile="metrics", backend="local-path")), "layers")
 
     def _topo_layers(self, layers, backend="local-path"):
         return topology_from_dict(
@@ -149,21 +153,35 @@ class TargetValidation(unittest.TestCase):
             }
         )
 
-    def test_layers_dataops_derives_atlas(self):
-        # ADR 0069 : layers prime sur profile ; [dataops] → atlas (local-path).
-        self.assertEqual(default_target(self._topo_layers(["dataops"])), "atlas")
-        self.assertEqual(default_target(self._topo_layers(["dataops"], "ceph")), "atlas-ceph")
+    def test_default_target_layers_regardless_of_declared(self):
+        # ADR 0083 : quel que soit l'ensemble de layers déclaré, default_target = layers
+        # (la séquence est dérivée, pas mappée sur un preset nommé).
+        for decl in ([], ["dataops"], ["metrics"], ["gitops", "metrics"], ["atlas"]):
+            self.assertEqual(default_target(self._topo_layers(decl)), "layers")
+        self.assertEqual(default_target(self._topo_layers(["dataops"], "ceph")), "layers")
 
-    def test_layers_metrics_derives_metrics(self):
-        self.assertEqual(default_target(self._topo_layers(["metrics"])), "metrics")
+    def test_layers_atlas_alias_full_chain(self):
+        # `layers: [atlas]` dérive la chaîne MLOps complète via le graphe (ADR 0083).
+        seq = expected_phase_sequence(self._topo_layers(["atlas"]), None)
+        self.assertEqual(
+            seq,
+            [
+                "up",
+                "bootstrap",
+                "storage-simple",
+                "metrics-server",
+                "monitoring",
+                "gitops",
+                "dataops",
+                "gitops-seed",
+                "mlflow",
+            ],
+        )
 
-    def test_layers_empty_is_socle(self):
-        self.assertEqual(default_target(self._topo_layers([])), "socle")
-
-    def test_layers_non_prefix_derives_layers_path(self):
-        # [gitops, metrics] : pas de preset NOMMÉ → chemin générique `layers` (ADR 0069,
-        # Lot B), dont la séquence est dérivée de resolve_layers (graphe atomique).
-        self.assertEqual(default_target(self._topo_layers(["gitops", "metrics"])), "layers")
+    def test_layers_non_prefix_palier(self):
+        # [gitops, metrics] : palier non-préfixe, séquence dérivée de resolve_layers.
+        seq = expected_phase_sequence(self._topo_layers(["gitops", "metrics"]), None)
+        self.assertEqual(seq, ["up", "bootstrap", "storage-simple", "metrics-server", "gitops"])
 
     def test_store_ceph_layers_sequence_includes_datalake(self):
         # Régression du « plan faux » : profil store + ceph → chemin layers, séquence
@@ -197,11 +215,12 @@ class TargetValidation(unittest.TestCase):
         )
 
     def test_ha_topology_derives_ha_3cp(self):
-        # > 1 CP DÉCLARÉ → default_target dérive ha-3cp (sélection par topologie,
-        # pas commande à flags — ADR 0056). HA prime sur le profil applicatif.
+        # > 1 CP DÉCLARÉ → default_target dérive ha-3cp (HA prime). ADR 0083 conserve
+        # le chemin HA tel quel (son refactor en layers est différé à une PR dédiée).
         self.assertEqual(default_target(self._ha_topo()), "ha-3cp")
 
     def test_ha_3cp_sequence(self):
+        # Séquence HA propre (amorçage VIP + joins), inchangée par l'ADR 0083.
         seq = expected_phase_sequence(self._ha_topo())
         self.assertEqual(seq, ["up", "bootstrap-ha", "join-cp", "storage-simple"])
 
@@ -347,6 +366,9 @@ _DEPS_LOCAL = {
     "gitops": {"storage-simple"},
     "dataops": {"monitoring", "storage-simple"},
     "gitops-seed": {"gitops"},
+    # mlflow (ADR 0082/0083) dépend de dataops (base CNPG) + monitoring (SeaweedFS),
+    # comme le vrai graphe (phase_deps) — sinon installable_now le croit montable au socle.
+    "mlflow": {"dataops", "monitoring"},
 }
 
 

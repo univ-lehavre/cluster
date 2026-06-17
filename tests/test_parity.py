@@ -35,6 +35,7 @@ _ARMS = {
     "socle": ("base", "local-path", ["up", "bootstrap"]),
     # metrics (ADR 0068) : socle léger + metrics-server seul (arm `metrics)` run-phases.sh).
     "metrics": ("metrics", "local-path", ["up", "bootstrap", "metrics-server"]),
+    # ADR 0083 : `atlas` = alias de la chaîne MLOps complète — ancien atlas + mlflow.
     "atlas": (
         "dataops",
         "local-path",
@@ -47,6 +48,7 @@ _ARMS = {
             "gitops",
             "dataops",
             "gitops-seed",
+            "mlflow",
         ],
     ),
     "storage-real": (
@@ -59,6 +61,8 @@ _ARMS = {
         "ceph",
         ["up", "bootstrap", "ceph", "sc", "datalake", "monitoring", "dataops"],
     ),
+    # ADR 0083 : `atlas` en ceph = ancien atlas-ceph + metrics-server (sur-ensemble
+    # assumé) + mlflow.
     "atlas-ceph": (
         "dataops",
         "ceph",
@@ -68,10 +72,12 @@ _ARMS = {
             "ceph",
             "sc",
             "datalake",
+            "metrics-server",
             "monitoring",
             "gitops",
             "dataops",
             "gitops-seed",
+            "mlflow",
         ],
     ),
 }
@@ -106,20 +112,28 @@ class ParityArms(unittest.TestCase):
 
 
 class ParityLayersArm(unittest.TestCase):
-    """L'arm GÉNÉRIQUE `layers <seq>` (ADR 0069) monte la MÊME chose que l'arm nommé
-    correspondant : socle + resolve_layers == expected_phase_sequence(preset). Garde-fou
-    que le chemin layers ne diverge pas des presets prouvés (gitops-seed mis à part —
-    posé par l'arm atlas en queue, hors clôture du graphe)."""
+    """ADR 0083 : `--target atlas` et `layers: [atlas]` produisent la MÊME séquence —
+    l'ordre vient du graphe (resolve_layers), une seule source de vérité. Garde-fou que
+    le preset nommé (rétrocompat CLI) ne diverge pas de l'alias de layers."""
 
-    def test_layers_atlas_equiv_local_path(self):
-        from nestor.layers import resolve_layers
-
-        # layers = le profil dataops complet (atlas) en local-path.
-        resolved = resolve_layers(["metrics", "store", "obs", "gitops", "dataops"], "local-path")
-        layers_seq = ["up", "bootstrap", *resolved]
-        atlas = expected_phase_sequence(_topo("dataops", "local-path"), "atlas")
-        # atlas porte gitops-seed en plus (posé en queue par l'arm, hors graphe).
-        self.assertEqual(layers_seq, [p for p in atlas if p != "gitops-seed"])
+    def test_target_atlas_equals_layers_atlas(self):
+        # `--target atlas` (preset) == topo déclarant `layers: [atlas]` (alias) :
+        # même séquence, dérivée du graphe atomique. C'est le cœur de l'ADR 0083.
+        via_target = expected_phase_sequence(_topo("dataops", "local-path"), "atlas")
+        topo_layers = topology_from_dict(
+            {
+                "catalog": {"topology": "x"},
+                "layers": ["atlas"],
+                "nodes": [
+                    {"name": "cp1", "roles": ["control"]},
+                    {"name": "node1", "roles": ["worker"]},
+                ],
+                "storage": {"backend": "local-path"},
+                "target_kind": "lima",
+            }
+        )
+        via_layers = expected_phase_sequence(topo_layers, None)  # default_target → layers
+        self.assertEqual(via_target, via_layers)
 
 
 class ParityHardening(unittest.TestCase):

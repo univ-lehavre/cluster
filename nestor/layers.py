@@ -43,6 +43,14 @@ LAYER_PHASES: dict[str, list[str]] = {
     "store": ["storage"],
     "obs": ["monitoring"],
     "dataops": ["dataops"],
+    # `atlas` (ADR 0083) : alias de la CHAÎNE MLOps complète — ancien preset atlas
+    # (metrics-server + monitoring + gitops + gitops-seed + dataops) PLUS mlflow
+    # (ADR 0082). Alias COMPOSITE : il référence d'autres alias (metrics/obs/store)
+    # → _expand_to_phases se déplie récursivement. L'ORDRE vient de resolve_layers
+    # (graphe atomique) ; ici un simple ENSEMBLE. `gitops-seed` est listé explicitement
+    # (phase de QUEUE non tirée par la clôture de [gitops]). N'EST PAS un profil
+    # (profile reste le préfixe cumulatif base⊂…⊂dataops, ADR 0039) : `layers: [atlas]`.
+    "atlas": ["metrics", "store", "obs", "gitops", "dataops", "gitops-seed", "mlflow"],
 }
 
 # Phases applicatives composables au grain phase (queue, hors socle up/bootstrap).
@@ -97,18 +105,29 @@ def _rb(call: str, backend: str) -> str:
     return out.stdout
 
 
-def _expand_to_phases(declared: list[str]) -> list[str]:
+def _expand_to_phases(declared: list[str], _seen: frozenset[str] = frozenset()) -> list[str]:
     """Normalise les jetons `layers` en phases/jetons (alias de profil → ses phases).
 
-    Lève TopologyError sur un jeton inconnu. Le jeton `storage` (abstrait) est laissé
-    tel quel : le graphe le résout par backend dans _expand_alias."""
+    Dépliage RÉCURSIF : un alias peut référencer d'autres alias (ex. `atlas` →
+    `metrics`/`obs`/`store` → leurs phases). `_seen` borne la récursion (anti-cycle :
+    un alias qui se référence, direct ou transitif, lève TopologyError). Lève aussi
+    TopologyError sur un jeton inconnu. Le jeton `storage` (abstrait) et les phases
+    brutes (non-alias) sont laissés tels quels : le graphe les résout dans _expand_alias."""
     phases: list[str] = []
     for token in declared:
         if token not in VALID_LAYERS:
             raise TopologyError(
                 f"couche `{token}` inconnue (valides : {sorted(VALID_LAYERS)}, ADR 0069)"
             )
-        phases.extend(LAYER_PHASES.get(token, [token]))
+        expansion = LAYER_PHASES.get(token, [token])
+        # Jeton terminal (phase brute ou `storage`) : LAYER_PHASES rend [token] inchangé.
+        if expansion == [token]:
+            phases.append(token)
+            continue
+        if token in _seen:
+            raise TopologyError(f"alias `{token}` cyclique (chaîne : {sorted(_seen)}, ADR 0083)")
+        # Alias (composite) : déplier récursivement ses jetons (qui peuvent être des alias).
+        phases.extend(_expand_to_phases(expansion, _seen | {token}))
     return phases
 
 

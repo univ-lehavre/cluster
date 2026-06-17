@@ -121,49 +121,43 @@ def phase_playbook(phase: str) -> str | None:
     return spec.playbook if spec else None
 
 
-# ── Séquences ordonnées des chemins nommés (transcription de run-phases.sh) ──
+# ── Socle dérivé + alias de chemins nommés (ADR 0083) ────────────────────────
 # Le socle de BASE = up → bootstrap (k8s + CNI SEULS). Le STOCKAGE n'en fait PAS
-# partie : c'est la brique du profil `store` (ADR 0039 : base ⊂ store ; PROFILE_BRICKS
-# rattache `storage` à store, pas à base). En mode Ceph le socle pose ceph+sc (le
-# stockage Ceph est indissociable du socle de ce backend) ; en local-path, la couche
-# `storage-simple` est ajoutée par les chemins qui en ont besoin (cf. _STORAGE_LAYER).
+# partie (ADR 0039 : base ⊂ store) : il vient des layers déclarés. En mode Ceph le
+# socle pose ceph+sc (stockage Ceph indissociable du socle de ce backend).
 # `hardening` s'insère APRÈS le socle (run_hardening_if_requested) si demandé.
 _SOCLE_CEPH = ["up", "bootstrap", "ceph", "sc"]
 _SOCLE_LIGHT = ["up", "bootstrap"]
-# Couche stockage local-path, insérée APRÈS le socle léger pour les chemins dont le
-# profil consomme du stockage (store+). Le chemin `socle` (profil base) ne la pose PAS.
-_STORAGE_LAYER = ["storage-simple"]
-# Chemins local-path qui EXIGENT le stockage (profil store+ : leurs apps créent des PVC).
-_LOCAL_PATH_NEEDS_STORAGE = {"atlas"}
 
-# Phases propres à chaque chemin, APRÈS le socle (+ stockage + hardening éventuel).
-_PATH_TAIL: dict[str, list[str]] = {
-    "socle": [],
-    # `metrics` (ADR 0068) : palier fin = socle + metrics-server seul (sans stockage,
-    # sans monitoring). default_target le dérive pour profile=metrics.
-    "metrics": ["metrics-server"],
-    "atlas": ["metrics-server", "monitoring", "gitops", "dataops", "gitops-seed"],
-    "storage-real": ["datalake", "smoke-s3", "wordpress"],
-    "cluster-dataops": ["datalake", "monitoring", "dataops"],
-    "atlas-ceph": ["datalake", "monitoring", "gitops", "dataops", "gitops-seed"],
-}
-
-# Chemins qui exigent le backend Ceph (WITH_CEPH=1 dans run-phases.sh).
-_CEPH_PATHS = {"storage-real", "cluster-dataops", "atlas-ceph"}
-
-# ha-3cp : control-plane HA hyperconvergé (ADR 0047/0055). Séquence À PART : le
-# « socle » n'est PAS up→bootstrap→storage mais l'amorçage HA (bootstrap du CP
-# primaire derrière la VIP + promotion des CP additionnels), porté par le chemin
-# nommé run-phases.sh ha-3cp qui DÉLÈGUE l'orchestration Ansible à Python
-# (nestor/ha.py). On l'expose comme chemin connu (sélection via
-# default_target) avec sa séquence propre — pas un socle+tail.
+# ha-3cp : chemin HA à séquence PROPRE (amorçage VIP + joins etcd), NON réductible à
+# des layers. Son refactor (HA = propriété de la topologie) est DIFFÉRÉ à une PR dédiée
+# (ADR 0083 §À revoir) — ici on le conserve tel quel pour ne pas casser le HA existant.
 _HA_3CP_SEQUENCE = ["up", "bootstrap-ha", "join-cp", "storage-simple"]
 
-# `layers` : chemin GÉNÉRIQUE (ADR 0069) pour les profils SANS preset nommé (store, obs,
-# paliers non-préfixe). Sa queue n'est PAS statique : elle est DÉRIVÉE de resolve_layers
-# (graphe atomique backend-conditionnel) dans expected_phase_sequence. L'arm `layers)` de
-# run-phases.sh l'exécute (ordre fourni par Python). Pas dans _PATH_TAIL (tail calculée).
-KNOWN_TARGETS = frozenset(_PATH_TAIL) | {"ha-3cp", "layers"}
+# Alias de chemins nommés → ENSEMBLE de layers (ADR 0083). PLUS de séquence figée
+# (`_PATH_TAIL` supprimé) : l'ORDRE vient TOUJOURS de resolve_layers (graphe atomique).
+# Ces noms ne sont plus DÉRIVÉS par défaut (default_target rend `layers`) ; ils restent
+# acceptés via `--target <nom>` (rétrocompat CLI/scénarios). `atlas` vit dans
+# LAYER_PHASES (alias composite, nestor/layers.py) — ici les presets de CHEMIN restants.
+_PRESET_LAYERS: dict[str, list[str]] = {
+    "socle": ["base"],
+    "metrics": ["metrics"],
+    "atlas": ["atlas"],  # alias composite (LAYER_PHASES) : chaîne MLOps complète
+    "storage-real": ["store"],  # pile stockage + épreuves S3/wordpress (cf. _PRESET_EPREUVES)
+    "cluster-dataops": ["store", "obs", "dataops"],
+    "atlas-ceph": ["atlas"],  # même alias ; le backend ceph donne la pile Ceph
+}
+# Épreuves jetables (hors graphe atomique) ajoutées EN QUEUE par certains presets :
+# storage-real = pile stockage (store) + smoke-s3 + wordpress (harnais — pas des layers).
+_PRESET_EPREUVES: dict[str, list[str]] = {
+    "storage-real": ["smoke-s3", "wordpress"],
+}
+# Presets qui exigent le backend Ceph (refusés en local-path, parité run-phases.sh).
+_CEPH_PRESETS = {"storage-real", "cluster-dataops", "atlas-ceph"}
+
+# Cibles connues acceptées par `--target` : les alias de chemin + l'épreuve storage-real
+# + le générique `layers` + `ha-3cp` (chemin HA conservé, refactor différé, ADR 0083).
+KNOWN_TARGETS = frozenset(_PRESET_LAYERS) | set(_PRESET_EPREUVES) | {"layers", "ha-3cp"}
 
 
 class PlanError(ValueError):
@@ -185,55 +179,43 @@ def _hardening_requested(topo: Topology) -> bool:
 
 
 def default_target(topo: Topology) -> str:
-    """Chemin nommé DÉDUIT de la topologie déclarée (ADR 0056 : une topologie se
-    déclare, l'outil en dérive le chemin — pas une commande impérative à flags).
+    """Chemin DÉDUIT de la topologie déclarée (ADR 0083).
 
-    HA D'ABORD : plus d'un control-plane (`is_ha_control_plane`) → `ha-3cp`, quel
-    que soit le reste (la HA est une propriété du CONTROL-PLANE, orthogonale aux
-    couches). Sinon on mappe l'ENSEMBLE de couches résolu (`declared_layers` →
-    resolve_layers, ADR 0069) sur le PRESET nommé correspondant — c'est ce que `up`
-    passe à run-phases.sh (parité bash, presets conservés). Un set sans preset
-    dédié sera monté par l'arm générique `layers` (Lot B) ; en attendant on retombe
-    sur le plus proche. `layers` absent → dérivé du profil (rétrocompat ADR 0039)."""
+    HA D'ABORD : > 1 control-plane → `ha-3cp` (chemin d'amorçage VIP/etcd à séquence
+    propre, NON réductible à des layers ; son refactor est différé à une PR dédiée).
+    Sinon : TOUJOURS `layers` — la séquence vient EXCLUSIVEMENT du graphe atomique
+    (`resolve_layers`) + le socle dérivé. Plus de mapping vers des presets applicatifs
+    (`atlas`/`socle`/`metrics`/`atlas-ceph`), seconde source de vérité de l'ordre
+    supprimée. Les noms de preset restent acceptés via `--target <nom>` (KNOWN_TARGETS,
+    rétrocompat) mais ne sont plus DÉRIVÉS. `atlas` est désormais un alias de LAYERS
+    (`layers: [atlas]`), pas un chemin."""
     if topo.is_ha_control_plane:
         return "ha-3cp"
-    backend = _backend_of(topo)
-    # On mappe sur le DÉCLARÉ (aliases/phases bruts, PUR — pas de resolve_layers qui
-    # shellerait le graphe) : le preset est une décision sur CE qui est demandé, pas
-    # sur la clôture. `base` est filtré (socle implicite). Les noms de phase comptent
-    # comme leur couche (gitops-seed ⇒ dataops+gitops déjà présents par construction).
-    layers = {layer for layer in topo.declared_layers if layer != "base"}
-    # dataops (toute la pile applicative) → atlas / atlas-ceph (le preset complet).
-    if "dataops" in layers:
-        return "atlas-ceph" if backend == "ceph" else "atlas"
-    # metrics SEUL (palier fin, ADR 0068) → preset `metrics`.
-    if layers in ({"metrics"}, {"metrics-server"}):
-        return "metrics"
-    # base nu (rien de déclaré au-delà) → socle.
-    if not layers:
-        return "socle"
-    # Tout autre set (store/obs/paliers non-préfixe) : pas de preset NOMMÉ → l'arm
-    # générique `layers` (ADR 0069, Lot B), dont la séquence est DÉRIVÉE de resolve_layers
-    # (graphe atomique backend-conditionnel). C'est ce qui rend `store` complet (ceph+sc+
-    # datalake en ceph) au lieu du repli `socle` tronqué.
     return "layers"
 
 
 def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[str]:
-    """Séquence ORDONNÉE de phases d'un chemin nommé, selon le backend de `topo`.
+    """Séquence ORDONNÉE de phases, selon le backend et la HA de `topo` (ADR 0083).
 
-    Transcription fidèle des arms de run-phases.sh (ADR 0063 G3) : socle (ceph ou
-    léger) + `hardening` si demandé + la queue propre au chemin. Lève PlanError si
-    le chemin est inconnu, ou si un chemin Ceph est demandé sur un backend non-ceph
-    (incohérence que run-phases.sh refuse aussi).
+    UNE seule logique : socle DÉRIVÉ (léger / ceph / HA) + `hardening` si demandé +
+    la queue DÉRIVÉE du graphe atomique (`resolve_layers`) — plus de table figée par
+    preset. `target` choisit seulement l'ENSEMBLE de layers : `layers` (défaut) prend
+    les couches déclarées de la topo ; un nom de preset (`--target atlas`…) prend son
+    alias (`_PRESET_LAYERS`), plus d'éventuelles épreuves jetables en queue
+    (`_PRESET_EPREUVES`, hors graphe). Lève PlanError sur un target inconnu ou un
+    preset Ceph sur backend non-ceph (parité run-phases.sh).
     """
+    from nestor.layers import resolve_layers
+
     target = target or default_target(topo)
     if target not in KNOWN_TARGETS:
         raise PlanError(f"chemin `{target}` inconnu (connus : {sorted(KNOWN_TARGETS)})")
+    backend = _backend_of(topo)
+
+    # ha-3cp : chemin HA à séquence propre (amorçage VIP + joins), conservé tel quel
+    # (refactor différé, ADR 0083). Backend local-path imposé (HA ⊥ stockage, #250).
     if target == "ha-3cp":
-        # Chemin HA à séquence propre (amorçage VIP + joins), backend local-path
-        # imposé (HA ⊥ stockage, #250). Le durcissement reste appliquable en amont.
-        if _backend_of(topo) == "ceph":
+        if backend == "ceph":
             raise PlanError(
                 "chemin `ha-3cp` = local-path (HA ⊥ stockage, #250) ; pas de backend ceph"
             )
@@ -241,34 +223,20 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
         if _hardening_requested(topo):
             seq.insert(2, "hardening")  # après bootstrap-ha, avant les joins
         return seq
-    backend = _backend_of(topo)
-    if target in _CEPH_PATHS and backend != "ceph":
+
+    if target in _CEPH_PRESETS and backend != "ceph":
         raise PlanError(f"chemin `{target}` exige le backend ceph (déclaré : `{backend}`)")
-    if target == "atlas" and backend == "ceph":
-        # run-phases.sh refuse atlas + WITH_CEPH (utiliser atlas-ceph).
-        raise PlanError("chemin `atlas` = profil local-path ; pour Ceph utiliser `atlas-ceph`")
-    socle = _SOCLE_CEPH if backend == "ceph" else _SOCLE_LIGHT
-    seq = list(socle)
+    # Socle DÉRIVÉ : ceph (bloc dans le socle) ou léger. Le stockage local-path n'est
+    # PAS dans le socle (ADR 0039) : il vient des layers déclarés (resolve_layers).
+    seq = list(_SOCLE_CEPH if backend == "ceph" else _SOCLE_LIGHT)
     if _hardening_requested(topo):
         seq.append("hardening")
-    if target == "layers":
-        # Chemin GÉNÉRIQUE (ADR 0069) : la queue est DÉRIVÉE des couches déclarées via le
-        # graphe atomique backend-conditionnel (resolve_layers), pas une table figée. On
-        # retire le préfixe socle (up/bootstrap[,ceph,sc]) déjà posé ci-dessus — resolve_
-        # layers rend la queue applicative, mais `storage`→ceph,sc,datalake en ceph inclut
-        # ceph+sc qui SONT dans le socle Ceph : on les filtre pour ne pas les doubler.
-        from nestor.layers import resolve_layers
-
-        queue = [p for p in resolve_layers(topo.declared_layers, backend) if p not in seq]
-        seq.extend(queue)
-        return seq
-    # Couche stockage local-path : ajoutée APRÈS le socle pour les chemins store+ qui
-    # en ont besoin (le Ceph l'a déjà dans son socle ; le chemin `socle`/base ne la
-    # pose pas — base = k8s+CNI nus, ADR 0039). Avant la queue applicative (les apps
-    # consomment le stockage).
-    if backend != "ceph" and target in _LOCAL_PATH_NEEDS_STORAGE:
-        seq.extend(_STORAGE_LAYER)
-    seq.extend(_PATH_TAIL[target])
+    # Queue DÉRIVÉE du graphe : layers déclarés (target=layers) ou l'alias du preset.
+    declared = topo.declared_layers if target == "layers" else _PRESET_LAYERS[target]
+    queue = [p for p in resolve_layers(declared, backend) if p not in seq]
+    seq.extend(queue)
+    # Épreuves jetables (hors graphe atomique) ajoutées en queue par certains presets.
+    seq.extend(_PRESET_EPREUVES.get(target, []))
     return seq
 
 

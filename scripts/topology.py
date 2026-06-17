@@ -2075,26 +2075,20 @@ def cmd_up(args: argparse.Namespace) -> int:
         raise _UsageError(str(exc)) from exc
     stack_name = topo.catalog.get("topology", "—")
 
-    # ADR 0069 : si les `layers` déclarés veulent des couches que le PRESET dérivé ne
-    # monte pas (palier non-préfixe, ex. [gitops, metrics] → preset socle), on bascule
-    # sur l'arm GÉNÉRIQUE `layers <seq>` — Python fournit l'ordre (resolve_layers, tri
-    # du graphe atomique), bash exécute. Sans --target explicite seulement (un --target
-    # force le preset). Le socle (up/bootstrap) préfixe la séquence passée à l'arm.
-    # On ne résout les couches (qui interroge le graphe) QUE si `layers` est
-    # EXPLICITEMENT déclaré ET qu'aucun --target n'est forcé : un profil scalaire
-    # (rétrocompat) passe par son preset sans ce détour.
-    layers_seq: list[str] | None = None
-    if not args.target and topo.layers:
-        backend = topo.storage.get("backend", "local-path")
-        try:
-            resolved = resolve_layers(topo.declared_layers, backend)
-        except TopologyError as exc:
-            raise _UsageError(str(exc)) from exc
-        # Couches voulues NON couvertes par la séquence du preset → arm `layers`.
-        if resolved and not set(resolved).issubset(set(seq)):
-            socle = ["up", "bootstrap", "ceph", "sc"] if backend == "ceph" else ["up", "bootstrap"]
-            layers_seq = socle + resolved
-            seq = layers_seq  # le PLAN affiché reflète la vraie séquence montée
+    # ADR 0083 : l'ordre vient TOUJOURS de `seq` (expected_phase_sequence → graphe
+    # atomique). `cmd_up` choisit seulement par quel ARM bash l'exécuter :
+    #   - HA (topo.is_ha_control_plane) : socle d'amorçage non réductible à des layers
+    #     (kube-vip + join etcd) → arm `ha-3cp` (run-phases.sh inchangé, orchestré par
+    #     nestor/ha.py). La queue applicative éventuelle suit l'arm `layers`.
+    #   - `--target <preset>` explicite : arm nommé (rétrocompat CLI/scénarios).
+    #   - sinon (défaut `layers`) : arm GÉNÉRIQUE `layers <seq>` (Python décide l'ordre,
+    #     bash exécute — fini le preset dérivé, plus de 2e source de vérité).
+    # ADR 0083 : par défaut (`target == "layers"`), tout passe par l'arm GÉNÉRIQUE
+    # `layers <seq>` — Python décide l'ordre (graphe atomique), bash exécute, plus de
+    # preset dérivé. Un `--target <nom>` explicite (atlas, ha-3cp…) force l'arm nommé
+    # (rétrocompat CLI/scénarios). `ha-3cp` (dérivé pour une topo HA) garde son arm
+    # propre (amorçage VIP/etcd non réductible à des layers — refactor différé).
+    layers_seq = list(seq) if target == "layers" else None
 
     # Affiche le PLAN (les couches à monter) avant de confirmer — comme `preview`.
     print(f"stack : {stack_name}  →  chemin : {target}")
@@ -2124,6 +2118,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         argv = ["bash", runphases, "layers", ",".join(layers_seq)]
         libelle = f"layers [{', '.join(topo.declared_layers)}]"
     else:
+        # `--target <nom>` explicite (atlas…) ou ha-3cp dérivé : arm nommé (rétrocompat).
         argv = ["bash", runphases, target]
         libelle = f"chemin `{target}`"
     print(f"→ montage {libelle} ({len(topo.nodes)} nœud(s)) via run-phases.sh…")

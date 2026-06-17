@@ -62,6 +62,30 @@ def _deny_run(argv, *a, **k):
     return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
 
 
+def _install_graph_passthrough(test):
+    """ADR 0083 : `expected_phase_sequence` shelle MAINTENANT le graphe atomique
+    (rollback-lib.sh via `bash -c`) pour DÉRIVER l'ordre des couches — y compris pour
+    les chemins qui utilisaient avant une table figée (`_PATH_TAIL`, supprimée). Le
+    default-deny du module (`_deny_run`) rendrait un `stdout` vide à ces appels → le
+    graphe résoudrait une queue VIDE (preview/next ne verraient que le socle). Ce helper
+    installe un spy qui LAISSE PASSER les appels au graphe vers le VRAI subprocess (local,
+    déterministe, sans banc) et ne DÉNIE que les tokens de provisionnement réel.
+
+    `cli.subprocess` est le MÊME objet module que `nestor.layers.subprocess` : poser
+    `cli.subprocess.run` suffit pour les deux. Restauré au `_deny_run` du module."""
+    real_run = _REAL_SUBPROCESS_RUN
+
+    def _spy(argv, *a, **k):
+        flat = " ".join(map(str, argv)) if isinstance(argv, (list, tuple)) else str(argv)
+        if any(tok in flat for tok in _FORBIDDEN_TOKENS) or ("kubectl" in flat and "scale" in flat):
+            return _deny_run(argv, *a, **k)  # provisionnement réel : refus bruyant
+        return real_run(argv, *a, **k)  # tout le reste (le GRAPHE) tourne pour de vrai
+
+    orig = cli.subprocess.run
+    cli.subprocess.run = _spy
+    test.addCleanup(setattr, cli.subprocess, "run", orig)
+
+
 _REAL_ASSERT_BENCH = cli._assert_bench_target  # garde d'isolation réelle
 _REAL_WAIT_HEALTHY = cli._wait_layer_healthy  # gate de santé réelle (#355)
 
@@ -444,6 +468,9 @@ runs:
         self.addCleanup(setattr, cli, "_real_vms", self._orig_vms)
         self.addCleanup(setattr, cli, "_ready_nodes", self._orig_ready)
         self.addCleanup(setattr, cli, "_observed_layers", self._orig_obs)
+        # ADR 0083 : laisser le graphe atomique (resolve_layers) tourner pour de vrai —
+        # sinon `expected_phase_sequence` ne dériverait que le socle (queue vide).
+        _install_graph_passthrough(self)
 
     def test_three_sections_voulu_reel_plan(self):
         # preview absorbe status (VOULU) + refresh (RÉEL) : les 3 sections présentes.
@@ -604,8 +631,17 @@ runs:
         self.assertIn("à installer", out)  # aucun run de CETTE stack → inédit
 
     def test_incoherent_target_is_usage_error(self):
-        # atlas sur backend ceph (incohérent) → erreur d'usage (code 2), comme `next`.
-        code, _, err = _capture(["preview", "-f", _EXAMPLE, "--target", "atlas"])
+        # ADR 0083 : `atlas` est backend-agnostique (plus incohérent sur ceph). Le cas
+        # incohérent reste un preset CEPH-ONLY (`storage-real`) sur une topo local-path →
+        # erreur d'usage (code 2), comme `next`/`up`.
+        topo_yaml = (
+            "catalog: {topology: lp, profile: base}\n"
+            "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
+            "storage: {backend: local-path}\ntarget_kind: lima\n"
+        )
+        path = _tmp(topo_yaml)
+        self.addCleanup(os.unlink, path)
+        code, _, err = _capture(["preview", "-f", path, "--target", "storage-real"])
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
@@ -826,10 +862,18 @@ runs:
         cli._observed_layers = lambda _phases: set()
         self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
         calls = []
+        # ADR 0083 : `expected_phase_sequence` shelle le graphe atomique. On n'intercepte
+        # QUE `run-phases.sh` (la délégation observée) et on LAISSE PASSER les appels au
+        # graphe (`bash -c`) vers le vrai subprocess — sinon `_rb` planterait sur un retour
+        # sans `.stdout`. `_REAL_SUBPROCESS_RUN` = subprocess.run capté avant le deny module.
+        real_run = _REAL_SUBPROCESS_RUN
 
         def fake_run(argv, **kw):
-            calls.append(argv)
-            return sp.CompletedProcess(args=argv, returncode=0)
+            seq = argv if isinstance(argv, list) else [argv]
+            if any("run-phases.sh" in str(c) for c in seq):
+                calls.append(argv)
+                return sp.CompletedProcess(args=argv, returncode=0)
+            return real_run(argv, **kw)  # laisse tourner le GRAPHE pour de vrai
 
         orig = cli.subprocess.run
         cli.subprocess.run = fake_run
@@ -851,7 +895,7 @@ runs:
         # Hors TTY sans --yes : la confirmation refuse → code 2, RIEN n'est monté.
         # On neutralise la sonde réelle `_observed_layers` (kubectl) pour ne capturer
         # QUE les appels de montage (sinon les probes kubectl pollueraient `calls`), et
-        # `phase_deps` (sinon le pont bash heurterait le stub subprocess ci-dessous).
+        # `phase_deps` (sinon le pont bash du menu heurterait le stub subprocess ci-dessous).
         orig_obs = cli._observed_layers
         cli._observed_layers = lambda _phases: set()
         self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
@@ -859,8 +903,22 @@ runs:
         cli.phase_deps = lambda _backend: {"datalake": set(), "monitoring": set(), "dataops": set()}
         self.addCleanup(setattr, cli, "phase_deps", orig_deps)
         calls = []
+        # ADR 0083 : `expected_phase_sequence` shelle le graphe atomique. On LAISSE PASSER
+        # le graphe (`bash -c`) vers le vrai subprocess et n'enregistre que les MONTAGES
+        # (`run-phases.sh`) dans `calls` — la confirmation refuse AVANT tout montage, donc
+        # `calls` doit rester vide même si le graphe a tourné pour de vrai.
+        real_run = _REAL_SUBPROCESS_RUN
+
+        def _spy(*a, **k):
+            argv = a[0] if a else k.get("args")
+            seq = argv if isinstance(argv, list) else [argv]
+            if any("run-phases.sh" in str(c) for c in seq):
+                calls.append(a)
+                return subprocess.CompletedProcess(argv, 0)
+            return real_run(*a, **k)  # laisse tourner le GRAPHE pour de vrai
+
         orig = cli.subprocess.run
-        cli.subprocess.run = lambda *a, **k: calls.append(a) or subprocess.CompletedProcess(a, 0)
+        cli.subprocess.run = _spy
         self.addCleanup(setattr, cli.subprocess, "run", orig)
         hist = _tmp(self._EMPTY_HIST)
         self.addCleanup(os.unlink, hist)
@@ -912,6 +970,10 @@ workers:
             orig = getattr(cli, name)
             setattr(cli, name, lambda _v=val: _v)
             self.addCleanup(setattr, cli, name, orig)
+        # ADR 0083 : `expected_phase_sequence` shelle le graphe atomique — laisser tourner
+        # le graphe pour de vrai (sinon la queue serait vide et `next` ne viserait aucune
+        # couche applicative, court-circuitant la garde d'inventaire qu'on teste ici).
+        _install_graph_passthrough(self)
         self._stub("_observed_layers", lambda _p: set())
         self._stub("phase_deps", lambda _b: {"storage-simple": set(), "metrics-server": set()})
         # Stub launch_phase : si la garde laissait passer, on le SAURAIT (ne doit JAMAIS
@@ -1015,6 +1077,11 @@ runs:
         cli._ready_nodes = lambda: ["cp1"]
         self.addCleanup(setattr, cli, "_real_vms", orig_vms)
         self.addCleanup(setattr, cli, "_ready_nodes", orig_ready)
+        # ADR 0083 : `expected_phase_sequence` shelle le graphe atomique. Laisser tourner
+        # le graphe pour de vrai (sinon la queue serait vide et le menu n'aurait rien à
+        # proposer). Les tests qui re-stubent subprocess.run écrasent ce spy mais stubent
+        # alors aussi phase_deps (carte figée) → pas de re-shell du graphe.
+        _install_graph_passthrough(self)
         # Carte de deps DÉTERMINISTE (== ce que phase_deps dérive du graphe ; prouvé
         # dans test_layers.PhaseDeps) — évite de sheller bash et fige le menu.
         orig_deps = cli.phase_deps
@@ -1670,8 +1737,10 @@ class Stack(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("socle.example", out)
         self.assertIn("★", out)
-        # socle.example (dataops+ceph) dérive atlas-ceph.
-        self.assertIn("atlas-ceph", out)
+        # ADR 0083 : `default_target` rend `layers` pour toute topo non-HA (plus de preset
+        # dérivé comme `atlas-ceph`) — l'ordre vient du graphe atomique, pas d'un nom figé.
+        # La ligne active affiche donc `socle.example → layers`.
+        self.assertRegex(out, r"★ socle\.example\s+→ layers")
 
 
 class UpCommand(unittest.TestCase):
@@ -1680,14 +1749,27 @@ class UpCommand(unittest.TestCase):
     def _stub_runphases(self, rc=0):
         # Capture l'appel à run-phases.sh (PAS de vrai montage en test). `self.env`
         # garde l'environnement passé (pour vérifier NODES_OVERRIDE).
+        # ADR 0083 : `expected_phase_sequence` shelle MAINTENANT le graphe atomique
+        # (rollback-lib.sh via `nestor.layers.subprocess.run`) pour DÉRIVER la séquence.
+        # On n'intercepte donc QUE `run-phases.sh` et on LAISSE PASSER les appels au
+        # graphe (`bash -c '. rollback-lib.sh && …'`) vers le vrai subprocess (local,
+        # déterministe, sans banc) — sinon `_rb` planterait sur un faux retour sans
+        # `.stdout`. On stube les DEUX modules (cli + nestor.layers).
         calls = []
         self.env = {}
+        # VRAI subprocess.run capté AVANT le default-deny du module (sinon `subprocess.run`
+        # est déjà `_deny_run`, qui rendrait un graphe vide).
+        real_run = _REAL_SUBPROCESS_RUN
 
         def _spy(cmd, *a, **k):
-            calls.append(cmd)
-            self.env = k.get("env", {})
-            return subprocess.CompletedProcess(args=cmd, returncode=rc)
+            argv = cmd if isinstance(cmd, list) else [cmd]
+            if any("run-phases.sh" in str(c) for c in argv):
+                calls.append(cmd)
+                self.env = k.get("env", {})
+                return subprocess.CompletedProcess(args=cmd, returncode=rc)
+            return real_run(cmd, *a, **k)  # laisse tourner le GRAPHE pour de vrai
 
+        # `cli.subprocess` est le MÊME module que `nestor.layers.subprocess` : un seul poser.
         orig = cli.subprocess.run
         cli.subprocess.run = _spy
         self.addCleanup(setattr, cli.subprocess, "run", orig)
@@ -1698,10 +1780,16 @@ class UpCommand(unittest.TestCase):
         code, out, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 0)
         self.assertIn("Couches à monter", out)  # le plan affiché
-        # Délégation à run-phases.sh <chemin dérivé> (atlas-ceph pour socle.example).
+        # ADR 0083 : `default_target` rend `layers` (plus de preset dérivé) → délégation
+        # à l'arm GÉNÉRIQUE `run-phases.sh layers <séquence-virgules>`, l'ordre venant du
+        # graphe atomique. socle.example (ceph) dérive up,bootstrap,ceph,sc,datalake,…
         self.assertEqual(len(calls), 1)
         self.assertIn("run-phases.sh", " ".join(calls[0]))
-        self.assertIn("atlas-ceph", calls[0])
+        self.assertEqual(calls[0][-2], "layers")  # arm générique, pas un preset nommé
+        seq = calls[0][-1].split(",")  # séquence complète passée à `layers`
+        self.assertEqual(seq[0], "up")
+        self.assertIn("ceph", seq)  # backend ceph → socle ceph dans la séquence
+        self.assertIn("datalake", seq)
 
     def test_explicit_target_overrides_derivation(self):
         calls = self._stub_runphases()
@@ -1745,9 +1833,18 @@ class UpCommand(unittest.TestCase):
         self.assertIn("échec", err)
 
     def test_incoherent_target_is_usage_error(self):
-        # atlas sur backend ceph (incohérent) → usage (2), avant toute délégation.
+        # ADR 0083 : `atlas` est backend-agnostique (n'est plus incohérent sur ceph). Le
+        # vrai cas incohérent reste un preset CEPH-ONLY (`storage-real`) sur une topo
+        # local-path → PlanError → usage (2), avant toute délégation.
+        topo_yaml = (
+            "catalog: {topology: lp, profile: base}\n"
+            "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
+            "storage: {backend: local-path}\ntarget_kind: lima\n"
+        )
+        path = _tmp(topo_yaml)
+        self.addCleanup(os.unlink, path)
         calls = self._stub_runphases()
-        code, _, err = _capture(["up", "-f", _EXAMPLE, "--target", "atlas", "--yes"])
+        code, _, err = _capture(["up", "-f", path, "--target", "storage-real", "--yes"])
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])
         self.assertIn("usage", err)

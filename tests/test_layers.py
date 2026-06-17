@@ -64,6 +64,31 @@ class ResolveLayersLocalPath(unittest.TestCase):
         # On peut déclarer un nom de phase brut (pas qu'un alias de profil).
         self.assertEqual(resolve_layers(["metrics-server"], "local-path"), ["metrics-server"])
 
+    def test_atlas_alias_is_full_mlops_chain(self):
+        # ADR 0083 : `atlas` = alias COMPOSITE de la chaîne MLOps complète. Reproduit
+        # l'ancien preset atlas (storage-simple → metrics-server → monitoring → gitops
+        # → dataops → gitops-seed) PLUS mlflow (ADR 0082) en queue. L'ordre vient du
+        # graphe atomique (resolve_layers), pas d'une table figée. FILET anti-drift.
+        self.assertEqual(
+            resolve_layers(["atlas"], "local-path"),
+            [
+                "storage-simple",
+                "metrics-server",
+                "monitoring",
+                "gitops",
+                "dataops",
+                "gitops-seed",
+                "mlflow",
+            ],
+        )
+
+    def test_atlas_alias_dedups_redundant_layer(self):
+        # Déclarer une couche DÉJÀ dans atlas (ex. mlflow) ne la double pas.
+        self.assertEqual(
+            resolve_layers(["atlas", "mlflow"], "local-path"),
+            resolve_layers(["atlas"], "local-path"),
+        )
+
 
 class ResolveLayersCeph(unittest.TestCase):
     def test_dataops_ceph_includes_datalake(self):
@@ -78,6 +103,25 @@ class ResolveLayersCeph(unittest.TestCase):
     def test_store_local_path_is_storage_simple(self):
         # en local-path : pas de RGW (datalake ceph-only) → provisioner bloc seul.
         self.assertEqual(resolve_layers(["store"], "local-path"), ["storage-simple"])
+
+    def test_atlas_alias_ceph_full_chain(self):
+        # ADR 0083 : `atlas` en ceph = ancien atlas-ceph (ceph+sc+datalake → monitoring
+        # → gitops → dataops → gitops-seed) PLUS metrics-server (sur-ensemble assumé,
+        # inoffensif) et mlflow (ADR 0082). Ordre du graphe atomique.
+        self.assertEqual(
+            resolve_layers(["atlas"], "ceph"),
+            [
+                "ceph",
+                "sc",
+                "datalake",
+                "metrics-server",
+                "monitoring",
+                "gitops",
+                "dataops",
+                "gitops-seed",
+                "mlflow",
+            ],
+        )
 
 
 class BackendGuard(unittest.TestCase):
