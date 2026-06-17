@@ -297,6 +297,64 @@ class Epreuves(unittest.TestCase):
         self.assertIn("exclues", out)
         self.assertIn("offensif", out)  # 17-21 exclus en prod (ADR 0025)
 
+    def _stub_bench_up(self, observed):
+        # banc joignable + couches `observed` montées + cible banc OK (pas de vrai SSH).
+        orig = {
+            "_ready_nodes": cli._ready_nodes,
+            "_observed_layers": cli._observed_layers,
+            "_assert_bench_target": cli._assert_bench_target,
+        }
+        cli._ready_nodes = lambda: ["node1"]
+        cli._observed_layers = lambda phases: observed
+        cli._assert_bench_target = lambda action: None
+        self._orig_exists = cli.os.path.exists
+        cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else self._orig_exists(p)
+        for k, v in orig.items():
+            self.addCleanup(setattr, cli, k, v)
+        self.addCleanup(setattr, cli.os.path, "exists", self._orig_exists)
+        # capte l'appel run-all.sh sans l'exécuter ; laisse passer les autres subprocess
+        # (resolve_layers shelle le graphe atomique → a besoin du vrai .stdout).
+        self._sp_calls = []
+        orig_run = cli.subprocess.run
+
+        class _CP:
+            returncode = 0
+
+        def fake(argv, **kw):
+            if isinstance(argv, list) and any("run-all.sh" in str(a) for a in argv):
+                self._sp_calls.append((argv, kw.get("env", {})))
+                return _CP()
+            return orig_run(argv, **kw)
+
+        cli.subprocess.run = fake
+        self.addCleanup(setattr, cli.subprocess, "run", orig_run)
+
+    def test_run_plays_only_ready_non_destructive_by_default(self):
+        # --run (sans --full) : dérive ONLY des épreuves PRÊTES NON destructives ; délègue
+        # à run-all.sh ; les ssh/offensif/chaos sont EXCLUS (pas de BANC=1).
+        self._stub_bench_up({"metrics-server", "storage-simple", "ceph", "sc"})
+        code, out, _ = _capture(["test", "scenarios", "-f", _EXAMPLE, "--run"])
+        self.assertEqual(code, 0)
+        self.assertTrue(self._sp_calls, "run-all.sh aurait dû être appelé")
+        argv, env = self._sp_calls[-1]
+        self.assertEqual(argv[0], "bash")
+        self.assertIn("run-all.sh", argv[1])
+        self.assertIn("ONLY", env)  # sélection dérivée passée à run-all.sh
+        self.assertNotIn("BANC", env)  # pas de --full → pas d'offensif
+
+    def test_run_full_adds_banc_env_for_offensive(self):
+        self._stub_bench_up({"metrics-server", "storage-simple", "ceph", "sc"})
+        code, _, _ = _capture(["test", "scenarios", "-f", _EXAMPLE, "--run", "--full"])
+        self.assertEqual(code, 0)
+        _, env = self._sp_calls[-1]
+        self.assertEqual(env.get("BANC"), "1")  # --full → BANC=1 (gardes offensifs ADR 0025)
+
+    def test_run_without_bench_is_usage_error(self):
+        # --run sans banc joignable (état réel) → erreur d'usage, ne lance rien.
+        code, _, err = _capture(["test", "scenarios", "-f", _EXAMPLE, "--run", "--declared"])
+        self.assertEqual(code, 2)
+        self.assertIn("banc", err.lower())
+
     def test_invalid_topology_is_business_error(self):
         path = _tmp("nodes:\n  - name: x\n    roles: [master]\n")
         self.addCleanup(os.unlink, path)
@@ -1182,8 +1240,8 @@ class NextHealthGate(unittest.TestCase):
         self.assertFalse(ok)
 
     def test_phase_without_signal_skips_gate(self):
-        # une phase sans _LAYER_SIGNAL (ex. amont/gitops-seed traité ailleurs) → True direct.
-        ok = cli._wait_layer_healthy("datalake", retries=1, delay=0, sleep=lambda _d: None)
+        # une phase sans _LAYER_SIGNAL (ex. amont up/bootstrap, ou smoke-s3) → True direct.
+        ok = cli._wait_layer_healthy("smoke-s3", retries=1, delay=0, sleep=lambda _d: None)
         self.assertTrue(ok)
 
     def test_monter_phase_returns_1_when_layer_not_healthy(self):

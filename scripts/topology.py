@@ -640,9 +640,19 @@ def _ready_nodes() -> list[str]:
 # Constaté sur le cluster (comme « nœud Ready ») pour que `preview`/`next` reflètent le
 # RÉEL — une couche à moitié posée n'est PAS « à-jour ». Miroir des gates de rôles et de
 # `gate_pred` (run-phases.sh) — même ressource, même critère Ready.
-_LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool]] = {
+# 4e champ = critère de SANTÉ : True → readyReplicas≥1 (workload répliqué) ; False →
+# présence seule (CRD type Application, ou StorageClass cluster-scoped) ; "phase" →
+# status.phase == "Ready" (CR opérateur sans replicas : CephCluster, CephObjectStore Rook).
+_LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool | str]] = {
     "metrics-server": ("deployment", "metrics-server", "kube-system", True),
     "storage-simple": ("deployment", "local-path-provisioner", "local-path-storage", True),
+    # Couches CEPH (banc Ceph) : leurs CR Rook portent la santé dans `status.phase`, PAS
+    # dans readyReplicas (ce ne sont pas des workloads répliqués). Sans ces signaux,
+    # `_observed_layers` ne voyait JAMAIS ceph/sc/datalake montés → preview/next/scenarios
+    # les croyaient « à monter » sur un banc Ceph pourtant up (bug vécu #227).
+    "ceph": ("cephcluster.ceph.rook.io", "rook-ceph", "rook-ceph", "phase"),
+    "sc": ("storageclass", "rook-ceph-block-replicated", None, False),  # cluster-scoped, présence
+    "datalake": ("cephobjectstore.ceph.rook.io", "datalake", "rook-ceph", "phase"),
     "monitoring": ("statefulset", "loki", "monitoring", True),
     "gitops": ("deployment", "argocd-server", "argocd", True),
     "dataops": ("deployment", "dagster-dagster-webserver", "dagster", True),
@@ -685,11 +695,19 @@ def _resource_exists(kind: str, name: str, namespace: str | None) -> bool:
     return out is not None and out.returncode == 0
 
 
-def _resource_healthy(kind: str, name: str, namespace: str | None, ready: bool) -> bool:
-    """La ressource est-elle posée ET saine ? `ready=False` → présence seule (CRD type
-    Application sans replicas). `ready=True` → pour un workload répliqué, readyReplicas≥1
-    (le DERNIER maillon : un Loki à 0/1 réplica n'est PAS sain → la couche n'est pas
-    « à-jour »). Lecture bornée, fail-closed (toute incertitude → False)."""
+def _resource_healthy(kind: str, name: str, namespace: str | None, ready: bool | str) -> bool:
+    """La ressource est-elle posée ET saine ? Trois critères selon `ready` :
+    - `"phase"` → `status.phase == "Ready"` (CR opérateur Rook : CephCluster, CephObjectStore
+      — pas de replicas, la santé est dans la phase) ;
+    - `True` → workload répliqué, readyReplicas≥1 (le DERNIER maillon : un Loki à 0/1 n'est
+      PAS sain) ;
+    - `False` → présence seule (CRD type Application, StorageClass cluster-scoped).
+    Lecture bornée, fail-closed (toute incertitude → False)."""
+    if ready == "phase":
+        out = _kubectl_resource(kind, name, namespace, jsonpath="{.status.phase}")
+        if out is None or out.returncode != 0:
+            return False
+        return (out.stdout or "").strip() == "Ready"
     if not ready or kind not in _READY_REPLICAS_KINDS:
         return _resource_exists(kind, name, namespace)
     out = _kubectl_resource(kind, name, namespace, jsonpath="{.status.readyReplicas}")
@@ -1074,7 +1092,59 @@ def cmd_epreuves(args: argparse.Namespace) -> int:
         print(f"\nÉpreuves exclues ({len(exclues)}) :")
         for e, raison in exclues:
             print(f"  {e.num} [{e.type:<5}] {e.nom} — {raison}")
+
+    if getattr(args, "run", False):
+        return _run_scenarios(jouables, _pretes if runtime else None, full=args.full, topo=topo)
     return 0
+
+
+# Une épreuve est DESTRUCTIVE/OFFENSIVE si elle touche les nœuds (ssh), attaque (offensif),
+# ou est du chaos — réservée à `--full` (+ BANC=1). Les non-destructives (terrain agnostique/
+# API : sondes kubectl in-cluster) sont jouées par défaut. Dérivé du modèle, pas codé.
+_SCENARIO_DESTRUCTIF_TERRAINS = frozenset({"ssh", "offensif"})
+
+
+def _run_scenarios(jouables, pretes_fn, *, full: bool, topo) -> int:
+    """LANCE les scénarios PRÊTS via bench/scenarios/run-all.sh (ADR 0049 : run-all.sh est
+    l'irréductible bash — kubectl/ceph/ssh ; Python le PILOTE, ne le réimplémente pas, #227).
+
+    Sélection DÉRIVÉE : seules les épreuves PRÊTES (couche montée — `pretes_fn`) sont jouées,
+    et sans `--full` on exclut les destructives/offensives (terrain ssh/offensif, type chaos).
+    `nestor` calcule donc le `ONLY=` au lieu d'un SKIP composé à la main. Garde banc imposée."""
+    if pretes_fn is None:
+        raise _UsageError(
+            "`--run` exige un banc joignable (état réel) — exporter KUBECONFIG / `nestor env`, "
+            "ou monter le banc (`nestor up`)."
+        )
+    _assert_bench_target("nestor test scenarios --run")
+    pretes = [e for e in jouables if pretes_fn(e)]
+
+    def _destructif(e) -> bool:
+        return e.terrain in _SCENARIO_DESTRUCTIF_TERRAINS or e.type == "chaos"
+
+    a_jouer = pretes if full else [e for e in pretes if not _destructif(e)]
+    if not a_jouer:
+        ecartees = [e.num for e in pretes if _destructif(e)]
+        suff = f" ({len(ecartees)} destructives/offensives derrière `--full`)" if ecartees else ""
+        print(f"→ aucune épreuve prête à jouer{suff}.")
+        return 0
+    nums = sorted(e.num for e in a_jouer)
+    ecartees = [e.num for e in pretes if _destructif(e)] if not full else []
+    print(f"Lancement de {len(nums)} scénario(s) prêt(s) via run-all.sh : {' '.join(nums)}")
+    if ecartees:
+        print(f"  (exclus sans --full : {' '.join(sorted(ecartees))} — destructifs/offensifs)")
+    runner = os.path.join(_ROOT, "bench", "scenarios", "run-all.sh")
+    env = {**os.environ, "ONLY": " ".join(nums)}
+    if full:
+        env["BANC"] = "1"  # les gardes banc-only des scénarios offensifs (ADR 0025) l'exigent
+    rc = subprocess.run(  # noqa: S603 — chemin codé, ONLY dérivé du modèle (numéros validés)
+        ["bash", runner], check=False, env=env
+    ).returncode
+    if rc == 0:
+        print("→ tous les scénarios joués sont PASS. Consigner le run (RESULTS.md, ADR 0042).")
+    else:
+        print(f"→ au moins un scénario a ÉCHOUÉ (rc={rc}) — voir le tableau ci-dessus.")
+    return rc
 
 
 def cmd_runs(args: argparse.Namespace) -> int:
@@ -3316,6 +3386,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_epr.add_argument(
         "--type", choices=["unit", "intég", "chaos"], default=None, help="filtrer par type"
+    )
+    p_epr.add_argument(
+        "--run",
+        action="store_true",
+        help="LANCER les scénarios prêts (couche montée) via run-all.sh, pas seulement lister",
+    )
+    p_epr.add_argument(
+        "--full",
+        action="store_true",
+        help="avec --run : inclure aussi les scénarios DESTRUCTIFS/OFFENSIFS (ssh/chaos, "
+        "BANC=1) — sinon seuls les non-destructifs (kubectl/API) sont joués",
     )
 
     p_smk = test_sub.add_parser(
