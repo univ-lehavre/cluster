@@ -16,9 +16,9 @@ déploie le **serveur seul**, comme Dagster est livré vide (ADR 0026).
 ## Décision
 
 **MLflow tracking server** sur Kubernetes (image officielle multi-arch
-`ghcr.io/mlflow/mlflow`), dans [`platform/mlflow/`](../../platform/mlflow/),
-appliqué par le rôle Ansible `platform-mlflow` comme les autres addons
-plateforme (manifeste figé appliqué via `kubernetes.core.k8s`, ADR
+`ghcr.io/mlflow/mlflow`), dans `platform/mlflow/`, appliqué par le rôle Ansible
+`platform-mlflow` comme les autres addons plateforme (manifeste figé appliqué
+via `kubernetes.core.k8s`, ADR
 [0033](0033-orchestration-ansible-platform-dataops.md)/[0049](0049-doctrine-choix-outil-par-action.md)
 — pas Argo CD pour l'infra, frontière anti-bootstrap-circulaire ADR 0022).
 
@@ -37,7 +37,7 @@ plateforme (manifeste figé appliqué via `kubernetes.core.k8s`, ADR
   versionnée ([ADR 0023](0023-plateforme-exemple-generique.md)).
 
 - **Artefact store = S3** via le rôle factorisé `platform-s3-bucket`
-  ([ADR 0036](0036-backing-s3-factorise.md)) :
+  ([ADR 0036](0036-backing-s3-unique-rgw.md)) :
   `--default-artifact-root s3://<bucket>/`, `MLFLOW_S3_ENDPOINT_URL` pointant le
   **backing actif** (RGW Ceph en prod / SeaweedFS au banc léger). Même chemin de
   code, backing paramétré ; le bucket OBC auto-nommé est résolu au runtime par

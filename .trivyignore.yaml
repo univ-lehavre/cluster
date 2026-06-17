@@ -181,6 +181,12 @@ misconfigurations:
     paths:
       - 'platform/dagster/dagster.yaml'
       - 'bench/lima/atlas-workflow-sample/workflow-job.yaml'
+  - id: KSV-0014 # rootfs read-only impossible pour MLflow (ADR 0082) : le serveur
+    # écrit son cache et le spooling des artefacts S3 dans /tmp → rootfs writable
+    # requis. Le reste est durci (non-root, drop ALL, no privilege escalation,
+    # seccomp RuntimeDefault dans le manifeste) — seul ce point reste acté.
+    paths:
+      - 'platform/mlflow/mlflow.yaml'
   - id: KSV-0118 # securityContext par défaut sur les workloads du chart amont
     # (webserver/daemon) — non durci en amont. Idem le workflow jouet (#231) qui
     # tourne en root comme l'émetteur de référence (Dagster l'exige ; #234).

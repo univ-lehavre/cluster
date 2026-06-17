@@ -55,6 +55,15 @@ spec:
         app.kubernetes.io/part-of: dataops
     spec:
       serviceAccountName: default
+      # Durcissement (KSV-0118) : non-root, pas d'escalade, capabilities droppées.
+      # rootfs NON read-only (KSV-0014 allowlisté) : MLflow écrit son cache/tmp et le
+      # spooling S3 dans /tmp — read-only casserait le serveur (acté comme Dagster).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       # wait-for-db : MLflow crée/migre son schéma au démarrage → attendre que CNPG
       # réponde. Image postgres épinglée par digest d'index multi-arch (ADR 0006),
       # identique à l'init Dagster/Marquez.
@@ -62,6 +71,11 @@ spec:
         - name: wait-for-db
           image: 'docker.io/library/postgres:14.6@sha256:f565573d74aedc9b218e1d191b04ec75bdd50c33b2d44d91bcd3db5f2fcea647'
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           command:
             - sh
             - -c
@@ -71,6 +85,11 @@ spec:
           # Image officielle MULTI-ARCH (amd64+arm64) épinglée par digest d'INDEX (ADR 0006).
           image: 'ghcr.io/mlflow/mlflow:v3.4.0@sha256:9c9e24a3fc24a0e9dcc5ba1daa9ebfc59e01b0a23b6eb89a4fdf25b84ad5347c'
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           # `mlflow server` : backend store = base CNPG `mlflow` ; artefact store = S3
           # (--default-artifact-root injecté par MLFLOW_DEFAULT_ARTIFACT_ROOT, résolu au
           # runtime par le rôle car le bucket OBC est auto-nommé).
