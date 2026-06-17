@@ -11,6 +11,106 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.37.0](https://github.com/univ-lehavre/cluster/compare/v2.36.0...v2.37.0) (2026-06-17)
+
+
+### Features
+
+* **cluster:** fonction shell (pose KUBECONFIG), -h groupé, next confirme ([086fe04](https://github.com/univ-lehavre/cluster/commit/086fe0478eb3fd7f6fe1d7c686df3d9b0801a9e2))
+* **cluster:** outil déclaratif — next/remove/refresh, menu de couches, santé, isolation banc↔prod durcie ([22a4202](https://github.com/univ-lehavre/cluster/commit/22a4202e61c5ed97d57f6a4d0b9ab8e9d83a9259))
+* **discover:** lire le node-side (CRI/CNI/disques) via node_exec (ADR 0081 étape 3) ([ce46b59](https://github.com/univ-lehavre/cluster/commit/ce46b59b7745f2da75190f721803cadd28fa26e7))
+* **discover:** lire le node-side (CRI/CNI/disques/durcissement) via node_exec (ADR 0081 étape 3) ([cf1f086](https://github.com/univ-lehavre/cluster/commit/cf1f086dcc1068d883556a19698d3715aa14fc13))
+* **discover:** rapatrier le kubeconfig depuis le control-plane (ADR 0081 étape 2) ([d10517c](https://github.com/univ-lehavre/cluster/commit/d10517c50a94068fdeba7429908120157a1c1f26))
+* **discover:** rapatrier le kubeconfig depuis le control-plane (ADR 0081 étape 2) ([26dd908](https://github.com/univ-lehavre/cluster/commit/26dd90858dcea0c36adc48a3d3414a8d0c748069))
+* **gouvernance:** notations & normes externes — doctrine de badges (ADR 0080) ([2a29bb4](https://github.com/univ-lehavre/cluster/commit/2a29bb42662c5b4adc6015dae46cdc047f3c248f))
+* **next:** gate de santé active après montage — attendre le dernier maillon Ready ([#355](https://github.com/univ-lehavre/cluster/issues/355)) ([0786064](https://github.com/univ-lehavre/cluster/commit/0786064bf3d0b93727ba49ac80a38407af68bd49))
+* **next:** gate de santé active après montage ([#355](https://github.com/univ-lehavre/cluster/issues/355)) ([b971997](https://github.com/univ-lehavre/cluster/commit/b9719978fa8ed6b3e81011f3be85649f29434485))
+* **next:** menu des couches montables — choix d'ordre (deps réelles vs convention) ([83f5bff](https://github.com/univ-lehavre/cluster/commit/83f5bff9a3f940cc6a1c2e4c5d3af89dc048a320))
+* **node-exec:** brique node_exec + résolution inventaire (ADR 0081 étape 1) ([ba29791](https://github.com/univ-lehavre/cluster/commit/ba29791cf58f4c568e608b212bd631e4d372dec0))
+* **node-exec:** brique node_exec + résolution inventaire (ADR 0081 étape 1) ([fd7f27e](https://github.com/univ-lehavre/cluster/commit/fd7f27e3611515e55bb986b1038377b4dd3e9378))
+* **ownership:** graphe d'appartenance + remove --dry-run (découverte, ADR 0079 / [#372](https://github.com/univ-lehavre/cluster/issues/372)) ([81e4990](https://github.com/univ-lehavre/cluster/commit/81e49905f9da2e290c3e6929c0ec029040ac721c))
+* **ownership:** graphe d'appartenance + remove --dry-run découverte (slice 1 de [#372](https://github.com/univ-lehavre/cluster/issues/372)) ([26c4014](https://github.com/univ-lehavre/cluster/commit/26c401413f7a55b2355bb7d59813e2d6c1ffd20b))
+* **refresh:** --prune — retirer les couches déclarées mais absentes du réel ([#357](https://github.com/univ-lehavre/cluster/issues/357)) ([ace71c3](https://github.com/univ-lehavre/cluster/commit/ace71c34aac445d35bcd841b02f85f2edca30ed7))
+* **refresh:** --prune (retirer les couches absentes du réel) ([#357](https://github.com/univ-lehavre/cluster/issues/357)) ([4f8978b](https://github.com/univ-lehavre/cluster/commit/4f8978b5ede174d3cf6d305059c0ab331282f451))
+* **refresh:** cluster refresh — réaligner topology.yaml sur le réel voulu (ADR 0076) ([0a0af05](https://github.com/univ-lehavre/cluster/commit/0a0af056642af3a8f97f859241bd137f3e9471a7))
+* **remove:** cluster remove — supprimer une couche et sa clôture (inverse de next, ADR 0054) ([db00592](https://github.com/univ-lehavre/cluster/commit/db005921a9f34b98b664ce530b6f1aab43bcfbf8))
+* **remove:** découverte par DÉFAUT + finalize des ns wedgés (ADR 0079 étape A) ([b253508](https://github.com/univ-lehavre/cluster/commit/b253508dd1e8abdc34d069c77401e8b6a84553e4))
+* **remove:** rollback par découverte d'appartenance — défaut, finalize ns (ADR 0079, [#372](https://github.com/univ-lehavre/cluster/issues/372) étape A) ([38508f6](https://github.com/univ-lehavre/cluster/commit/38508f677f772c85da5a3814d07757491b1da170))
+* **remove:** rollback par découverte d'appartenance (--discover, ADR 0079 slice 2) ([9524d21](https://github.com/univ-lehavre/cluster/commit/9524d21c85f70b64938b14f7637b7e234129b49e))
+* **test:** nestor test scenarios --run + signaux de santé des couches Ceph ([#227](https://github.com/univ-lehavre/cluster/issues/227)) ([2203089](https://github.com/univ-lehavre/cluster/commit/2203089d42f42ed46431143f6ee87a0a7ebf7928))
+* **test:** nestor test scenarios --run + signaux de santé des couches Ceph ([#227](https://github.com/univ-lehavre/cluster/issues/227)) ([00dccf7](https://github.com/univ-lehavre/cluster/commit/00dccf73e3c5ac9b9f06971aa2e4c99e66ba2c0f))
+* **topology:** select pose KUBECONFIG (eval), messages simples, expo effective ([5fdbd2a](https://github.com/univ-lehavre/cluster/commit/5fdbd2ad62a1a077594872c7ab42c94ad37701c0))
+
+
+### Bug Fixes
+
+* **ci,preview:** verdir la CI (test banc-dépendant, lychee 0.23, MD028) + warning preview shell≠banc ([7656c15](https://github.com/univ-lehavre/cluster/commit/7656c1526b6091a1386ce20b7b082605ef0ada43))
+* **cluster:** robustesse KUBECONFIG — /dev/null remplaçable, select non destructif, auto-env ([6ae4229](https://github.com/univ-lehavre/cluster/commit/6ae42298f727e1e5a4b81f9d9e9000b524547d21))
+* **gates:** until '.resources | default([])' — ne pas crasher si k8s_info échoue ([e553a69](https://github.com/univ-lehavre/cluster/commit/e553a694456bad06d14c3c3a66f7f2fa043c3533))
+* **gates:** until '.resources | default([])' — ne pas crasher si le k8s_info échoue ([1c96fd5](https://github.com/univ-lehavre/cluster/commit/1c96fd5ee2aac86b888e90074026fd384384f65b))
+* **isolation:** garde audit-log sur les plays hosts:cloud + test anti-régression (part code de [#359](https://github.com/univ-lehavre/cluster/issues/359)) ([a0e6aff](https://github.com/univ-lehavre/cluster/commit/a0e6aff52bc37f8b99279ddb4ae8fd05cb3a8e26))
+* **isolation:** garde audit-log sur tous les plays 'hosts: cloud' + test anti-régression ([#359](https://github.com/univ-lehavre/cluster/issues/359)) ([e3b4649](https://github.com/univ-lehavre/cluster/commit/e3b4649fdbf6a245d523869d3dec74abd079a59a))
+* **isolation:** next valide l'inventaire Ansible avant montage — faille banc→prod (ADR 0053) ([ca9c4ae](https://github.com/univ-lehavre/cluster/commit/ca9c4ae7ca217b528da809988329427a8be471f9))
+* **isolation:** next vise l'inventaire de la STACK active (banc Lima ≠ prod, ADR 0053) ([e360233](https://github.com/univ-lehavre/cluster/commit/e360233dba6c295ca80588bcc2ca6e2db94488cd))
+* **lint:** lychee.toml — include_fragments en enum "none" (compat lychee ≥ 0.24) ([b9a9cab](https://github.com/univ-lehavre/cluster/commit/b9a9cabea38d2cb1a4b8a173d2053794140eaaa6))
+* **metrology:** émettre par_noeud avec accolades sans espaces (yamllint refuse `{ ... }`) ([82201f9](https://github.com/univ-lehavre/cluster/commit/82201f9e151af314e8650ecebd6d4908635a724e))
+* **metrology:** par_noeud sans espaces dans les accolades (yamllint refuse `{ ... }`) ([ebabf14](https://github.com/univ-lehavre/cluster/commit/ebabf14852d40688dcd10ec58f3f4888117edead))
+* **next:** déléguer toute phase sans play unitaire à run-phases.sh (gitops-seed) ([33c9947](https://github.com/univ-lehavre/cluster/commit/33c9947033b29a99797bbbb155cba23152882d0d))
+* **next:** déléguer toute phase sans play unitaire à run-phases.sh (gitops-seed) ([f9f7ca6](https://github.com/univ-lehavre/cluster/commit/f9f7ca62bbc158253428df169331fe58f4e3c228))
+* **next:** gitops-seed vu fait + next cohérent avec preview (signal + observé) ([522947b](https://github.com/univ-lehavre/cluster/commit/522947bb597133d9f8ea91a60c97f6a22f475ca9))
+* **next:** signal de santé dataops — webserver, pas un deployment `dagster` inexistant ([5cdfbde](https://github.com/univ-lehavre/cluster/commit/5cdfbde8ae21aed6326d79e069232feb49b60180))
+* **next:** signal de santé dataops — webserver, pas un deployment dagster inexistant ([7f52a4b](https://github.com/univ-lehavre/cluster/commit/7f52a4b229c021fe55ecf5bd0b34ec883e357050))
+* **node-exec:** 3 correctifs révélés par la preuve banc (ADR 0081 étapes 1+3) ([b2e993d](https://github.com/univ-lehavre/cluster/commit/b2e993dba91b02592ff1049b969aa22bc0c73801))
+* **node-exec:** 3 correctifs révélés par la preuve banc (ADR 0081 étapes 1+3) ([1245d64](https://github.com/univ-lehavre/cluster/commit/1245d64f074bbf41db0c9009ebfde69db80e9d6e))
+* **plan:** profil `store` monte le stockage objet (datalake/RGW) — chemin `layers` dérivé ([9a53d15](https://github.com/univ-lehavre/cluster/commit/9a53d15e35040d87d5765cd31edf7330cc862f76))
+* **plan:** profil store monte le stockage objet (datalake/RGW) — chemin layers dérivé ([0dd6c7f](https://github.com/univ-lehavre/cluster/commit/0dd6c7f188f2953c440d79fcddb4454c3b05bcdd))
+* **preview,next:** couche « saine » = dernier maillon READY, pas namespace présent ([b565f92](https://github.com/univ-lehavre/cluster/commit/b565f92eb74659a9dc723fbc491d00dd6377f2b1))
+* **preview:** le réel contredit le socle — plus de « ✓ créer les VMs à-jour » sans VM ([c0d1606](https://github.com/univ-lehavre/cluster/commit/c0d1606410a9c59db411d7705935c032edd8d705))
+* **preview:** le réel CONTREDIT le socle — plus de « ✓ créer les VMs à-jour » sans VM ([c528b19](https://github.com/univ-lehavre/cluster/commit/c528b1981306926a9e4b58f0707feaa6f9df1f6d))
+* **preview:** signaler un backend orphelin (réel ≠ déclaré) — drift rook-ceph ([#356](https://github.com/univ-lehavre/cluster/issues/356)) ([d618bde](https://github.com/univ-lehavre/cluster/commit/d618bde1e49f86ffc6f435cc5012a2f18ded2150))
+* **preview:** signaler un backend orphelin réel ≠ déclaré ([#356](https://github.com/univ-lehavre/cluster/issues/356)) ([c643018](https://github.com/univ-lehavre/cluster/commit/c643018fe2a5abe3b279aed3b96c96e43ccc3522))
+* **profile:** loki_s3_backing/endpoint manquants → monitoring cassé en local-path ([f5fe5f1](https://github.com/univ-lehavre/cluster/commit/f5fe5f1c39d231af846bbd050e0dc447c40fba8f))
+* **remove:** force les pods possédés qui traînent après suppression des racines (ADR 0079) ([ec83d16](https://github.com/univ-lehavre/cluster/commit/ec83d16958d658f72b7e7ae1b41f256c9f3d2aa4))
+* **remove:** force les pods POSSÉDÉS qui traînent après suppression des racines (ADR 0079) ([efa4277](https://github.com/univ-lehavre/cluster/commit/efa4277a2a8ad0df6185a213a6e3f9a55c775e55))
+* **remove:** rollback conscient du backend — pas d'OBC Ceph en local-path (ADR 0069) ([b1cf3b8](https://github.com/univ-lehavre/cluster/commit/b1cf3b84663aeb0059a2e7ea0f8b293108e70228))
+* **remove:** rollback-lib — Application atlas-workflows + CR Argo CD à finaliser ([58050d5](https://github.com/univ-lehavre/cluster/commit/58050d5f153d9dccf8d79b70288413c455c77e71))
+* **rollback:** débloquer un ns wedgé + clôture résiliente ([#361](https://github.com/univ-lehavre/cluster/issues/361)) ([dbe4e81](https://github.com/univ-lehavre/cluster/commit/dbe4e8148596385f85a8df6514fecfe1b4969573))
+* **rollback:** débloquer un ns wedgé + ne pas abandonner la clôture au 1er échec ([#361](https://github.com/univ-lehavre/cluster/issues/361)) ([c0c3ded](https://github.com/univ-lehavre/cluster/commit/c0c3dedee4ef252c6daa1ec14b489a404e4fc317))
+* **s3-bucket:** idempotence du make-bucket sur SeaweedFS (BucketAlreadyExists) ([20bcc58](https://github.com/univ-lehavre/cluster/commit/20bcc581b14ee3e282f5a2a66e6ae0d008bf6268))
+* **s3-bucket:** supprimer un Job d'init non-réussi avant de le recréer (template immuable) ([afd5dbc](https://github.com/univ-lehavre/cluster/commit/afd5dbc6469a422603ccd925fab851e223565a6e))
+* **topology:** message de `next` clair (sans jargon « 1er drift ») ([ebfdcba](https://github.com/univ-lehavre/cluster/commit/ebfdcba2640c855938944da49c2f845105e9b79a))
+* **topology:** next respecte le PLAN de preview (VMs d'abord, phase par phase) ([d4368a3](https://github.com/univ-lehavre/cluster/commit/d4368a38045dfb122fdb8679ce71b9cc5d6c68b5))
+* **topology:** stack select n'imprime l'export que si stdout est capturé ([c7db250](https://github.com/univ-lehavre/cluster/commit/c7db250b7cb97921c40ab68d9a59078cc47b73ed))
+
+
+### Performance
+
+* **hooks:** appeler prettier/commitlint en local (node_modules/.bin) au lieu de pnpm exec ([750050c](https://github.com/univ-lehavre/cluster/commit/750050c53d97cb5f649f23d8923104d48eb765a7))
+* **hooks:** pre-commit/pre-push quasi instantanés (binaire local + fichiers du push) ([1808d43](https://github.com/univ-lehavre/cluster/commit/1808d438771ff52c5251bfed79f9b93e6567989f))
+* **hooks:** pre-push ne lint que les fichiers du push (prettier/yamllint/shellcheck) ([862d770](https://github.com/univ-lehavre/cluster/commit/862d77080813ed6cdfd9a3ac7c048361d73d48d4))
+
+
+### Refactor
+
+* **nestor:** renommer la CLI cluster → nestor + hygiène ~/.kube/config (ADR 0053) ([929d863](https://github.com/univ-lehavre/cluster/commit/929d86310b219fc19d8775eacbaf8617540fc666))
+* **nestor:** renommer le paquet cluster_topology → nestor ([944e555](https://github.com/univ-lehavre/cluster/commit/944e555ecb239f8083aada6b595e65b8dd19b8e2))
+
+
+### Documentation
+
+* **adr-0023:** génériser les valeurs prod réelles résiduelles (ADR 0055, RUNBOOK) ([aa1f571](https://github.com/univ-lehavre/cluster/commit/aa1f57133db45c6914c8e7d4dbd14f5411fa33ae))
+* **adr:** 0076 — cluster refresh (réel voulu → déclaration, borné par ADR 0046) ([32f58d0](https://github.com/univ-lehavre/cluster/commit/32f58d0900007eaa7884a1708d0172759b5e7e2d))
+* **adr:** 0077 — cluster next, menu des couches montables (deps réelles vs convention) ([c0c3751](https://github.com/univ-lehavre/cluster/commit/c0c375107528471816bc7d7f810388703a146e3e))
+* **adr:** 0079 — découverte de l'appartenance réelle (socle commun health + remove) ([d1436ba](https://github.com/univ-lehavre/cluster/commit/d1436ba6110462ac583d082ebd265e0cea244286))
+* **adr:** 0080 — doctrine d'affichage des notations & badges README ([06336ef](https://github.com/univ-lehavre/cluster/commit/06336eff10b5a05834c6ed0c6f79c2dd358c7c06))
+* **adr:** 0081 socle d'exécution node-side (node_exec) — discover + remove ([df30320](https://github.com/univ-lehavre/cluster/commit/df3032011d27d0780fca6234acab4628d56d387d))
+* **adr:** 0081 socle d'exécution node-side (node_exec) — discover + remove ([8439675](https://github.com/univ-lehavre/cluster/commit/8439675614a933a2bec1e2fa91ce213d9cf32d40))
+* **audit:** passage notations & normes externes (hors cyber) + journal ([b035945](https://github.com/univ-lehavre/cluster/commit/b03594546b1d59eba1ce3b7c722f7f39a4599ae9))
+* **audit:** passage notations cyber + fusion des passages en une famille (ADR 0078, supersède 0067) ([6d3774a](https://github.com/univ-lehavre/cluster/commit/6d3774a1604b6c1f6b0f4a380007eb592f03f2df))
+* **bonnes-pratiques:** mapper FAIR et OpenGitOps aux preuves ([cd4c29a](https://github.com/univ-lehavre/cluster/commit/cd4c29afc37bf2f830b52d9b5b57848660273470))
+* **exposition:** clarifier l'avertissement TLS (CA interne, attendu) ([52e5a31](https://github.com/univ-lehavre/cluster/commit/52e5a314e190924120b53ebb4bbffb4bce71dfc9))
+* **readme:** rangée de badges groupée par thématique (ADR 0080) ([3818629](https://github.com/univ-lehavre/cluster/commit/3818629e28cc5576eb3c66d67ebb388f00133890))
+
 ## [2.36.0](https://github.com/univ-lehavre/cluster/compare/v2.35.0...v2.36.0) (2026-06-16)
 
 
