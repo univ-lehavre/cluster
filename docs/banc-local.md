@@ -16,13 +16,18 @@ pas un cluster de production : vous montez ce banc et vous y travaillez.
 La topologie locale de référence est **`multi-node-3`** (1 control plane + 2
 workers, banc [Lima](glossaire.md#kubeadm) — ADR
 [0030](decisions/0030-nomenclature-bancs-topologies.md)/[0040](decisions/0040-terrains-x-topologies.md)).
-Le **chemin nommé** `atlas` enchaîne tout le socle DataOps + GitOps sur un
-profil léger `local-path` (pas de [Ceph](composants.md#rook-ceph) — ADR
-[0044](decisions/0044-topologie-deploiement-banc-atlas.md)/[0045](decisions/0045-chemins-installation-banc-couches.md))
-:
+`atlas` est un **alias de couches** (layers) : la chaîne MLOps complète
+`[metrics, obs, gitops, dataops, gitops-seed, mlflow]`, montée sur un profil
+léger `local-path` (pas de [Ceph](composants.md#rook-ceph) — ADR
+[0044](decisions/0044-topologie-deploiement-banc-atlas.md)/[0045](decisions/0045-chemins-installation-banc-couches.md)).
+Depuis l'[ADR 0083](decisions/0083-layers-source-unique-de-l-ordre.md), `atlas`
+n'est **plus la cible dérivée par défaut** (c'est `layers`, dont l'ordre vient
+d'un graphe atomique) : on le déclare via `layers: [atlas]` dans la
+`topology.yaml`, ou on le rejoue tel quel via `--target atlas` (alias
+rétrocompatible) :
 
 ```bash
-# socle léger → monitoring → gitops (Gitea + Argo CD) → dataops → gitops-seed
+# socle léger → monitoring → gitops (Gitea + Argo CD) → dataops → gitops-seed → mlflow
 bench/lima/run-phases.sh atlas
 # (variante stockage réel : bench/lima/run-phases.sh atlas-ceph)
 ```

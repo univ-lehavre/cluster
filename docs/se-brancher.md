@@ -91,6 +91,41 @@ wget -qO- http://marquez.marquez.svc.cluster.local:5000/api/v1/namespaces/<ns>/j
 > modèle — leçon du drift L19, cf.
 > [leçons des runs](architecture/lecons-des-runs.md)).
 
+## Suivi de modèles — logger avec MLflow
+
+Loggez vos entraînements (paramètres, métriques, artefacts) vers le serveur
+[MLflow](composants.md#mlflow-suivi-de-modèles) ; ils y sont enregistrés et
+visualisables, et les modèles versionnés dans le registre
+([ADR 0082](decisions/0082-suivi-modeles-mlflow.md)). Le serveur est livré
+**vide** : c'est votre code (côté atlas) qui le peuple. Le client MLflow lit une
+seule variable d'environnement (pendant de `OPENLINEAGE_URL`) :
+
+| Variable              | Valeur (intra-cluster)                        |
+| --------------------- | --------------------------------------------- |
+| `MLFLOW_TRACKING_URI` | `http://mlflow.mlflow.svc.cluster.local:5000` |
+
+```python
+# Exemple générique — depuis un pod du cluster, l'URI vient d'une var d'env.
+import os, mlflow
+
+mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
+mlflow.set_experiment("mon-experiment")
+
+with mlflow.start_run():
+    mlflow.log_param("epochs", 10)
+    mlflow.log_metric("accuracy", 0.92)
+    # mlflow.log_artifact(...) / mlflow.<saveur>.log_model(...) → artefact store S3
+```
+
+Le **backend store** (métadonnées des runs) est la base CNPG `mlflow` ;
+l'**artefact store** (modèles, fichiers volumineux) est du S3
+([ADR 0036](decisions/0036-backing-s3-unique-rgw.md)) — vous n'avez rien à
+câbler, le serveur les porte. Pas d'authentification intra-cluster (réseau privé
+mono-admin).
+
+> **Réseau** : votre pod émetteur a besoin d'un egress vers `mlflow:5000`
+> (modèle : `platform/network-policies/<app>/allow-mlflow-egress.yaml`).
+
 ## Orchestration — brancher une code-location Dagster
 
 L'[orchestrateur](composants.md#dagster-orchestration) est livré **vide**

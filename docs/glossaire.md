@@ -333,6 +333,16 @@ Le mode d'exécution de Dagster choisi ici : **chaque run devient un Job
 Kubernetes** isolé (au lieu de tourner dans le processus de l'orchestrateur).
 L'isolation et l'élasticité sont ainsi déléguées au cluster.
 
+### MLflow
+
+Le serveur de **suivi de modèles** du socle : il enregistre les _runs_
+d'entraînement (paramètres, métriques, artefacts) et porte un **model registry**
+(versions de modèles, promotions). Ses métadonnées vivent dans une base CNPG
+dédiée (`mlflow`) ; ses artefacts (modèles, fichiers) dans du **S3**. Livré
+**vide**, il est peuplé par le code applicatif via `MLFLOW_TRACKING_URI`. Voir
+[composants](composants.md#mlflow-suivi-de-modèles) et
+[ADR 0082](decisions/0082-suivi-modeles-mlflow.md).
+
 ### Promtail
 
 L'agent qui **collecte les logs** sur chaque nœud (un DaemonSet) et les pousse

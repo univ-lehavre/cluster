@@ -304,6 +304,30 @@ lui-même. Son store persiste dans une base PostgreSQL dédiée (`marquez`),
 peuplée par des migrations Flyway au démarrage. Manifestes :
 [`platform/marquez/`](../platform/marquez/).
 
+### MLflow (suivi de modèles)
+
+**MLflow** est le serveur de **suivi de modèles** du socle DataOps (le frère de
+Dagster et Marquez dans la chaîne) : il enregistre les _runs_ d'entraînement —
+paramètres, métriques, artefacts — et porte un **model registry** (versions de
+modèles, étapes de promotion)
+([ADR 0082](decisions/0082-suivi-modeles-mlflow.md)). Comme Dagster, il est
+livré **vide** : c'est le socle de traçabilité des modèles, sans aucun run
+métier ; c'est le dépôt applicatif `atlas` qui le peuple, en pointant la
+variable `MLFLOW_TRACKING_URI` vers le serveur.
+
+Deux stockages le caractérisent, alignés sur le reste du socle : son **backend
+store** (métadonnées des runs : paramètres, métriques, tags) est une base
+PostgreSQL dédiée `mlflow` du cluster CNPG ; son **artefact store** (les
+fichiers volumineux : modèles sérialisés, graphiques) est du **S3** — RGW Ceph
+en prod, SeaweedFS sur le banc léger
+([ADR 0036](decisions/0036-backing-s3-unique-rgw.md)). L'API et l'UI partagent
+le port `5000` (`mlflow.mlflow.svc.cluster.local:5000`) ; l'UI est exposée hors
+cluster via le Gateway Cilium en HTTPS interne (`https://mlflow.cluster.lan`),
+**sans authentification** — compromis assumé sur un réseau privé de confiance
+mono-admin ([ADR 0003](decisions/0003-pas-de-chiffrement-ceph-tailscale.md)).
+L'image est l'**officielle multi-arch** (pas de build maison). Manifestes :
+[`platform/mlflow/mlflow.yaml`](../platform/mlflow/mlflow.yaml).
+
 ## Observabilité
 
 L'observabilité est montée par **paliers**

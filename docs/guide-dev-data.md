@@ -36,6 +36,7 @@ namespace autorisé par les NetworkPolicies.
 | PostgreSQL (CNPG)    | `pg-rw.postgres.svc.cluster.local` (primary) | 5432 | Secret du rôle (`pg-role-<rôle>`)    |
 | PostgreSQL (replica) | `pg-ro.postgres.svc.cluster.local` (lecture) | 5432 | idem                                 |
 | Marquez (lineage)    | `marquez.marquez.svc.cluster.local`          | 5000 | aucune (intra-cluster)               |
+| MLflow (modèles)     | `mlflow.mlflow.svc.cluster.local`            | 5000 | aucune (intra-cluster)               |
 | Registry d'images    | `registry:80` (sur les nœuds)                | 80   | aucune (HTTP interne, ADR 0011)      |
 | S3 datalake (RGW)    | `rook-ceph-rgw-datalake.rook-ceph`           | 80   | creds d'un `ObjectBucketClaim`       |
 | Gitea (forge GitOps) | `gitea-http.gitea.svc.cluster.local`         | 80   | Secret `gitea-admin` (mot de passe)  |
@@ -90,6 +91,20 @@ Le client OpenLineage standard lit ces variables pour émettre vers
 | `OPENLINEAGE_URL`       | `http://marquez.marquez.svc.cluster.local:5000`  |
 | `OPENLINEAGE_ENDPOINT`  | `api/v1/lineage`                                 |
 | `OPENLINEAGE_NAMESPACE` | le namespace logique de vos jobs (ex. `dagster`) |
+
+## Variable MLflow
+
+Pendant de `OPENLINEAGE_URL` pour le **suivi de modèles** : le client MLflow lit
+cette variable pour logger ses runs vers
+[MLflow](composants.md#mlflow-suivi-de-modèles) (serveur livré vide, peuplé par
+atlas) :
+
+| Variable              | Valeur (intra-cluster)                        |
+| --------------------- | --------------------------------------------- |
+| `MLFLOW_TRACKING_URI` | `http://mlflow.mlflow.svc.cluster.local:5000` |
+
+La **procédure** (logger un run, exemple Python) est dans
+[Se brancher → Suivi de modèles](se-brancher.md#suivi-de-modèles-logger-avec-mlflow).
 
 ## Pour aller plus loin
 

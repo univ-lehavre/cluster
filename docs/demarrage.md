@@ -67,6 +67,14 @@ pas. Les sections avancées sont signalées.
 
 - **Tout se valide d'abord sur le banc** Lima ([`bench/`](../bench/)) — voir
   [SAFEGUARDS.md](../SAFEGUARDS.md) pour les garde-fous (hooks, CI, banc).
+- **Le banc se monte en couches (layers).** L'ordre des couches n'est plus une
+  table figée : il est **dérivé d'un graphe atomique** de dépendances
+  ([ADR 0083](decisions/0083-layers-source-unique-de-l-ordre.md)). On déclare ce
+  qu'on veut via `layers:` dans la `topology.yaml` — `layers: [atlas]` = chaîne
+  MLOps complète (metrics → obs → gitops → dataops → gitops-seed → mlflow). Les
+  anciens chemins nommés (`atlas`, `atlas-ceph`…) restent des **alias
+  rétrocompatibles** rejouables via `--target <nom>`. Détail :
+  [Monter le banc local](banc-local.md).
 - **L'état d'avancement** se lit dans les plans de mise en œuvre
   ([`docs/plans/`](plans/), ADR 0057) et les passages d'audit datés
   ([`docs/audit/`](audit/), ADR 0058) ; l'état **live** du cluster vient de

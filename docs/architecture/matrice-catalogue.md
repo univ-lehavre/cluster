@@ -140,8 +140,10 @@ Le terrain détermine le **provisioner** (attribut, pas axe —
 - Stockage : Rook-Ceph / Longhorn / local-path
 - Stockage objet S3 : RGW Ceph (prod) / SeaweedFS (banc léger) — ADR 0036
 - Observabilité : Prometheus + Alertmanager + Grafana (métriques) · Loki (logs)
-- DataOps : CNPG, Dagster, Marquez (dont Airflow envisagé)
-- GitOps · MLOps · AIOps
+- DataOps : CNPG, Dagster, Marquez, MLflow (dont Airflow envisagé)
+- GitOps · MLOps · AIOps — MLOps (côté atlas) : drift Evidently des embeddings
+  (run N vs N-1, non bloquant) + entraînement continu (CT, schedule
+  `transform_daily`), tous deux loggués dans MLflow (maturité MLOps 1→2)
 - IaaS : OpenStack
 - Interfaces : CLI, API, WebApp
 
@@ -155,7 +157,7 @@ du banc :
 | `base`    | socle : k8s + Cilium (+WireGuard)               | `bootstrap`                               |
 | `store`   | + stockage : local-path **ou** Ceph (+SC, +RGW) | `storage-simple` / `ceph`+`sc`+`datalake` |
 | `obs`     | + observabilité : Prometheus + Grafana + Loki   | `monitoring`                              |
-| `dataops` | + DataOps : CNPG, Dagster, Marquez              | `dataops`                                 |
+| `dataops` | + DataOps : CNPG, Dagster, Marquez, MLflow      | `dataops`                                 |
 
 ### 1.5 Dimensions fines paramétrables (à briques fixées)
 

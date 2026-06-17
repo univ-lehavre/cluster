@@ -27,12 +27,12 @@ réconcilie). Détail pas à pas :
 
 ## Comprendre la plateforme
 
-| Page                                                              | Pour quoi                                                                                                            |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [Composants — la pile technologique](composants.md)               | Ce que fait chaque brique (PostgreSQL/CNPG, Dagster, Marquez, Argo CD, Gitea, Ceph, Cilium…) et pourquoi elle est là |
-| [Guide du développeur data](guide-dev-data.md)                    | Comment se brancher : endpoints, secrets, paramétrage, boucle GitOps, accès local                                    |
-| [Glossaire](glossaire.md)                                         | Définitions courtes des termes techniques                                                                            |
-| [Chaîne DataOps (accès & vérifs)](architecture/chaine-dataops.md) | Vue d'ensemble Dagster → CNPG → Marquez                                                                              |
+| Page                                                              | Pour quoi                                                                                                                    |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [Composants — la pile technologique](composants.md)               | Ce que fait chaque brique (PostgreSQL/CNPG, Dagster, Marquez, MLflow, Argo CD, Gitea, Ceph, Cilium…) et pourquoi elle est là |
+| [Guide du développeur data](guide-dev-data.md)                    | Comment se brancher : endpoints, secrets, paramétrage, boucle GitOps, accès local                                            |
+| [Glossaire](glossaire.md)                                         | Définitions courtes des termes techniques                                                                                    |
+| [Chaîne DataOps (accès & vérifs)](architecture/chaine-dataops.md) | Vue d'ensemble Dagster → CNPG → Marquez + suivi de modèles MLflow                                                            |
 
 ## Se brancher — le contrat d'interface
 
