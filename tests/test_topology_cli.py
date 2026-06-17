@@ -705,6 +705,52 @@ runs:
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
+    # Run frais COMPLET (jusqu'à gitops-seed) d'une AUTRE stack (multi-node-3) — ne
+    # doit JAMAIS servir de référence à _EXAMPLE (multi-node-4).
+    _OTHER_STACK_COMPLETE = f"""\
+runs:
+  - id: other
+    date: {dt_today()}
+    target: atlas-ceph
+    profil: ceph
+    topologie: multi-node-3
+    phases:
+      up: 1
+      bootstrap: 1
+      ceph: 1
+      sc: 1
+      datalake: 1
+      monitoring: 1
+      gitops: 1
+      dataops: 1
+      gitops-seed: 1
+"""
+
+    def test_other_topology_run_not_attributed(self):
+        # RÉGRESSION (divergence next/preview vécue) : `next` ancrait son run de
+        # référence sur un fallback `latest_run` GLOBAL → il empruntait le run frais
+        # d'une AUTRE topologie (ex. atlas-ceph multi-node-3) et croyait gitops-seed
+        # fait → « à jour », alors que `preview` (match par stack) le voyait « à
+        # installer ». Comme preview, `next` match par NOM de stack : un run d'une
+        # autre topologie ne le rend PAS « à jour ». Réel = socle présent mais aucune
+        # couche applicative observée → gitops-seed reste à installer.
+        self._set_real(vms=["cp1", "node1", "node2", "node3"], ready=["cp1"])
+        orig_obs = cli._observed_layers
+        cli._observed_layers = lambda phases: set()
+        self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
+        hist = _tmp(self._OTHER_STACK_COMPLETE)
+        self.addCleanup(os.unlink, hist)
+        code, out, err = _capture(
+            ["next", "-f", _EXAMPLE, "--target", "atlas-ceph", "--history", hist]
+        )
+        # AVANT le fix : « à jour » (code 0), le run multi-node-3 attribué à tort.
+        # APRÈS : `next` veut monter gitops-seed (manquant) → il NE dit PAS « à jour »
+        # et atteint le garde-fou « refusé hors TTY sans --yes » (code 2) — la preuve
+        # qu'il a bien VU une couche à monter, là où le run étranger l'aveuglait.
+        self.assertNotIn("à jour", out)
+        self.assertEqual(code, 2)
+        self.assertIn("hors TTY", err)
+
     def _ensure_inventory(self):
         """Garantit un bootstrap/hosts.yaml (gitignoré, absent en CI) pour `next` ;
         le retire ensuite si on l'a créé. Sinon le garde-fou d'inventaire bloque."""
