@@ -1,0 +1,88 @@
+# Code-location JOUET (ADR 0086, scénario 27/29) — substitut générique de la
+# code-location qu'atlas pousse dans Gitea (`citation-dagster`). Argo CD réconcilie
+# CE manifeste ; l'infra DataOps (CNPG/Dagster/Marquez) reste montée par Ansible,
+# livrée vide (frontière ADR 0022/0045).
+#
+# C'est une VRAIE code-location gRPC (vs l'ancien Job `materialize` jetable) : un
+# serveur `dagster api grpc -m toy_assets` que le webserver/daemon Dagster chargent
+# via le `workspace.yaml` (cf. workspace-patch.yaml). L'orchestrateur expose alors
+# l'asset `toy_dataset` + le job `toy_job` — lançables par GraphQL `launchRun`, comme
+# atlas/l'UI. Réutilise l'image émetteur buildée par `dataops`
+# (registry:80/dagster-openlineage-emit:dev), seule la commande change.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: toy-codeloc
+  namespace: dagster
+  labels:
+    app.kubernetes.io/name: toy-codeloc
+    app.kubernetes.io/part-of: dataops
+    app.kubernetes.io/managed-by: argocd
+    atlas.workflow/sample: 'true'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: toy-codeloc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: toy-codeloc
+        atlas.workflow/sample: 'true'
+    spec:
+      containers:
+        - name: grpc
+          image: registry:80/dagster-openlineage-emit:dev
+          imagePullPolicy: IfNotPresent
+          # Serveur gRPC de code-location : charge toy_assets et l'expose au workspace.
+          command:
+            - dagster
+            - api
+            - grpc
+            - --host
+            - 0.0.0.0
+            - --port
+            - '4000'
+            - --module-name
+            - toy_assets
+            - --location-name
+            - toy
+          ports:
+            - name: grpc
+              containerPort: 4000
+          env:
+            # Image que le K8sRunLauncher utilise pour les pods de run (sinon « Got
+            # None »). Pointe l'image de cette code-location (elle porte toy_assets).
+            - name: DAGSTER_CURRENT_IMAGE
+              value: registry:80/dagster-openlineage-emit:dev
+            # Lineage OpenLineage émis par les runs → API Marquez interne (générique).
+            - name: OPENLINEAGE_URL
+              value: 'http://marquez.marquez.svc.cluster.local:5000'
+            - name: OPENLINEAGE_ENDPOINT
+              value: 'api/v1/lineage'
+            - name: OPENLINEAGE_NAMESPACE
+              value: 'dagster'
+          # PAS de durcissement (drift L54, #234) : aligné sur l'émetteur de référence
+          # (dagster écrit un DAGSTER_HOME dans son cwd root) — durcissement global #234.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: toy-codeloc
+  namespace: dagster
+  labels:
+    app.kubernetes.io/name: toy-codeloc
+    app.kubernetes.io/part-of: dataops
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: toy-codeloc
+  ports:
+    - name: grpc
+      port: 4000
+      targetPort: 4000
+      protocol: TCP

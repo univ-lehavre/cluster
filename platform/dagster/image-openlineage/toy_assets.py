@@ -18,7 +18,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from dagster import asset
+from dagster import Definitions, asset, define_asset_job
 
 from openlineage.client import OpenLineageClient
 from openlineage.client.event_v2 import Job, Run, RunEvent, RunState
@@ -70,3 +70,14 @@ def toy_dataset():
     _emit_openlineage(job_name="toy_dataset")
     # Valeur de retour symbolique (l'asset n'a pas d'IO manager configuré ici).
     return {"rows": 1, "generated_at": datetime.now(timezone.utc).isoformat(), "id": str(uuid.uuid4())}
+
+
+# Job nommé matérialisant l'asset — lançable par `launchRun` (GraphQL) quand ce module
+# est chargé comme code-location gRPC (ADR 0086, `dagster api grpc -m toy_assets`). Le
+# scénario 29 lance `CODELOC_JOB=toy_job`. (Le harnais CLI `materialize -m toy_assets`
+# reste valable : il découvre l'asset directement, indépendamment de ce job.)
+toy_job = define_asset_job(name="toy_job", selection="*")
+
+# `Definitions` : point d'entrée que `dagster api grpc -m toy_assets` charge pour exposer
+# la code-location. Sans lui, le module n'expose pas de job nommé au workspace.
+defs = Definitions(assets=[toy_dataset], jobs=[toy_job])

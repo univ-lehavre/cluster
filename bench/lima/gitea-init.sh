@@ -94,34 +94,45 @@ main() {
         gitea_cli curl "${args[@]}"
     }
 
+    # push_gitea_file <nom> — pousse SAMPLE_DIR/<nom> à la racine du dépôt Gitea via
+    # la Contents API (create-or-update idempotent). Lit le SHA existant pour une MAJ ;
+    # vérifie la réponse (un PUT/POST raté laissait l'ancienne version → Argo CD
+    # déployait un manifeste périmé, drift à ne pas reproduire). rc≠0 si pas de commit.
+    push_gitea_file() {
+        local path=$1 content sha payload resp
+        content=$(base64 < "${SAMPLE_DIR}/${path}" | tr -d '\n')
+        sha=$(api GET "/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${path}" 2>/dev/null \
+            | grep -oE '"sha":"[a-f0-9]+"' | head -1 | cut -d'"' -f4) || true
+        if [ -n "${sha}" ]; then
+            payload="{\"content\":\"${content}\",\"sha\":\"${sha}\",\"message\":\"update ${path} (atlas-init)\"}"
+            resp=$(api PUT "/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${path}" "${payload}")
+        else
+            payload="{\"content\":\"${content}\",\"message\":\"add ${path} (atlas-init)\"}"
+            resp=$(api POST "/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${path}" "${payload}")
+        fi
+        if ! printf '%s' "${resp}" | grep -q '"commit"'; then
+            echo "gitea-init: push de ${path} ÉCHOUÉ — réponse: ${resp}" >&2
+            return 1
+        fi
+    }
+
     echo "[gitea-init] 3/6 — organisation ${GITEA_ORG} + dépôt ${GITEA_REPO}"
     api POST "/orgs" "{\"username\":\"${GITEA_ORG}\"}" >/dev/null 2>&1 || true
     api POST "/orgs/${GITEA_ORG}/repos" \
         "{\"name\":\"${GITEA_REPO}\",\"auto_init\":true,\"default_branch\":\"main\"}" \
         >/dev/null 2>&1 || true
 
-    echo "[gitea-init] 4/6 — push du workflow jouet (Contents API, idempotent)"
-    # Pousse workflow-job.yaml via l'API Contents (create-or-update). On lit le
-    # SHA existant pour une mise à jour idempotente. La réponse est CAPTURÉE et
-    # vérifiée (un PUT/POST raté laissait silencieusement l'ANCIENNE version dans
-    # Gitea → Argo CD déployait un manifeste périmé : drift à ne pas reproduire).
-    local content sha payload path="workflow-job.yaml" resp
-    content=$(base64 < "${SAMPLE_DIR}/workflow-job.yaml" | tr -d '\n')
-    sha=$(api GET "/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${path}" 2>/dev/null \
-        | grep -oE '"sha":"[a-f0-9]+"' | head -1 | cut -d'"' -f4) || true
-    if [ -n "${sha}" ]; then
-        payload="{\"content\":\"${content}\",\"sha\":\"${sha}\",\"message\":\"update workflow (atlas-init)\"}"
-        resp=$(api PUT "/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${path}" "${payload}")
-    else
-        payload="{\"content\":\"${content}\",\"message\":\"add workflow (atlas-init)\"}"
-        resp=$(api POST "/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${path}" "${payload}")
-    fi
-    # La réponse de succès porte un objet "content" avec le nouveau "sha" ; une
-    # erreur porte un "message". On échoue explicitement si pas de commit.
-    if ! printf '%s' "${resp}" | grep -q '"commit"'; then
-        echo "gitea-init: push du workflow ÉCHOUÉ — réponse: ${resp}" >&2
-        return 1
-    fi
+    echo "[gitea-init] 4/6 — push de la code-location jouet (Contents API, idempotent)"
+    # Pousse les manifestes de la code-location jouet (ADR 0086) via l'API Contents
+    # (create-or-update). On lit le SHA existant pour une mise à jour idempotente. La
+    # réponse est CAPTURÉE et vérifiée (un PUT/POST raté laissait silencieusement
+    # l'ANCIENNE version dans Gitea → Argo CD déployait un manifeste périmé : drift à
+    # ne pas reproduire). Argo CD réconcilie la VRAIE code-location gRPC (Deployment +
+    # Service + patch workspace), pas un Job jetable.
+    local f
+    for f in code-location.yaml workspace-patch.yaml; do
+        push_gitea_file "${f}" || return 1
+    done
 
     echo "[gitea-init] 5/6 — secret partagé webhook.gitea.secret (argocd-secret)"
     local wh_secret

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# Scénario 27 — INTÉGRATION : un push sur Gitea déploie-t-il les workflows atlas
-# par Argo CD, qui lancent la chaîne DataOps ?
+# Scénario 27 — INTÉGRATION : un push sur Gitea déploie-t-il la code-location atlas
+# par Argo CD ?
 #
-# Cœur du banc atlas (ADR 0044/0045) : prouve que le contenu poussé dans la forge
-# Gitea intra-banc est réconcilié par Argo CD (via webhook) jusqu'au run Dagster
-# réel + lineage Marquez. Argo CD déploie les WORKFLOWS, pas l'infra DataOps
-# (montée par Ansible, ADR 0022/0045).
+# Cœur du banc atlas (ADR 0044/0045/0086) : prouve que le contenu poussé dans la forge
+# Gitea intra-banc est réconcilié par Argo CD (via webhook) jusqu'au déploiement d'une
+# VRAIE code-location Dagster gRPC (Deployment toy-codeloc + Service + patch workspace),
+# branchée dans l'orchestrateur. Argo CD déploie la CODE-LOCATION, pas l'infra DataOps
+# (montée par Ansible, ADR 0022/0045). Le RUN e2e (launchRun → lineage Marquez) relève
+# du scénario 29 ; ici l'intention est « GitOps déploie une code-location fonctionnelle ».
 #
 # Pré-requis : socle GitOps (Gitea + Argo CD) + infra DataOps + init du dépôt
 # (bench/lima/gitea-init.sh) — c.-à-d. un banc monté par `run-phases.sh atlas`
@@ -31,21 +33,10 @@ APP=${APP:-atlas-workflows}
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Assertions PURES (testées en bats) : classify_argocd_app, classify_webhook_trigger
-# (gitops-assert) ; parse_ol_job_count, classify_marquez_ingest (dataops-assert).
+# (gitops-assert). Le lineage Marquez (parse_ol_job_count) relève désormais du
+# scénario 29 (run e2e), plus du 27 (qui prouve le DÉPLOIEMENT de la code-location).
 # shellcheck source=bench/lima/gitops-assert.sh
 . ../lima/gitops-assert.sh
-# shellcheck source=bench/lima/dataops-assert.sh
-. ../lima/dataops-assert.sh
-
-# Probe Marquez autonome (calque scénario 23) — compte les jobs d'un namespace
-# OpenLineage via un pod busybox jetable. Renvoie un entier sur stdout.
-marquez_job_count() {
-    local ol_ns=$1 json
-    json=$(kubectl -n marquez run marquez-count-$$ --rm -i --restart=Never \
-        --image=busybox:1.36 --quiet -- \
-        sh -c "wget -qO- 'http://marquez.marquez.svc.cluster.local:5000/api/v1/namespaces/${ol_ns}/jobs' 2>/dev/null" 2>/dev/null)
-    parse_ol_job_count "${json}"
-}
 
 skip_or_fail() {
     if [ "${STRICT_GITOPS}" = 1 ]; then
@@ -112,17 +103,33 @@ verdict=$(classify_webhook_trigger "${rev_before}" "${rev_after}")
 [ "${verdict%%|*}" = ok ] || { log "✗ ${verdict#*|}"; exit 1; }
 log "✓ ${verdict#*|}"
 
-# ── 4. Le workflow déployé tourne : run Dagster réussi + lineage Marquez ─────
-log "[4/4] le workflow (Job) s'exécute → lineage ingéré par Marquez"
-job_before=$(marquez_job_count dagster)
-# Argo a déployé le Job atlas-workflow-sample ; on attend sa complétion.
-done_ok() { [ "$(kubectl -n dagster get job atlas-workflow-sample -o jsonpath='{.status.succeeded}' 2>/dev/null)" = "1" ]; }
-for _ in $(seq 1 30); do done_ok && break; sleep 10; done
-done_ok || { log "✗ le Job atlas-workflow-sample n'a pas réussi"; kubectl -n dagster logs job/atlas-workflow-sample 2>/dev/null | tail -15; exit 1; }
-sleep 5
-job_after=$(marquez_job_count dagster)
-verdict=$(classify_marquez_ingest "${job_before}" "${job_after}")
-[ "${verdict%%|*}" = ok ] || { log "✗ ${verdict#*|}"; exit 1; }
-log "✓ ${verdict#*|}"
+# ── 4. La code-location jouet déployée par GitOps est branchée (ADR 0086) ────
+# Argo CD a réconcilié la VRAIE code-location gRPC (Deployment toy-codeloc + Service
+# + patch workspace), pas un Job jetable. On prouve que le déploiement GitOps aboutit :
+# le serveur gRPC est Ready et le workspace Dagster le charge (location « toy »).
+# Le LANCEMENT d'un run + le lineage Marquez relèvent du scénario 29 (run e2e via
+# launchRun) — ici, l'intention est « GitOps déploie une code-location fonctionnelle ».
+log "[4/4] la code-location jouet (toy-codeloc) est déployée + branchée par GitOps"
+codeloc_ready() {
+    [ "$(kubectl -n dagster get deploy toy-codeloc -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]
+}
+for _ in $(seq 1 30); do codeloc_ready && break; sleep 10; done
+codeloc_ready || {
+    log "✗ le Deployment toy-codeloc (code-location gRPC) n'est pas Ready"
+    kubectl -n dagster get deploy toy-codeloc -o wide 2>/dev/null || true
+    kubectl -n dagster logs deploy/toy-codeloc --tail=15 2>/dev/null || true
+    exit 1
+}
+log "✓ toy-codeloc Ready — code-location gRPC servie"
 
-log "🎉 GitOps → workflows atlas prouvé : push Gitea → webhook → Argo CD Synced → run Dagster → lineage Marquez."
+# Le workspace Dagster charge-t-il bien la location « toy » ? (patch ConfigMap réconcilié)
+if kubectl -n dagster get configmap dagster-workspace -o jsonpath='{.data.workspace\.yaml}' 2>/dev/null \
+    | grep -q 'location_name: toy'; then
+    log "✓ workspace Dagster branché sur la code-location « toy »"
+else
+    log "✗ le workspace Dagster ne charge pas la location « toy » (patch non réconcilié ?)"
+    exit 1
+fi
+
+log "🎉 GitOps → code-location prouvé : push Gitea → webhook → Argo CD Synced → code-location gRPC déployée + branchée."
+log "ℹ️  Run e2e (launchRun → lineage Marquez) : scénario 29 (CODELOC_NAME=toy CODELOC_JOB=toy_job)."
