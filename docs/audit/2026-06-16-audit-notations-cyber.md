@@ -46,23 +46,37 @@ Référentiel le plus directement applicable : ~18 checks automatisés sur tout
 dépôt GitHub public, badge + dashboard. Aligné avec le profil « projet de
 recherche tracé, citable » (DOI Zenodo, `CITATION.cff`).
 
-| Check Scorecard          | État au 2026-06-16  | Preuve                                                                                                                                                                                                                              |
-| ------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Branch-Protection`      | **vert attendu**    | 13 required checks, PR obligatoire, `strict:true` (SAFEGUARDS.md §branch protection ; `gh api …/branches/main/protection`)                                                                                                          |
-| `Security-Policy`        | **vert**            | `SECURITY.md` présent (Private Vulnerability Reporting + modèle de menace assumé)                                                                                                                                                   |
-| `Pinned-Dependencies`    | **vert (partiel)**  | 40/40 actions GitHub SHA-pinnées ([ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md)) ; **mais** 4 `FROM` de Dockerfile en tag seul (cf. #349 gap SLSA 5)                                                    |
-| `Dependency-Update-Tool` | **vert**            | `renovate.json` (`pinDigests:true`, `vulnerabilityAlerts`)                                                                                                                                                                          |
-| `CI-Tests`               | **vert**            | `ci.yml` 14 jobs / 13 requis                                                                                                                                                                                                        |
-| `License`                | **vert**            | `LICENSE` + `NOTICE`                                                                                                                                                                                                                |
-| `Token-Permissions`      | **rouge (partiel)** | `docs.yml`/`release.yml`/`*-freshness.yml` déclarent des `permissions:` restreintes **MAIS `ci.yml` n'a aucun bloc `permissions:`** (`grep -c permissions ci.yml = 0`) → token par défaut implicite sur le workflow le plus exécuté |
-| `Code-Review`            | **rouge (assumé)**  | `required_approving_review_count:0`, mono-mainteneur — choix tenu (SAFEGUARDS.md), pas corrigeable sans 2ᵉ relecteur                                                                                                                |
-| `Signed-Releases`        | **rouge**           | tags non signés (`git tag -v v2.9.0` → « cannot verify a non-tag object ») ; release-please ne signe pas                                                                                                                            |
-| `SAST`                   | **rouge**           | Trivy fait l'IaC, **mais pas de SAST code** au sens Scorecard (codeql/semgrep absents — cf. #349 gap SAMM-Verification)                                                                                                             |
-| `Fuzzing`                | **rouge (N/A)**     | pas de code applicatif à fuzzer (IaC) — non pertinent                                                                                                                                                                               |
+| Check Scorecard          | État au 2026-06-16 | Preuve                                                                                                                                                                                                                                              |
+| ------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Branch-Protection`      | **vert attendu**   | 13 required checks, PR obligatoire, `strict:true` (SAFEGUARDS.md §branch protection ; `gh api …/branches/main/protection`)                                                                                                                          |
+| `Security-Policy`        | **vert**           | `SECURITY.md` présent (Private Vulnerability Reporting + modèle de menace assumé)                                                                                                                                                                   |
+| `Pinned-Dependencies`    | **vert (partiel)** | 40/40 actions GitHub SHA-pinnées ([ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md)) ; les 2 `FROM` Dagster épinglés par digest (#434), restent les `FROM` Marquez vendorés upstream (`eclipse-temurin`, `node` — ADR 0028) |
+| `Dependency-Update-Tool` | **vert**           | `renovate.json` (`pinDigests:true`, `vulnerabilityAlerts`)                                                                                                                                                                                          |
+| `CI-Tests`               | **vert**           | `ci.yml` 14 jobs / 13 requis                                                                                                                                                                                                                        |
+| `License`                | **vert**           | `LICENSE` + `NOTICE`                                                                                                                                                                                                                                |
+| `Token-Permissions`      | **corrigé**        | tous les workflows ont `permissions:` top-level ; le seul `Warn` (`release.yml` `contents: write` top-level) est **confiné au job** `release-please` (#435). `ci.yml` a bien `contents: read`                                                       |
+| `Code-Review`            | **rouge (assumé)** | `required_approving_review_count:0`, mono-mainteneur — choix tenu (SAFEGUARDS.md), pas corrigeable sans 2ᵉ relecteur                                                                                                                                |
+| `Signed-Releases`        | **rouge**          | tags non signés (`git tag -v v2.9.0` → « cannot verify a non-tag object ») ; release-please ne signe pas                                                                                                                                            |
+| `SAST`                   | **en cours**       | Trivy fait l'IaC ; **CodeQL (Python) câblé** (`codeql.yml`, #367) sur le seul code applicatif réel (nestor/, scripts/, tests/ — shell déjà shellcheck, manifestes trivy/kubeconform). Non bloquant d'abord (alertes onglet Security)                |
+| `Fuzzing`                | **rouge (N/A)**    | pas de code applicatif à fuzzer (IaC) — non pertinent                                                                                                                                                                                               |
 
 **Effort de câblage : S.** Action officielle `ossf/scorecard-action` + badge
-README. Le seul check **corrigeable à coût quasi nul** est `Token-Permissions`
-(ajouter `permissions: { contents: read }` en tête de `ci.yml`).
+README.
+
+**Quick-wins réalisés (session 2026-06-18, score de départ 4.9/10).**
+
+- `Token-Permissions` 0→ : `release.yml` `contents: write` ramené au seul job
+  `release-please` (#435).
+- `Pinned-Dependencies` 6→ : les 2 Dockerfiles Dagster épinglés par digest
+  d'index multi-arch (#434, dette ADR 0006).
+- `SAST` rouge→en cours : CodeQL (Python) câblé (#367).
+- `Branch-Protection` (−1) identifié comme **faux négatif** : la protection EST
+  configurée (required_status_checks, reviews, signatures, enforce_admins,
+  linear_history) mais le token Scorecard ne peut pas la lire.
+
+**Restent assumés/différés** : `Code-Review` (mono-mainteneur, SAFEGUARDS.md),
+`Maintained` (dépôt < 90 j, se résout seul), `Signed-Releases`/`Packaging`/
+`Fuzzing` (non pertinents pour de l'IaC, ou nécessitent un prérequis — #366).
 
 ### 2. CIS Benchmarks — posture de durcissement (PASS/WARN/FAIL par contrôle)
 

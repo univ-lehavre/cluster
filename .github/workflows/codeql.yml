@@ -1,0 +1,46 @@
+name: CodeQL
+
+# SAST de code (OpenSSF Scorecard `SAST`). Ce dépôt est de l'IaC : le shell est
+# déjà couvert par shellcheck, les manifestes par trivy/kubeconform, l'Ansible
+# par ansible-lint. Le seul code applicatif réel analysable par CodeQL est le
+# Python du harnais (nestor/, scripts/ — ~60 fichiers, logique de décision non
+# triviale) : c'est là que CodeQL a un gain net (#367). On NE scanne donc QUE
+# Python (langs non présents écartés : pas de JS/Go applicatif significatif).
+#
+# Non bloquant d'abord : les alertes remontent dans l'onglet Security ; on ne
+# fait pas échouer la CI tant que la pertinence des règles n'est pas éprouvée.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 4 * * 1' # tous les lundis 04:17 UTC (décalé des autres crons)
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analyze:
+    name: Analyse CodeQL (python)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # uploader le SARIF sur l'onglet Security
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Initialiser CodeQL
+        uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Analyser
+        uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          category: '/language:${{ matrix.language }}'
