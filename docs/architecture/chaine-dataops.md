@@ -82,6 +82,18 @@ Le maillon qui prouve que tout est câblé est **Dagster → Marquez** : un run 
 - **État de validation** : [résultats du banc Lima](../../bench/lima/RESULTS.md)
   (section « Chaîne DataOps assemblée »).
 
+> **Code-location jouet du socle
+> ([ADR 0086](../decisions/0086-code-location-jouet-du-socle.md)).**
+> L'orchestrateur Dagster est livré **vide** (`load_from: []`). Pour exercer la
+> chaîne réelle (webserver → gRPC → `K8sRunLauncher` → run → lineage → drift
+> MLflow) **sans dépendre du dépôt applicatif**, le socle déploie **par GitOps**
+> une code-location jouet `toy-codeloc` (serveur gRPC chargeant `toy_assets` :
+> `toy_dataset` émet du lineage, `toy_drift` calcule un drift Evidently et le
+> logge dans MLflow). C'est ce que le **scénario 27** prouve (déploiement +
+> branchement) et le **29** exécute (run e2e → lineage + MLflow). ⚠️ Les env
+> (`MLFLOW_TRACKING_URI`, `OPENLINEAGE_*`) doivent être injectées dans les
+> **pods de run** via un tag `dagster-k8s/config` — voir la note du contrat.
+
 ## Voir aussi
 
 - [Validation sur banc](validation-banc.md) — méthodologie des runs.

@@ -244,6 +244,20 @@ morts (suppression, corruption) que la redondance ne traite pas. Le fil rouge du
 socle Ceph : `failureDomain: host` et le modèle de panne « perte d'un hôte » sur
 4 nœuds.
 
+## Où se prouve le stockage : local-path par défaut, Ceph sur installation
+
+[ADR 0085](../decisions/0085-preuves-applicatives-local-path.md) tranche **où**
+la plateforme se valide au banc : les **preuves applicatives** (chaîne MLOps) se
+font sur **local-path** (profil léger), car le code applicatif parle à
+S3/stockage par un **chemin paramétré unique** (backing `seaweedfs`↔`rgw`
+dérivé, ADR 0036/0065) — local-path exerce donc le même code que Ceph. Le
+**stockage Ceph** est validé sur son **installation seule** (`storage-real` :
+montage du cluster + PVC RBD + smoke S3 RGW), **pas** avec la chaîne applicative
+empilée par-dessus (irréalisable en ressources au banc mono-hôte). La soupape
+`cluster-dataops` (applicatif sur Ceph) reste jouable **sur demande** avant tout
+changement touchant le chemin S3/backing — seule preuve du « RGW rempli par un
+vrai workload ».
+
 ## Voir aussi
 
 - [Vue — Exposition réseau](../architecture/exposition-reseau.md) (réseau /

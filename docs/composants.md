@@ -379,6 +379,29 @@ d'administration du cluster. Il est déployé avec un compte de service en
 assumé comme tel ([ADR 0010](decisions/0010-dashboard-cluster-admin.md)).
 Manifestes : [`platform/k8s-dashboard/`](../platform/k8s-dashboard/).
 
+## Applications
+
+Charges applicatives déployées **sur** la plateforme (pas des briques d'infra) —
+chacune autonome, hors graphe `nestor` ([`apps/`](../apps/)) :
+
+### RStudio
+
+RStudio Server (image `rocker`) sur PVC RBD, pour le calcul statistique
+interactif. Mono-utilisateur, **sans authentification** (réseau isolé, accès par
+`kubectl port-forward`) — choix assumé pour un cluster de recherche
+([ADR 0012](decisions/0012-rstudio-disable-auth.md)). Manifestes :
+[`apps/rstudio/`](../apps/rstudio/).
+
+### REDCap
+
+[REDCap](https://projectredcap.org) (saisie de données de recherche, PHP/Apache)
+adossé à un **MariaDB autonome** (REDCap ne supporte pas PostgreSQL/CNPG).
+Logiciel **tiers sous licence** : image **maison** (`php:apache` + extensions +
+le code source, gitignoré et jamais commité, ADR 0023) ; déployée par un
+**playbook dédié** [`bootstrap/redcap.yaml`](../bootstrap/redcap.yaml)
+(installation et désinstallation, `redcap_state=present|absent`). Manifestes et
+procédure : [`apps/redcap/`](../apps/redcap/).
+
 ## Pour aller plus loin
 
 - Consommer ces briques depuis son code :

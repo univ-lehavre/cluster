@@ -70,7 +70,7 @@ gate/assertion par couche, et leur regroupement en **chemins d'installation**
 
 ## Niveau 3 — Scénarios (comportement)
 
-26 scénarios numérotés ([`bench/scenarios/`](../../bench/scenarios/), runner
+31 scénarios numérotés ([`bench/scenarios/`](../../bench/scenarios/), runner
 `run-all.sh`), couvrant résilience, sécurité active, chaos et observabilité. La
 **matrice détaillée** (ce que teste chacun + couverture) vit dans
 [`bench/scenarios/README.md`](../../bench/scenarios/README.md). Chaque famille
@@ -79,12 +79,16 @@ monte le banc requis et que le garde-fou de fraîcheur surveille à sa cadence
 ([ADR 0025](../decisions/0025-securite-active-chaos-attaques-controlees.md),
 [ADR 0042](../decisions/0042-fraicheur-preuves-banc.md)) :
 
-| Plage        | Famille                                                                                                                                            | Chemin scellant (§6)             |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| 06           | Smoke S3 (RGW) + montage WordPress (PVC bloc Ceph)                                                                                                 | `storage-real` (30 j)            |
-| 01–05, 07–22 | Stockage, résilience, etcd, durcissement, sécu active, chaos                                                                                       | `storage-real` (banc Ceph monté) |
-| 23–26        | Intégration DataOps + observabilité                                                                                                                | `cluster-dataops` (90 j)         |
-| **27**       | **e2e GitOps → workflows atlas** (push Gitea → Argo CD déploie les workflows → run Dagster + lineage) — implémenté (#231), preuve banc à consigner | `atlas` (7 j)                    |
+| Plage        | Famille                                                                                         | Chemin scellant (§6)             |
+| ------------ | ----------------------------------------------------------------------------------------------- | -------------------------------- |
+| 06           | Smoke S3 (RGW) + montage WordPress (PVC bloc Ceph)                                              | `storage-real` (30 j)            |
+| 01–05, 07–22 | Stockage, résilience, etcd, durcissement, sécu active, chaos                                    | `storage-real` (banc Ceph monté) |
+| 23–26        | Intégration DataOps + observabilité                                                             | `cluster-dataops` (90 j)         |
+| **27**       | **e2e GitOps → code-location gRPC jouet** déployée+branchée (ADR 0086) — prouvé banc 2026-06-18 | `atlas` (7 j)                    |
+| 28           | UI joignables via le Gateway Cilium (HTTPRoute + TLS de bordure, SNI)                           | `atlas` (7 j)                    |
+| 29           | Code-location : run e2e `launchRun` → lineage Marquez + MLflow drift — prouvé banc 2026-06-18   | `atlas` (7 j)                    |
+| 30           | ha-3cp : survie à 1 panne CP (VIP kube-vip + quorum etcd) — topologie `ha-3cp`                  | `ha-3cp` (sur demande)           |
+| 31           | Contrat cluster→atlas : endpoints tenus (Service + port + réponse), transversal (ADR 0043)      | `atlas` (7 j)                    |
 
 **Axe durcissement (`WITH_HARDENING=1`, ADR 0045 §3 / #240).** Les scénarios qui
 exigent un hôte durci ne passent que si le chemin a été monté avec
@@ -147,5 +151,5 @@ WITH_CEPH=1 WITH_HARDENING=1 NO_CACHE=1 bench/lima/run-phases.sh storage-real
 
 - [Chemins d'installation (ADR 0045)](../decisions/0045-chemins-installation-banc-couches.md)
   — quelle couche, quel ordre, quels gates par chemin.
-- [Matrice des scénarios](../../bench/scenarios/README.md) — détail des 26 (+1).
+- [Matrice des scénarios](../../bench/scenarios/README.md) — détail des 31.
 - [Leçons des Runs](lecons-des-runs.md) — synthèse des drifts par campagne.

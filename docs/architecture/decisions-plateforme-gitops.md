@@ -146,6 +146,19 @@ default-deny Cilium est préservé via `platform/network-policies/argocd/`. Le
 protocole de banc est détaillé dans la vue
 [Validation banc](../architecture/validation-banc.md).
 
+### Code-location jouet : prouver la chaîne GitOps en autonomie
+
+[ADR 0086](../decisions/0086-code-location-jouet-du-socle.md) ajoute une
+**code-location Dagster jouet** (`toy-codeloc`, serveur gRPC minimal) **déployée
+par GitOps** (poussée dans Gitea, réconciliée par Argo CD) — exactement comme la
+vraie code-location d'atlas. Elle rend le banc **autonome** pour exercer toute
+la chaîne (push Gitea → webhook → Argo CD `Synced` → gRPC → run Dagster via
+`launchRun` → lineage Marquez → métrique de drift Evidently dans MLflow) **sans
+dépendre du dépôt applicatif**. C'est le contenu réconcilié par le scénario 27,
+et le pipeline lancé par le 29. Respecte la frontière (la code-location est de
+l'**applicatif** → GitOps, pas Ansible) ; elle remplace l'ancien Job CLI jetable
+`dataops_chain_emit_and_verify`.
+
 ## Voir aussi
 
 - [Exposition réseau](../architecture/exposition-reseau.md) — Gateway Cilium,

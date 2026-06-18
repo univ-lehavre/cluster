@@ -129,7 +129,10 @@ export default defineConfig({
       },
       {
         text: 'Applications',
-        items: [{ text: 'RStudio', link: '/apps/rstudio/' }],
+        items: [
+          { text: 'RStudio', link: '/apps/rstudio/' },
+          { text: 'REDCap', link: '/apps/redcap/' },
+        ],
       },
       {
         text: 'Banc de test (Lima)',
