@@ -80,6 +80,16 @@ endpoints:
     note: >-
       Orchestrateur livré VIDE ; le code (assets/code-locations) est déployé
       par atlas (ADR 0022/0026). Event log dans la base `dagster` (CNPG).
+      ⚠️ INJECTION DES ENV DANS LES PODS DE RUN (piège, ADR 0086) : les variables
+      d'environnement (MLFLOW_TRACKING_URI, OPENLINEAGE_URL…) posées sur le
+      Deployment de la code-location gRPC ne se propagent PAS aux pods de RUN créés
+      par le K8sRunLauncher. Un run aboutit alors SUCCESS mais le logging est un
+      no-op silencieux (variable absente du pod de run). Le consommateur DOIT
+      déclarer ces variables via un tag `dagster-k8s/config`
+      (`container_config.env` ou `env_from`) sur ses jobs
+      (`define_asset_job(..., tags={"dagster-k8s/config": {...}})`) pour qu'elles
+      atteignent les pods de run. Cf. atlas `_RUN_K8S_CONFIG` (definitions.py) et la
+      garde `deploy/validate.sh` qui vérifie MLFLOW_TRACKING_URI dans le rendu.
 
   # ── Suivi de modèles (MLflow, ns mlflow) ──────────────────────────────────
   - id: mlflow-tracking
@@ -97,7 +107,10 @@ endpoints:
       Backend store = base `mlflow` (CNPG) ; artefact store = bucket S3 (OBC).
       Variable consommateur (pendant de OPENLINEAGE_URL pour Marquez) :
       MLFLOW_TRACKING_URI=http://mlflow.mlflow.svc.cluster.local:5000 — logguer
-      runs/params/métriques et enregistrer les modèles depuis atlas.
+      runs/params/métriques et enregistrer les modèles depuis atlas. ⚠️ Cette
+      variable doit atteindre les PODS DE RUN (pas seulement la code-location) :
+      l'injecter via le tag `dagster-k8s/config` — cf. la note de `dagster-webserver`
+      ci-dessus (piège ADR 0086, sinon logging MLflow no-op silencieux).
       Chaîne MLOps atlas (maturité 1→2) : la détection de DRIFT (Evidently, asset
       check Dagster à côté des suites Great Expectations) logue ses métriques ici ;
       l'entraînement CONTINU (schedule/sensor Dagster sur transform_job) trace ses

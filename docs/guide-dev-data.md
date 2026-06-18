@@ -103,6 +103,14 @@ atlas) :
 | --------------------- | --------------------------------------------- |
 | `MLFLOW_TRACKING_URI` | `http://mlflow.mlflow.svc.cluster.local:5000` |
 
+> ⚠️ **Pour que vos RUNS Dagster voient cette variable** (pas seulement la
+> code-location) : déclarez-la via un tag `dagster-k8s/config`
+> (`container_config.env`) sur vos jobs — les env du pod de la code-location
+> gRPC **ne se propagent pas** aux pods de run du K8sRunLauncher. Sinon le
+> logging MLflow est un no-op silencieux (run SUCCESS mais rien de loggé).
+> Détail : note `dagster-webserver` du
+> [contrat](../contract/endpoints.example.yaml).
+
 La **procédure** (logger un run, exemple Python) est dans
 [Se brancher → Suivi de modèles](se-brancher.md#suivi-de-modèles-logger-avec-mlflow).
 
