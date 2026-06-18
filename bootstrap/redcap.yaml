@@ -4,7 +4,12 @@
 # graphe nestor : ce playbook se lance explicitement (`ansible-playbook bootstrap/
 # redcap.yaml`), ce n'est PAS une layer `nestor up`.
 #
-# Calqué sur mlflow.yaml (image MAISON → registry interne) — DEUX plays :
+# MODE (redcap_state) : `present` (défaut) INSTALLE ; `absent` DÉSINSTALLE (play
+# teardown en fin de fichier — supprime les ressources k8s, conserve le PVC MariaDB
+# sauf redcap_purge_data=true). En mode absent, les deux plays d'install ci-dessous
+# se terminent immédiatement (meta: end_play).
+#
+# Calqué sur mlflow.yaml (image MAISON → registry interne) — DEUX plays d'install :
 #   1. étape NŒUDS (`hosts: cloud`) : build de l'image maison REDCap (php:apache +
 #      extensions + le code source REDCap copié au build) vers le registry interne ;
 #   2. étape k8s (`localhost`) : applique namespace + NetworkPolicies + MariaDB + REDCap.
@@ -23,7 +28,15 @@
   # dans le registry → il DOIT vérifier EXPECTED_TARGET_KIND via audit-log AVANT toute
   # tâche distante (comme mlflow.yaml/dataops.yaml). gather_facts requis :
   # platform-build-images teste ansible_architecture.
+  #
+  # MODE : redcap_state=present (défaut) installe ; redcap_state=absent désinstalle
+  # (cf. play « teardown » en fin de fichier). En mode absent, ce play nœuds n'a rien
+  # à faire (on ne dé-build pas l'image du registry — réutilisable) → end_play immédiat.
   pre_tasks:
+    - name: Skip le build en mode désinstallation
+      ansible.builtin.meta: end_play
+      when: redcap_state | default('present') == 'absent'
+
     - name: Audit-log — record playbook execution (+ garde target_kind)
       ansible.builtin.import_role:
         name: audit-log
@@ -79,6 +92,10 @@
     redcap_repo_dir: '{{ playbook_dir }}/..'
     redcap_namespace: redcap
   pre_tasks:
+    - name: Skip l'installation en mode désinstallation
+      ansible.builtin.meta: end_play
+      when: redcap_state | default('present') == 'absent'
+
     # kubernetes.core exige la lib Python `kubernetes` ; certifi fournit le CA (idem mlflow).
     - name: 'Garde : client Python kubernetes+certifi présent (sinon : uv sync)'
       block:
@@ -178,4 +195,93 @@
         msg: >-
           redcap.yaml terminé. Accès : kubectl -n {{ redcap_namespace }} port-forward
           svc/redcap 8080:80 → http://localhost:8080 (install au premier accès).
+      run_once: true
+
+# ── DÉSINSTALLATION (redcap_state=absent) ────────────────────────────────────
+# Symétrique de l'install : supprime les ressources k8s dans l'ordre inverse. Ne
+# touche PAS l'image du registry (réutilisable) ni les Secrets réels (creds hors
+# dépôt, à la main de l'opérateur). Le PVC MariaDB (données REDCap) est CONSERVÉ par
+# défaut — sa destruction est un choix EXPLICITE (redcap_purge_data=true), car perdre
+# des données ne doit jamais être un effet de bord d'un `remove`.
+#
+#   uv run ansible-playbook -i <inv> redcap.yaml -e redcap_state=absent
+#   uv run ansible-playbook -i <inv> redcap.yaml -e redcap_state=absent -e redcap_purge_data=true
+- name: REDCap — désinstallation k8s (redcap_state=absent)
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
+  gather_facts: false
+  environment:
+    SSL_CERT_FILE: '{{ redcap_ca_bundle | default(omit) }}'
+  vars:
+    redcap_repo_dir: '{{ playbook_dir }}/..'
+    redcap_namespace: redcap
+  pre_tasks:
+    - name: Skip la désinstallation en mode installation
+      ansible.builtin.meta: end_play
+      when: redcap_state | default('present') != 'absent'
+
+    - name: Resolve the certifi CA bundle path
+      ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import certifi; print(certifi.where())'"
+      register: redcap_certifi
+      changed_when: false
+    - name: Set the CA bundle for HTTPS requests
+      ansible.builtin.set_fact:
+        redcap_ca_bundle: '{{ redcap_certifi.stdout | trim }}'
+  tasks:
+    # Ordre inverse de l'install : REDCap (frontend) puis MariaDB, puis NetworkPolicies.
+    - name: Remove REDCap (serveur PHP/Apache)
+      kubernetes.core.k8s:
+        state: absent
+        namespace: '{{ redcap_namespace }}'
+        src: '{{ redcap_repo_dir }}/apps/redcap/redcap.yaml'
+
+    # MariaDB : on supprime le Deployment + le Service NOMMÉMENT (pas le manifeste
+    # entier), pour NE PAS toucher au PVC tant qu'on ne le décide pas. Préserver les
+    # données = ne jamais supprimer le PVC par effet de bord.
+    - name: Remove MariaDB Deployment + Service (PVC conservé)
+      kubernetes.core.k8s:
+        state: absent
+        namespace: '{{ redcap_namespace }}'
+        api_version: '{{ item.api }}'
+        kind: '{{ item.kind }}'
+        name: '{{ item.name }}'
+      loop:
+        - api: apps/v1
+          kind: Deployment
+          name: redcap-mariadb
+        - api: v1
+          kind: Service
+          name: redcap-mariadb
+      loop_control:
+        label: '{{ item.kind }}/{{ item.name }}'
+
+    - name: Remove REDCap network policies
+      kubernetes.core.k8s:
+        state: absent
+        namespace: '{{ redcap_namespace }}'
+        src: '{{ redcap_repo_dir }}/platform/network-policies/redcap/{{ item }}'
+      loop:
+        - allow-mariadb.yaml
+        - allow-redcap.yaml
+        - allow-dns.yaml
+        - 00-default-deny.yaml
+
+    # PVC MariaDB : CONSERVÉ par défaut (les données survivent à un remove/re-install).
+    # Détruit SEULEMENT si redcap_purge_data=true — perdre des données ne doit jamais
+    # être un effet de bord d'un `remove`.
+    - name: Purge le PVC MariaDB (données REDCap) — uniquement si demandé
+      kubernetes.core.k8s:
+        state: absent
+        namespace: '{{ redcap_namespace }}'
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: redcap-mariadb-pv-claim
+      when: redcap_purge_data | default(false) | bool
+
+    - name: REDCap teardown outcome
+      ansible.builtin.debug:
+        msg: >-
+          REDCap désinstallé (ns {{ redcap_namespace }}).
+          PVC MariaDB {{ 'PURGÉ (données perdues)' if (redcap_purge_data | default(false) | bool)
+          else 'CONSERVÉ (re-install réutilisera les données)' }}.
+          Namespace + Secrets laissés en place (Secrets = creds hors dépôt).
       run_once: true

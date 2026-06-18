@@ -87,6 +87,25 @@ kubectl -n redcap port-forward svc/redcap 8080:80
 # → http://localhost:8080  (installation REDCap au premier accès : /install.php)
 ```
 
+### 5. Désinstaller
+
+Le même playbook désinstalle avec `redcap_state=absent` (symétrique de
+l'install) :
+
+```bash
+cd bootstrap
+# Désinstalle REDCap + MariaDB + NetworkPolicies. Le PVC MariaDB (données) est
+# CONSERVÉ par défaut → une ré-installation réutilise les données.
+uv run ansible-playbook -i <inventaire> redcap.yaml -e redcap_state=absent
+
+# Pour TOUT effacer, y compris les données MariaDB (irréversible) :
+uv run ansible-playbook -i <inventaire> redcap.yaml -e redcap_state=absent -e redcap_purge_data=true
+```
+
+> Le namespace `redcap` et les Secrets (`redcap-db-secret`/`redcap-db-config`)
+> sont **laissés en place** (les Secrets portent des creds gérés hors dépôt).
+> Les supprimer à la main si besoin : `kubectl delete ns redcap`.
+
 ## Fichiers
 
 | Fichier                                                                                                                      | Rôle                                                                  |
