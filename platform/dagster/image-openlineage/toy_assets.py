@@ -73,20 +73,37 @@ def toy_dataset():
     return {"rows": 1, "generated_at": datetime.now(timezone.utc).isoformat(), "id": str(uuid.uuid4())}
 
 
-def _toy_drift_score() -> tuple[float, bool]:
-    """Calcule un `drift_score` JOUET (déterministe, sans dépendance lourde).
+def _compute_drift() -> dict:
+    """Score de drift VIA EVIDENTLY (EmbeddingsDriftMetric), comme atlas (#404, #428).
 
-    Deux petits jeux codés en dur (référence vs courant) ; le score est l'écart
-    ABSOLU de leurs moyennes, normalisé. C'est une formule TRIVIALE maison — pas le
-    vrai EmbeddingsDriftMetric d'Evidently (étape ultérieure, ADR 0086). Le verdict
-    `drift_detected` applique un seuil simple. Objectif : produire une métrique
-    plausible à logger dans MLflow, pour prouver le CHEMIN Dagster → MLflow."""
-    reference = [0.10, 0.12, 0.09, 0.11, 0.10]
-    current = [0.42, 0.45, 0.40, 0.44, 0.41]  # décalé volontairement → drift attendu
-    mean_ref = sum(reference) / len(reference)
-    mean_cur = sum(current) / len(current)
-    drift_score = round(abs(mean_cur - mean_ref) / (abs(mean_ref) + 1e-9), 4)
-    return drift_score, drift_score > 0.5
+    Réplique fidèle du `compute_drift` d'atlas, mais sur deux jeux SYNTHÉTIQUES
+    générés en mémoire (pas de S3/DuckDB) : `reference` centré sur 0, `current`
+    décalé → drift attendu. Le verdict `drift_detected` est celui d'Evidently (test
+    statistique : ROC AUC d'un classifieur ref↔cur), PAS un seuil maison.
+
+    Imports LOCAUX : Evidently est lourd (pandas/scipy/sklearn) — chargé seulement à
+    l'exécution du check, pas à l'import du module (démarrage gRPC rapide), comme atlas."""
+    import numpy as np
+    import pandas as pd
+    from evidently import ColumnMapping
+    from evidently.metrics import EmbeddingsDriftMetric
+    from evidently.report import Report
+
+    dim, n = 8, 20
+    rng = np.random.default_rng(0)
+    cols = [f"e{i}" for i in range(dim)]
+    reference = pd.DataFrame(rng.normal(0.0, 1.0, (n, dim)), columns=cols)
+    current = pd.DataFrame(rng.normal(0.8, 1.0, (n, dim)), columns=cols)  # décalé → drift
+
+    mapping = ColumnMapping(embeddings={"toy_vectors": cols})
+    report = Report(metrics=[EmbeddingsDriftMetric("toy_vectors")])
+    report.run(reference_data=reference, current_data=current, column_mapping=mapping)
+    result = report.as_dict()["metrics"][0]["result"]
+    return {
+        "drift_score": float(result["drift_score"]),
+        "drift_detected": bool(result["drift_detected"]),
+        "method": result.get("method_name", "—"),
+    }
 
 
 def _log_drift_to_mlflow(run_id: str, drift_score: float, drift_detected: bool) -> bool:
@@ -113,18 +130,20 @@ def _log_drift_to_mlflow(run_id: str, drift_score: float, drift_detected: bool) 
 
 @asset
 def toy_drift():
-    """Asset jouet : calcule un drift_score trivial et le logge dans MLflow.
+    """Asset jouet : calcule un drift_score Evidently et le logge dans MLflow.
 
-    Prouve la chaîne Dagster → MLflow (jumeau trivial du drift/CT atlas, #404). Le
-    scénario de vérification interroge ensuite l'API MLflow pour l'experiment
+    Réplique la chaîne drift/CT d'atlas (#404) EN AUTONOMIE (jeux synthétiques, sans
+    atlas) : vrai EmbeddingsDriftMetric → drift_score/drift_detected → MLflow. Le
+    scénario 29 (VERIFY_MLFLOW=1) interroge ensuite l'API MLflow pour l'experiment
     `toy_embeddings_drift`."""
     run_id = str(uuid.uuid4())
-    drift_score, drift_detected = _toy_drift_score()
-    logged = _log_drift_to_mlflow(run_id, drift_score, drift_detected)
+    drift = _compute_drift()
+    logged = _log_drift_to_mlflow(run_id, drift["drift_score"], drift["drift_detected"])
     return {
         "run_id": run_id,
-        "drift_score": drift_score,
-        "drift_detected": drift_detected,
+        "drift_score": drift["drift_score"],
+        "drift_detected": drift["drift_detected"],
+        "method": drift["method"],
         "mlflow_logged": logged,
     }
 
