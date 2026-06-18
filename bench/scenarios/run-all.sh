@@ -7,12 +7,14 @@
 # scénarios DESTRUCTIFS (qui touchent à l'état du cluster), attend le retour à
 # `HEALTH_OK` côté Ceph pour ne pas enchaîner sur un cluster encore dégradé.
 #
-# Usage :
+# Usage — options en VARIABLES D'ENV, TOUJOURS AVANT la commande (sinon ignorées,
+# cf. le garde-fou plus bas qui refuse un `VAR=val` placé après le script) :
 #   bench/scenarios/run-all.sh                  # tous les scénarios (kubectl)
 #   SKIP='03 04' bench/scenarios/run-all.sh     # exclure des scénarios (par n°)
 #   ONLY='01 02 07' bench/scenarios/run-all.sh  # n'exécuter que ceux-là
 #   HOSTS='cp1 node1' bench/scenarios/run-all.sh  # inclut le 13 (host)
 #   TARGET_IP=192.168.67.11 ONLY='16' …        # joue un scénario SSH ciblé
+#   CODELOC_NAME=toy CODELOC_JOB=toy_job VERIFY_MLFLOW=1 ONLY='29' bench/scenarios/run-all.sh
 #
 # ⚠️ Sur le banc Vagrant, la phase « restore » des scénarios 03/04 ne se valide
 # pas (artefacts arm64 sans valeur prod — cf. bench/scenarios/README.md). Les
@@ -33,6 +35,24 @@
 #
 # Sortie : 0 si tous les scénarios joués passent, 1 sinon.
 set -uo pipefail
+
+# Garde-fou ergonomie : ce runner se configure par VARIABLES D'ENVIRONNEMENT
+# (ONLY/SKIP/VERIFY_*/CODELOC_*…), JAMAIS par argument positionnel. Une variable
+# placée APRÈS le script (`run-all.sh ONLY='29'`) devient un argument $1 IGNORÉ →
+# le runner jouait alors TOUS les scénarios sans filtrer, en silence (piège vécu).
+# On refuse explicitement tout argument ressemblant à VAR=valeur et on rappelle la
+# bonne syntaxe (variables AVANT la commande).
+for _arg in "$@"; do
+    case "${_arg}" in
+        *=*)
+            printf '✗ argument ignoré : « %s »\n' "${_arg}" >&2
+            printf '  Les options se passent en VARIABLES D'\''ENV, AVANT la commande :\n' >&2
+            printf "      %s bench/scenarios/run-all.sh\n" "${_arg}" >&2
+            printf '  (et non « run-all.sh %s », qui serait silencieusement ignoré).\n' "${_arg}" >&2
+            exit 2
+            ;;
+    esac
+done
 
 # KUBECONFIG en chemin ABSOLU avant le `cd` (drift L50) : ce runner se déplace
 # dans son propre dossier, donc un KUBECONFIG relatif (ex.
