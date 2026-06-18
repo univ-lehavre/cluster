@@ -29,7 +29,12 @@
 #   OL_NAMESPACE=dagster        namespace OpenLineage où chercher le lineage
 #   VERIFY_S3_ENDPOINT=''       (option) endpoint S3 à vérifier en aval
 #   VERIFY_S3_BUCKET=''         (option) bucket où un objet doit apparaître
+#   VERIFY_MLFLOW=1             (option) l'experiment MLFLOW_EXPERIMENT doit exister
+#   MLFLOW_EXPERIMENT=toy_embeddings_drift  experiment MLflow attendu après le run
 #   STRICT_CODELOC=1            échoue (au lieu de skip) si prérequis absents
+#
+# Exemple code-location jouet (ADR 0086) — run + lineage + MLflow d'un coup :
+#   CODELOC_NAME=toy CODELOC_JOB=toy_job VERIFY_MLFLOW=1 bench/scenarios/run-all.sh ONLY='29'
 #
 # ⚠️ BORNER le run (jobs métier lourds). Le harnais lance le VRAI job ; un sync
 # complet (ex. snapshot OpenAlex = To) ne tient pas dans un test. Passer
@@ -55,6 +60,12 @@ CODELOC_TIMEOUT=${CODELOC_TIMEOUT:-600}
 OL_NAMESPACE=${OL_NAMESPACE:-dagster}
 VERIFY_S3_ENDPOINT=${VERIFY_S3_ENDPOINT:-}
 VERIFY_S3_BUCKET=${VERIFY_S3_BUCKET:-}
+# (Option) vérifier qu'un run a loggé une métrique dans MLflow (ADR 0086, #404) :
+# si VERIFY_MLFLOW=1, l'experiment MLFLOW_EXPERIMENT doit exister après le run (toy_drift
+# le crée via mlflow.set_experiment + log_metric). Prouve la chaîne Dagster → MLflow.
+VERIFY_MLFLOW=${VERIFY_MLFLOW:-}
+MLFLOW_SVC=${MLFLOW_SVC:-mlflow.mlflow.svc.cluster.local:5000}
+MLFLOW_EXPERIMENT=${MLFLOW_EXPERIMENT:-toy_embeddings_drift}
 
 WEBSERVER_URL="http://dagster-dagster-webserver.${CODELOC_NS}.svc.cluster.local:80/graphql"
 
@@ -179,6 +190,22 @@ if [ -n "${VERIFY_S3_ENDPOINT}" ] && [ -n "${VERIFY_S3_BUCKET}" ]; then
     [ "${n_obj:-0}" -ge 1 ] \
         || { log "✗ aucun objet dans ${VERIFY_S3_BUCKET} (${VERIFY_S3_ENDPOINT})"; exit 1; }
     log "  ✓ objet présent dans le bucket aval ${VERIFY_S3_BUCKET}"
+fi
+# 5c. (Option) une métrique a été loggée dans MLflow → l'experiment existe (ADR 0086).
+# API REST MLflow : get-by-name renvoie l'experiment si un run l'a créé (toy_drift),
+# une erreur RESOURCE_DOES_NOT_EXIST sinon. Prouve la chaîne Dagster → MLflow.
+if [ "${VERIFY_MLFLOW}" = 1 ]; then
+    exp_json=$(kubectl -n "${CODELOC_NS}" run "mlflowcheck-29-$$" --rm -i --restart=Never \
+        --image=curlimages/curl:8.11.1 --quiet -- \
+        curl -sS "http://${MLFLOW_SVC}/api/2.0/mlflow/experiments/get-by-name?experiment_name=${MLFLOW_EXPERIMENT}" \
+        --max-time 30 2>/dev/null || true)
+    if printf '%s' "${exp_json}" | grep -q '"experiment_id"'; then
+        log "  ✓ MLflow : experiment « ${MLFLOW_EXPERIMENT} » présent (métrique loggée par le run)"
+    else
+        log "✗ MLflow : experiment « ${MLFLOW_EXPERIMENT} » absent — le run n'a pas loggé"
+        log "    (MLFLOW_TRACKING_URI injecté dans la code-location ? egress dagster→mlflow #407 ?)"
+        exit 1
+    fi
 fi
 
 log "🎉 code-location externe « ${CODELOC_NAME} » validée e2e : branchée → run ${CODELOC_JOB} SUCCESS → lineage ingéré."

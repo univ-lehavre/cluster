@@ -1,14 +1,15 @@
-# Image Dagster + OpenLineage JETABLE pour la validation e2e de la chaîne (#148).
+# Image Dagster + OpenLineage + MLflow JETABLE — code-location jouet (#148, ADR 0086).
 #
-# Émetteur de lineage : matérialise un asset trivial (toy_assets.py) qui POST des
-# événements OpenLineage RÉELS vers Marquez. Sert UNIQUEMENT au harnais
-# `test/lima/run-phases.sh dataops-chain` ; ce n'est pas une brique de production
-# (l'orchestrateur Dagster livré reste vide — le code métier vit dans atlas).
+# Le module toy_assets.py expose : `toy_dataset` (émet du lineage OpenLineage vers
+# Marquez) et `toy_drift` (logge un drift_score jouet dans MLflow). Sert au harnais
+# (`dataops-chain`) et à la code-location gRPC jouet (scénario 27/29). Ce n'est PAS
+# une brique de production (l'orchestrateur Dagster livré reste vide — métier dans atlas).
 #
-# arm64 (banc Lima) : Dagster + openlineage sont du pur Python → l'image se
-# construit trivialement sur python:3.10-slim (même base que l'image Dagster
-# maison, platform/dagster/image/). Hard-pin de dagster sur la version du chart
-# (verrou chart↔package 1:1, ADR 0006).
+# arm64 (banc Lima) : Dagster + openlineage + mlflow-skinny sont du pur Python → l'image
+# se construit sur python:3.10-slim (même base que platform/dagster/image/). Hard-pin de
+# dagster sur la version du chart (verrou chart↔package 1:1, ADR 0006).
+# mlflow-skinny (client seul, ~50 Mo) et NON mlflow complet (serveur + scipy/sklearn) :
+# image légère. Le VRAI calcul Evidently (deps lourdes) viendra dans une étape ultérieure.
 #
 # Build (depuis ce dossier) :
 #   docker buildx build --platform linux/arm64 \
@@ -20,7 +21,8 @@ ARG DAGSTER_VERSION=1.13.7
 RUN pip install --no-cache-dir -U uv
 RUN python -m uv pip install --system \
     dagster==${DAGSTER_VERSION} \
-    openlineage-python
+    openlineage-python \
+    mlflow-skinny==2.17.2
 
 # Le module d'asset jetable (chargé par `dagster asset materialize -m toy_assets`).
 WORKDIR /opt/dagster/app
