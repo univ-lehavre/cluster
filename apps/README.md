@@ -2,9 +2,10 @@
 
 Charges applicatives déployées sur le cluster (calcul / services de recherche).
 
-| Application            | Rôle                                                       |
-| ---------------------- | ---------------------------------------------------------- |
-| [`rstudio/`](rstudio/) | RStudio Server (image `rocker`) sur PVC RBD — cf. ADR 0012 |
+| Application            | Rôle                                                                    |
+| ---------------------- | ----------------------------------------------------------------------- |
+| [`rstudio/`](rstudio/) | RStudio Server (image `rocker`) sur PVC RBD — cf. ADR 0012              |
+| [`redcap/`](redcap/)   | REDCap (PHP/Apache, image maison) + MariaDB autonome — cf. README dédié |
 
 > Les exemples de validation du stockage (WordPress/MySQL) vivent sous
 > [`storage/ceph/wordpress/`](../storage/ceph/wordpress/), pas ici.

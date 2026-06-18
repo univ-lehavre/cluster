@@ -1,0 +1,136 @@
+# REDCap — serveur PHP/Apache (image maison registry:80/redcap, cf.
+# platform/redcap/image/Dockerfile). Backend : MariaDB autonome (redcap-mariadb).
+# App AUTONOME déployée à la main (comme RStudio), HORS graphe nestor.
+#
+# Connexion base : REDCap lit ses identifiants dans `database.php` (à la racine du
+# webroot). On l'injecte par un Secret monté en lecture seule par-dessus le fichier
+# baké dans l'image (subPath) — les identifiants ne sont JAMAIS dans l'image. Le
+# modèle générique est `database.example.php` (versionné) ; le Secret réel
+# `redcap-db-config` est créé par l'opérateur (cf. README).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redcap
+  labels:
+    app: redcap
+    tier: frontend
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+  selector:
+    app: redcap
+    tier: frontend
+---
+# Stockage persistant des fichiers uploadés (edocs) + temp : REDCap écrit hors du
+# code (documents, exports). Le code lui-même est dans l'image (immuable).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redcap-edocs-pv-claim
+  labels:
+    app: redcap
+spec:
+  storageClassName: rook-ceph-block-replicated
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redcap
+  labels:
+    app: redcap
+    tier: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redcap
+      tier: frontend
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: redcap
+        tier: frontend
+    spec:
+      # Durcissement (ADR 0014 / trivy KSV-0118). www-data = uid 33 dans l'image
+      # php:apache. rootfs NON read-only (KSV-0014, allowlisté) : Apache écrit ses
+      # logs/lock dans /var ; REDCap son cache. Les uploads (edocs) sur PVC dédié.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        fsGroup: 33
+        seccompProfile:
+          type: RuntimeDefault
+      # wait-for-db : REDCap se connecte à MariaDB au premier hit. On attend que le
+      # service réponde (port 3306) avant de démarrer Apache. Image postgres réutilisée
+      # comme conteneur d'attente générique (pg_isready non utilisé — simple nc TCP).
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36@sha256:9ae97d36d26566ff84e8893c64a6dc4fe8ca6d1144bf5b87b2b85a32def253c7
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          command:
+            - sh
+            - -c
+            - 'until nc -z redcap-mariadb 3306; do echo waiting for mariadb; sleep 2; done;'
+      containers:
+        - name: redcap
+          image: 'registry:80/redcap:v17.1.3'
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /index.php
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /index.php
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            # Identifiants base injectés par-dessus le database.php baké (Secret).
+            - name: db-config
+              mountPath: /var/www/html/database.php
+              subPath: database.php
+              readOnly: true
+            # Uploads persistants (documents/exports REDCap).
+            - name: edocs
+              mountPath: /var/www/html/edocs
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+      volumes:
+        - name: db-config
+          secret:
+            secretName: redcap-db-config
+        - name: edocs
+          persistentVolumeClaim:
+            claimName: redcap-edocs-pv-claim

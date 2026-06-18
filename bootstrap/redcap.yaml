@@ -1,0 +1,181 @@
+# code: language=ansible
+# App REDCap (apps/redcap, cf. README) — saisie de données de recherche (PHP/Apache)
+# adossée à un MariaDB autonome. App AUTONOME déployée à la main (comme RStudio), HORS
+# graphe nestor : ce playbook se lance explicitement (`ansible-playbook bootstrap/
+# redcap.yaml`), ce n'est PAS une layer `nestor up`.
+#
+# Calqué sur mlflow.yaml (image MAISON → registry interne) — DEUX plays :
+#   1. étape NŒUDS (`hosts: cloud`) : build de l'image maison REDCap (php:apache +
+#      extensions + le code source REDCap copié au build) vers le registry interne ;
+#   2. étape k8s (`localhost`) : applique namespace + NetworkPolicies + MariaDB + REDCap.
+#
+# PRÉREQUIS (non gérés ici, à monter AVANT) : registry interne (platform-registry) +
+# StorageClass RBD (rook-ceph-block-replicated) pour les PVC. Et SURTOUT, côté opérateur :
+#   - le CODE SOURCE REDCap stagé dans platform/redcap/image/source/redcap/ (gitignoré,
+#     logiciel tiers sous licence propriétaire — cf. apps/redcap/README.md §1) ;
+#   - les Secrets RÉELS `redcap-db-secret` + `redcap-db-config` créés hors dépôt (creds,
+#     cf. README §3) — ce play les VÉRIFIE et s'arrête avec un message actionnable s'ils
+#     manquent (il ne peut pas les inventer : ils portent de vrais mots de passe).
+
+- name: REDCap — étape nœuds (containerd registry + build image maison)
+  hosts: cloud
+  # GARDE D'ISOLATION (ADR 0053) : ce play SSH sur les nœuds (`cloud`) et build/pousse
+  # dans le registry → il DOIT vérifier EXPECTED_TARGET_KIND via audit-log AVANT toute
+  # tâche distante (comme mlflow.yaml/dataops.yaml). gather_facts requis :
+  # platform-build-images teste ansible_architecture.
+  pre_tasks:
+    - name: Audit-log — record playbook execution (+ garde target_kind)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: redcap.yaml
+
+    # Le code source REDCap n'est PAS versionné (licence) : il doit être stagé dans le
+    # contexte de build AVANT ce play, sinon le `COPY source/redcap/` du Dockerfile
+    # échoue. On vérifie sa présence sur le poste de contrôle (où vit le dépôt) et on
+    # guide sinon — plutôt qu'un build cryptique qui plante node-side.
+    - name: 'Garde : code source REDCap stagé (sinon : cf. README §1)'
+      ansible.builtin.stat:
+        path: '{{ playbook_dir }}/../platform/redcap/image/source/redcap/index.php'
+      delegate_to: localhost
+      run_once: true
+      become: false
+      register: redcap_src
+    - name: Fail if the REDCap source is not staged
+      ansible.builtin.fail:
+        msg: >-
+          Code source REDCap introuvable
+          (platform/redcap/image/source/redcap/index.php absent). Le PHP est un logiciel
+          tiers NON versionné (gitignoré) : le stager dans le contexte de build avant ce
+          play — cf. apps/redcap/README.md §1 (`cp -a <source>/redcap
+          platform/redcap/image/source/redcap`).
+      when: not redcap_src.stat.exists
+      run_once: true
+  tasks:
+    # Config containerd pour le registry interne AVANT le build (push vers registry:80).
+    - name: Configuration containerd pour le registry interne
+      ansible.builtin.import_role:
+        name: platform-registry
+        tasks_from: node
+      tags: registry-node
+
+    # Build (les 2 arches, build_all_arch) de l'image maison REDCap → registry:80.
+    # build_images RESTREINTE à redcap (override) — ne touche pas les listes dataops/mlflow.
+    - name: Build de l'image maison REDCap (php:apache + extensions + source)
+      ansible.builtin.import_role:
+        name: platform-build-images
+      vars:
+        build_images: '{{ redcap_build_images }}'
+      tags: build-images
+
+- name: REDCap — déploiement k8s (MariaDB autonome + serveur PHP/Apache)
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
+  gather_facts: false
+  # PAS d'audit-log : ce play pilote l'API k8s depuis le poste de contrôle (localhost),
+  # il ne `become` pas sur un nœud (cf. mlflow.yaml/dataops.yaml Play k8s).
+  environment:
+    SSL_CERT_FILE: '{{ redcap_ca_bundle | default(omit) }}'
+  vars:
+    redcap_repo_dir: '{{ playbook_dir }}/..'
+    redcap_namespace: redcap
+  pre_tasks:
+    # kubernetes.core exige la lib Python `kubernetes` ; certifi fournit le CA (idem mlflow).
+    - name: 'Garde : client Python kubernetes+certifi présent (sinon : uv sync)'
+      block:
+        - name: Probe import kubernetes + certifi
+          ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import kubernetes, certifi'"
+          changed_when: false
+          check_mode: false
+      rescue:
+        - name: Manque le client Python — guider vers uv sync
+          ansible.builtin.fail:
+            msg: >-
+              Le client Python `kubernetes` (ou `certifi`) est introuvable dans
+              l'interpréteur {{ ansible_python_interpreter | default('python3') }}.
+              Provisionner le .venv du poste de contrôle avant de jouer ce play :
+              `uv sync` à la racine du dépôt (ADR 0006/0023). Si le .venv vit ailleurs,
+              surcharger `ansible_python_interpreter` sur l'hôte localhost.
+    - name: Resolve the certifi CA bundle path
+      ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import certifi; print(certifi.where())'"
+      register: redcap_certifi
+      changed_when: false
+    - name: Set the CA bundle for HTTPS requests
+      ansible.builtin.set_fact:
+        redcap_ca_bundle: '{{ redcap_certifi.stdout | trim }}'
+  tasks:
+    - name: Apply REDCap namespace
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ redcap_repo_dir }}/apps/redcap/namespace.yaml'
+
+    # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou allow
+    # ignoré), comme platform-dagster. allow-redcap = frontend:80 + egress MariaDB:3306 ;
+    # allow-mariadb = ingress 3306 depuis le frontend uniquement.
+    - name: Apply REDCap network policies (default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ redcap_namespace }}'
+        src: '{{ redcap_repo_dir }}/platform/network-policies/redcap/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-redcap.yaml
+        - allow-mariadb.yaml
+
+    # Secrets RÉELS attendus (creds, hors dépôt) : on les VÉRIFIE — ce play ne les crée
+    # pas (ils portent de vrais mots de passe, cf. README §3). MariaDB et REDCap les
+    # consomment ; sans eux, MariaDB ne s'initialise pas et REDCap n'a pas de database.php.
+    - name: Read required REDCap secrets
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: '{{ item }}'
+        namespace: '{{ redcap_namespace }}'
+      register: redcap_secrets
+      loop:
+        - redcap-db-secret
+        - redcap-db-config
+    - name: Assert the REDCap secrets exist
+      ansible.builtin.assert:
+        that:
+          - item.resources | default([]) | length > 0
+        fail_msg: >-
+          Secret {{ redcap_namespace }}/{{ item.item }} introuvable. Le créer hors dépôt
+          AVANT ce play (creds réels — cf. apps/redcap/README.md §3 ;
+          db-secret.example.yaml / db-config.example.yaml pour la structure).
+      loop: '{{ redcap_secrets.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+
+    - name: Apply MariaDB (standalone, durci)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ redcap_namespace }}'
+        src: '{{ redcap_repo_dir }}/apps/redcap/mariadb.yaml'
+
+    - name: Apply REDCap (serveur PHP/Apache)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ redcap_namespace }}'
+        src: '{{ redcap_repo_dir }}/apps/redcap/redcap.yaml'
+
+    - name: Wait for MariaDB and REDCap to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: '{{ item }}'
+        namespace: '{{ redcap_namespace }}'
+      register: redcap_deploy
+      until: >-
+        redcap_deploy.resources | default([]) | length > 0
+        and (redcap_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: 30
+      delay: 10
+      loop:
+        - redcap-mariadb
+        - redcap
+
+    - name: REDCap deployment outcome
+      ansible.builtin.debug:
+        msg: >-
+          redcap.yaml terminé. Accès : kubectl -n {{ redcap_namespace }} port-forward
+          svc/redcap 8080:80 → http://localhost:8080 (install au premier accès).
+      run_once: true

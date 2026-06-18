@@ -1,0 +1,37 @@
+# Modèle GÉNÉRIQUE (versionné, ADR 0023) du Secret `redcap-db-config` : il porte le
+# fichier `database.php` que REDCap lit au démarrage (monté en subPath par-dessus celui
+# baké dans l'image). Le Secret RÉEL n'est PAS versionné — voici comment le générer en
+# cohérence avec redcap-db-secret (le `$password` doit être le MÊME que la clé
+# `password` du Secret redcap-db-secret) :
+#
+#   kubectl -n redcap create secret generic redcap-db-config \
+#     --from-file=database.php=<chemin/vers/database.php-rempli>
+#
+# Structure attendue par REDCap 17 (cf. source database.php) :
+#   $hostname = 'redcap-mariadb:3306'  (Service ClusterIP headless de ce dossier)
+#   $db = 'redcap' ; $username = 'redcap' ; $password = '<= redcap-db-secret.password>'
+#   $salt = '<alpha-numérique aléatoire ≥ 8 car.>'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redcap-db-config
+  namespace: redcap
+  labels:
+    app: redcap
+type: Opaque
+stringData:
+  database.php: |
+    <?php
+    // GÉNÉRIQUE — remplacer par les vraies valeurs hors dépôt (cf. en-tête).
+    $hostname   = 'redcap-mariadb:3306';
+    $db         = 'redcap';
+    $username   = 'redcap';
+    $password   = 'changeme-redcap-generic-example';
+    $db_ssl_key = '';
+    $db_ssl_cert = '';
+    $db_ssl_ca  = '';
+    $db_ssl_capath = NULL;
+    $db_ssl_cipher = NULL;
+    $db_ssl_verify_server_cert = false;
+    $salt = 'changemeSalt00';

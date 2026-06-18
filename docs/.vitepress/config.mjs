@@ -42,6 +42,7 @@ export default defineConfig({
     // de la doc et cassent le parse Vue de VitePress (srcDir='..' scanne le filesystem,
     // pas git). Exclus comme node_modules.
     'apps/redcap/source/**',
+    'platform/redcap/image/source/**',
   ],
 
   // Map every README.md to its directory's index.md so URLs like /bench/,

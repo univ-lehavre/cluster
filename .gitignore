@@ -79,6 +79,16 @@ docs/.vitepress/dist/
 bootstrap/artifacts/
 bootstrap/env/
 
+# Code source REDCap — logiciel TIERS sous licence propriétaire (REDCap_License.txt),
+# JAMAIS redistribuable ni versionnable. Il est STAGÉ par l'opérateur dans le contexte
+# de build de l'image maison (`platform/redcap/image/source/redcap/`, cf.
+# apps/redcap/README.md) ; l'image `registry:80/redcap` le copie au build node-side.
+# Seuls le Dockerfile/manifestes/README génériques restent versionnés (ADR 0023 : on
+# garde la brique, on génériese l'instance). `apps/redcap/source/` couvert aussi par
+# sécurité (ancien emplacement / scratch).
+platform/redcap/image/source/
+apps/redcap/source/
+
 # OpenTofu / Terraform — provisioning cloud (ADR 0032). L'état contient des
 # identités réelles → JAMAIS versionné (ADR 0023) ; idem les *.tfvars réels
 # (le *.tfvars.example générique reste versionné). Le code *.tf et
@@ -88,5 +98,3 @@ bootstrap/env/
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
-
-apps/redcap/source/

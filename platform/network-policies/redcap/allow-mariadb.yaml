@@ -1,0 +1,23 @@
+# MariaDB : ingress :3306 UNIQUEMENT depuis les pods frontend REDCap de ce
+# namespace (app: redcap, tier: frontend). Pas d'egress (la base n'initie rien).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mariadb
+  namespace: redcap
+spec:
+  podSelector:
+    matchLabels:
+      app: redcap
+      tier: mariadb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: redcap
+              tier: frontend
+      ports:
+        - protocol: TCP
+          port: 3306

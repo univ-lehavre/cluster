@@ -18,6 +18,7 @@ build_workdir: /tmp/dataops-build
 dagster_version: '1.13.7'
 marquez_version: '0.51.1'
 mlflow_version: 'v3.4.0'
+redcap_version: 'v17.1.3'
 
 # Source upstream Marquez (clone pour build API Java + UI React, sur le nœud).
 marquez_git_repo: https://github.com/MarquezProject/marquez.git
@@ -74,4 +75,20 @@ mlflow_build_images:
     src_context: '{{ platform_repo_dir }}/platform/mlflow/image/'
     build_context: '{{ build_workdir }}/mlflow'
     dockerfile: '{{ build_workdir }}/mlflow/Dockerfile'
+    build_all_arch: true
+
+# Image maison REDCap (app autonome, hors graphe nestor — déployée à la main comme
+# RStudio). Liste SÉPARÉE de build_images : consommée UNIQUEMENT au build manuel de
+# l'app redcap (cf. apps/redcap/README.md), JAMAIS par dataops/mlflow. PAS de
+# `official_image` : REDCap est un logiciel TIERS sous licence propriétaire sans image
+# publique → on build TOUJOURS depuis les sources (`build_all_arch: true` ; sur x86 le
+# retag d'une officielle n'a pas de sens, il n'y en a pas). `src_context` =
+# platform/redcap/image/ (Dockerfile versionné) ; le code PHP attendu sous
+# `source/redcap/` du contexte est COPIÉ node-side par main.yaml et reste GITIGNORÉ.
+redcap_build_images:
+  - name: redcap
+    tag: '{{ redcap_version }}'
+    src_context: '{{ platform_repo_dir }}/platform/redcap/image/'
+    build_context: '{{ build_workdir }}/redcap'
+    dockerfile: '{{ build_workdir }}/redcap/Dockerfile'
     build_all_arch: true

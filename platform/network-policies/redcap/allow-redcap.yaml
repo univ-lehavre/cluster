@@ -1,0 +1,37 @@
+# REDCap (frontend PHP/Apache) : Service ClusterIP :80 → conteneur :80.
+# Ingress ouvert sur 80 (accès UI/API, via port-forward ou un éventuel HTTPRoute).
+# Egress : MariaDB :3306 (base) + API server :6443. (DNS couvert par allow-dns.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redcap
+  namespace: redcap
+spec:
+  podSelector:
+    matchLabels:
+      app: redcap
+      tier: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+  egress:
+    # Base de données MariaDB (pods tier: mariadb de ce namespace).
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redcap
+              tier: mariadb
+      ports:
+        - protocol: TCP
+          port: 3306
+    # API server Kubernetes.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 6443

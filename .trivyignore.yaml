@@ -52,6 +52,9 @@ misconfigurations:
   - id: KSV-0014 # rootfs read-only impossible (apache écrit sa conf/runtime)
     paths:
       - 'storage/ceph/wordpress/wordpress.yaml'
+      # REDCap (apps/redcap) : même contrainte qu'apache/wordpress — Apache écrit
+      # logs/lock/run, REDCap son cache ; les uploads (edocs) sont sur PVC dédié.
+      - 'apps/redcap/redcap.yaml'
   - id: KSV-0014 # rootfs read-only impossible (rstudio-server root + écritures)
     paths:
       - 'apps/rstudio/deployment.yaml'
@@ -216,6 +219,12 @@ misconfigurations:
       # non-root divergerait de l'amont. Le pod pose déjà un securityContext non-root
       # (runAsNonRoot/runAsUser 1000, KSV-0118 dans platform/mlflow/mlflow.yaml).
       - 'platform/mlflow/image/Dockerfile'
+      # Image REDCap maison (apps/redcap) : `FROM php:8.3-apache` — l'officielle PHP
+      # tourne en root (Apache doit binder :80 puis déposer ses privilèges vers
+      # www-data lui-même). Y forcer un USER divergerait de l'amont et casserait le
+      # bind. Le pod pose déjà un securityContext non-root (runAsUser 33/www-data,
+      # KSV-0118 dans apps/redcap/redcap.yaml).
+      - 'platform/redcap/image/Dockerfile'
 
   # ── Marquez vendored (chart 0.51.1, helm template figé) — posture amont ────
   # Le chart Marquez ne durcit pas ses workloads en amont (API Java + UI React,

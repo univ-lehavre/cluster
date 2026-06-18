@@ -1,0 +1,107 @@
+# MariaDB pour REDCap — base de données autonome (REDCap exige MySQL/MariaDB ; le
+# cluster n'a que CNPG/PostgreSQL, non supporté par REDCap). Déploiement standalone
+# durci, calqué sur le MySQL du smoke WordPress (storage/ceph/wordpress/mysql.yaml).
+# PAS d'opérateur ni de HA : une app autonome déployée à la main (comme RStudio).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redcap-mariadb
+  labels:
+    app: redcap
+    tier: mariadb
+spec:
+  ports:
+    - port: 3306
+  selector:
+    app: redcap
+    tier: mariadb
+  clusterIP: None
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redcap-mariadb-pv-claim
+  labels:
+    app: redcap
+spec:
+  storageClassName: rook-ceph-block-replicated
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redcap-mariadb
+  labels:
+    app: redcap
+    tier: mariadb
+spec:
+  selector:
+    matchLabels:
+      app: redcap
+      tier: mariadb
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: redcap
+        tier: mariadb
+    spec:
+      # Durcissement (trivy KSV-0118/KSV-0014, comme le MySQL WordPress). L'image
+      # mariadb tourne en uid 999 (mysql) ; fsGroup 999 donne au groupe l'accès en
+      # écriture au PVC. rootfs en lecture seule : socket/tmp/run en emptyDir dédiés.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - image: mariadb:11.4
+          name: mariadb
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          env:
+            - name: MARIADB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redcap-db-secret
+                  key: root-password
+            # Base + utilisateur applicatif créés à l'init : REDCap se connecte avec
+            # l'user `redcap` (PAS root) sur la base `redcap`.
+            - name: MARIADB_DATABASE
+              value: redcap
+            - name: MARIADB_USER
+              value: redcap
+            - name: MARIADB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redcap-db-secret
+                  key: password
+          ports:
+            - containerPort: 3306
+              name: mariadb
+          volumeMounts:
+            - name: mariadb-persistent-storage
+              mountPath: /var/lib/mysql
+            - name: run
+              mountPath: /run/mysqld
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: mariadb-persistent-storage
+          persistentVolumeClaim:
+            claimName: redcap-mariadb-pv-claim
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
