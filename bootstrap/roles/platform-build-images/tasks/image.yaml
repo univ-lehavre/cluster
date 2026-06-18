@@ -17,8 +17,13 @@
   failed_when: false
   check_mode: false # pré-check de présence qui pilote le when du build — doit tourner même en --check (ADR 0051)
 
+# `force_rebuild` (image à TAG MUTABLE, ex. l'émetteur `:dev`) : rebuild MÊME si le tag
+# existe déjà dans le registry. Sans lui, le skip-si-présent (rc==0) servait à jamais une
+# image périmée quand le code source change (vécu : toy_assets sans toy_job — la
+# code-location jouet exposait un module ancien). Les images à tag FIGÉ (ADR 0006)
+# gardent force_rebuild=false : leur tag identifie le contenu, inutile de rebuilder.
 - name: 'Build (arm64) or retag (x86) image — {{ img.name }}'
-  when: img_present.rc != 0
+  when: img_present.rc != 0 or (img.force_rebuild | default(false) | bool)
   block:
     # BUILD interne via nerdctl/buildkit, depuis les sources sur le nœud, pour l'arch
     # courante. arm64 TOUJOURS ; x86 seulement si `build_all_arch` (image dérivée à

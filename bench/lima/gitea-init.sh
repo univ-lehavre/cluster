@@ -130,7 +130,7 @@ main() {
     # ne pas reproduire). Argo CD réconcilie la VRAIE code-location gRPC (Deployment +
     # Service + patch workspace), pas un Job jetable.
     local f
-    for f in code-location.yaml workspace-patch.yaml; do
+    for f in code-location.yaml workspace-patch.yaml reload-hook.yaml; do
         push_gitea_file "${f}" || return 1
     done
 

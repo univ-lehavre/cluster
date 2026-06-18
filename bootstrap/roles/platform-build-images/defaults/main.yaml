@@ -34,6 +34,9 @@ emitter_image:
   src_context: '{{ platform_repo_dir }}/platform/dagster/image-openlineage/'
   build_context: '{{ build_workdir }}/emitter'
   dockerfile: '{{ build_workdir }}/emitter/Dockerfile'
+  # Tag `:dev` MUTABLE (toy_assets évolue) → rebuild même si le tag existe déjà,
+  # sinon la code-location jouet sert un module périmé (ADR 0086, vécu au banc).
+  force_rebuild: true
 
 # Images maison de la chaîne. Chaque entrée :
 #   official_image : image amd64 officielle à re-taguer sur x86 (skip build).

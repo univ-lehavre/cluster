@@ -14,10 +14,11 @@ le banc **autonome** pour exercer la chaîne Dagster (run réel via `launchRun`,
 lineage) **sans dépendre du dépôt atlas**. Réutilise l'image émetteur du banc
 (`registry:80/dagster-openlineage-emit:dev`).
 
-| Fichier                                        | Rôle                                                                                                 |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| [`code-location.yaml`](code-location.yaml)     | La code-location : Deployment gRPC `toy-codeloc` (`dagster api grpc -m toy_assets`) + Service :4000. |
-| [`workspace-patch.yaml`](workspace-patch.yaml) | ConfigMap `dagster-workspace` qui branche la location `toy` (remplace `load_from: []`).              |
+| Fichier                                        | Rôle                                                                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`code-location.yaml`](code-location.yaml)     | La code-location : Deployment gRPC `toy-codeloc` (`dagster api grpc -m toy_assets`) + Service :4000.         |
+| [`workspace-patch.yaml`](workspace-patch.yaml) | ConfigMap `dagster-workspace` qui branche la location `toy` (remplace `load_from: []`).                      |
+| [`reload-hook.yaml`](reload-hook.yaml)         | Hook Argo CD PostSync (SA+Role+Job) : `rollout restart` webserver+daemon → ils relisent le workspace patché. |
 
 Frontière (ADR 0022/0045) : Argo CD déploie **cette code-location**, jamais
 l'infra DataOps (CNPG/Dagster/Marquez sont montés par Ansible, livrés vides).

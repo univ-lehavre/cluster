@@ -1,0 +1,102 @@
+# Hook Argo CD PostSync (ADR 0086) — recharge le workspace Dagster après chaque sync.
+#
+# POURQUOI : le webserver et le daemon Dagster lisent `-w /workspace/workspace.yaml`
+# AU DÉMARRAGE. Quand Argo CD patche le ConfigMap `dagster-workspace` pour y ajouter
+# la code-location `toy` (workspace-patch.yaml), les pods montés AVANT ne relisent pas
+# le fichier → la location reste INVISIBLE (vécu au banc : 29 « location absente »,
+# puis « job introuvable »). Ce hook PostSync force un `rollout restart` du webserver
+# et du daemon après la réconciliation → ils relisent le workspace et voient `toy`.
+#
+# RBAC dédié : le SA `dagster` du chart ne porte PAS `patch deployments` (Role limité
+# à jobs/pods). On crée donc un SA + Role minimal (get/patch deployments dans le ns
+# `dagster`) pour CE hook — pas d'élargissement du RBAC dagster amont.
+#
+# Frontière (ADR 0022/0045) : ce hook est du contenu applicatif réconcilié par Argo CD
+# (comme la code-location), pas de l'infra. Hook-delete-policy : nettoyé avant le hook
+# suivant (idempotent, pas d'accumulation de Jobs).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dagster-workspace-reloader
+  namespace: dagster
+  labels:
+    atlas.workflow/sample: 'true'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dagster-workspace-reloader
+  namespace: dagster
+  labels:
+    atlas.workflow/sample: 'true'
+rules:
+  # rollout restart = patch de l'annotation du template + lecture du statut.
+  - apiGroups: ['apps']
+    resources: ['deployments']
+    verbs: ['get', 'list', 'patch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dagster-workspace-reloader
+  namespace: dagster
+  labels:
+    atlas.workflow/sample: 'true'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dagster-workspace-reloader
+subjects:
+  - kind: ServiceAccount
+    name: dagster-workspace-reloader
+    namespace: dagster
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dagster-workspace-reload
+  namespace: dagster
+  labels:
+    atlas.workflow/sample: 'true'
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    # Supprime le Job du sync précédent avant d'en recréer un (pas d'accumulation).
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        atlas.workflow/sample: 'true'
+    spec:
+      serviceAccountName: dagster-workspace-reloader
+      restartPolicy: Never
+      # securityContext au niveau POD (KSV-0118) : non-root + seccomp. kubectl n'a
+      # besoin d'aucun privilège ni écriture rootfs → on durcit complètement (contrairement
+      # aux workloads Dagster qui écrivent leur DAGSTER_HOME).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reload
+          image: bitnami/kubectl:1.34
+          command:
+            - sh
+            - -c
+            - >-
+              kubectl -n dagster rollout restart deploy/dagster-dagster-webserver deploy/dagster-daemon &&
+              kubectl -n dagster rollout status deploy/dagster-dagster-webserver --timeout=120s &&
+              kubectl -n dagster rollout status deploy/dagster-daemon --timeout=120s
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+            seccompProfile:
+              type: RuntimeDefault

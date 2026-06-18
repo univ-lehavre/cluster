@@ -33,7 +33,11 @@ spec:
       containers:
         - name: grpc
           image: registry:80/dagster-openlineage-emit:dev
-          imagePullPolicy: IfNotPresent
+          # Always (et NON IfNotPresent) : le tag `:dev` est MUTABLE (rebuild à chaque
+          # évolution de toy_assets) ; avec IfNotPresent, un nœud gardait l'ANCIENNE
+          # image en cache → la code-location servait un module périmé (toy_job absent,
+          # vécu au banc). Always force le re-pull du `:dev` courant du registry.
+          imagePullPolicy: Always
           # Serveur gRPC de code-location : charge toy_assets et l'expose au workspace.
           command:
             - dagster
