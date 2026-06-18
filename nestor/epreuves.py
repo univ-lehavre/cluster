@@ -353,6 +353,21 @@ EPREUVES: list[Epreuve] = [
         "base",
         None,
     ),
+    # Contrat d'interface cluster→atlas (ADR 0043) : dérive contract/endpoints
+    # et vérifie chaque endpoint (Service + port + réponse). Transversal, agnostique
+    # de topologie ; le scénario SKIP par endpoint absent (profil partiel) → profil_min
+    # base (jouable dès le socle ; plus le profil est complet, plus d'endpoints sont
+    # vérifiés). backend_req=None (lit le contrat, jamais Ceph-obligatoire). #407/0043.
+    Epreuve(
+        "31",
+        "Contrat cluster→atlas : endpoints tenus",
+        "intég",
+        "gitops",
+        TOPO_AGNOSTIQUE,
+        TERRAIN_API,
+        "base",
+        None,
+    ),
 ]
 
 
