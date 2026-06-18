@@ -166,5 +166,29 @@ class ParityHardening(unittest.TestCase):
         self.assertEqual(seq[5], "datalake")
 
 
+class ParityLayerHasBashPhase(unittest.TestCase):
+    """Chaque layer DÉCLARABLE (_QUEUE_PHASES) doit avoir sa fonction `phase_<nom>` dans
+    run-phases.sh : l'arm `layers` boucle et appelle `phase_${p//-/_}` pour chaque phase.
+    Une layer sans fonction → rc=127 au montage (`phase_mlflow: command not found`, vécu
+    au banc 2026-06-17 : `mlflow` déclarée côté Python mais sans phase bash). Ce test fige
+    l'alignement Python (liste des layers) ↔ bash (exécuteur)."""
+
+    def test_every_declarable_layer_has_a_bash_phase(self):
+        from nestor.layers import _QUEUE_PHASES  # noqa: E402
+
+        run_phases = os.path.join(os.path.dirname(__file__), "..", "bench", "lima", "run-phases.sh")
+        with open(run_phases, encoding="utf-8") as fh:
+            src = fh.read()
+        for layer in sorted(_QUEUE_PHASES):
+            fn = "phase_" + layer.replace("-", "_")
+            with self.subTest(layer=layer):
+                self.assertIn(
+                    f"{fn}()",
+                    src,
+                    f"layer `{layer}` déclarable mais `{fn}()` absente de run-phases.sh "
+                    f"→ `layers [...,{layer}]` échouerait en rc=127 (command not found)",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

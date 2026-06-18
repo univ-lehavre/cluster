@@ -1162,6 +1162,32 @@ phase_monitoring() {
     ok "🎉 observabilité déployée — Prometheus + Grafana + Loki (S3/${STORAGE_BACKING}) Ready"
 }
 
+# ── Phase mlflow — suivi de modèles (ADR 0082, layer autonome) ───────────────
+# Jumeau de monitoring/dataops : déploie via bootstrap/mlflow.yaml (build image
+# maison node-side + serveur MLflow k8s). Backend store = base CNPG `mlflow` (posée
+# par dataops, prérequis du graphe) ; artefact store S3 dont le BACKING est DÉTECTÉ
+# du cluster (ADR 0036/0065) — SeaweedFS en banc léger, RGW Ceph en mode Ceph,
+# parité avec loki_s3_backing. Sans cette fonction, l'arm `layers` appelait
+# `phase_mlflow` inexistant → rc=127 (le montage `layers [...,mlflow]` échouait, alors
+# que `nestor next` passait car il route mlflow vers son playbook autonome côté Python).
+phase_mlflow() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
+    log "Phase mlflow — serveur de suivi de modèles (backend CNPG + artefacts S3, via Ansible)"
+
+    # Profil de backing S3 DÉTECTÉ du cluster (ADR 0065), comme monitoring/dataops.
+    detect_storage_profile
+
+    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
+        "${REPO}/bootstrap/mlflow.yaml" \
+        -e dataops_k8s_host=localhost \
+        -e "mlflow_s3_backing=${STORAGE_BACKING}" \
+        -e "mlflow_s3_endpoint=${STORAGE_ENDPOINT}" \
+        || die "mlflow.yaml : échec du déploiement du suivi de modèles"
+    ok "🎉 MLflow déployé — suivi de modèles (S3/${STORAGE_BACKING}) Ready"
+}
+
 # Prédicats CNPG réutilisés par la phase (purs côté décision via dataops-assert.sh).
 cnpg_operator_ready() { [ "$("${KUBECTL[@]}" -n cnpg-system get deploy cnpg-controller-manager -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]; }
 cnpg_cluster_healthy() {
@@ -1688,6 +1714,7 @@ case "${1:-}" in
     gitops) time_phase gitops phase_gitops ;;
     gitops-seed) time_phase gitops-seed phase_gitops_seed ;;
     monitoring) time_phase monitoring phase_monitoring ;;
+    mlflow) time_phase mlflow phase_mlflow ;;
     access) phase_access "${@:2}" ;;
     ceph) time_phase ceph phase_ceph ;;
     sc) time_phase sc phase_sc ;;
