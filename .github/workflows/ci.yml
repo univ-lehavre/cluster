@@ -208,6 +208,47 @@ jobs:
           trivyignores: .trivyignore.yaml
           skip-dirs: node_modules
 
+  # Secret scanning : détecte clés/tokens/mots de passe committés par accident,
+  # sur tout l'historique (mode `git`). Binaire gitleaks ÉPINGLÉ (version + SHA-256
+  # vérifié, ADR 0006) plutôt que l'action wrapper, qui exige une licence pour les
+  # dépôts d'organisation — le binaire est MIT, sans clé. Allowlist .gitleaks.toml :
+  # ce catalogue n'a QUE des valeurs d'exemple (ADR 0023), les vraies vivent en
+  # config locale gitignorée. NON BLOQUANT d'abord (modèle codeql/scorecard) : on
+  # éprouve la pertinence avant de gater ; le rapport reste consultable dans le log.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0 # historique complet : le scan `git` couvre tous les commits
+      - name: Installer gitleaks (binaire épinglé + checksum)
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL "$url" -o gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan des secrets (historique git)
+        run: |
+          # exit-code 0 : non bloquant d'abord (informatif). Le rapport est dans
+          # le log + uploadé en artefact. Passer --exit-code 1 pour gater ensuite.
+          gitleaks git . \
+            --config .gitleaks.toml \
+            --no-banner --redact \
+            --report-format sarif --report-path gitleaks.sarif \
+            --exit-code 0
+      - name: Archiver le rapport
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gitleaks-report
+          path: gitleaks.sarif
+          retention-days: 5
+
   commitlint:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
