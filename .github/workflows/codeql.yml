@@ -39,6 +39,16 @@ jobs:
         uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
         with:
           languages: ${{ matrix.language }}
+          # Suite étendue (sécurité + qualité) plutôt que les requêtes par
+          # défaut : couverture plus large sur le seul code analysable (Python
+          # du harnais). Gratuit, reste non bloquant (alertes onglet Security).
+          queries: security-and-quality
+          # Les tests sont du harnais de validation, pas du code de production :
+          # on les exclut pour concentrer le signal SAST sur la logique de
+          # décision (nestor/, scripts/). N'affecte que l'analyse, pas la CI.
+          config: |
+            paths-ignore:
+              - tests
 
       - name: Analyser
         uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
