@@ -32,6 +32,14 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: true # alimente le badge + l'API publique
+          # Le check Branch-Protection LIT les réglages de protection via l'API
+          # GraphQL, ce qui exige des droits ADMIN — le GITHUB_TOKEN (read-all)
+          # ne les a pas, d'où l'erreur « Resource not accessible by integration ».
+          # PAT fine-grained dédié (secret SCORECARD_TOKEN, scope = ce repo :
+          # Administration: Read + Contents: Read) pour que Scorecard puisse NOTER
+          # Branch-Protection au lieu d'échouer. Lecture seule : aucun pouvoir
+          # d'écriture (ne contourne pas la doctrine token, ADR Token-Permissions).
+          repo_token: ${{ secrets.SCORECARD_TOKEN }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
