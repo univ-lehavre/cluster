@@ -1,0 +1,50 @@
+# Configuration Gitleaks — secret scanning (CI, job `gitleaks`).
+#
+# Détecte les clés/tokens/mots de passe committés par accident. Étend la config
+# par défaut de gitleaks (toutes ses règles) et y ajoute une ALLOWLIST ciblée :
+# ce dépôt n'emploie QUE des valeurs d'exemple génériques (ADR 0023), jamais de
+# vraies valeurs (qui vivent en config locale gitignorée). Les valeurs de test
+# versionnées sont donc des FAUX POSITIFS — allowlistées ici, par regex précise
+# et par chemin, jamais en désactivant une règle globalement.
+#
+# Règle de tenue (esprit .trivyignore.yaml) : on n'allowliste QUE ce qui est une
+# valeur d'exemple prouvée (motif `*-test-*`, `changeme-*-generic-*`) ou un
+# fichier `.example` par convention. Un vrai secret accidentel hors de ces motifs
+# fait rougir le scan — c'est tout l'intérêt.
+
+[extend]
+# Hérite de toutes les règles intégrées de gitleaks (clés AWS/GCP, tokens GitHub,
+# clés privées PEM, etc.). On n'ajoute que l'allowlist ci-dessous.
+useDefault = true
+
+[allowlist]
+description = "Valeurs d'exemple génériques du catalogue (ADR 0023) — pas de vrais secrets"
+
+# Mots de passe / valeurs de TEST versionnés, par convention de nommage explicite
+# (« VALEUR DE TEST », ADR 0023). Toute vraie valeur ne suit PAS ces motifs.
+regexes = [
+  '''[a-z0-9-]+-test-password''',          # dagster-test-password, mlflow-test-password…
+  '''changeme-[a-z0-9-]+-generic-example''', # changeme-root-generic-example…
+]
+
+# Fichiers d'exemple versionnés : par convention `.example`, ils ne portent QUE
+# des valeurs génériques (le vrai secret est en config locale gitignorée). Le
+# `.example` EST la marque « ceci n'est pas un secret réel ».
+#
+# Manifestes VENDORED (bundles upstream volumineux, appliqués tels quels) :
+# mêmes chemins que l'allowlist .trivyignore.yaml / CLAUDE.md. Leurs `data:`
+# base64 et mots de passe par défaut (ex. admin Grafana du chart) sont des
+# valeurs amont, pas des secrets du dépôt — non modifiables sans diverger.
+#
+# Scripts de scénarios de banc : valeurs TÉMOIN de test (ex. `scenario15-witness`),
+# nommées pour ça — jamais de vrai secret.
+paths = [
+  '''.*\.example(\..*)?$''',
+  '''.*-secret\.example\.ya?ml$''',
+  '''.*secrets\.example\.ya?ml$''',
+  '''platform/kube-prometheus-stack/.*\.yaml$''',
+  '''platform/cloudnative-pg/plugin-barman-cloud\.yaml$''',
+  '''storage/ceph/.*\.yaml$''',
+  '''platform/(cert-manager|argocd)/.*\.yaml$''',
+  '''(bench|test)/scenarios/.*\.sh$''',
+]
