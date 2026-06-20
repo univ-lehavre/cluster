@@ -46,6 +46,15 @@ pas. Les sections avancées sont signalées.
    à côté. Pas besoin du _pourquoi_ de chaque décision pour démarrer : il est
    raconté dans le [manifeste](manifeste.md), à lire avant ou après, sans
    interrompre l'installation.
+
+   > 🔰 **Première fois ? Montez d'abord « votre premier cluster », sans
+   > risque.** Avant de toucher des serveurs réels, le tutoriel
+   > [**Monter le banc local**](banc-local.md) déploie un cluster complet sur
+   > des VM Lima jetables (un `run-phases.sh` codé, rien à enchaîner à la main)
+   > : on y apprend la séquence de bout en bout sans wipe disque ni machine de
+   > prod. L'étape 2 ci-dessous est la **vraie installation** (serveurs), à
+   > faire une fois le banc apprivoisé.
+
 2. **Installer le cluster.** Suivre la séquence de référence pas à pas :
    [`bootstrap/RUNBOOK.md`](../bootstrap/RUNBOOK.md) — préparation OS,
    `kubeadm`, CNI Cilium, jonction des workers. Raccourcis :

@@ -23,6 +23,12 @@ des **liens** : un mot-clé renvoie à sa définition (le
 
 ## Contexte et état de l'art
 
+> 🔰 **Lecteur pressé ?** Cette section pose le **pourquoi** (paysage des
+> menaces, état de l'art académique) et compte une trentaine de références. Pour
+> aller droit au but, sautez directement à [**Objectif**](#objectif) : ce que ce
+> cluster vise concrètement. Le contexte ci-dessous éclaire les décisions, il
+> n'est pas un prérequis pour comprendre la suite.
+
 Un laboratoire de recherche produit et consomme des données : il faut les
 stocker, les transformer, les tracer, et faire tourner du calcul à côté. Or ces
 gestes se déroulent aujourd'hui dans un environnement bien plus hostile et
