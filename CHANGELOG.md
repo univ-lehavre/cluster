@@ -11,6 +11,26 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.40.0](https://github.com/univ-lehavre/cluster/compare/v2.39.0...v2.40.0) (2026-06-20)
+
+
+### Features
+
+* **scorecard:** SAST, fuzzing, signed-releases + README GitHub pur ([1bcbc21](https://github.com/univ-lehavre/cluster/commit/1bcbc213850977fdf6db9858db531f543fed757a))
+
+
+### Documentation
+
+* **audit:** évaluation kubescape — ne pas câbler (redondant trivy/kyverno) ([78d8c45](https://github.com/univ-lehavre/cluster/commit/78d8c45abb87e7ab752936698a9ecaf4c931c0df))
+* **audit:** évaluation kubescape — ne pas câbler (redondant) ([c78628d](https://github.com/univ-lehavre/cluster/commit/c78628d9fe1df0544130ed665a48779083c1a6f5))
+* **audit:** tracer packaging n/a assumé (nestor pilote le dépôt, [#366](https://github.com/univ-lehavre/cluster/issues/366)) ([94d1cea](https://github.com/univ-lehavre/cluster/commit/94d1cea63a63a68b22fc9465f636d71fdca6a3b0))
+* **readme:** readme github pur, retirer best practices, home dans docs/index ([fc1533b](https://github.com/univ-lehavre/cluster/commit/fc1533be5d34178933a3a9760cb7ce4d10763428))
+* **readme:** retirer la rangée de badges du haut (doublon avec la section) ([5d0555e](https://github.com/univ-lehavre/cluster/commit/5d0555e08455210346170bb20750851f0c6e13f5))
+* **readme:** retirer la rangée de badges du haut (doublon) ([92ffcbb](https://github.com/univ-lehavre/cluster/commit/92ffcbb5334b8d444a95fa1934c06d4616a7caac))
+* **readme:** sections présentées pour les familles de badges ([48fe2fd](https://github.com/univ-lehavre/cluster/commit/48fe2fd222dcd8919f9c20de6a831dd30a6b7dc7))
+* **readme:** sections présentées pour les familles de badges ([fd4a927](https://github.com/univ-lehavre/cluster/commit/fd4a927447f7b28f60ef57e5aa7ebd627a3d1b4d))
+* **scorecard:** tracer packaging n/a + lire branch-protection ([#366](https://github.com/univ-lehavre/cluster/issues/366)) ([72489ea](https://github.com/univ-lehavre/cluster/commit/72489ea55d7c5eda2d4f9c375142c4c50d77e340))
+
 ## [2.39.0](https://github.com/univ-lehavre/cluster/compare/v2.38.0...v2.39.0) (2026-06-19)
 
 
