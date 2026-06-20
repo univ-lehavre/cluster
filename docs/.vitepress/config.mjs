@@ -176,7 +176,7 @@ export default defineConfig({
         text: 'Décisions (ADR)',
         collapsed: true,
         items: [
-          { text: 'Index des 62 ADR', link: '/docs/decisions/' },
+          { text: 'Index des ADR', link: '/docs/decisions/' },
           { text: '— par thème —', link: '/docs/architecture/' },
           { text: 'Stockage & données', link: '/docs/architecture/decisions-stockage' },
           { text: 'Plan de contrôle', link: '/docs/architecture/decisions-plan-de-controle' },

@@ -150,7 +150,7 @@ Le coût assumé rejoint directement le control plane unique : pendant le
 continuent, seul le plan de contrôle l'est momentanément). Fenêtre courte,
 acceptée. La discipline de version reste à la charge de l'opérateur (le playbook
 `assert` la version cible mais ne vérifie pas la compat croisée), et tout
-upgrade se **valide d'abord sur le banc multi-node**. Détail dans
+upgrade se **valide d'abord sur le banc Lima multi-nœuds**. Détail dans
 [ADR 0015](../decisions/0015-strategie-upgrade-kubernetes.md).
 
 ## Encadré honnêteté — les compromis assumés
@@ -181,4 +181,5 @@ d'upgrade (ADR 0015).
 - [Exposition réseau](../architecture/exposition-reseau.md) — réseau et
   exposition des services.
 - [Validation sur banc](../architecture/validation-banc.md) — tests sur le banc
-  multi-node, où les procédures d'upgrade et de restauration sont rejouées.
+  Lima multi-nœuds, où les procédures d'upgrade et de restauration sont
+  rejouées.

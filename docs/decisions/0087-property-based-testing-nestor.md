@@ -2,7 +2,8 @@
 
 ## Statut
 
-Proposed (2026-06-19)
+Accepted (2026-06-19). Le code est livré et mergé
+(`tests/test_nestor_properties.py`, `hypothesis` en dépendance dev).
 
 ## Contexte
 

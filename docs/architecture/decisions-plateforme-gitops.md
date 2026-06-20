@@ -20,19 +20,19 @@ par paliers** : poser le socle autonome maintenant, différer le stack lourd.
 - **Palier 1 (fait)** : déploiement de **metrics-server v0.8.0** sous
   `platform/metrics-server/`. Autonome (pas de Prometheus requis), empreinte
   minimale (`requests` 100m/200Mi). Rend opérants `kubectl top` et les HPA.
-- **Palier 2 (différé)** : **kube-prometheus-stack** (Prometheus + Grafana +
-  AlertManager, ou équivalent léger) avec les CRDs `monitoring.coreos.com`, puis
-  passage de `monitoring.enabled: true` côté Ceph (alertes OSD down, near-full,
-  perte de quorum mon) et routage d'AlertManager vers le mail d'exploitation ou
-  un webhook.
+- **Palier 2 (fait)** : **kube-prometheus-stack** (Prometheus + Grafana +
+  AlertManager) avec les CRDs `monitoring.coreos.com`, déployé sous
+  [`platform/kube-prometheus-stack/`](../../platform/kube-prometheus-stack/)
+  (rôle `platform-monitoring`), avec Loki pour les logs. Validé sur banc
+  (scénarios 24-26, « 22 targets UP », cf.
+  [matrice du catalogue](matrice-catalogue.md)).
 
-La raison de différer le palier 2 est **technique** : activer
-`monitoring.enabled: true` sans Prometheus pré-installé ferait créer par
-l'operator Rook des `PrometheusRule`/`ServiceMonitor` dont **les CRDs seraient
-absents** → erreurs. L'activer à vide serait pire que de ne rien faire. À noter
-que l'**exporter Ceph** est déjà actif (`metricsDisabled: false`) : les
-métriques sont _exposées_, il ne manque que le _collecteur_ et les _règles
-d'alerte_.
+L'**ordre** des deux paliers était une contrainte **technique** : activer
+`monitoring.enabled: true` côté Ceph **sans** Prometheus pré-installé ferait
+créer par l'operator Rook des `PrometheusRule`/`ServiceMonitor` dont les CRDs
+seraient absents → erreurs. C'est pourquoi le collecteur (palier 2) précède
+l'activation des règles d'alerte Ceph. L'**exporter Ceph** est actif
+(`metricsDisabled: false`).
 
 Entre les deux paliers, le filet reste **actif mais manuel/ponctuel** :
 `state.sh` (drift par couche, dont santé SMART du NVMe via smartd), `report.sh`,
@@ -139,7 +139,7 @@ bordure est traité dans la vue
 ## Validation sur banc
 
 La mise en service d'Argo CD est conditionnée à une **validation banc**
-(`bench/multi-node`) : une `Application` de test doit passer
+([`bench/lima/`](../../bench/lima/)) : une `Application` de test doit passer
 **`Synced/Healthy`**, l'UI répondre en HTTPS via le Gateway (cert CA interne,
 root importé), et le CLI `--grpc-web` fonctionner à travers la `HTTPRoute`. Le
 default-deny Cilium est préservé via `platform/network-policies/argocd/`. Le
@@ -164,6 +164,6 @@ l'**applicatif** → GitOps, pas Ansible) ; elle remplace l'ancien Job CLI jetab
 - [Exposition réseau](../architecture/exposition-reseau.md) — Gateway Cilium,
   HTTPRoute, TLS de bordure pour l'UI Argo CD.
 - [Validation banc](../architecture/validation-banc.md) — protocole de tests sur
-  `bench/multi-node`.
+  le banc Lima ([`bench/lima/`](../../bench/lima/)).
 - ADR de cette vue : [ADR 0016](../decisions/0016-observabilite.md),
   [ADR 0022](../decisions/0022-argocd-gitops-applicatif.md).

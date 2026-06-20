@@ -144,3 +144,8 @@ abandonné). Dupliquerait un datapath de bordure que le Gateway couvre déjà.
 exposition, cert-manager, Argo CD. **Écarté** : **bootstrap circulaire** —
 l'outil ne converge pas sans le cluster, le cluster (infra) ne converge pas sans
 l'outil. La frontière Ansible(infra)/GitOps(applicatif) tranche la dépendance.
+
+> **Amendement 2026-06-19.** La « Validation banc » ci-dessus cite
+> `bench/multi-node` (Vagrant), **déprécié** au profit du banc Lima
+> ([ADR 0038](0038-lima-seul-banc-local.md)) : lire `bench/lima/`. La décision
+> (Argo CD applicatif, frontière infra/app) est inchangée.

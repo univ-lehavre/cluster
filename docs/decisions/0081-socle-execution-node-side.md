@@ -2,7 +2,9 @@
 
 ## Statut
 
-Proposed (2026-06-16)
+Accepted (2026-06-19) — livraison INCRÉMENTALE. Le code est livré
+(`nestor/nodeside.py`, usages `discover`/`remove`) ; promu depuis
+`Proposed (2026-06-16)`.
 
 Prolonge [ADR 0079](0079-rollback-par-decouverte-appartenance.md) (rollback par
 découverte) et [ADR 0074](0074-cluster-discover-reconstruire-topologie.md)

@@ -2,7 +2,9 @@
 
 ## Statut
 
-Proposed (2026-06-17)
+Accepted (2026-06-19) — livraison INCRÉMENTALE. Le code est livré
+(`nestor/layers.py`, source unique de l'ordre) ; promu depuis
+`Proposed (2026-06-17)`.
 
 ## Contexte
 

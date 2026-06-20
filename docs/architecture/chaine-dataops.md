@@ -9,7 +9,7 @@ câblée.
 Ce document est la **carte d'accès** unifiée ; le détail de déploiement de
 chaque brique vit dans son `README` (lié dans le tableau). La validation
 assemblée est portée par le harnais
-[`dataops-chain`](../../bench/lima/run-phases.sh) (#148).
+[`cluster-dataops`](../../bench/lima/run-phases.sh) (#148).
 
 > **Valeurs génériques (ADR 0023).** Les URLs `https://<svc>.cluster.lan` sont
 > des **placeholders** : sur une topologie réelle, l'administrateur réseau
@@ -68,7 +68,7 @@ dans son UI. L'observabilité (Prometheus/Loki/Mailpit) est transverse.
 Le maillon qui prouve que tout est câblé est **Dagster → Marquez** : un run réel
 émet du lineage que Marquez ingère.
 
-- **Automatisé** : `bench/lima/run-phases.sh dataops-chain` déploie la chaîne,
+- **Automatisé** : `bench/lima/run-phases.sh cluster-dataops` déploie la chaîne,
   lance un run émetteur réel et vérifie l'ingestion ; puis
   `bench/scenarios/run-all.sh ONLY='23'` re-vérifie l'assertion isolément.
 - **À la main, dans le navigateur** :

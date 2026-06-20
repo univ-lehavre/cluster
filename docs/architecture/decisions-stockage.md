@@ -51,10 +51,11 @@ acte **Longhorn** comme troisième profil, comblant le trou entre le local-path
 
 **local-path** — un Deployment + une StorageClass (`WaitForFirstConsumer`,
 `Delete`). Complexité quasi nulle, empreinte minime (c'est ce qui rend le profil
-`light` tenable : 8 GiB RAM / 20 GiB disque par VM contre 12/40 en Ceph). En
-contrepartie : **aucune résilience** — le PV est épinglé à un nœud, dont la
-perte emporte les données ; pas d'objet ni de RWX ; pas de snapshots CSI. Pour
-tout ce qui est éphémère ou ré-montable ; jamais pour de la donnée à conserver.
+`light` tenable : 8 GiB RAM par VM contre 12 GiB en Ceph, à disque égal —
+`VM_DISK` 40 GiB par défaut, surchargeable). En contrepartie : **aucune
+résilience** — le PV est épinglé à un nœud, dont la perte emporte les données ;
+pas d'objet ni de RWX ; pas de snapshots CSI. Pour tout ce qui est éphémère ou
+ré-montable ; jamais pour de la donnée à conserver.
 
 **Longhorn** — bloc distribué répliqué synchrone (×2/×3) piloté par un operator.
 Plus simple à opérer que Ceph (pas de pools/CRUSH/rééquilibrage manuel), plus

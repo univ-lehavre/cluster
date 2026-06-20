@@ -75,3 +75,9 @@ Accepted (2026-06-01).
   d'upgrade.
 - Automatiser la vérification de compat croisée (release-notes) au lieu de la
   laisser manuelle.
+
+> **Amendement 2026-06-19.** Le banc cité ici sous `bench/multi-node/` (Vagrant)
+> est **déprécié** au profit du banc Lima
+> ([ADR 0038](0038-lima-seul-banc-local.md), commit 1aac57c) : lire désormais
+> `bench/lima/`. La décision (upgrade in-place séquencé, validé d'abord sur
+> banc) est inchangée.

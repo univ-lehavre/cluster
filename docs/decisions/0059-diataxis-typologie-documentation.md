@@ -132,3 +132,16 @@ page, et n'aide pas le lecteur. Le mode guide l'auteur, pas le lecteur.
 **Composant Vue pour les liens (tooltip au survol) ou glyphe décoratif accolé au
 lien.** Écarté : ne rend pas sur GitHub (HTML brut visible / glyphe parasite) ;
 viole la portabilité Markdown pur exigée. Un lien Markdown standard suffit.
+
+## Amendement 2026-06-20 — préciser le mode « Tutorial »
+
+La table §1 listait `demarrage.md` comme **le** tutoriel (« parcours 1→5 »).
+Précision après revue Diátaxis : `demarrage.md` est en réalité une **page
+d'orientation/aiguillage** (ses 5 étapes n'exécutent aucune commande, ce sont
+des renvois), tandis que le **vrai tutoriel learn-by-doing est
+[`banc-local.md`](../banc-local.md)** (monter le banc Lima de zéro, commandes +
+résultats vérifiables, environnement jetable). La décision (typologie Diátaxis,
+un mode par page, câblage dirigé) est **inchangée** ; seule la classification de
+ces deux pages est corrigée — `demarrage.md` reste l'index d'entrée qui
+**câble** vers le tutoriel `banc-local.md`. `docs/README.md` (colonne « Mode »)
+est aligné en conséquence.

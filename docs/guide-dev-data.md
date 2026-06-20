@@ -49,15 +49,16 @@ Exposition **hors cluster** (UI) via le Gateway Cilium + TLS interne
 
 ## Bases logiques PostgreSQL
 
-Un cluster HA unique `pg` (namespace `postgres`) porte **trois bases logiques**,
-chacune avec son rôle propriétaire
+Un cluster HA unique `pg` (namespace `postgres`) porte **quatre bases
+logiques**, chacune avec son rôle propriétaire
 ([ADR 0024](decisions/0024-postgres-manage-cloudnative-pg.md)) :
 
-| Base       | Rôle (login) | Usage                                                                  |
-| ---------- | ------------ | ---------------------------------------------------------------------- |
-| `dagster`  | `dagster`    | event log de l'orchestrateur                                           |
-| `pgvector` | `pgvector`   | recherche sémantique (extension SQL [`vector`](glossaire.md#pgvector)) |
-| `marquez`  | `marquez`    | store de lineage (migrations [Flyway](glossaire.md#flyway))            |
+| Base       | Rôle (login) | Usage                                                                                  |
+| ---------- | ------------ | -------------------------------------------------------------------------------------- |
+| `dagster`  | `dagster`    | event log de l'orchestrateur                                                           |
+| `pgvector` | `pgvector`   | recherche sémantique (extension SQL [`vector`](glossaire.md#pgvector))                 |
+| `marquez`  | `marquez`    | store de lineage (migrations [Flyway](glossaire.md#flyway))                            |
+| `mlflow`   | `mlflow`     | backend store du suivi de modèles ([ADR 0082](decisions/0082-suivi-modeles-mlflow.md)) |
 
 Le mot de passe d'un rôle est dans le Secret `pg-role-<rôle>` (clé `password`,
 namespace `postgres`). Connexion : écrire (`pg-rw`) ou lire (`pg-ro`). La

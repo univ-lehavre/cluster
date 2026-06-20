@@ -1,10 +1,19 @@
 # Validation sur banc — historique et évolution
 
+> ⏱️ **Photo historique du banc Vagrant (mai 2026).** Ce banc VirtualBox
+> (`192.168.67.0/24`) est **déprécié au profit du banc Lima**
+> ([ADR 0038](../decisions/0038-lima-seul-banc-local.md)). Les campagnes
+> **courantes** (Lima) sont synthétisées dans
+> [lecons-des-runs.md](lecons-des-runs.md) et journalisées dans
+> [`bench/lima/RESULTS.md`](../../bench/lima/RESULTS.md). Cette page reste **non
+> réécrite** (honnêteté des Runs,
+> [ADR 0052](../decisions/0052-reproductibilite-des-resultats.md)).
+
 Cette page donne une **vue d'évolution** des campagnes de test sur le banc
-multi-nœuds : ce qui a été validé, quand, et avec quels écarts (_findings_)
-corrigés. Le **détail brut** de chaque campagne (logs, symptômes, correctifs)
-reste dans le journal [`bench/RESULTS.md`](../../bench/RESULTS.md) ; cette page
-en est la synthèse navigable.
+multi-nœuds Vagrant : ce qui a été validé, quand, et avec quels écarts
+(_findings_) corrigés. Le **détail brut** de chaque campagne (logs, symptômes,
+correctifs) reste dans le journal [`bench/RESULTS.md`](../../bench/RESULTS.md) ;
+cette page en est la synthèse navigable.
 
 > **Le banc.** 3 VM Debian 13 **arm64** (Apple Silicon + VirtualBox), réseau
 > privé `192.168.67.0/24`, topologie 1 control-plane + 2 workers. Il **exerce
@@ -85,7 +94,7 @@ Ceux qui illustrent le mieux la valeur du banc — invisibles au lint :
 > le déploiement réel reste une action humaine, tracée étape par étape.
 >
 > **Chaîne DataOps assemblée.** Le harnais
-> `bench/lima/run-phases.sh dataops-chain` déploie et vérifie
+> `bench/lima/run-phases.sh cluster-dataops` déploie et vérifie
 > `monitoring → CNPG → Dagster → Marquez` de bout en bout (#148). Pour la carte
 > d'accès et les actions vérifiables par brique (URL navigateur / commande
 > console), voir [La chaîne DataOps de bout en bout](chaine-dataops.md).

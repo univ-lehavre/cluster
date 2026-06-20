@@ -2,7 +2,9 @@
 
 ## Statut
 
-Proposed (2026-06-18)
+Accepted (2026-06-19) — livraison INCRÉMENTALE. Le code est livré
+(`platform/dagster/image-openlineage/toy_assets.py`, code-location jouet) ;
+promu depuis `Proposed (2026-06-18)`.
 
 ## Contexte
 

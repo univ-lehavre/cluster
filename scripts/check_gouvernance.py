@@ -38,6 +38,10 @@ PLANS_DIR = "docs/plans"
 AUDIT_DIR = "docs/audit"
 DRIFTS_FILE = "docs/architecture/registre-drifts.yaml"
 DECISIONS_INDEX = "docs/decisions/README.md"
+README_FILE = "README.md"
+# Marqueurs encadrant le bloc « le dépôt en chiffres » régénérable (ADR 0060).
+STATS_BEGIN = "<!-- STATS:DEBUT"
+STATS_END = "<!-- STATS:FIN -->"
 
 PLAN_ETATS = {"Brouillon", "Actif", "Achevé", "Abandonné"}
 ADR_STATUTS = {"Accepted", "Proposed", "Superseded", "Deprecated"}
@@ -344,6 +348,54 @@ def format_stats(stats: dict) -> str:
     return "\n".join(lignes)
 
 
+def extract_stats_bullets(text: str) -> list[str] | None:
+    """Les lignes de puces du bloc STATS entre les marqueurs (fonction PURE).
+
+    Renvoie None si un marqueur manque ; sinon la liste des lignes `- …`
+    (strippées) entre `STATS:DEBUT … -->` et `STATS:FIN`. Isolée du reste pour
+    être testable sans I/O (ADR 0017).
+    """
+    if STATS_BEGIN not in text or STATS_END not in text:
+        return None
+    inner = text.split(STATS_BEGIN, 1)[1].split("-->", 1)[1].split(STATS_END, 1)[0]
+    return [ln.strip() for ln in inner.splitlines() if ln.strip().startswith("- ")]
+
+
+def check_stats_block(repo: Repo) -> list[Finding]:
+    """Le bloc STATS du README est-il à jour vs les chiffres régénérés ? (anti doc-rot)
+
+    Compare les *lignes de puces* entre les marqueurs `STATS:DEBUT`/`STATS:FIN`
+    du README à celles que `format_stats` produit à l'instant. Un écart = un
+    compteur figé périmé (le travers « 62 ADR » vs 88). Sans date dans le bloc :
+    la comparaison reste stable d'un run à l'autre.
+    """
+    path = os.path.join(repo.root, README_FILE)
+    if not os.path.exists(path):
+        return [Finding("stats", README_FILE, "README absent")]
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    actual = extract_stats_bullets(text)
+    if actual is None:
+        return [Finding("stats", README_FILE, f"marqueurs {STATS_BEGIN}…/{STATS_END} absents")]
+    # `format_stats` rend un titre + lignes ; on ne compare que les puces.
+    expected = [
+        ln.strip()
+        for ln in format_stats(gather_stats(repo)).splitlines()
+        if ln.strip().startswith("- ")
+    ]
+    if actual != expected:
+        return [
+            Finding(
+                "stats",
+                README_FILE,
+                "bloc « le dépôt en chiffres » périmé — régénérer via "
+                "`pnpm check:gouvernance --stats` puis recopier entre les marqueurs "
+                f"(attendu : {expected} ; trouvé : {actual})",
+            )
+        ]
+    return []
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 def run_all_checks(repo: Repo, audit_max_days: int) -> list[Finding]:
     findings: list[Finding] = []
@@ -352,6 +404,7 @@ def run_all_checks(repo: Repo, audit_max_days: int) -> list[Finding]:
     findings += check_drifts(repo)
     findings += check_index(repo)
     findings += check_freshness(repo, audit_max_days)
+    findings += check_stats_block(repo)
     return findings
 
 
@@ -368,8 +421,9 @@ def format_report(findings: list[Finding]) -> str:
         "drift": "Drifts (ADR 0058 §6)",
         "index": "Index des décisions",
         "fraicheur": "Fraîcheur des traces (ADR 0058)",
+        "stats": "Bloc « le dépôt en chiffres » (ADR 0060)",
     }
-    for famille in ["plan", "adr", "drift", "index", "fraicheur"]:
+    for famille in ["plan", "adr", "drift", "index", "fraicheur", "stats"]:
         items = by_famille.get(famille, [])
         if not items:
             continue
@@ -383,6 +437,11 @@ def format_report(findings: list[Finding]) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Audit des conventions de gouvernance (ADR 0060).")
     ap.add_argument("--stats", action="store_true", help="émettre le bloc « le dépôt en chiffres »")
+    ap.add_argument(
+        "--stats-check",
+        action="store_true",
+        help="vérifier que le bloc STATS du README est à jour (exit 1 si périmé)",
+    )
     ap.add_argument("--report", action="store_true", help="rapport de conformité (défaut)")
     ap.add_argument("--audit-max-days", type=int, default=DEFAULT_AUDIT_MAX_DAYS)
     ap.add_argument("--root", default=".", help="racine du dépôt")
@@ -393,6 +452,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.stats:
         print(format_stats(gather_stats(repo)))
         return 0
+
+    if args.stats_check:
+        findings = check_stats_block(repo)
+        print(format_report(findings))
+        return 1 if findings else 0
 
     findings = run_all_checks(repo, args.audit_max_days)
     print(format_report(findings))

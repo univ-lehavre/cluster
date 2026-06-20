@@ -88,7 +88,17 @@ git ; son interface est elle-même exposée par cette chaîne (Gateway + cert).
 
 ## Ce qui a été validé sur le banc
 
-Banc `bench/multi-node` (3 VM Debian arm64, K8s 1.34.8, Cilium 1.19.4). Détail
+> ⏱️ **Photo historique (banc Vagrant, mai 2026).** Le tableau ci-dessous date
+> du banc Vagrant (`192.168.67.0/24`), aujourd'hui **déprécié au profit du banc
+> Lima** ([ADR 0038](../decisions/0038-lima-seul-banc-local.md)). L'état de
+> validation **courant** (dont cert-manager/Gateway+TLS, scénario 28) vit dans
+> le journal Lima vivant —
+> [`bench/lima/RESULTS.md`](../../bench/lima/RESULTS.md) et
+> [lecons-des-runs.md](lecons-des-runs.md). On ne réécrit pas ce constat daté
+> (honnêteté des Runs,
+> [ADR 0052](../decisions/0052-reproductibilite-des-resultats.md)).
+
+Banc Vagrant (3 VM Debian arm64, K8s 1.34.8, Cilium 1.19.4). Détail
 chronologique et findings : [validation-banc.md](validation-banc.md) et le
 journal brut [`bench/RESULTS.md`](../../bench/RESULTS.md).
 

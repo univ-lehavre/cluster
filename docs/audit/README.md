@@ -23,6 +23,7 @@ précédents.
 | **[2026-06-16 — notations de cybersécurité](2026-06-16-audit-notations-cyber.md)**                         | Scorecard / CIS / NIST-ANSSI : 3 référentiels applicables                                                                                                     | issue #354 (manques actionnables)           |
 | **[2026-06-16 — notations & normes externes (hors cyber)](2026-06-16-audit-notations-normes-externes.md)** | FAIR / OpenSSF-Badge / DORA / OpenGitOps / SemVer-Changelog-CommitsConv / Diátaxis / WCAG / REUSE / ISO : alignement de fait, 4 référentiels notés non câblés | note sœur de la cyber (mêmes manques)       |
 | **[2026-06-19 — évaluation Kubescape (NSA)](2026-06-19-kubescape-nsa.md)**                                 | scan réel + évaluation multi-angle adversariale : NE PAS câbler (redondant Trivy/Kyverno) ; vraie dette = resource limits                                     | réflexion d'adoption (Scorecard-like infra) |
+| **[2026-06-20 — documentation (194 .md)](2026-06-20-documentation.md)**                                    | audit doc 14 dimensions (éventail multi-agents) + Diátaxis + comparatif atlas : doc forte ; doc-rot corrigé ; gate `--stats-check` livrée                     | revue exhaustive de la documentation        |
 
 > ⚠️ Le passage du **2026-05-29** est **antérieur à l'installation de
 > production** et à ~45 ADR ultérieurs : ses notes /5 reflètent l'état **à cette

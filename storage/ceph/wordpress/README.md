@@ -1,8 +1,9 @@
 # WordPress (exemple)
 
 Exemple d'usage du stockage bloc Ceph : un MySQL et un WordPress montés sur des
-volumes `rook-ceph-block-ec`. Sert à valider que le provisionnement de volumes
-persistants fonctionne.
+volumes `rook-ceph-block-replicated` (réplication ×3,
+[ADR 0001](../../../docs/decisions/0001-replication-x3-pour-workloads-bloc.md)).
+Sert à valider que le provisionnement de volumes persistants fonctionne.
 
 ## Prérequis
 

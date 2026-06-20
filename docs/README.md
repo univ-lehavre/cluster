@@ -8,9 +8,9 @@ composant…).
 | ---------------------------------------- | --------------------------------------------------------------------------------- | ----------- |
 | [`manifeste.md`](manifeste.md)           | Le récit du projet de bout en bout (contexte, méthode, voyage, résultats)         | explication |
 | [`preuves.md`](preuves.md)               | Vitrine consolidée des preuves de qualité (juger en 5 min)                        | référence   |
-| [`composants.md`](composants.md)         | La pile technologique brique par brique (rôle et raison d'être de chaque techno)  | référence   |
+| [`composants.md`](composants.md)         | La pile technologique brique par brique (rôle et raison d'être de chaque techno)  | explication |
 | [`glossaire.md`](glossaire.md)           | Définitions des termes techniques en langage simple                               | référence   |
-| [`demarrage.md`](demarrage.md)           | Par où commencer (public, prérequis, parcours 1→5)                                | tutoriel    |
+| [`demarrage.md`](demarrage.md)           | Par où commencer — page d'orientation/aiguillage (public, prérequis, parcours)    | orientation |
 | [`banc-local.md`](banc-local.md)         | Monter le banc Lima de zéro et rejouer la boucle GitOps                           | tutoriel    |
 | [`se-brancher.md`](se-brancher.md)       | Mode d'emploi : connecter son code à chaque brique de la plateforme               | procédure   |
 | [`guide-dev-data.md`](guide-dev-data.md) | Référence d'interface du développeur data (endpoints, StorageClasses)             | référence   |

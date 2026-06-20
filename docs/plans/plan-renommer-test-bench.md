@@ -2,9 +2,12 @@
 
 ## État
 
-**Actif** (2026-06-15). Fonde :
-[ADR 0070](../decisions/0070-renommer-test-en-bench-bootstrap-plat.md). Issues :
-_(à créer)_.
+> **État : Achevé** (2026-06-15 → livré). Fonde :
+> [ADR 0070](../decisions/0070-renommer-test-en-bench-bootstrap-plat.md). Le
+> renommage `test/` → `bench/` est **livré** : l'arbre n'utilise plus que
+> `bench/` (vérifiable par le `grep` de non-régression de l'étape 4, vide hors
+> exceptions). Les cases ci-dessous reflètent le plan d'exécution **tel
+> qu'appliqué** (conservées au passé pour la traçabilité, ADR 0057).
 
 Périmètre : renommage du dossier banc `test/` → `bench/` + ré-indexation de
 `bootstrap/README.md`. Le dossier `tests/` (pytest) **ne bouge pas**. Les
@@ -187,3 +190,15 @@ de lisibilité :
 > sous-dossiers : ~60 références littérales (`plan.py`, banc, Justfile, tests,
 > ADR) en dépendent et l'ordre vit déjà dans le DAG des couches
 > ([ADR 0069](../decisions/0069-topology-layers-dag-grain-phase.md)).
+
+## Suivi
+
+- **Livré** : le renommage `test/` → `bench/` est appliqué dans tout l'arbre
+  (`bench/lima/`, `bench/scenarios/`, `bench/spikes/`…), références réécrites,
+  exceptions `RESULTS.md` non touchées (ADR 0023). Le `grep` de non-régression
+  (étape 4) est vide hors exceptions.
+- **Re-prouvé** : `pnpm lint`, `docs:build`, `unittest`, `check_md_orphans` et
+  `check_gouvernance` passent sur l'arbre renommé.
+- **Reste (volet `bootstrap/`)** : la ré-indexation par phase du tableau de
+  `bootstrap/README.md` et la note « quatre topology » sont des compagnons de
+  lisibilité, suivis hors de ce plan (issue dédiée si besoin).

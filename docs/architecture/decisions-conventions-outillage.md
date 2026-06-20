@@ -75,9 +75,9 @@ La **politique de bump** se résume en cinq règles :
 3. **Pinner partout** : tags d'image avec version explicite, jamais `:latest` ni
    `:N` flottant — idéalement avec **digest** pour les composants critiques
    (c'est le cas de cert-manager et d'Argo CD dans la matrice).
-4. **Valider sur le banc multi-nœuds** (`bench/multi-node/`) avant la prod :
-   déployer, vérifier que `state.sh` est vert sur toutes les couches, et jouer
-   un cycle bootstrap → rollback → re-bootstrap.
+4. **Valider sur le banc Lima multi-nœuds** ([`bench/lima/`](../../bench/lima/))
+   avant la prod : déployer, vérifier que `state.sh` est vert sur toutes les
+   couches, et jouer un cycle bootstrap → rollback → re-bootstrap.
 5. **Mettre à jour l'ADR** (nouvelle matrice et date).
 
 Ce pinning éclaire le coût assumé côté CRI : containerd.io n'étant pas figé à

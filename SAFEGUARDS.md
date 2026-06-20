@@ -60,13 +60,17 @@ Configurée côté GitHub (non versionnable, documentée ici pour mémoire) :
 
 - **Pull request obligatoire** (pas de push direct — doublé par le hook
   `no-direct-push-to-main`).
-- **13 checks requis** avant merge (= tous les jobs CI) : `prettier`,
-  `yamllint`, `shellcheck`, `kubeconform`, `ansible-lint`, `commitlint`,
-  `trivy`, `bats`, `jscpd`, `markdownlint`, `lychee`, `ansible-syntax`,
-  `scripts-extra`. **Tout job CI doit être ajouté à cette liste** : un job non
-  requis se contourne par l'auto-merge et peut casser `main` (vécu deux fois —
-  `trivy`, puis `lychee`). Règle : nouveau job → l'ajouter aux required checks
-  une fois vu vert.
+- **13 checks requis** avant merge : `prettier`, `yamllint`, `shellcheck`,
+  `kubeconform`, `ansible-lint`, `commitlint`, `trivy`, `bats`, `jscpd`,
+  `markdownlint`, `lychee`, `ansible-syntax`, `scripts-extra`. **Tout job CI
+  doit être ajouté à cette liste** : un job non requis se contourne par
+  l'auto-merge et peut casser `main` (vécu deux fois — `trivy`, puis `lychee`).
+  Règle : nouveau job → l'ajouter aux required checks une fois vu vert.
+  - ⚠️ **Écart à combler** : les jobs `python` (ruff + tests unittest) et
+    `gitleaks` (secret scanning) tournent en CI mais **ne sont pas encore dans
+    les required checks** — à ajouter une fois éprouvés (gitleaks est non
+    bloquant de propos délibéré ; `python` devrait l'être). C'est précisément la
+    règle ci-dessus, non encore appliquée à ces deux jobs récents.
 - **`strict: true`** : la branche doit être **à jour avec `main`** (checks
   rejoués sur le dernier état) avant merge.
 - **Résolution des conversations requise**.
@@ -211,10 +215,10 @@ Strictement idempotent : un 2ᵉ run ne change rien si l'état est déjà confor
 
 ## Décisions tracées — [`docs/decisions/`](docs/decisions/)
 
-12 ADR (Architecture Decision Records) au format _Contexte / Décision / Statut /
-Conséquences_. Couvrent les choix architecturaux (réplication ×3, control plane
-unique, hyperconvergence, EC 2+1 datalake) et les compromis sécurité (HTTP sans
-auth, dashboard cluster-admin, RStudio sans login). Voir
+Les ADR (Architecture Decision Records) au format _Contexte / Décision / Statut
+/ Conséquences_. Couvrent les choix architecturaux (réplication ×3, control
+plane unique, hyperconvergence, EC 2+1 datalake) et les compromis sécurité (HTTP
+sans auth, dashboard cluster-admin, RStudio sans login). Voir
 [index ADR](docs/decisions/README.md).
 
 ## Phasage gated banc → prod

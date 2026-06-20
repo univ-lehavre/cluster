@@ -2,7 +2,8 @@
 
 ## Statut
 
-Proposed (2026-06-15)
+Accepted (2026-06-19) — livraison INCRÉMENTALE. Le code est livré
+(`nestor/scale.py`, `cluster scale`) ; promu depuis `Proposed (2026-06-15)`.
 
 ## Contexte
 

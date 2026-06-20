@@ -584,10 +584,16 @@ utilisateur debian + first-access" — comme si aucun playbook K8s n'avait été
 joué :
 
 ```bash
-# Sur le banc (exige confirmation explicite)
-ansible-playbook -i ../bench/multi-node/inventory.yaml rollback.yaml \
+# Sur le banc Lima, l'inventaire est généré par run-phases.sh dans son WORKDIR
+# (bench/lima/.work/inventory.yaml). On rejoue le rollback contre cet inventaire :
+ansible-playbook -i ../bench/lima/.work/inventory.yaml rollback.yaml \
   -e confirm=yes --limit cp1
 ```
+
+> Au banc, préférer le **chemin nommé codé** plutôt qu'un enchaînement manuel
+> (ADR 0045) : `BANC_JETABLE=1 bench/lima/run-phases.sh rollback <phase>` défait
+> une phase pour la re-tester (ADR 0054). La commande ci-dessus reste utile pour
+> un rollback **complet** du bootstrap (hors phases plateforme).
 
 Ce que le rollback fait :
 
@@ -729,8 +735,8 @@ sudo systemctl start kubelet
 kubectl get nodes      # attendre que les nœuds redeviennent Ready
 ```
 
-> Tester cette procédure **sur le banc multi-nœuds** avant d'en avoir besoin en
-> prod (cf. `bench/multi-node/`).
+> Tester cette procédure **sur le banc Lima multi-nœuds** avant d'en avoir
+> besoin en prod (cf. [`bench/lima/`](../bench/lima/)).
 
 ### Rotation de la clé de chiffrement etcd (ADR 0014)
 

@@ -1,13 +1,14 @@
 # Scénarios de test
 
-Suite de tests **reproductibles** et **documentés** à dérouler sur le banc
-multi-node (ou en prod après validation banc) pour valider que le stockage
+Suite de tests **reproductibles** et **documentés** à dérouler sur le banc Lima
+multi-nœuds (ou en prod après validation banc) pour valider que le stockage
 Rook-Ceph et le CNI Cilium se comportent comme attendu en nominal et en panne.
 
 ## Pré-requis
 
-- Banc multi-node up (`bench/multi-node/`) ou cluster prod opérationnel.
-- `kubectl` configuré côté poste de contrôle (ou ssh sur cp1).
+- Banc Lima up (cf. [`bench/lima/`](../lima/)) ou cluster prod opérationnel.
+- `kubectl` configuré (au banc : `KUBECONFIG=bench/lima/.work/kubeconfig`), ou
+  accès node-side via `limactl shell <instance>`.
 - Phase 1-3 du PLAN appliquées (cluster K8s + Rook-Ceph HEALTH_OK).
 
 ## Conventions
@@ -206,9 +207,11 @@ Chaque script :
 >
 > Lancer (banc) : `KUBECONFIG=… bash bench/scenarios/17-pod-evasion-psa.sh`
 > (kubectl-only) ;
-> `TARGET_IP=192.168.67.11 bash bench/scenarios/16-brute-force-ssh-fail2ban.sh`
+> `TARGET_IP=<ip-noeud> bash bench/scenarios/16-brute-force-ssh-fail2ban.sh`
 > (SSH) ;
-> `NODE_IP=192.168.67.12 bash bench/scenarios/19-chaos-perte-paquets-partition.sh`.
+> `NODE_IP=<ip-noeud> bash bench/scenarios/19-chaos-perte-paquets-partition.sh`
+> — au banc Lima, les IP des nœuds viennent de l'inventaire généré
+> (`bench/lima/.work/inventory.yaml`), pas d'une plage Vagrant figée.
 
 ## Réponses aux questions opérationnelles
 
@@ -303,9 +306,9 @@ Oui, par les scénarios 10-13 :
 
   ```bash
   HOSTS='cp1 node1 node2' bash bench/scenarios/13-host-node-hardening.sh
-  # banc (port forwardé Vagrant, un nœud à la fois) :
-  HOSTS=127.0.0.1 SSH_OPTS='-p 2222 -i ~/.vagrant.d/insecure_private_keys/vagrant.key.rsa' \
-    USER_REMOTE=debian bash bench/scenarios/13-host-node-hardening.sh
+  # banc Lima : l'accès node-side passe par `limactl shell <instance>`
+  # (le nom d'instance Lima, pas une IP ni un port forwardé). Les IP réelles des
+  # nœuds sont fournies par l'inventaire généré (bench/lima/.work/inventory.yaml).
   ```
 
   Il **réutilise** [`bootstrap/state.sh`](../../bootstrap/state.sh) et échoue
@@ -374,10 +377,10 @@ Nettoyage manuel si un script est sorti `KEEP=1` :
 kubectl delete all,pvc -l 'test.cluster.dev/scenario' --all-namespaces
 ```
 
-## État courant (banc 2026-05-28)
+## État courant
 
-Voir [bench/RESULTS.md](../RESULTS.md) — les scénarios 01-08 ont été **écrits et
-sont reproductibles**, mais leur **exécution complète sur le banc** est gated
-par le drift #9 (ceph-csi-operator + Driver CR à configurer pour Rook 1.19+).
-Une fois ce drift résolu, dérouler la suite de bout en bout est l'objectif du
-prochain run.
+L'état d'exécution des scénarios sur le banc **n'est pas figé ici** (il
+périmerait) : il vit dans le **journal des runs Lima**, source vivante et datée
+— [`bench/lima/RESULTS.md`](../lima/RESULTS.md). L'historique Vagrant (déprécié)
+reste dans [`bench/RESULTS.md`](../RESULTS.md), non réécrit (honnêteté des Runs,
+[ADR 0052](../../docs/decisions/0052-reproductibilite-des-resultats.md)).

@@ -27,12 +27,13 @@ joindre, avec quel secret, quel paramétrage. Elle suppose que votre code tourne
 
 ## Base de données — PostgreSQL (CloudNativePG)
 
-Un cluster HA unique `pg` (namespace `postgres`) porte **trois bases logiques**,
-chacune avec son rôle propriétaire
+Un cluster HA unique `pg` (namespace `postgres`) porte **quatre bases
+logiques**, chacune avec son rôle propriétaire
 ([ADR 0024](decisions/0024-postgres-manage-cloudnative-pg.md)) : `dagster`
 (event log de l'[orchestrateur](composants.md#dagster-orchestration)), `marquez`
 (store de [lineage](composants.md#marquez-et-openlineage-lineage)), `pgvector`
-(recherche sémantique).
+(recherche sémantique), `mlflow` (backend store du
+[suivi de modèles](composants.md#mlflow-suivi-de-modèles), ADR 0082).
 
 **Connexion** : écrire sur le service primary
 ([`pg-rw`](glossaire.md#postgresql-cloudnativepg-cnpg)), lire sur le replica

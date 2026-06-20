@@ -325,7 +325,12 @@ le port `5000` (`mlflow.mlflow.svc.cluster.local:5000`) ; l'UI est exposée hors
 cluster via le Gateway Cilium en HTTPS interne (`https://mlflow.cluster.lan`),
 **sans authentification** — compromis assumé sur un réseau privé de confiance
 mono-admin ([ADR 0003](decisions/0003-pas-de-chiffrement-ceph-tailscale.md)).
-L'image est l'**officielle multi-arch** (pas de build maison). Manifestes :
+L'image est **maison** : la base officielle `ghcr.io/mlflow/mlflow:v3.4.0`
+(épinglée par digest) **+ `psycopg2-binary`** (driver PostgreSQL absent de
+l'upstream, requis par le backend store CNPG), buildée pour les 2 arches et
+tirée du registry interne
+([`platform/mlflow/image/Dockerfile`](../platform/mlflow/image/Dockerfile),
+[ADR 0082](decisions/0082-suivi-modeles-mlflow.md)). Manifestes :
 [`platform/mlflow/mlflow.yaml`](../platform/mlflow/mlflow.yaml).
 
 ## Observabilité

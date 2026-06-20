@@ -86,12 +86,12 @@ Format léger inspiré de Michael Nygard :
 | 0064 | [Longhorn comme option de stockage du catalogue (3ᵉ profil)](0064-longhorn-option-stockage-catalogue.md)                             | Proposed           |
 | 0065 | [Variables d'environnement : intention vs état détectable](0065-variables-env-intention-vs-etat.md)                                  | Accepted           |
 | 0066 | [Rollback atomique : composants + graphe de dépendances unique](0066-rollback-atomique-graphe-composants.md)                         | Accepted           |
-| 0067 | [Workflows multi-agents consignés : 4ᵉ trace empirique](0067-workflows-consignes-4e-trace-empirique.md)                              | Superseded (0078)  |
+| 0067 | [Workflows multi-agents consignés : 4ᵉ trace empirique](0067-workflows-consignes-4e-trace-empirique.md)                              | Superseded by 0078 |
 | 0068 | [Profil `metrics` : palier fin entre `base` et `store`](0068-profil-metrics-palier-fin.md)                                           | Accepted           |
 | 0069 | [`topology.layers` : déclaration explicite des couches (DAG, grain phase)](0069-topology-layers-dag-grain-phase.md)                  | Accepted           |
 | 0070 | [Renommer `test/` en `bench/` ; garder `bootstrap/` à plat](0070-renommer-test-en-bench-bootstrap-plat.md)                           | Accepted           |
 | 0071 | [Exposition `gateway` en hostNetwork (80/443 sur l'IP du nœud)](0071-exposition-gateway-hostnetwork.md)                              | Accepted           |
-| 0072 | [`cluster scale` : ajuster les replicas au nombre de nœuds](0072-cluster-scale-replicas-noeuds.md)                                   | Proposed           |
+| 0072 | [`cluster scale` : ajuster les replicas au nombre de nœuds](0072-cluster-scale-replicas-noeuds.md)                                   | Accepted           |
 | 0073 | [Hubble UI : activer l'observabilité réseau (opt-in)](0073-hubble-ui-observabilite-reseau.md)                                        | Proposed           |
 | 0074 | [`cluster discover` : reconstruire un `topology.yaml` depuis un cluster réel](0074-cluster-discover-reconstruire-topologie.md)       | Accepted           |
 | 0075 | [Kyverno CLI en CI : valider nos invariants de manifeste en statique](0075-kyverno-cli-statique-ci.md)                               | Proposed           |
@@ -100,11 +100,11 @@ Format léger inspiré de Michael Nygard :
 | 0078 | [Passages d'audit : une seule famille, la méthode est une propriété](0078-passages-audit-famille-unique.md)                          | Accepted           |
 | 0079 | [Découverte de l'appartenance réelle : socle commun `health` + `remove`](0079-rollback-par-decouverte-appartenance.md)               | Accepted           |
 | 0080 | [Notations externes & badges README : doctrine d'affichage](0080-notations-et-badges-readme.md)                                      | Accepted           |
-| 0081 | [Socle d'exécution node-side : une brique `node_exec`, deux usages (`discover`, `remove`)](0081-socle-execution-node-side.md)        | Proposed           |
+| 0081 | [Socle d'exécution node-side : une brique `node_exec`, deux usages (`discover`, `remove`)](0081-socle-execution-node-side.md)        | Accepted           |
 | 0082 | [Suivi de modèles via MLflow](0082-suivi-modeles-mlflow.md)                                                                          | Proposed           |
-| 0083 | [`layers` source unique de l'ordre : presets en alias, plus de chemins nommés par défaut](0083-layers-source-unique-de-l-ordre.md)   | Proposed           |
+| 0083 | [`layers` source unique de l'ordre : presets en alias, plus de chemins nommés par défaut](0083-layers-source-unique-de-l-ordre.md)   | Accepted           |
 | 0084 | [Sondes de lecture gatées par `target_kind` (isolation banc/prod, suite de 0053)](0084-sondes-de-lecture-gatees-par-target-kind.md)  | Proposed           |
 | 0085 | [Preuves applicatives sur local-path par défaut ; Ceph validé sur installation seule](0085-preuves-applicatives-local-path.md)       | Proposed           |
-| 0086 | [Code-location jouet du socle : pipeline Dagster minimal branché en permanence](0086-code-location-jouet-du-socle.md)                | Proposed           |
-| 0087 | [Property-based testing des fonctions pures de `nestor` (Hypothesis)](0087-property-based-testing-nestor.md)                         | Proposed           |
-| 0088 | [Signer les releases : tarball source + cosign keyless + provenance SLSA](0088-signature-releases-cosign-slsa.md)                    | Proposed           |
+| 0086 | [Code-location jouet du socle : pipeline Dagster minimal branché en permanence](0086-code-location-jouet-du-socle.md)                | Accepted           |
+| 0087 | [Property-based testing des fonctions pures de `nestor` (Hypothesis)](0087-property-based-testing-nestor.md)                         | Accepted           |
+| 0088 | [Signer les releases : tarball source + cosign keyless + provenance SLSA](0088-signature-releases-cosign-slsa.md)                    | Accepted           |
