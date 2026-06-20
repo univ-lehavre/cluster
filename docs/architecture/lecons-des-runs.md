@@ -8,8 +8,9 @@ patterns récurrents et les invariants qu'ils imposent.
 > **Catalogue indexé des drifts** : le détail par drift (id, symptôme, cause,
 > correctif, portée, statut) vit dans le **registre**
 > [`registre-drifts.yaml`](registre-drifts.yaml) — source de vérité unique et
-> citable. Cette page en donne la **synthèse par catégorie** ; le registre, la
-> fiche par drift.
+> citable — dont une [**vue navigable**](registre-drifts.md) (tableau par
+> portée, générée depuis le YAML) facilite la lecture. Cette page en donne la
+> **synthèse par catégorie** ; le registre, la fiche par drift.
 >
 > **Pourquoi cette page existe.** Aucune brique d'infra du dépôt n'a jamais
 > fonctionné e2e du premier coup : chaque chantier a traversé plusieurs runs

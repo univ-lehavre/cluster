@@ -45,9 +45,10 @@ Pourquoi Lima
 | kubectl | —        | `brew install kubectl` |
 | python3 | —        | (préinstallé macOS)    |
 
-**RAM consommée** : 3 × 5 GiB ≈ **15 GiB** (5 GiB/VM : le check bootstrap
-`k8s-pre-install` exige `real.total ≥ 4096 MB`, qu'une VM 4 GiB ne garantit
-pas).
+**RAM consommée** : 3 × 12 GiB ≈ **36 GiB** par défaut (`VM_MEMORY` 12 GiB/VM,
+marge OK sur un hôte 48 GiB pour macOS). Surchargeable via `VM_MEMORY` ; le
+check bootstrap `k8s-pre-install` exige `real.total ≥ 4096 MB` (une VM 4 GiB ne
+le garantit pas).
 
 ## Modes de stockage
 

@@ -122,6 +122,11 @@ rejouer, en local, la chaîne complète que la production exécutera à l'identi
 
 ## 4. Accès bas-niveau (dépannage)
 
+> Le **tutoriel** s'arrête à l'étape 3 — vous avez monté le banc et bouclé la
+> chaîne GitOps. Cette section est un **appendice how-to** (dépannage), gardé
+> ici par commodité ; le mode d'emploi général des accès vit dans
+> [`docs/outils.md`](outils.md) et [`docs/se-brancher.md`](se-brancher.md).
+
 Si vous préférez un accès manuel sans `access.sh` (ou pour diagnostiquer), un
 `kubectl port-forward` par service reste possible :
 

@@ -166,6 +166,7 @@ export default defineConfig({
           { text: 'Matrice du catalogue', link: '/docs/architecture/matrice-catalogue' },
           { text: 'Validation sur banc', link: '/docs/architecture/validation-banc' },
           { text: 'Leçons des runs', link: '/docs/architecture/lecons-des-runs' },
+          { text: 'Registre des drifts', link: '/docs/architecture/registre-drifts' },
           { text: 'Plan de tests', link: '/docs/architecture/plan-de-tests' },
           { text: 'Bonnes pratiques', link: '/docs/architecture/bonnes-pratiques' },
           { text: 'Chaîne DataOps', link: '/docs/architecture/chaine-dataops' },

@@ -1,0 +1,88 @@
+<!-- PAGE GÉNÉRÉE par scripts/render_drifts.py depuis registre-drifts.yaml.
+     NE PAS ÉDITER À LA MAIN — modifier le YAML puis régénérer (`uv run python scripts/render_drifts.py`). -->
+
+# Registre des drifts — vue navigable
+
+Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (honnêteté des Runs, [ADR 0052](../decisions/0052-reproductibilite-des-resultats.md) / [ADR 0058](../decisions/0058-doctrine-audit-grille-passages.md) §6). La **source de vérité** reste [`registre-drifts.yaml`](registre-drifts.yaml) ; cette page en est le rendu navigable, **généré** (ne pas l'éditer).
+
+## En chiffres
+
+- **57 drifts** indexés — statut : 3 caduc, 51 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 25 code, 8 env, 20 harnais, 4 livrable.
+
+## Livrable (bug — vaut pour tous les bancs ET la prod) (4)
+
+| Id | Statut | Campagne | Symptôme → correctif |
+| --- | --- | --- | --- |
+| `L48` | ✅ corrige | socle GitOps Gitea + Argo CD (#230) | `argocd-server` reste 0/1 ; tous les composants Argo CD en `CreateContainerConfigError` (« secret "argocd-redis" not found »). Le pod `argocd-redis` boucle en `Init:Error` (exit 20). → Réécrire `allow-apiserver-egress` SANS `to:` (idiome du dépôt pour l'apiserver, calque `dagster/allow-apiserver-egress` ; une règle egress sans `to` autorise les entités réservées Cilium) + ports 443 et 6443. Validé banc : 10.96.0.1:443 joignable, Secret créé, 7 pods Argo CD 1/1. |
+| `L51` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | L'Application Argo CD `atlas-workflows` reste InvalidSpecError : « application repo `http://gitea-http…/atlas/workflows.git` is not permitted in project 'atlas' », alors que le sourceRepos autorise `http://gitea-http…/*`. → sourceRepos `…/**` (double étoile, récursif) dans appproject-atlas.yaml. Validé banc : Application acceptée (passe à ComparisonError puis Synced). |
+| `L52` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | Application bloquée ComparisonError « dial tcp …:8081 i/o timeout » : l'application-controller ne joint pas le repo-server (génération de manifeste impossible). → NetworkPolicy `allow-argocd-internal-egress` (podSelector {} → podSelector {} intra-ns, ports 8081/8084/6379/8080/5556/5557) dans allow-egress.yaml. |
+| `L53` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | repo-server : « failed to list refs: Get `http://gitea-http…/atlas/` workflows.git/info/refs : context deadline exceeded » — clone du dépôt Gitea impossible. → NetworkPolicy `allow-reposerver-gitea-egress` ciblant le namespace gitea par namespaceSelector, ports 3000 (cible réelle du pod après DNAT) ET 80 (robustesse). Validé banc : repo-server clone, Application Synced/Healthy, scénario 27 PASS + 9 scénarios pertinents PASS (10/10). |
+
+## Code (défaut du livrable révélé au run) (25)
+
+| Id | Statut | Campagne | Symptôme → correctif |
+| --- | --- | --- | --- |
+| `L2` | ✅ corrige | bootstrap K8s — banc Lima (#127) | `initialisation` : `Permission denied: /home/lima` (création du `.kube`). → Rôles `k8s-initialization`/`k8s-rollback` : home résolu via `ansible_env.HOME` (le vrai home, indépendant de l'utilisateur). |
+| `L2bis` | ✅ corrige | bootstrap K8s — banc Lima (#127) | `join-workers` : `Unable to change directory` (/home/debian). → `chdir` résolu via `ansible_env.HOME`. |
+| `L3` | ✅ corrige | bootstrap K8s — banc Lima (#127) | `initialisation` : `taint "…control-plane" not found`. → Tâche rendue tolérante : `failed_when` ignore « not found ». |
+| `L4` | ✅ corrige | bootstrap K8s — banc Lima (#127) | `cni.sh` : `cluster unreachable: localhost:8080`. → Lancer `cni.sh` en tant qu'utilisateur (sudo interne seulement où nécessaire). |
+| `L8` | ✅ corrige | validation DataOps Dagster — banc Lima (#144) | cert-manager controller en CrashLoop : « Gateway API CRDs not present ». → Phase `platform-prereqs` : pose les CRDs Gateway API v1.4.1. |
+| `L9` | ✅ corrige | validation DataOps Dagster — banc Lima (#144) | ImagePullBackOff : « HTTP response to HTTPS client » (`registry:80`). → Phase `platform-prereqs` : `/etc/hosts` + `certs.d/registry:80/hosts.toml` en HTTP. |
+| `L11` | ✅ corrige | validation DataOps Dagster — banc Lima (#144) | `kubectl apply -f dagster.yaml` crée les ressources dans `default`. → README : `kubectl apply -n dagster …` (corrigé). |
+| `L13` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | Pull `registry:80` HTTP échoue : « HTTP response to HTTPS client ». → `use_local_image_pull = true` dans la config containerd (les 3 nœuds) — fix racine. |
+| `L14` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | CNPG bloqué : « unknown plugin being required ». → Contournement banc initial (retrait du bloc `plugins:`) puis éliminé à la racine en #173 (Barman vers RGW Ceph via platform-s3-bucket). |
+| `L16` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | Dagster « too many retries for DB connection » (vrai bug du livrable). → Fix dépôt : `passwordSecret` par rôle + `role-secrets.example.yaml`. |
+| `L17` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | Le Secret dérivé applicatif ne correspond pas au mot de passe réel du rôle. → Résolu par L16 : `.example` de rôle et dérivés alignés sur les mêmes valeurs de test. |
+| `L19` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | Run émetteur en timeout sur le POST OpenLineage (vrai bug du livrable). → Fix dépôt : `platform/network-policies/dagster/allow-marquez-egress.yaml`. |
+| `L20` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | webserver/daemon Dagster en CrashLoop : « no [tool.dagster] block ». → Fix dépôt : ConfigMap `dagster-workspace` (`load_from: []`) monté + `-w` dans dagster.yaml. |
+| `L25` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | Secret dérivé : « namespaces postgres not found ». → Namespace `postgres` créé en premier dans `platform-cnpg`. |
+| `L26` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | build : « dict has no attribute 'clone_subdir' ». → `default('')` sur les attributs optionnels. |
+| `L30` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | Pods Dagster en ImagePullBackOff sur `registry:80` (HTTP/HTTPS). → Restart containerd sur les nœuds (handler à fiabiliser). |
+| `L34` | ✅ corrige | storageClass + S3 — banc Lima (#158/#186) | CRDs monitoring rejetées par le module k8s. → Appliquer ces CRDs via `kubectl apply --server-side`, pas le module. |
+| `L35` | ✅ corrige | storageClass + S3 — banc Lima (#158/#186) | « no matches for cert-manager.io/v1.Certificate ». → `platform-cert-manager` appliqué AVANT monitoring (dans monitoring.yaml). |
+| `L36` | ✅ corrige | storageClass + S3 — banc Lima (#158/#186) | `PrometheusRule` rejetés en masse (HTTP 500 du webhook `prometheusrulemutate`). → Deux passes : stack sauf `PrometheusRule` → attente operator Ready → `PrometheusRule`. |
+| `L37` | ✅ corrige | storageClass + S3 — banc Lima (#158/#186) | cert-manager en CrashLoop au démarrage (cause racine de L36). → Le rôle `platform-cert-manager` pose lui-même les CRDs Gateway API (v1.4.1). |
+| `L38` | ✅ corrige | storageClass + S3 — banc Lima (#158/#186) | Loki en CrashLoop `NoSuchBucket` (compactor), profil RGW uniquement. → En RGW : résoudre le bucket de l'OBC et l'employer pour chunks ET ruler ; init-buckets skippé. |
+| `L40` | ✅ corrige | storageClass + S3 — banc Lima (#158/#186) | `platform-prereqs` meurt (EXIT 1) sur banc léger (monitoring sans dataops, donc sans namespace registry). → `… \|\| true` sur l'assignation (skip propre). |
+| `L41` | ✅ corrige | topologies — DataOps sans Ceph (#158/#186 suite) | Le déploiement registry (puis CNPG) reste Pending : PVC non lié, pod registry 0/1 « Deployment does not have minimum availability ». → phase_dataops (run-phases.sh) choisit storageClass + backing S3 selon le profil (registry_storage_class / cnpg_storage_class / cnpg_s3_backing / cnpg_s3_endpoint), comme phase_monitoring. Le rôle CNPG est par ailleurs découplé du RGW via platform-s3-bucket (backing rgw\|seaweedfs, ADR 0036). |
+| `L45` | ✅ corrige | migration ansible_facts (échéance ansible-core 2.24) | Au run, `set_fact all_hostnames` échoue : « object of type 'HostVarsVars' has no attribute 'ansible_facts.hostname' » (bootstrap k8s-pre-install). → Passer une LISTE de clés pour la descente : `map('extract', hostvars, ['ansible_facts', 'hostname'])`. Validé e2e (bootstrap vert). |
+| `L56` | 🔄 en-cours (#251) | portail UI — exposition tout-Cilium (#232, scénario 28) | Aucune UI joignable via le Gateway. Le Gateway argocd reste PROGRAMMED=Unknown « Waiting for controller », la GatewayClass cilium reste Accepted=Unknown, et AUCUN Service type=LoadBalancer n'obtient d'IP. Le scénario 28 ne trouve qu'une HTTPRoute et ne peut sonder aucune UI. → (1) cni.sh applique les CRs inline (heredoc), plage LB-IPAM + interface L2 paramétrées par env (LB_IPAM_RANGE_START/STOP, L2_INTERFACE) dérivées du réseau réel par run-phases.sh (ADR 0023) ; (2) poser les CRDs Gateway API AVANT cni.sh (dépendance réelle Gateway-API → Cilium-gateway). Validé À CHAUD (HTTP 200 via Gateway, scénario 28 PASS). Re-preuve from-scratch différée → issue #251 (ADR 0034/0046). |
+
+## Environnement (artefact d'un banc précis) (8)
+
+| Id | Statut | Campagne | Symptôme → correctif |
+| --- | --- | --- | --- |
+| `L6` | ✅ corrige | bootstrap K8s — banc Lima (#127) | OSD-prepare en CrashLoopBackOff : `binary lvm does not exist`. → Installer `lvm2` dans le provision de la VM (`profiles/node.yaml.tmpl`). |
+| `L18` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | Build d'images impossible dans les VMs. → `apt install git` + `systemctl enable --now buildkit` (intégré à la prépa-build). |
+| `L23` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | `SSL: CERTIFICATE_VERIFY_FAILED` (modules get_url/k8s). → `SSL_CERT_FILE` via `certifi`, résolu en pré-tâche par le bon interpréteur. |
+| `L27` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | build : « Dockerfile no such file or directory » sur le nœud. → Copier contextes/Dockerfiles sur le nœud avant le build. |
+| `L28` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | build `marquez-web` OOM-killed (rc 137). → `VM_MEMORY` 5 → 8 GiB (dimensionner pour le pic, pas le repos). |
+| `L29` | 🗑️ caduc | portage DataOps Ansible — banc Lima (#173) | Operator CNPG en CrashLoop après un reboot. → Artefact de reboot (cf. réserve « restore non fidèle ») : redémarrer l'operator. Pas un défaut du livrable. |
+| `L42` | 🗑️ caduc | topologies — banc single-node (exploratoire) | Gate « Wait for Dagster webserver and daemon to be Ready » expire alors que les pods finissent par devenir Ready peu après. → Aucun (topologie single-node abandonnée — ADR 0040). Consigné pour la traçabilité de l'abandon. |
+| `L43` | 🗑️ caduc | topologies — banc single-node (exploratoire) | Pods CloudNativePG (pg-1/2/3) évincés : « The node was low on resource: ephemeral-storage » ; nœud taint disk-pressure → plus de placement. → Aucun (topologie single-node abandonnée — ADR 0040). Aurait exigé CNPG ×1 + disque accru ; non représentatif. Consigné pour la traçabilité. |
+
+## Harnais (outillage de test, pas le livrable) (20)
+
+| Id | Statut | Campagne | Symptôme → correctif |
+| --- | --- | --- | --- |
+| `L1` | ✅ corrige | bootstrap K8s — banc Lima (#127) | Au play `initialisation`, `ansible_user is undefined`. → Inventaire généré : `cloud.vars.ansible_user: lima`. |
+| `L5` | ✅ corrige | bootstrap K8s — banc Lima (#127) | Gate kubeconfig : l'API est injoignable depuis l'hôte. → Réécrire `server:` sur `127.0.0.1:<portForward>` + `tls-server-name: cluster-api`. |
+| `L7` | ✅ corrige | bootstrap K8s — banc Lima (#127) | Le gate Ceph passe au vert avec 0 OSD. → Gate renforcé : HEALTH_OK ET le nombre d'OSD attendus up (nœuds × disques data). |
+| `L10` | ✅ corrige | validation DataOps Dagster — banc Lima (#144) | Pod registry Pending : `unbound PersistentVolumeClaim`. → Override banc : PVC sur `local-path` (paramétré ensuite par profil, cf. L41). |
+| `L12` | 🔴 ouvert (#318) | chaîne DataOps shell — banc Lima (#148) | `bootstrap` sort en code 141 (SIGPIPE) — kubeconfig non récupéré. → Contournement : phase `kubeconfig` séparée (le cluster était sain) ; reste à durcir dans le bootstrap. |
+| `L15` | ✅ corrige | chaîne DataOps shell — banc Lima (#148) | PVC `pg` Pending : « unbound immediate PersistentVolumeClaims ». → Surcharge banc : `standard → local-path` (paramétré par profil ensuite, cf. #158/L41). |
+| `L21` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | `ansible_user_id is undefined` sur le play cluster. → Retrait de l'audit-log du play cluster (cf. L22). |
+| `L22` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | `sudo: a password is required` (audit-log sur localhost). → audit-log retiré de `dataops.yaml` (conservé sur les playbooks de nœuds). |
+| `L24` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | Le volet « node » du rôle registry tourne sur localhost. → Rôle scindé `cluster.yaml`/`node.yaml`, importés via `tasks_from`. |
+| `L31` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | Preuve de lineage : l'image émetteur est absente du registry. → `build_emitter_image=true` au banc (câblé conditionnellement). |
+| `L32` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | « aucun job ingéré (1 → 1) » alors que le lineage est présent. → `classify_marquez_ingest` teste la présence (`after >= 1`) + bats à jour. |
+| `L33` | ✅ corrige | portage DataOps Ansible — banc Lima (#173) | « RGW datalake pas Ready » alors que les 3 pods sont 2/2 Running. → Gate `>= 1` (au moins une instance up). |
+| `L39` | ✅ corrige | storageClass + S3 — banc Lima (#158/#186) | Job init-buckets « prêt » alors que rien n'est créé (profil RGW). → Script réécrit (`set -eu`) : échec franc si le bucket n'est ni créé ni déjà présent. |
+| `L44` | 🔴 ouvert (#319) | topologies — DataOps sans Ceph (#158/#186 suite) | Une phase (dataops, monitoring) lancée sans WITH_CEPH=1 sur un banc Ceph choisit silencieusement le profil léger (storageClass local-path) → PVC Pending sur le banc Ceph, échec en aval. → À faire (ouvert) : faire que dataops/monitoring DÉTECTENT le profil (présence d'un storageClass rook-ceph / du RGW) au lieu de dépendre de WITH_CEPH, ou refuser proprement si incohérent. Contournement actuel : passer WITH_CEPH=1 à toutes les phases d'un banc Ceph. |
+| `L46` | ✅ corrige | migration ansible_facts (échéance ansible-core 2.24) | Warnings « discovered Python interpreter could change » persistants malgré `interpreter_python = auto_silent` dans bootstrap/ansible.cfg ; et `inject_facts_as_vars = False` non appliqué au banc. → Exporter `ANSIBLE_CONFIG="${REPO}/bootstrap/ansible.cfg"` dans bench/lima/lib.sh (couvre toutes les invocations du banc). Validé : warnings disparus, run vert sous inject_facts_as_vars=False. |
+| `L47` | ✅ corrige | métrologie du banc (#216/#217/#219) | Échantillonnage Prometheus (#217) toujours `?`, ET le `runs-history.yaml` pollué par des lignes ANSI (codes couleur) qui le rendaient invalide. → Requête via un pod busybox éphémère ciblant le Service `prometheus-operated` (pattern de `marquez_job_count`) ; tous les `log`/`warn` routés sur stderr (`>&2`). Deux tests bats anti-régression (stdout sans ANSI ; Prometheus absent → stdout vide). Métriques réelles obtenues (CPU 272 cœur·s, RAM pic 7606 MiB). |
+| `L49` | ✅ corrige | socle GitOps Gitea + Argo CD (#230) | Un `run-phases.sh all` relancé sur un socle EN CACHE (#219) consignait dans `runs-history.yaml` une entrée présentée comme run complet, mais avec un `total_s` tronqué et des `phases` partielles (p. ex. `gitops: 12` seul) — fausse preuve qui trompe le garde-fou de fraîcheur (ADR 0042). → Ne consigner que les runs FROM-SCRATCH (flag `socle_built` : 1 seulement si la branche else a rejoué up/bootstrap/storage). Run sur cache → message explicite, PAS d'entrée. Seul un run from-scratch est une preuve (ADR 0034/0042 ; NO_CACHE=1 pour forcer). Fausse entrée a855ec8 retirée. |
+| `L50` | ✅ corrige | chemins d'installation + scénarios atlas (#237) | `KUBECONFIG=bench/lima/.work/kubeconfig ONLY=… bench/scenarios/run-all.sh` (chemin RELATIF) : tous les scénarios échouent ou skippent à tort (`connection to localhost:8080 refused`), alors qu'un `kubectl` direct avec le même kubeconfig joint bien le cluster. → Résoudre KUBECONFIG en chemin ABSOLU AVANT le `cd` (si défini et relatif). Validé : ONLY=24 avec KUBECONFIG relatif passe (Prometheus 22 targets UP). |
+| `L54` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | Le workflow jouet (Job) échoue : OSError/PermissionError Read-only file system puis Permission denied sur `/opt/dagster/app/.tmp_dagster_home…` — `dagster asset materialize` ne peut pas créer son DAGSTER_HOME temporaire. → Aligner le workflow jouet sur l'émetteur de référence : retirer le durcissement securityContext (garder drop ALL). Le durcissement global des workloads Dagster root relève de #234. Validé : Job Complete + lineage Marquez, scénario 27 PASS. |
+| `L55` | ✅ corrige | banc atlas-ceph complet (#232) | En cours de run atlas-ceph (Ceph + dataops complet), des pods sont Evicted puis laissés en Error/ContainerStatusUnknown (postgres pg-1/pg-3, rook-ceph-rgw-datalake, node-exporter, crashcollector). Kubernetes recrée systématiquement un remplaçant Running — la chaîne reste fonctionnelle (workflow Completed) — mais les tombstones polluent l'état. → VM_DISK DÉRIVE du profil (ADR 0046) : 40 GiB en mode Ceph (WITH_CEPH=1), 20 GiB en léger. Le qcow2 Lima est thin-provisionné → n'occupe le disque hôte qu'à l'usage réel. Re-preuve from-scratch atlas-ceph différée → issue #251 (ADR 0034). Tombstones du run courant nettoyés (kubectl delete pod --field-selector status.phase=Failed). |

@@ -151,6 +151,8 @@ jobs:
         run: uv run python scripts/check_md_orphans.py
       - name: garde-fou bloc « le dépôt en chiffres » à jour (ADR 0060)
         run: uv run python scripts/check_gouvernance.py --stats-check
+      - name: garde-fou page registre-drifts.md à jour (générée, ADR 0017)
+        run: uv run python scripts/render_drifts.py --check
       - name: garde-fou contrat cluster→atlas aligné sur platform/ (ADR 0043)
         run: uv run python scripts/check_contract.py
 

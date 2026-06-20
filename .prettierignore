@@ -35,6 +35,9 @@ CHANGELOG.md
 # Auto-généré par bench/lima/run-phases.sh (append d'une entrée par run de banc)
 bench/lima/runs-history.yaml
 
+# Auto-généré par scripts/render_drifts.py depuis registre-drifts.yaml (gate --check)
+docs/architecture/registre-drifts.md
+
 # Vendored upstream Dagster (helm template figé, épinglé par digest)
 platform/dagster/dagster.yaml
 # Vendored upstream Marquez (helm template figé, épinglé par digest)
