@@ -18,6 +18,7 @@ from check_gouvernance import (  # noqa: E402
     adr_number_from_filename,
     days_since,
     drift_issue_ok,
+    extract_stats_bullets,
     is_living_plan,
     normalize_statut,
     parse_adr_statut,
@@ -158,6 +159,33 @@ class DaysSince(unittest.TestCase):
 
     def test_invalid_date(self):
         self.assertIsNone(days_since("pas-une-date", dt.date(2026, 6, 13)))
+
+
+class ExtractStatsBullets(unittest.TestCase):
+    _BLOCK = (
+        "# Titre\n\n"
+        "<!-- STATS:DEBUT — bloc régénéré -->\n\n"
+        "- **88 ADR** (80 Accepted, 6 Proposed, 2 Superseded)\n"
+        "- **8 plans** vivants (4 Achevé)\n\n"
+        "<!-- STATS:FIN -->\n\n"
+        "## Suite\n"
+        "- une puce hors bloc, à ignorer\n"
+    )
+
+    def test_extracts_only_bullets_between_markers(self):
+        self.assertEqual(
+            extract_stats_bullets(self._BLOCK),
+            [
+                "- **88 ADR** (80 Accepted, 6 Proposed, 2 Superseded)",
+                "- **8 plans** vivants (4 Achevé)",
+            ],
+        )
+
+    def test_missing_marker_returns_none(self):
+        self.assertIsNone(extract_stats_bullets("# Titre\n\n- pas de marqueurs\n"))
+
+    def test_empty_block(self):
+        self.assertEqual(extract_stats_bullets("<!-- STATS:DEBUT -->\n\n<!-- STATS:FIN -->\n"), [])
 
 
 if __name__ == "__main__":
