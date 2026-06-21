@@ -218,6 +218,10 @@ export default defineConfig({
           { text: 'Marquez (lineage)', link: '/docs/plans/plan-marquez' },
           { text: 'Rollback par phase', link: '/docs/plans/plan-rollback-par-phase' },
           { text: 'Audit des conventions', link: '/docs/plans/plan-audit-conventions' },
+          {
+            text: 'Migration doc → Astro Starlight',
+            link: '/docs/plans/plan-migration-astro-starlight',
+          },
           { text: 'Refonte documentaire', link: '/docs/plans/plan-refonte-doc' },
           {
             text: 'Audit — réalignement Dagster ↔ main',

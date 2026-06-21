@@ -108,3 +108,4 @@ Format léger inspiré de Michael Nygard :
 | 0086 | [Code-location jouet du socle : pipeline Dagster minimal branché en permanence](0086-code-location-jouet-du-socle.md)                | Accepted           |
 | 0087 | [Property-based testing des fonctions pures de `nestor` (Hypothesis)](0087-property-based-testing-nestor.md)                         | Accepted           |
 | 0088 | [Signer les releases : tarball source + cosign keyless + provenance SLSA](0088-signature-releases-cosign-slsa.md)                    | Accepted           |
+| 0089 | [Migration de la documentation : VitePress → Astro Starlight](0089-migration-doc-vitepress-astro-starlight.md)                       | Proposed           |
