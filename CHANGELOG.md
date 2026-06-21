@@ -11,6 +11,29 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.41.0](https://github.com/univ-lehavre/cluster/compare/v2.40.0...v2.41.0) (2026-06-21)
+
+
+### Features
+
+* **ci:** gate --stats-check anti doc-rot du bloc « le dépôt en chiffres » ([fb4af78](https://github.com/univ-lehavre/cluster/commit/fb4af78411ac013b8835a3b1d570e70a914bcdfe))
+* **docs:** registre des drifts navigable généré depuis le yaml (+ gate) ([b06f7c0](https://github.com/univ-lehavre/cluster/commit/b06f7c0820d58a6abdf3097cd54f992192ef1f76))
+
+
+### Bug Fixes
+
+* **docs:** corriger le doc-rot (banc vagrant, compteurs figés, faits périmés) ([50364a6](https://github.com/univ-lehavre/cluster/commit/50364a62a990679a32476ca0a8ba9ad7ee3105f3))
+* **docs:** neutraliser les url citées dans la page registre-drifts (lychee) ([a5f3f61](https://github.com/univ-lehavre/cluster/commit/a5f3f61a8dc1fa8bf0254a5e11759f3b15c9960f))
+
+
+### Documentation
+
+* **adr:** promouvoir 6 adr livrés en accepted + reclasser diátaxis ([5db7582](https://github.com/univ-lehavre/cluster/commit/5db75820a5e9ab27783c4229d040a41f9c13d312))
+* améliorer navigabilité et pédagogie (suite audit doc) ([63e7cb8](https://github.com/univ-lehavre/cluster/commit/63e7cb808cc5cad2b091033d41c29ab160375114))
+* audit documentation 194 .md + corrections doc-rot + gate stats ([537e9ab](https://github.com/univ-lehavre/cluster/commit/537e9ab35d8b0004d7f6d933e63a9efe529fc351))
+* **audit:** passage daté — audit documentation 194 .md (2026-06-20) ([5041e42](https://github.com/univ-lehavre/cluster/commit/5041e42e731949684773c5016f01f46b7dd013f4))
+* finaliser l'audit doc (navigabilité, pédagogie, registre drifts navigable) ([4310964](https://github.com/univ-lehavre/cluster/commit/4310964a449206000b4aef41d29840a961f78211))
+
 ## [2.40.0](https://github.com/univ-lehavre/cluster/compare/v2.39.0...v2.40.0) (2026-06-20)
 
 
