@@ -179,21 +179,11 @@ jobs:
         with:
           globs: '**/*.md'
 
-  # Vérification des liens (lychee) — mode hors-ligne : ne valide que les liens
-  # internes / fichiers (les liens externes sont flaky en CI et hors de notre
-  # contrôle). Couvre les liens cassés vers des fichiers/ancres du dépôt.
-  lychee:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2
-        with:
-          # Épinglé : `lychee-action@v2` suit la dernière version, mais le format de
-          # `include_fragments` a changé en 0.24 (booléen → enum). On fige 0.23 pour que
-          # `lychee.toml` (include_fragments = false) reste valide et déterministe.
-          lycheeVersion: v0.23.0
-          args: '--config lychee.toml --offline --no-progress "**/*.md"'
-          fail: true
+  # NB : la validation des liens internes de la doc est désormais assurée par
+  # `starlight-links-validator` (BLOQUANT au build Astro, workflow docs.yml) — il
+  # connaît le base /cluster/ et résout les liens du site, ce que lychee (offline,
+  # base virtuel) ne savait pas faire (ADR 0089). lychee a donc été retiré, comme
+  # côté atlas. Les liens vers le code pointent désormais github.com/blob/main.
 
   # Scan de posture sécurité IaC (manifestes K8s, Dockerfile-like, config).
   # Échoue sur HIGH/CRITICAL. Les compromis actés sont listés, CIBLÉS PAR

@@ -61,12 +61,14 @@ Configurée côté GitHub (non versionnable, documentée ici pour mémoire) :
 
 - **Pull request obligatoire** (pas de push direct — doublé par le hook
   `no-direct-push-to-main`).
-- **13 checks requis** avant merge : `prettier`, `yamllint`, `shellcheck`,
+- **12 checks requis** avant merge : `prettier`, `yamllint`, `shellcheck`,
   `kubeconform`, `ansible-lint`, `commitlint`, `trivy`, `bats`, `jscpd`,
-  `markdownlint`, `lychee`, `ansible-syntax`, `scripts-extra`. **Tout job CI
-  doit être ajouté à cette liste** : un job non requis se contourne par
-  l'auto-merge et peut casser `main` (vécu deux fois — `trivy`, puis `lychee`).
-  Règle : nouveau job → l'ajouter aux required checks une fois vu vert.
+  `markdownlint`, `ansible-syntax`, `scripts-extra`. **Tout job CI doit être
+  ajouté à cette liste** : un job non requis se contourne par l'auto-merge et
+  peut casser `main` (vécu deux fois — `trivy`, puis `lychee`). _(`lychee`
+  retiré avec la migration Astro, ADR 0089 : la validation des liens de doc est
+  désormais bloquante au build via `starlight-links-validator`.)_ Règle :
+  nouveau job → l'ajouter aux required checks une fois vu vert.
   - ⚠️ **Écart à combler** : les jobs `python` (ruff + tests unittest) et
     `gitleaks` (secret scanning) tournent en CI mais **ne sont pas encore dans
     les required checks** — à ajouter une fois éprouvés (gitleaks est non
