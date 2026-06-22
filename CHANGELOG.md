@@ -11,6 +11,15 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.41.1](https://github.com/univ-lehavre/cluster/compare/v2.41.0...v2.41.1) (2026-06-22)
+
+
+### Documentation
+
+* **adr:** adr 0089 + plan migration doc vitepress → astro starlight ([c724a0a](https://github.com/univ-lehavre/cluster/commit/c724a0aeb7c17812484dd5a840cd2a7c95805625))
+* **adr:** ADR 0089 + plan migration doc VitePress → Astro Starlight ([50e1206](https://github.com/univ-lehavre/cluster/commit/50e12060bede957ed6214f86654bcc3348356b07))
+* régénérer le bloc « le dépôt en chiffres » (adr 0089 + plan) ([ba7e0ad](https://github.com/univ-lehavre/cluster/commit/ba7e0ad8d28458dc8ca9950d6f0a95d35d80c093))
+
 ## [2.41.0](https://github.com/univ-lehavre/cluster/compare/v2.40.0...v2.41.0) (2026-06-21)
 
 
