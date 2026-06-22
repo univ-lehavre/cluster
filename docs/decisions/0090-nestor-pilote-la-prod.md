@@ -2,11 +2,13 @@
 
 ## Statut
 
-Proposed (2026-06-22) — mise en œuvre suivie par
-[`plan-nestor-pilote-prod.md`](../plans/plan-nestor-pilote-prod.md). Suite
-directe de [ADR 0053](0053-isolation-multi-cible-banc-prod.md) (isolation
-banc/prod) et [ADR 0084](0084-sondes-de-lecture-gatees-par-target-kind.md)
-(sondes gatées par `target_kind`).
+Accepted (2026-06-22) — mise en œuvre **incrémentale** suivie par
+[`plan-nestor-pilote-prod.md`](../plans/plan-nestor-pilote-prod.md) (promu
+`Proposed → Accepted` au démarrage de l'implémentation, étape 1 : champ
+`kubeconfig` du modèle). Suite directe de
+[ADR 0053](0053-isolation-multi-cible-banc-prod.md) (isolation banc/prod) et
+[ADR 0084](0084-sondes-de-lecture-gatees-par-target-kind.md) (sondes gatées par
+`target_kind`).
 
 ## Contexte
 
@@ -86,6 +88,17 @@ Principes de mise en œuvre (détaillés dans le plan) :
   fichier. Le banc Lima garde son propre kubeconfig généré
   (`bench/lima/.work/kubeconfig`) — même esprit (un fichier par cible),
   emplacement distinct car généré par le harnais.
+- **`nestor` COMPLÈTE la topologie à l'activation (`stack select`).** « Lecture
+  seule » porte sur le **CLUSTER** (ne jamais muter la prod K8s) — PAS sur la
+  config locale. Quand on **active** une stack prod (`stack select` — déjà une
+  écriture : le symlink), si la topo ne déclare pas `kubeconfig:`, `nestor`
+  **propose d'ajouter le champ** `~/.kube/<stack>.config` au fichier (édition
+  texte préservant commentaires, ADR 0076 §4) + propose le rapatriement, puis
+  pose ce KUBECONFIG. Écriture **confirmée** (jamais silencieuse, ADR 0046),
+  **jamais en `--no-input`** (CI : on signale seulement). C'est « nestor corrige
+  la topologie » : la cible devient déclarée, et `preview` dit ensuite la
+  vérité. `preview`, lui, **reste lecture seule** (il n'écrit ni le cluster ni
+  la topo — il réoriente vers `stack select` si la cible manque).
 - **Confirmation interactive de la cible avant toute action prod.** En
   `target_kind: prod`, avant d'exécuter une commande, `nestor` **affiche le
   cluster réellement visé** par le kubeconfig résolu (endpoint de l'API + nœuds

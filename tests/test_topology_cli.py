@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -495,9 +496,11 @@ runs:
 
     def test_three_sections_voulu_reel_plan(self):
         # preview absorbe status (VOULU) + refresh (RÉEL) : les 3 sections présentes.
+        # Topo LIMA : la section RÉEL affiche les VMs (« VMs à créer ») — propre au
+        # banc. En prod, l'état réel = nœuds K8s, pas de VMs (ADR 0090, testé à part).
         hist = _tmp(self._EMPTY_HIST)
         self.addCleanup(os.unlink, hist)
-        code, out, _ = _capture(["preview", "-f", _EXAMPLE, "--history", hist])
+        code, out, _ = _capture(["preview", "-f", _example_as_lima(self), "--history", hist])
         self.assertEqual(code, 0)
         self.assertIn("VOULU", out)
         self.assertIn("RÉEL", out)
@@ -507,6 +510,54 @@ runs:
         self.assertIn("profil", out)
         # RÉEL (ex-refresh) : les VMs à créer (terrain vierge, stub vms=[]).
         self.assertIn("VMs à créer", out)
+
+    def test_prod_real_is_k8s_nodes_not_vms(self):
+        # ADR 0090 : une topo PROD avec `kubeconfig:` déclaré lit l'état RÉEL du
+        # cluster K8s (nœuds Ready) et n'affiche AUCUNE section VMs (les machines sont
+        # provisionnées hors nestor). preview ne ment plus (« VMs à créer : dirqual* »).
+        cli._ready_nodes = lambda *_a, **_k: ["dirqual1", "dirqual2", "dirqual3", "dirqual4"]
+        topo_yaml = (
+            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "nodes:\n"
+            "  - {name: dirqual1, roles: [control, worker]}\n"
+            "  - {name: dirqual2, roles: [worker]}\n"
+            "storage: {backend: ceph}\n"
+            "target_kind: prod\n"
+            "kubeconfig: ~/.kube/dirqual.config\n"
+        )
+        path = _tmp(topo_yaml)
+        self.addCleanup(os.unlink, path)
+        hist = _tmp(self._EMPTY_HIST)
+        self.addCleanup(os.unlink, hist)
+        # `--no-input` : le rapatriement assisté (ADR 0090) ne doit JAMAIS prompter en
+        # CI (kubeconfig dirqual absent du runner → sinon `input()` bloquerait).
+        code, out, _ = _capture(["preview", "-f", path, "--history", hist, "--no-input"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("VMs à créer", out)  # plus de mensonge VMs en prod
+        self.assertNotIn("VMs présentes", out)
+        self.assertIn("dirqual1", out)  # nœuds K8s réels affichés
+        self.assertIn("nœuds Ready", out)
+
+    def test_prod_without_kubeconfig_reorients_to_stack_select(self):
+        # ADR 0090 : preview prod SANS `kubeconfig:` déclaré ne plante pas et ne ment
+        # pas — il RÉORIENTE vers `stack select` (qui déclare/rapatrie la cible).
+        topo_yaml = (
+            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+            "storage: {backend: ceph}\ntarget_kind: prod\n"  # PAS de kubeconfig:
+        )
+        path = _tmp(topo_yaml)
+        self.addCleanup(os.unlink, path)
+        hist = _tmp(self._EMPTY_HIST)
+        self.addCleanup(os.unlink, hist)
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KUBECONFIG", None)
+            orig = cli._KUBECONFIG_AUTO_BENCH
+            cli._KUBECONFIG_AUTO_BENCH = False
+            self.addCleanup(setattr, cli, "_KUBECONFIG_AUTO_BENCH", orig)
+            code, _, err = _capture(["preview", "-f", path, "--history", hist, "--no-input"])
+        self.assertEqual(code, 0)  # ne plante pas
+        self.assertIn("stack select", err)  # réoriente
 
     def test_hyperconverged_node_annotated_in_voulu(self):
         # Section VOULU : un nœud control+worker s'affiche `<nom>+worker` (ex-status).
@@ -618,11 +669,13 @@ runs:
 
     def test_orphan_vms_listed_to_destroy(self):
         # Des VMs réelles hors stack → preview les liste « à détruire d'abord ».
+        # Notion propre au BANC (VMs Lima) : en prod, les machines sont hors nestor
+        # (ADR 0090) → topo lima pour ce test.
         cli._real_vms = lambda *_a: ["cp9", "cp8"]
         hist = _tmp(self._EMPTY_HIST)
         self.addCleanup(os.unlink, hist)
         code, out, _ = _capture(
-            ["preview", "-f", _EXAMPLE, "--target", "atlas-ceph", "--history", hist]
+            ["preview", "-f", _example_as_lima(self), "--target", "atlas-ceph", "--history", hist]
         )
         self.assertEqual(code, 0)
         self.assertIn("détruire", out)
@@ -654,6 +707,32 @@ runs:
         self.addCleanup(os.unlink, hist)
         _capture(["preview", "-f", _EXAMPLE, "--target", "atlas-ceph", "--history", hist])
         self.assertEqual(called, [])
+
+    def test_prod_preview_never_mutates(self):
+        # ADR 0090/0053 : un preview PROD (kubeconfig déclaré) reste lecture seule —
+        # NI mutation (`launch_phase`), NI rapatriement non sollicité (`_fetch_kubeconfig`)
+        # sous --no-input. Garde-fou anti-régression d'isolation.
+        mutations = []
+        orig_launch = cli._runner.launch_phase
+        orig_fetch = cli._fetch_kubeconfig
+        cli._runner.launch_phase = lambda *a, **k: mutations.append("launch")
+        cli._fetch_kubeconfig = lambda *a, **k: mutations.append("fetch")
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig_launch)
+        self.addCleanup(setattr, cli, "_fetch_kubeconfig", orig_fetch)
+        topo_yaml = (
+            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+            "storage: {backend: ceph}\n"
+            "target_kind: prod\n"
+            "kubeconfig: ~/.kube/dirqual.config\n"
+        )
+        path = _tmp(topo_yaml)
+        self.addCleanup(os.unlink, path)
+        hist = _tmp(self._EMPTY_HIST)
+        self.addCleanup(os.unlink, hist)
+        code, _, _ = _capture(["preview", "-f", path, "--history", hist, "--no-input"])
+        self.assertEqual(code, 0)
+        self.assertEqual(mutations, [])  # AUCUNE écriture en chemin lecture prod
 
     def test_other_topology_run_not_attributed(self):
         # RÉGRESSION (bug « preview faux avec 1cp ») : un run frais d'une AUTRE stack
@@ -1766,6 +1845,54 @@ class Stack(unittest.TestCase):
         self.assertIn("export KUBECONFIG=", out)
         self.assertNotIn(os.devnull, out)  # le banc, pas /dev/null
 
+    def test_prod_select_no_input_warns_but_does_not_write_kubeconfig(self):
+        # ADR 0090 : `stack select` sur une stack PROD sans `kubeconfig:` SIGNALE de le
+        # déclarer mais N'ÉCRIT PAS le fichier sous --no-input (action opérateur, CI sûre).
+        name = "zz-test-prod-kc"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(
+                "catalog: {topology: multi-node-4, profile: dataops}\n"
+                "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+                "storage: {backend: ceph}\ntarget_kind: prod\n"
+            )
+        # Pas de banc ET pas de KUBECONFIG hérité (sinon `_default_kubeconfig_to_bench`
+        # ou un env pollué sauterait la branche « topo sans kubeconfig »). On force les
+        # deux absents pour un test déterministe (indépendant de l'ordre des tests).
+        orig_exists = cli.os.path.exists
+        cli.os.path.exists = lambda p: False if p == cli._BENCH_KUBECONFIG else orig_exists(p)
+        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KUBECONFIG", None)
+            code, _, err = _capture(["stack", "select", name, "--no-input"])
+        self.assertEqual(code, 0)
+        self.assertIn("kubeconfig", err)  # signale de le déclarer
+        with open(target, encoding="utf-8") as f:
+            self.assertNotIn("kubeconfig:", f.read())  # rien écrit en --no-input
+
+    def test_prod_select_writes_kubeconfig_field_and_ignores_bench_env(self):
+        # ADR 0090 : `stack select` PROD interactif ÉCRIT le champ kubeconfig dans la
+        # topo (« nestor corrige la topologie ») et NE BLOQUE PAS (ni sonde ni prompt).
+        # Un KUBECONFIG pointant le BANC (résidu d'un select banc) est IGNORÉ — sinon on
+        # viserait le banc et on n'écrirait pas le champ.
+        name = "zz-test-prod-write-kc"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(
+                "catalog: {topology: multi-node-4, profile: dataops}\n"
+                "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+                "storage: {backend: ceph}\ntarget_kind: prod\n"
+            )
+        with mock.patch.dict(os.environ, {"KUBECONFIG": cli._BENCH_KUBECONFIG}, clear=False):
+            code, out, _ = _capture(["stack", "select", name])  # interactif (pas --no-input)
+        self.assertEqual(code, 0)  # ne bloque pas (ni sonde réseau ni prompt)
+        with open(target, encoding="utf-8") as f:
+            self.assertIn("kubeconfig: ~/.kube/", f.read())  # champ écrit
+        # l'export vise la prod déclarée, PAS le banc résiduel.
+        self.assertNotIn(cli._BENCH_KUBECONFIG, out)
+
     def test_activate_absent_is_business_error_with_catalog(self):
         code, _, err = _capture(["stack", "select", "zz-nexistepas"])
         self.assertEqual(code, 1)
@@ -1774,7 +1901,9 @@ class Stack(unittest.TestCase):
 
     def test_list_marks_active_and_derives(self):
         # Active une entrée connue, puis `stack ls` doit la marquer ★ + son chemin.
-        _capture(["stack", "select", "socle.example"])
+        # `--no-input` : socle.example est prod (ADR 0090) → ne pas prompter/écrire le
+        # kubeconfig de la topo en test (on ne teste ici que l'activation).
+        _capture(["stack", "select", "socle.example", "--no-input"])
         code, out, _ = _capture(["stack", "ls"])
         self.assertEqual(code, 0)
         self.assertIn("socle.example", out)

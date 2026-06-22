@@ -491,6 +491,28 @@ rm -f /tmp/cluster-prod.config
 > - ou, pour une session prod assumée, `eval "$(bench/lima/env.sh export)"` côté
 >   banc et un `export KUBECONFIG=…` côté prod — jamais le contexte par défaut.
 
+#### `nestor` et la lecture de la prod (ADR 0090)
+
+> 🔭 **`nestor` sait LIRE la prod (ADR 0090).** Depuis l'ADR 0090, une topologie
+> prod peut DÉCLARER sa cible : un champ
+> **`kubeconfig: ~/.kube/<stack>.config`** (HORS dépôt, credentials jamais
+> commités — un fichier dédié par stack). Alors `nestor preview` lit l'état RÉEL
+> du **cluster K8s** (nœuds Ready + couches déjà saines via kubectl) au lieu des
+> VMs Lima — il ne dit plus « 10 couches à installer » sur une prod existante.
+> Convention de rapatriement (un fichier par stack) :
+>
+> ```bash
+> # un kubeconfig dédié par stack, hors du dépôt (ADR 0090)
+> scp control1:/etc/kubernetes/admin.conf ~/.kube/dirqual.config
+> kubectl --kubeconfig ~/.kube/dirqual.config get nodes   # vérifier l'accès
+> # puis déclarer `kubeconfig: ~/.kube/dirqual.config` dans la topo (gitignorée)
+> ```
+>
+> Si le `kubeconfig:` déclaré est absent/injoignable, `nestor preview` **propose
+> de le rapatrier** depuis le control-plane (réutilise `discover`). `nestor`
+> reste **lecture seule** sur la prod : il ne la MONTE pas — l'installation prod
+> passe par les playbooks Ansible ci-dessus.
+
 <!-- séparateur : deux blockquotes distincts (MD028) -->
 
 > Cluster prod **déjà installé** sans `clusterName` (contexte homonyme

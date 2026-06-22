@@ -2,11 +2,18 @@
 
 ## État
 
-> **État : Brouillon** (2026-06-22) · **Fonde :
-> [ADR 0090](../decisions/0090-nestor-pilote-la-prod.md)** (Proposed).
+> **État : Actif** (2026-06-22) · **Fonde :
+> [ADR 0090](../decisions/0090-nestor-pilote-la-prod.md)** (Accepted).
 >
-> `Proposed` ⇒ **pas d'implémentation** tant que l'ADR n'est pas `Accepted` (ADR
-> 0057 §plans). Ce plan cadre le travail ; il ne le lance pas.
+> ADR `Accepted` ⇒ implémentation **incrémentale** autorisée (ADR 0057 §plans).
+>
+> **Suivi des étapes** : ✅ Étape 1 (champ `kubeconfig` du modèle). ✅ Étapes
+> 2-3 (résolution kubeconfig prod + état réel K8s dans `preview` — **prouvé sur
+> dirqual** : 3 couches manquantes au lieu de 10). ✅ Étape 4 (couches déduites
+> du réel via `_observed_layers`). ✅ Étape 1bis/5 (module `prod_target` +
+> rapatriement assisté réutilisant `_fetch_kubeconfig`). ✅ Étape 4-bis
+> (garde-fou anti-mutation : `test_prod_preview_never_mutates`). ⏳ Doc
+> RUNBOOK + extension de la confirmation aux futures commandes de mutation.
 
 ## Objectif
 
