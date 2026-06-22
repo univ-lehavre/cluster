@@ -511,43 +511,48 @@ def cmd_stack_new(args: argparse.Namespace) -> int:
 
 
 def _select_prod_kubeconfig(topo: Topology, topo_path: str, stack: str, *, no_input: bool) -> str:
-    """Détermine (et complète si besoin) le kubeconfig d'une stack PROD à l'activation
-    (ADR 0090). Renvoie le chemin KUBECONFIG à poser (jamais `~/.kube/config` implicite).
+    """Détermine le kubeconfig d'une stack PROD à l'activation (ADR 0090). Renvoie le
+    chemin KUBECONFIG à poser (jamais `~/.kube/config` implicite).
 
-    1. résout la cible (`KUBECONFIG` exporté > `topo.kubeconfig` > `~/.kube/<stack>.config`) ;
-    2. si la topo ne DÉCLARE pas `kubeconfig:`, PROPOSE de l'ajouter au fichier
-       (`add_kubeconfig_field`, confirmé — c'est « nestor corrige la topologie ») ;
-    3. si la cible est absente/injoignable, PROPOSE le rapatriement (`_fetch_kubeconfig`).
-    Sous `--no-input` : aucune écriture/prompt (action opérateur) — on signale et on
-    renvoie la cible résolue (qui peut être injoignable : honnête)."""
-    target = os.path.expanduser(
-        _prod_target.resolve_kubeconfig(
-            env_kubeconfig=os.environ.get("KUBECONFIG"), declared=topo.kubeconfig, stack=stack
-        )
-    )
-    # (2) compléter la topo si le champ manque (et qu'on ne suit pas un KUBECONFIG exporté).
-    if not topo.kubeconfig and not os.environ.get("KUBECONFIG"):
-        default = _prod_target.default_kubeconfig_path(stack)
-        if no_input:
-            _warn(
-                f"topologie sans `kubeconfig:` — la déclarer (ex. `{default}`) pour que "
-                "`nestor preview` lise l'état réel du cluster prod (ADR 0090)."
+    `stack select` doit rester RAPIDE et NON BLOQUANT (souvent appelé via
+    `eval "$(nestor stack select …)"`) : on ne SONDE PAS le réseau et on ne PROMPTE
+    PAS ici. Si la topo ne déclare pas `kubeconfig:` (et pas de KUBECONFIG exporté),
+    on l'ÉCRIT directement avec la valeur conventionnelle `~/.kube/<stack>.config`
+    (ADR 0090 : « nestor corrige la topologie » ; écriture d'un fichier LOCAL, pas du
+    cluster — confirmation non requise car valeur déterministe et réversible). Le
+    rapatriement éventuel et la vérif d'accès sont du ressort de `preview` (qui les
+    PROPOSE quand il lit l'état réel), pas de l'activation."""
+    # Un KUBECONFIG pointant le BANC (résidu d'un `nestor env`/select banc) n'est PAS une
+    # intention prod : on l'ignore pour une stack prod (sinon on viserait le banc et on
+    # n'écrirait pas le champ). Seul un KUBECONFIG vers une AUTRE cible compte comme
+    # intention explicite.
+    env_kc = os.environ.get("KUBECONFIG")
+    if env_kc and os.path.abspath(env_kc) == os.path.abspath(_BENCH_KUBECONFIG):
+        env_kc = None
+    if topo.kubeconfig or env_kc:
+        return os.path.expanduser(
+            _prod_target.resolve_kubeconfig(
+                env_kubeconfig=env_kc, declared=topo.kubeconfig, stack=stack
             )
-        elif _confirm(
-            f"Déclarer `kubeconfig: {default}` dans la topologie « {stack} » ?",
-            default=True,
-            no_input=no_input,
-        ):
-            with open(topo_path, encoding="utf-8") as f:
-                edited = _prod_target.add_kubeconfig_field(f.read(), default)
-            with open(topo_path, "w", encoding="utf-8") as f:
-                f.write(edited)
-            print(f"✓ `kubeconfig: {default}` ajouté à la topologie.", file=sys.stderr)
-            target = os.path.expanduser(default)
-    # (3) rapatrier si la cible est absente/injoignable.
-    if not no_input and not _kubeconfig_reaches_api(target):
-        _offer_kubeconfig_repatriation_to(topo, target, no_input=no_input)
-    return target
+        )
+    # Topo sans cible : compléter (déterministe). En --no-input on signale seulement
+    # (rester strict en CI : ne pas modifier de fichier versionné/local sans intention).
+    default = _prod_target.default_kubeconfig_path(stack)
+    if no_input:
+        _warn(
+            f"topologie sans `kubeconfig:` — la déclarer (ex. `{default}`) pour que "
+            "`nestor preview` lise l'état réel du cluster prod (ADR 0090)."
+        )
+        return os.path.expanduser(default)
+    with open(topo_path, encoding="utf-8") as f:
+        edited = _prod_target.add_kubeconfig_field(f.read(), default)
+    with open(topo_path, "w", encoding="utf-8") as f:
+        f.write(edited)
+    _warn(
+        f"`kubeconfig: {default}` ajouté à la topologie « {stack} ». "
+        f"Si le fichier n'existe pas encore, `nestor preview` proposera de le rapatrier."
+    )
+    return os.path.expanduser(default)
 
 
 def cmd_stack_select(args: argparse.Namespace) -> int:

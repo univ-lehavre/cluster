@@ -1871,6 +1871,28 @@ class Stack(unittest.TestCase):
         with open(target, encoding="utf-8") as f:
             self.assertNotIn("kubeconfig:", f.read())  # rien écrit en --no-input
 
+    def test_prod_select_writes_kubeconfig_field_and_ignores_bench_env(self):
+        # ADR 0090 : `stack select` PROD interactif ÉCRIT le champ kubeconfig dans la
+        # topo (« nestor corrige la topologie ») et NE BLOQUE PAS (ni sonde ni prompt).
+        # Un KUBECONFIG pointant le BANC (résidu d'un select banc) est IGNORÉ — sinon on
+        # viserait le banc et on n'écrirait pas le champ.
+        name = "zz-test-prod-write-kc"
+        target = self._catalog(name)
+        self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(
+                "catalog: {topology: multi-node-4, profile: dataops}\n"
+                "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+                "storage: {backend: ceph}\ntarget_kind: prod\n"
+            )
+        with mock.patch.dict(os.environ, {"KUBECONFIG": cli._BENCH_KUBECONFIG}, clear=False):
+            code, out, _ = _capture(["stack", "select", name])  # interactif (pas --no-input)
+        self.assertEqual(code, 0)  # ne bloque pas (ni sonde réseau ni prompt)
+        with open(target, encoding="utf-8") as f:
+            self.assertIn("kubeconfig: ~/.kube/", f.read())  # champ écrit
+        # l'export vise la prod déclarée, PAS le banc résiduel.
+        self.assertNotIn(cli._BENCH_KUBECONFIG, out)
+
     def test_activate_absent_is_business_error_with_catalog(self):
         code, _, err = _capture(["stack", "select", "zz-nexistepas"])
         self.assertEqual(code, 1)
