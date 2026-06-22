@@ -212,6 +212,10 @@ export default defineConfig({
             },
             { label: 'Dagster (orchestration)', link: '/docs/plans/plan-dagster/' },
             { label: 'Marquez (lineage)', link: '/docs/plans/plan-marquez/' },
+            {
+              label: 'nestor pilote la prod (lecture)',
+              link: '/docs/plans/plan-nestor-pilote-prod/',
+            },
             { label: 'Rollback par phase', link: '/docs/plans/plan-rollback-par-phase/' },
             { label: 'Audit des conventions', link: '/docs/plans/plan-audit-conventions/' },
             {
