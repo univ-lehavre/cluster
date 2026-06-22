@@ -132,6 +132,31 @@ en continu**. La page d'accueil du **site** vit désormais dans
 (plus de frontmatter VitePress) — la rangée de badges y reste **ordonnée par
 thématique** (règle 3 inchangée).
 
+## Mise à jour 2026-06-22 — réintégration du badge Best Practices (validé)
+
+Le badge **OpenSSF Best Practices** est **remis** dans la section « Conformité »
+du README (famille « Sécurité & supply-chain »,
+[projet 13301](https://www.bestpractices.dev/projects/13301)).
+
+Ce n'est **pas** un revirement par rapport au 2026-06-19, mais l'effet d'un
+**changement d'état**. Le retrait visait un badge **affiché à vide** : tant que
+le questionnaire n'était pas rempli ni soumis, le badge n'attestait rien (au
+mieux « in progress »), c'était décoratif (règle 1). Désormais le projet est
+**soumis et le questionnaire validé par l'OpenSSF** : le badge n'apparaît «
+passing » **que parce qu'un tiers (la plateforme bestpractices.dev) a accepté
+les réponses**, chacune **adossée à une preuve réelle** du dépôt (cf.
+[answer-sheet](../audit/2026-06-22-best-practices-badge-answer-sheet.md) : ~50
+critères Met sourcés, ~12 N/A justifiés, 0 Unmet). C'est donc un **état
+vérifié** — pas une auto-déclaration à vide — qui rentre dans le cadre de la
+règle 1.
+
+Nuance conservée : un badge auto-rempli **reste plus faible** qu'un score
+recalculé en continu (Scorecard). D'où la hiérarchie inchangée — **Scorecard en
+tête sous le titre** (le plus structurant), Best Practices **rangé dans sa
+famille** plus bas. La discipline d'honnêteté tient : on affiche le badge
+**parce qu'il est validé**, et on le **retirerait** s'il retombait « in progress
+».
+
 ## Alternatives écartées
 
 - **Tout badge sans condition d'honnêteté** (« si un badge existe upstream, on

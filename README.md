@@ -4,17 +4,25 @@
 
 > Un cluster Kubernetes de recherche hyperconvergé — installation, stockage
 > distribué, chaîne DataOps et services transverses, racontés de bout en bout.
+>
+> 🇬🇧 **English summary.** A self-hosted, hyperconverged research Kubernetes
+> cluster: provisioning, distributed storage (Rook-Ceph), a DataOps chain and
+> shared services, documented end to end. The documentation is written in French
+> (the maintaining team's language), but **issues, pull requests and security
+> reports written in English are welcome** — see
+> [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 <!-- Badges — doctrine ADR 0080 (docs/decisions/0080-notations-et-badges-readme.md) :
 n'afficher QUE ce qui mesure un état VRAI (dynamique câblé, ou statique factuel
 stable) ; GROUPER par thématique pour rendre visibles les familles revendiquées.
 Un référentiel noté non encore câblé reste au plan de remédiation du passage
-d'audit, PAS affiché à vide. Un référentiel écarté (DORA, ISO) ou auto-déclaratif
-non vérifié (Best Practices, retiré le 2026-06-19 — cf. ADR 0080 §Mise à jour)
-n'a pas de badge — c'est un choix tracé. Le badge le plus structurant (OpenSSF
-Scorecard, recalculé en continu) est mis en avant SOUS LE TITRE ; les autres
-sont regroupés par famille, chacune présentée dans la section « Conformité &
-badges » plus bas. -->
+d'audit, PAS affiché à vide. Un référentiel écarté (DORA, ISO) n'a pas de badge —
+c'est un choix tracé. Le Best Practices Badge, retiré le 2026-06-19 tant qu'il
+était à vide, est réintégré le 2026-06-22 une fois le questionnaire VALIDÉ par
+l'OpenSSF (état vérifié — cf. ADR 0080 §Mises à jour). Le badge le plus
+structurant (OpenSSF Scorecard, recalculé en continu) est mis en avant SOUS LE
+TITRE ; les autres sont regroupés par famille dans la section « Conformité » plus
+bas. -->
 
 Manifests, playbooks et runbooks pour déployer et opérer un cluster Kubernetes
 de recherche : installation, stockage distribué, applications de calcul et
@@ -68,7 +76,7 @@ publiée automatiquement depuis `main` par
 | [`platform/`](platform/)         | Services transverses (dashboard, registry, metrics, NetworkPolicies) |
 | [`apps/`](apps/)                 | Charges applicatives (RStudio)                                       |
 | [`bench/`](bench/)               | Banc Lima + scénarios reproductibles                                 |
-| [`docs/`](docs/)                 | Glossaire, démarrage, ADR, audit (site VitePress)                    |
+| [`docs/`](docs/)                 | Glossaire, démarrage, ADR, audit (site Astro Starlight)              |
 
 ## Qualité — garde-fous en place
 
@@ -80,9 +88,10 @@ la prod :
 - **Avant le push** : tout le dépôt revalidé (`kubeconform`, `ansible-lint`,
   `shellcheck` complet, prettier complet) + interdiction de push direct sur
   `main`.
-- **En CI GitHub Actions** : 13 checks requis avant merge (formats, lint,
-  `kubeconform`, `ansible-lint`, `trivy`, `jscpd` ≤ 5 % duplication, build
-  VitePress, `lychee`…).
+- **En CI GitHub Actions** : 12 checks requis avant merge (formats, lint,
+  `kubeconform`, `ansible-lint`, `trivy`, `jscpd` ≤ 5 % duplication…) ; la
+  validation des liens de la doc est bloquante au build Astro
+  (`starlight-links-validator`).
 - **Sur les serveurs** : [`bootstrap/state.sh`](bootstrap/state.sh) (7 couches
   de drift detection) +
   [`bootstrap/security/report.sh`](bootstrap/security/report.sh) (visibilité
@@ -115,7 +124,7 @@ consolidée, pour juger en 5 min : [docs/preuves.md](docs/preuves.md).
 > conventions est vérifié chaque semaine (workflow `conventions-freshness`, non
 > bloquant).
 
-## Conformité & badges
+## Conformité
 
 Les badges sous le titre ne sont pas décoratifs : chacun reflète un état **vrai
 et vérifiable** (recalculé en continu, ou fait stable), groupé par famille pour
@@ -149,15 +158,27 @@ généré automatiquement à chaque release.
 ### Qualité & CI
 
 Aucune régression n'atteint `main` sans passer les contrôles : chaque PR doit
-satisfaire **13 checks requis** (formats, lint, `kubeconform`, `ansible-lint`,
-`trivy`, `jscpd`, build de la doc, tests…) avant merge. Le badge reflète l'état
-réel du workflow `ci.yml` sur `main`. Détail des garde-fous : section
+satisfaire **12 checks requis** (formats, lint, `kubeconform`, `ansible-lint`,
+`trivy`, `jscpd`, tests…) avant merge. Le badge reflète l'état réel du workflow
+`ci.yml` sur `main`. Détail des garde-fous : section
 [« Qualité — garde-fous en place »](#qualité--garde-fous-en-place) ci-dessus et
 [SAFEGUARDS.md](SAFEGUARDS.md).
 
 [![CI](https://github.com/univ-lehavre/cluster/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/univ-lehavre/cluster/actions/workflows/ci.yml)
 
-## Trademarks
+### Sécurité & supply-chain
+
+Au-delà du score Scorecard (en tête), le dépôt vise les **bonnes pratiques OSS**
+de l'OpenSSF : le **Best Practices Badge** atteste, après questionnaire **validé
+par l'OpenSSF** (et non auto-déclaré à vide), la couverture des critères de
+santé projet — change control, tests, rapport de vulnérabilités, analyse
+statique ([ADR 0080](docs/decisions/0080-notations-et-badges-readme.md)). Détail
+des réponses :
+[answer-sheet](docs/audit/2026-06-22-best-practices-badge-answer-sheet.md).
+
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13301/badge)](https://www.bestpractices.dev/projects/13301)
+
+### Marques
 
 Tous les noms de produits et marques mentionnés dans ce dépôt sont la propriété
 de leurs détenteurs respectifs.

@@ -1,5 +1,9 @@
 # Contribuer à `cluster`
 
+> 🇬🇧 This guide is in French (the maintaining team's language), but
+> **contributions and issues written in English are welcome** — open a PR or an
+> issue in either language.
+
 Outillage géré par [Lefthook](https://lefthook.dev/) (hooks git),
 [Prettier](https://prettier.io/) (format),
 [yamllint](https://yamllint.readthedocs.io/),

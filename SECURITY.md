@@ -1,5 +1,10 @@
 # Politique de sécurité
 
+> 🇬🇧 This policy is in French, but **vulnerability reports in English are
+> welcome**. Use GitHub Private Vulnerability Reporting
+> (<https://github.com/univ-lehavre/cluster/security/advisories/new>) or e-mail
+> the maintainer (address below) — in either language.
+
 ## Signaler une vulnérabilité
 
 Merci de **ne pas** ouvrir d'issue publique pour une faille de sécurité.
