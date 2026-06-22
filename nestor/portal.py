@@ -200,3 +200,90 @@ def build_view(
             ordered[layer] = view.layers[layer]
     view.layers = ordered
     return view
+
+
+# ── Rendu HTML (PUR) ─────────────────────────────────────────────────────────
+# Le serveur (portal_server) collecte l'état (I/O) puis appelle render_html(view) :
+# une page autonome (sidebar par couche, liens nouvel onglet, commandes secret
+# copiables). Pas d'iframe (ADR 0091 §2). Pur → testable sans cluster.
+
+_VERDICT_BADGE = {
+    MATCH: ("✓", "ok"),
+    MISSING: ("∅", "missing"),
+    DRIFT: ("⚠", "drift"),
+    EXTRA: ("＋", "extra"),
+}
+
+_CSS = """
+body{font:14px/1.5 system-ui,sans-serif;margin:0;color:#1a1a1a;background:#fafafa}
+header{padding:1rem 1.5rem;background:#1a2b4a;color:#fff}
+header h1{margin:0;font-size:1.2rem}
+header p{margin:.3rem 0 0;opacity:.8;font-size:.85rem}
+main{display:flex;flex-wrap:wrap;gap:1rem;padding:1.5rem}
+section{flex:1 1 320px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:1rem}
+section h2{margin:0 0 .6rem;font-size:.95rem;text-transform:uppercase;color:#555}
+section h2{letter-spacing:.04em}
+.entry{border-top:1px solid #f0f0f0;padding:.6rem 0}
+.entry:first-of-type{border-top:0}
+.entry a{font-weight:600;color:#1a5fb4;text-decoration:none}
+.entry a:hover{text-decoration:underline}
+.entry .name{font-weight:600}
+.badge{display:inline-block;font-size:.7rem;padding:.05rem .4rem;border-radius:4px}
+.badge{margin-left:.4rem;vertical-align:middle}
+.badge.ok{background:#e6f4ea;color:#1e7e34}
+.badge.missing{background:#eee;color:#777}
+.badge.drift{background:#fff3cd;color:#9a6700}
+.badge.extra{background:#e7e0fb;color:#5a32a3}
+.note{color:#666;font-size:.82rem;margin:.2rem 0 0}
+.secret{margin:.3rem 0 0}
+.secret code{display:block;background:#1e1e1e;color:#d4d4d4;padding:.4rem .6rem}
+.secret code{border-radius:4px;font-size:.78rem;overflow-x:auto;white-space:pre}
+.secret span{font-size:.78rem;color:#666}
+"""
+
+
+def _esc(text: str) -> str:
+    """Échappe le HTML (pas de dépendance ; entrées = contrat versionné, mais sûr)."""
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _render_entry(e: Entry) -> str:
+    glyph, css = _VERDICT_BADGE.get(e.verdict, ("?", "missing"))
+    badge = f'<span class="badge {css}" title="{e.verdict}">{glyph} {e.verdict}</span>'
+    if e.ui_url:
+        title = f'<a href="{_esc(e.ui_url)}" target="_blank" rel="noopener">{_esc(e.id)}</a>'
+    else:
+        title = f'<span class="name">{_esc(e.id)}</span>'
+    parts = [f'<div class="entry">{title}{badge}']
+    if e.note:
+        parts.append(f'<p class="note">{_esc(e.note)}</p>')
+    if e.secret_cmd:
+        parts.append(
+            f'<div class="secret"><span>credential :</span><code>{_esc(e.secret_cmd)}</code></div>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def render_html(view: View, *, title: str = "Portail — plateforme") -> str:
+    """Rend la page HTML autonome du portail depuis une View. PUR (ADR 0091)."""
+    sections = []
+    for layer, entries in view.layers.items():
+        rows = "".join(_render_entry(e) for e in entries)
+        sections.append(f"<section><h2>{_esc(layer)}</h2>{rows}</section>")
+    body = "".join(sections) or "<p style='padding:1.5rem'>Aucun endpoint au contrat.</p>"
+    return (
+        "<!doctype html><html lang=fr><head><meta charset=utf-8>"
+        '<meta name=viewport content="width=device-width,initial-scale=1">'
+        f"<title>{_esc(title)}</title><style>{_CSS}</style></head><body>"
+        f"<header><h1>{_esc(title)}</h1>"
+        "<p>UI et endpoints de la plateforme — cliquer ouvre dans un nouvel onglet. "
+        "Les commandes affichées récupèrent les credentials (jamais leur valeur ici).</p>"
+        f"</header><main>{body}</main></body></html>"
+    )
