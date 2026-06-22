@@ -109,3 +109,4 @@ Format léger inspiré de Michael Nygard :
 | 0087 | [Property-based testing des fonctions pures de `nestor` (Hypothesis)](0087-property-based-testing-nestor.md)                         | Accepted           |
 | 0088 | [Signer les releases : tarball source + cosign keyless + provenance SLSA](0088-signature-releases-cosign-slsa.md)                    | Accepted           |
 | 0089 | [Migration de la documentation : VitePress → Astro Starlight](0089-migration-doc-vitepress-astro-starlight.md)                       | Proposed           |
+| 0090 | [`nestor` lit l'état réel d'un cluster prod (état = K8s, pas VMs)](0090-nestor-pilote-la-prod.md)                                    | Proposed           |
