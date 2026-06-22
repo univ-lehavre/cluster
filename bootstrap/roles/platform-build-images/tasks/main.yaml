@@ -15,6 +15,49 @@
   become: true
   become_method: ansible.builtin.sudo
   block:
+    # ── nerdctl (client containerd) — REQUIS par toutes les branches ─────────
+    # containerd.io (dépôt Docker, ADR 0005) ne fournit PAS nerdctl. Le banc Lima
+    # l'a dans son image VM, mais un nœud bare-metal (Debian) ne l'a pas → ce rôle
+    # échouait en prod (« nerdctl: Aucun fichier ou dossier »). On l'installe ICI,
+    # avant tout usage, épinglé par checksum (ADR 0006). Variante `-full` : embarque
+    # buildkit/buildctl (requis pour le build arm64). Idempotent : on (re)télécharge
+    # seulement si nerdctl est absent ou à une autre version que la cible.
+    - name: Map node architecture to the nerdctl asset arch
+      ansible.builtin.set_fact:
+        _nerdctl_arch: "{{ nerdctl_arch_map[ansible_facts.architecture] | default('') }}"
+
+    - name: Fail clearly on an unsupported architecture for nerdctl
+      ansible.builtin.fail:
+        msg: >-
+          architecture {{ ansible_facts.architecture }} non gérée pour nerdctl
+          (attendu : {{ nerdctl_arch_map.keys() | list | join(', ') }}).
+      when: not _nerdctl_arch
+
+    - name: Check the installed nerdctl version (if any)
+      ansible.builtin.command: nerdctl --version
+      register: _nerdctl_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Install nerdctl-full at the pinned version
+      when: nerdctl_version not in (_nerdctl_installed.stdout | default(''))
+      block:
+        - name: Download the pinned nerdctl-full archive (verified by checksum)
+          ansible.builtin.get_url:
+            url: >-
+              https://github.com/containerd/nerdctl/releases/download/v{{ nerdctl_version }}/nerdctl-full-{{ nerdctl_version }}-linux-{{ _nerdctl_arch }}.tar.gz
+            dest: '/tmp/nerdctl-full-{{ nerdctl_version }}-{{ _nerdctl_arch }}.tar.gz'
+            checksum: '{{ nerdctl_checksums[_nerdctl_arch] }}'
+            mode: '0644'
+
+        # `-full` s'extrait sous le préfixe (bin/, lib/, libexec/…). /usr/local est
+        # standard et déjà dans le PATH des nœuds.
+        - name: Extract nerdctl-full into /usr/local
+          ansible.builtin.unarchive:
+            src: '/tmp/nerdctl-full-{{ nerdctl_version }}-{{ _nerdctl_arch }}.tar.gz'
+            dest: /usr/local
+            remote_src: true
+
     # `_needs_local_build` : un BUILD nerdctl tourne sur CE nœud si l'arch est arm64
     # (rebuild des officielles amd64-only) OU si une image de la liste a `build_all_arch`
     # (image dérivée à builder sur TOUTE arche, ex. mlflow — ADR 0082). En x86 SANS

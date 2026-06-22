@@ -20,6 +20,20 @@ marquez_version: '0.51.1'
 mlflow_version: 'v3.4.0'
 redcap_version: 'v17.1.3'
 
+# nerdctl (client containerd) — REQUIS par ce rôle (inspect/pull/tag/push + buildkit
+# pour le build arm64). containerd.io (dépôt Docker, ADR 0005) ne le fournit PAS : c'est
+# un binaire upstream séparé. La variante `-full` embarque buildkit/buildctl (build arm64).
+# Épinglé par version + checksum SHA256 par arch (ADR 0006). Bumper : changer la version
+# ET les deux checksums (github.com/containerd/nerdctl/releases → SHA256SUMS).
+nerdctl_version: '2.3.3'
+nerdctl_checksums:
+  amd64: 'sha256:8d39a120d8414e3aff15ac05accf51bbbad6baf54764ae709b09087e4544c1ad'
+  arm64: 'sha256:2322f29f451189dd790b5d7c599b4600c210ff0f2c10244308a8e6a024274066'
+# Map arch Ansible (uname -m) → arch des assets nerdctl.
+nerdctl_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+
 # Source upstream Marquez (clone pour build API Java + UI React, sur le nœud).
 marquez_git_repo: https://github.com/MarquezProject/marquez.git
 marquez_src_dir: /tmp/marquez-src
