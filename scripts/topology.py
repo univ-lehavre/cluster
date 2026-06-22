@@ -1981,6 +1981,35 @@ def _offer_kubeconfig_repatriation(topo: Topology, topo_path: str, *, no_input: 
     _offer_kubeconfig_repatriation_to(topo, os.environ.get("KUBECONFIG", ""), no_input=no_input)
 
 
+def _resolve_prod_kubeconfig_into_env(topo: Topology, topo_path: str, *, no_input: bool) -> None:
+    """Pose le `KUBECONFIG` de la cible PROD dans l'environnement, pour que les sondes de
+    lecture (`_ready_nodes`, `_observed_layers`, `_resource_healthy`…) visent le bon
+    cluster (ADR 0090). Partagé par `preview` ET `next`/`up` : sans ça, ces commandes
+    sont AVEUGLES en prod (kubeconfig non résolu → `_ready_nodes` vide → l'état réel
+    semble vide → on RE-propose des couches déjà installées — DANGEREUX sur prod saine).
+
+    - Si la topo DÉCLARE `kubeconfig:` (et qu'on ne suit pas déjà un KUBECONFIG exporté) :
+      on le pose + propose le rapatriement si absent/injoignable.
+    - Si la topo prod n'a PAS de `kubeconfig:` ni KUBECONFIG exporté : on RÉORIENTE vers
+      `stack select` (qui complète la topo, ADR 0090) plutôt que de mentir sur l'état.
+    No-op pour une stack `lima` (le banc garde sa résolution, ADR 0053)."""
+    if topo.target_kind == "lima":
+        return
+    follows_export = bool(os.environ.get("KUBECONFIG")) and not _KUBECONFIG_AUTO_BENCH
+    if follows_export:
+        return  # un KUBECONFIG explicite est déjà en place : intention de l'opérateur
+    if topo.kubeconfig:
+        os.environ["KUBECONFIG"] = os.path.expanduser(topo.kubeconfig)
+        globals()["_KUBECONFIG_AUTO_BENCH"] = False  # cible prod EXPLICITE désormais
+        _offer_kubeconfig_repatriation(topo, topo_path, no_input=no_input)
+    else:
+        _warn(
+            f"topologie prod « {topo.catalog.get('topology', '—')} » sans `kubeconfig:` "
+            "déclaré → l'état réel ne peut pas être lu. Active la stack pour le déclarer "
+            "et le rapatrier : `nestor stack select <stack>` (ADR 0090)."
+        )
+
+
 def cmd_preview(args: argparse.Namespace) -> int:
     """`preview` : LA vue complète d'une stack — VOULU + RÉEL + PLAN (calque `pulumi preview`).
 
@@ -1997,37 +2026,12 @@ def cmd_preview(args: argparse.Namespace) -> int:
     (informatif) ; chemin incohérent avec le backend → usage (2)."""
     path = _resolve(args.file)
     topo = load_topology(path)
-    # ADR 0090 : en prod, pointer KUBECONFIG vers le kubeconfig DÉCLARÉ de la topo,
-    # SAUF si l'opérateur a déjà exporté son intention (KUBECONFIG non auto-banc).
-    # Un seul point d'injection : toutes les sondes en aval (`_kubectl`,
-    # `_resource_healthy`/`_observed_layers`, `_ready_nodes`) lisent ce KUBECONFIG via
-    # `_kubectl_env()` → l'état réel ET les couches observées visent le bon cluster
-    # prod, sans threader le chemin partout. Le banc (lima) garde sa résolution.
-    if (
-        topo.target_kind != "lima"
-        and topo.kubeconfig
-        and (_KUBECONFIG_AUTO_BENCH or not os.environ.get("KUBECONFIG"))
-    ):
-        os.environ["KUBECONFIG"] = os.path.expanduser(topo.kubeconfig)
-        globals()["_KUBECONFIG_AUTO_BENCH"] = False  # cible prod EXPLICITE désormais
-        # ADR 0090 : si le kubeconfig déclaré est absent/injoignable, PROPOSER de le
-        # rapatrier depuis le control-plane (réutilise _fetch_kubeconfig de discover) —
-        # plutôt que d'afficher « nœuds Ready : — » sans explication.
-        _offer_kubeconfig_repatriation(topo, path, no_input=getattr(args, "no_input", False))
-    elif (
-        topo.target_kind != "lima"
-        and not topo.kubeconfig
-        and (_KUBECONFIG_AUTO_BENCH or not os.environ.get("KUBECONFIG"))
-    ):
-        # Stack PROD sans cible déclarée NI KUBECONFIG exporté : `preview` reste lecture
-        # seule (il n'écrit pas la topo — c'est `stack select` qui complète, ADR 0090).
-        # On RÉORIENTE plutôt que d'afficher « nœuds Ready : — / 10 couches à installer »
-        # (faux et dangereux sur une prod existante).
-        _warn(
-            f"topologie prod « {topo.catalog.get('topology', '—')} » sans `kubeconfig:` "
-            "déclaré → l'état réel ne peut pas être lu. Active la stack pour le déclarer "
-            "et le rapatrier : `nestor stack select <stack>` (ADR 0090)."
-        )
+    # ADR 0090 : en prod, pointer KUBECONFIG vers le kubeconfig DÉCLARÉ de la topo (sauf
+    # KUBECONFIG déjà exporté), pour que TOUTES les sondes en aval (`_ready_nodes`,
+    # `_observed_layers`, `_resource_healthy`…) visent le bon cluster. Helper PARTAGÉ avec
+    # `next` (sans lui, ces commandes seraient aveugles en prod et re-proposeraient des
+    # couches déjà installées). Réoriente vers `stack select` si la topo n'a pas de cible.
+    _resolve_prod_kubeconfig_into_env(topo, path, no_input=getattr(args, "no_input", False))
     # Avertissements d'ALIGNEMENT SHELL — propres au BANC (ADR 0053). Une stack
     # `target_kind: prod` ne lit PAS le banc (gating ADR 0084) : ces messages, pensés
     # pour le banc, seraient TROMPEURS en prod (ils invitent à `nestor env` qui, en prod,
@@ -2487,6 +2491,11 @@ def cmd_next(args: argparse.Namespace) -> int:
     """
     path = _resolve(args.file)
     topo = load_topology(path)
+    # ADR 0090 : MÊME résolution de cible que `preview` — sans elle, `next` est AVEUGLE
+    # en prod (`_ready_nodes`/`_observed_layers` vides → l'état réel semble vide → `next`
+    # re-propose la 1re couche, Kubernetes, sur une prod saine : DANGEREUX). Doit précéder
+    # tout calcul d'`observed_*`. Réoriente vers `stack select` si la topo n'a pas de cible.
+    _resolve_prod_kubeconfig_into_env(topo, path, no_input=getattr(args, "no_input", False))
     runs = load_runs(args.history or _RUNS_HISTORY)
     now = int(dt.datetime.now(tz=dt.UTC).timestamp())
     target = args.target  # None → plan.default_target le déduit
