@@ -220,3 +220,29 @@ runs:
         192.168.104.3:9100: {cpu_core_s: 7400, ram_peak_mib: 4019, ram_mean_mib: 0}
         192.168.104.4:9100: {cpu_core_s: 4011, ram_peak_mib: 3187, ram_mean_mib: 0}
         192.168.104.9:9100: {cpu_core_s: 4140, ram_peak_mib: 3559, ram_mean_mib: 0}
+  - id: 2026-06-20T06-local-path-a5f3f61
+    target: layers
+    date: 2026-06-20T06:35:45Z
+    branche: docs/finaliser-audit-doc
+    commit: a5f3f61
+    profil: local-path
+    topologie: banc
+    arch: arm64
+    hote: 'Mac15,9'
+    total_s: 1359
+    phases:
+      up: 15
+      bootstrap: 296
+      storage-simple: 12
+      metrics-server: 5
+      monitoring: 163
+      gitops: 44
+      dataops: 673
+      gitops-seed: 3
+      mlflow: 148
+    metriques:
+      cpu_core_s: 997
+      ram_peak_mib: 7812
+      ram_mean_mib: 4614
+      par_noeud:
+        192.168.104.3:9100: {cpu_core_s: 7812, ram_peak_mib: 4614, ram_mean_mib: 0}
