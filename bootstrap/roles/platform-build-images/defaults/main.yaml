@@ -51,6 +51,12 @@ emitter_image:
   # Tag `:dev` MUTABLE (toy_assets évolue) → rebuild même si le tag existe déjà,
   # sinon la code-location jouet sert un module périmé (ADR 0086, vécu au banc).
   force_rebuild: true
+  # build_all_arch : image MAISON (FROM dagster + toy_assets.py), SANS officielle à
+  # retaguer. Sur x86 (prod dirqual), le retag d'une officielle n'a pas de sens (il
+  # n'y en a pas) → elle DOIT être BUILDÉE sur toute arche, comme mlflow/redcap. Sans
+  # ça, la code-location jouet (preuve e2e) reste en ImagePullBackOff en prod x86
+  # (image `not found`, constaté 2026-06-22). Identique au banc arm64 (qui buildait déjà).
+  build_all_arch: true
 
 # Images maison de la chaîne. Chaque entrée :
 #   official_image : image amd64 officielle à re-taguer sur x86 (skip build).

@@ -2566,7 +2566,9 @@ def cmd_next(args: argparse.Namespace) -> int:
         # CONTREDIT `preview` : une couche faite mais non consignée (run non consigné /
         # cache socle) ressortirait comme « 1er drift non encore joué » alors que preview
         # la voit ✓ à-jour. Le RÉEL prime (ADR 0052/0056 §7), comme dans `cmd_preview`.
-        sugg = suggest_next(topo, target, done | observed, etat_frais, run_params=run_params)
+        sugg = suggest_next(
+            topo, target, done | observed, etat_frais, run_params=run_params, observed=observed
+        )
         print(sugg.message)
         return 0
 

@@ -245,16 +245,26 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     return seq
 
 
-def diff_phases(expected: list[str], done: set[str], freshness: str) -> list[str]:
+def diff_phases(
+    expected: list[str], done: set[str], freshness: str, observed: set[str] | None = None
+) -> list[str]:
     """Phases du `expected` non encore satisfaites, dans l'ordre.
 
     Si la fraîcheur est `perime`/`jamais` (verdict de history.py — RÉUTILISÉ, pas
     redérivé), toute la séquence est candidate au rejeu (le chemin n'a pas de run
-    frais). Sinon, on ne retient que les phases absentes de `done`.
+    frais) — SAUF les phases que le RÉEL prouve déjà faites (`observed`). Sinon, on ne
+    retient que les phases absentes de `done`.
+
+    `observed` (état RÉEL : nœuds Ready, couches déployées) PRIME TOUJOURS sur la
+    fraîcheur de l'historique (ADR 0052/0056 §7) : un cluster prod sain mais sans run
+    nestor consigné a `freshness="jamais"` ; sans cette soustraction, `next`
+    proposerait de RÉINSTALLER bootstrap/des couches déjà en place — ce que `preview`
+    (qui soustrait l'observé) ne fait pas. Les deux DOIVENT rendre le même verdict.
     """
+    observed = observed or set()
     if freshness in ("perime", "jamais"):
-        return list(expected)
-    return [p for p in expected if p not in done]
+        return [p for p in expected if p not in observed]
+    return [p for p in expected if p not in (done | observed)]
 
 
 def observed_done_phases(
@@ -299,17 +309,21 @@ def suggest_next(
     done: set[str],
     freshness: str,
     run_params: dict | None = None,
+    observed: set[str] | None = None,
 ) -> Suggestion:
     """Suggère la PROCHAINE phase manquante (1er drift, parité state.sh #107-109).
 
     `done` : phases déjà jouées (fournies par la façade depuis l'historique/state).
-    `freshness` : verdict de history.verdict_for_run. `run_params` : le faisceau
-    `-e` dérivé (profile.derive_run_params) à attacher à la phase, pour que
+    `freshness` : verdict de history.verdict_for_run. `observed` : phases que l'ÉTAT
+    RÉEL prouve faites (nœuds Ready, couches déployées) — PRIME sur la fraîcheur
+    (ADR 0052/0056 §7), sinon un cluster sain sans run consigné se ferait re-proposer
+    le rejeu de phases déjà en place (incohérent avec `preview`). `run_params` : le
+    faisceau `-e` dérivé (profile.derive_run_params) à attacher à la phase, pour que
     `--apply` lance le MÊME play avec les MÊMES `-e` que run-phases.sh (ADR 0063 G3).
     """
     target = target or default_target(topo)
     seq = expected_phase_sequence(topo, target)
-    manquantes = diff_phases(seq, done, freshness)
+    manquantes = diff_phases(seq, done, freshness, observed)
     if not manquantes:
         return Suggestion(
             target=target,

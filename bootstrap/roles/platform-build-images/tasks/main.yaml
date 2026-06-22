@@ -139,16 +139,17 @@
         label: '{{ item.dest }}'
       when: ansible_facts.architecture == 'aarch64'
 
-    # Émetteur OpenLineage jetable (harnais e2e, ADR 0022) — contexte copié sur
-    # le nœud UNIQUEMENT si la preuve lineage du banc est demandée (drift L31).
+    # Émetteur OpenLineage jetable (harnais e2e, ADR 0022) — contexte copié sur le nœud
+    # si la preuve lineage est demandée. L'émetteur est `build_all_arch` (image maison
+    # sans officielle à retaguer) → BUILDÉ sur TOUTE arche (x86 prod inclus, pas que le
+    # banc arm64) ; le contexte doit donc être présent partout où on build, sinon
+    # `nerdctl build` échoue (« Dockerfile no such file », constaté prod x86 2026-06-22).
     - name: Copy emitter build context to the builder node
       ansible.builtin.copy:
         src: '{{ platform_repo_dir }}/platform/dagster/image-openlineage/'
         dest: '{{ build_workdir }}/emitter/'
         mode: '0644'
-      when:
-        - ansible_facts.architecture == 'aarch64'
-        - build_emitter_image | bool
+      when: build_emitter_image | bool
 
     # ── Build (arm64) ou re-tag (x86) image par image ────────────────────────
     # L'émetteur est ajouté à la liste seulement si build_emitter_image (banc e2e).

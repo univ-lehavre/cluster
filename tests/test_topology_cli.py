@@ -890,6 +890,30 @@ runs:
         self.assertNotIn("Kubernetes", combined)
         self.assertNotIn("CRI", combined)
 
+    def test_prod_all_layers_observed_says_up_to_date(self):
+        # RÉGRESSION (prod dirqual 2026-06-22) : prod 100 % installée mais SANS run nestor
+        # consigné (freshness="jamais") → `next` doit dire « à jour », PAS « rejeu de la
+        # séquence / bootstrap ». diff_phases doit soustraire l'observé même en "jamais".
+        self._set_real(vms=["dirqual1"], ready=["dirqual1", "dirqual2", "dirqual3", "dirqual4"])
+        orig_obs = cli._observed_layers
+        cli._observed_layers = lambda phases: set(phases)  # TOUTES les couches observées
+        self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
+        topo_yaml = (
+            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+            "storage: {backend: ceph}\ntarget_kind: prod\n"
+            "kubeconfig: ~/.kube/dirqual.config\n"
+        )
+        path = _tmp(topo_yaml)
+        self.addCleanup(os.unlink, path)
+        hist = _tmp(self._EMPTY_HIST)  # AUCUN run consigné → freshness "jamais"
+        self.addCleanup(os.unlink, hist)
+        code, out, _ = _capture(["next", "-f", path, "--history", hist, "--no-input"])
+        self.assertEqual(code, 0)
+        self.assertIn("à jour", out)
+        self.assertNotIn("rejeu", out)  # le bug : « rejeu de la séquence »
+        self.assertNotIn("bootstrap", out)
+
     # Run frais COMPLET (jusqu'à gitops-seed) d'une AUTRE stack (multi-node-3) — ne
     # doit JAMAIS servir de référence à _EXAMPLE (multi-node-4).
     _OTHER_STACK_COMPLETE = f"""\
