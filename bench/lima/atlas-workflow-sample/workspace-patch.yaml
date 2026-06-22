@@ -20,9 +20,15 @@ metadata:
     app.kubernetes.io/managed-by: argocd
     atlas.workflow/sample: 'true'
 data:
+  # host: nom COURT `toy-codeloc` (PAS le FQDN `…svc.cluster.local`). Le résolveur
+  # gRPC/c-ares du webserver suit `resolv.conf` (ndots:5) ; en prod, un search domain
+  # externe (`dix.univ-lehavre.fr`) fait TIMEOUTER la résolution du FQDN complet →
+  # « DagsterUserCodeUnreachableError: gRPC UNAVAILABLE » alors que le pod gRPC est sain
+  # (constaté dirqual 2026-06-22 : ping OK par nom court/IP, KO par FQDN). Le nom court
+  # résout via le 1er search domain (`dagster.svc.cluster.local`). Même parade que gitea-init.
   workspace.yaml: |
     load_from:
       - grpc_server:
-          host: toy-codeloc.dagster.svc.cluster.local
+          host: toy-codeloc
           port: 4000
           location_name: toy
