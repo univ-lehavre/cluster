@@ -57,6 +57,20 @@ de topologie (`cluster_topology/model.py` + schéma de validation) ; le
 tests unitaires (parsing du champ + ordre de résolution, stub env), aucun appel
 réseau.
 
+### Étape 1bis — Confirmation interactive + rapatriement assisté
+
+(a) **Confirmer la cible** : avant une commande prod, lire l'endpoint API + les
+nœuds vus (kubectl, fonction pure stubable) et **demander confirmation** («
+stack `<nom>` → `<endpoint>` `<nœuds>` ? [y/N] ») ; négatif ⇒ arrêt. En
+`--no-input`/CI : **vérification stricte** endpoint attendu vs résolu (pas de
+prompt). (b) **Rapatriement assisté** : si le `kubeconfig:` est
+absent/injoignable, proposer la copie
+`scp <control>:/etc/kubernetes/admin.conf → ~/.kube/<stack>.config`
+(control-plane lu dans `bootstrap/hosts.yaml`) + re-vérif `get nodes`.
+**Preuve** : tests unitaires (rendu de la confirmation, parsing endpoint/nœuds,
+construction de la commande de rapatriement) — tout stubé, aucun appel réseau ni
+mutation cluster.
+
 ### Étape 2 — État réel polymorphe selon `target_kind`
 
 `preview` : en `prod`, ne pas appeler `_real_vms` (omettre la section VMs) ;

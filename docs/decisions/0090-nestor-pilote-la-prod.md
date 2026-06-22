@@ -86,6 +86,24 @@ Principes de mise en œuvre (détaillés dans le plan) :
   fichier. Le banc Lima garde son propre kubeconfig généré
   (`bench/lima/.work/kubeconfig`) — même esprit (un fichier par cible),
   emplacement distinct car généré par le harnais.
+- **Confirmation interactive de la cible avant toute action prod.** En
+  `target_kind: prod`, avant d'exécuter une commande, `nestor` **affiche le
+  cluster réellement visé** par le kubeconfig résolu (endpoint de l'API + nœuds
+  vus, ex. `https://10.67.2.11:6443 — dirqual1..4 Ready`) et **demande
+  confirmation** (« est-ce bien la stack `<nom>` ? [y/N] »). Une réponse
+  négative **interrompt** sans rien faire. C'est le garde-fou qui aurait attrapé
+  le piège vécu lors du diagnostic (un contexte fantôme `gohone` pointant un
+  cluster inexistant restait sélectionné). Mode non interactif (`--no-input`/CI)
+  : la confirmation est remplacée par une **vérification stricte** (l'endpoint
+  résolu doit correspondre à celui attendu pour la stack), échec sinon.
+- **Assistance au rapatriement du kubeconfig.** Si le `kubeconfig:` déclaré est
+  **absent ou injoignable** (cluster non répondant), `nestor` **ne se contente
+  pas d'échouer** : il **propose de le rapatrier** depuis le control-plane —
+  copier `/etc/kubernetes/admin.conf` du nœud `control` (connu de l'inventaire
+  SSH `bootstrap/hosts.yaml`) vers le `~/.kube/<stack>.config` déclaré, puis
+  re-vérifier l'accès (`get nodes`). L'opérateur garde la main (action proposée,
+  confirmée), `nestor` automatise la mécanique. Reste **lecture seule**
+  vis-à-vis du cluster : rapatrier un kubeconfig n'est pas muter la prod.
 - **Lecture d'abord ; les mutations restent hors périmètre de cet ADR.** Cet ADR
   rend `nestor` **honnête en lecture** sur la prod (`preview`/`discover`/santé).
   Faire **muter** la prod par `nestor` (`up`/`next`/`remove` → délégation aux
