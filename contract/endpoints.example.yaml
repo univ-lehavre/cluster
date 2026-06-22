@@ -286,6 +286,21 @@ endpoints:
     source: platform/k8s-dashboard/
     note: Tableau de bord Kubernetes (cluster-admin, ADR 0010).
 
+  - id: portal-ui
+    service: portal
+    namespace: portal
+    fqdn: portal.portal.svc.cluster.local
+    port: 80
+    protocol: http
+    auth: none # vue lecture seule ; aucun secret exposé (ADR 0091 §3)
+    layer: socle
+    ui_hostname: portail.cluster.lan # exemple générique (Gateway hostNetwork, ADR 0071)
+    source: platform/portal/
+    note: >-
+      Portail d'accès aux UI (ADR 0091) : vue unifiée des endpoints de la plateforme
+      (par couche, liens nouvel onglet, commandes pour récupérer les credentials). Se
+      liste lui-même (dogfooding du contrat).
+
 # ── Matrice d'accès réseau (NetworkPolicy default-deny) ──────────────────────
 # ⚠️ CRITIQUE pour un consommateur. Le socle applique un régime DEFAULT-DENY par
 # namespace (platform/network-policies/) : un Service joignable au niveau DNS/port

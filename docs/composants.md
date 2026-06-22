@@ -384,6 +384,17 @@ d'administration du cluster. Il est déployé avec un compte de service en
 assumé comme tel ([ADR 0010](decisions/0010-dashboard-cluster-admin.md)).
 Manifestes : [`platform/k8s-dashboard/`](../platform/k8s-dashboard/).
 
+### Portail d'accès aux UI
+
+Le **portail** est une vue unifiée des UI/endpoints de la plateforme pour
+l'opérateur : qu'est-ce qui est exposé, sous quel hostname, avec quelle
+authentification, et **comment récupérer le credential** (la commande `kubectl`,
+jamais la valeur). Serveur **dynamique** in-cluster qui lit l'API k8s en lecture
+seule et la croise avec le [contrat](../contract/) ; sidebar par couche, liens
+en nouvel onglet (pas d'iframe). RBAC **sans droit sur les Secrets**, pod durci
+([ADR 0091](decisions/0091-portail-acces-ui.md)). Manifestes :
+[`platform/portal/`](../platform/portal/).
+
 ## Applications
 
 Charges applicatives déployées **sur** la plateforme (pas des briques d'infra) —

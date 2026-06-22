@@ -1,0 +1,72 @@
+# NetworkPolicies du PORTAIL (ADR 0091 / ADR 0019 default-deny). Le portail ne parle
+# QU'À l'API server (lecture des Services/EndpointSlices/HTTPRoutes/Applications) ; il
+# n'atteint pas les UI lui-même (c'est le navigateur de l'opérateur qui les ouvre).
+# Surface réseau minimale : DNS + apiserver en egress, HTTP en ingress.
+---
+# Socle : nie tout (ingress + egress) ; les `allow-*` ré-ouvrent le strict nécessaire.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: portal
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# DNS (CoreDNS) — indispensable sous default-deny pour résoudre l'API server.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: portal
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Egress API server (6443) : la SEULE destination du portail (lecture k8s). L'API
+# server est hors-cluster (IP du control-plane) → autorisé par port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-egress
+  namespace: portal
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 6443
+---
+# Ingress HTTP (8080) : le Gateway Cilium hostNetwork (Envoy sur l'IP du nœud) atteint
+# le pod portail. Le Gateway tourne en hostNetwork (pas un pod sélectionnable par ns)
+# → on autorise l'ingress sur le port, sans restreindre la source (ADR 0071).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-http-ingress
+  namespace: portal
+spec:
+  podSelector:
+    matchLabels:
+      app: portal
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080

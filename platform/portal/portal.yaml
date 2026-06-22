@@ -1,0 +1,114 @@
+# Portail d'accès aux UI (ADR 0091) — namespace, RBAC least-privilege, Deployment
+# durci, Service. Le portail lit l'API k8s en LECTURE SEULE et n'a AUCUN droit sur
+# les Secrets (ADR 0091 §3 : il affiche la commande kubectl, jamais la valeur).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portal
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portal
+  namespace: portal
+automountServiceAccountToken: true # config in-cluster (lecture API)
+---
+# RBAC : get/list sur les ressources NON SENSIBLES affichées. AUCUNE règle `secrets`
+# (en RBAC k8s, get/list secrets renvoie .data — il n'existe pas de droit « savoir
+# qu'un Secret existe sans lire sa valeur » ; le seul vrai least-privilege est zéro
+# règle secrets, ADR 0091 §3). ClusterRole car la lecture est cross-namespace ; pas
+# de `watch` (le portail relit à la demande).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: portal-read
+rules:
+  - apiGroups: ['']
+    resources: ['services']
+    verbs: ['get', 'list']
+  - apiGroups: ['discovery.k8s.io']
+    resources: ['endpointslices']
+    verbs: ['get', 'list']
+  - apiGroups: ['gateway.networking.k8s.io']
+    resources: ['gateways', 'httproutes']
+    verbs: ['get', 'list']
+  - apiGroups: ['argoproj.io']
+    resources: ['applications']
+    verbs: ['get', 'list']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: portal-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: portal-read
+subjects:
+  - kind: ServiceAccount
+    name: portal
+    namespace: portal
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal
+  namespace: portal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: portal
+  template:
+    metadata:
+      labels:
+        app: portal
+    spec:
+      serviceAccountName: portal
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: portal
+          image: registry:80/portal:dev
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # le portail n'écrit rien sur disque
+            capabilities:
+              drop:
+                - 'ALL'
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portal
+  namespace: portal
+spec:
+  selector:
+    app: portal
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

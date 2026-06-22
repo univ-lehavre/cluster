@@ -105,8 +105,14 @@ l'étape 1 — logique pure de croisement contrat ↔ état (ADR 0057).
 
 - [x] Étape 1 — logique pure + tests (`nestor/portal.py`,
       `tests/test_portal.py`)
-- [ ] Étape 2 — serveur + image
-- [ ] Étape 3 — Deployment + RBAC + NetworkPolicy (RBAC sans secrets prouvé)
-- [ ] Étape 4 — Gateway hostNetwork (portail joignable au banc)
-- [ ] Étape 5 — intégration contrat + access/doc
-- [ ] Étape 6 — scénario e2e + bascule prod
+- [x] Étape 2 — serveur + image (`nestor/portal_server.py`, `render_html` ;
+      `platform/portal/image/Dockerfile`)
+- [x] Étape 3 — Deployment + RBAC + NetworkPolicy
+      (`platform/portal/portal.yaml`, `platform/network-policies/portal/` ;
+      ClusterRole **sans** secrets)
+- [x] Étape 4 — Gateway hostNetwork (`platform/portal/gateway.yaml`,
+      `portail.cluster.lan`)
+- [x] Étape 5 — intégration contrat (`portal-ui`) + README brique
+- [ ] Étape 6 — preuve e2e au banc + bascule prod (banc à monter : build image,
+      `kubectl apply`, sonder `portail.cluster.lan`, `auth can-i get secrets` →
+      no)

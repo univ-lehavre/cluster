@@ -10,6 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+from nestor import portal_server  # noqa: E402
 from nestor.portal import (  # noqa: E402
     DRIFT,
     EXTRA,
@@ -18,6 +19,7 @@ from nestor.portal import (  # noqa: E402
     MISSING,
     Observed,
     build_view,
+    render_html,
     secret_command,
 )
 
@@ -178,6 +180,144 @@ class Grouping(unittest.TestCase):
         self.assertIsNone(mlflow.secret_cmd)
         argocd = next(e for e in v.all_entries() if e.id == "argocd-ui")
         self.assertIsNotNone(argocd.secret_cmd)
+
+
+class RenderHtml(unittest.TestCase):
+    def test_page_has_layers_links_and_no_iframe(self):
+        obs = {
+            ("argocd", "argocd-server"): Observed(
+                present=True, ready=True, hostname="argocd.cluster.lan"
+            )
+        }
+        html = render_html(build_view(_EP, obs))
+        self.assertIn("<!doctype html>", html)
+        self.assertIn("gitops", html)  # une couche
+        self.assertIn('target="_blank"', html)  # lien nouvel onglet
+        self.assertNotIn("<iframe", html)  # JAMAIS d'iframe (ADR 0091 §2)
+        self.assertIn("argocd.cluster.lan", html)
+
+    def test_page_shows_secret_command_not_value(self):
+        html = render_html(build_view(_EP, {}))
+        # la COMMANDE kubectl est affichée…
+        self.assertIn("kubectl -n argocd get secret", html)
+        # …jamais une valeur de secret (pas de bloc « = <valeur> » décodée).
+        self.assertIn("jsonpath", html)
+
+    def test_html_is_escaped(self):
+        ep = [
+            {"id": "x<script>", "service": "s", "namespace": "n", "layer": "socle", "auth": "none"}
+        ]
+        html = render_html(build_view(ep, {}))
+        self.assertNotIn("<script>", html)
+        self.assertIn("&lt;script&gt;", html)
+
+
+class _FakeApiException(Exception):
+    def __init__(self, status):
+        self.status = status
+
+
+class ObserveCluster(unittest.TestCase):
+    """observe_cluster avec une API k8s STUBÉE (aucun cluster)."""
+
+    def _fake_apis(self, present, ready, hosts):
+        # core_v1 stub : read_namespaced_service lève 404 si absent ; endpointslices
+        # via call_api ; custom stub : list_cluster_custom_object → httproutes.
+        # FakeExc HÉRITE de la vraie ApiException (catchée par les `except ApiException`
+        # des helpers) — on NE remplace PAS la classe globale (sinon pollution de
+        # test_smoke qui construit de vraies ApiException).
+        from kubernetes.client.exceptions import ApiException
+
+        class FakeExc(ApiException):
+            def __init__(self, status=404):
+                self.status = status
+
+        class CoreV1:
+            class api_client:  # noqa: N801
+                @staticmethod
+                def call_api(path, method, **kw):
+                    # endpointslices : renvoie un slice prêt si (ns,svc) ∈ ready
+                    sel = dict(kw.get("query_params") or []).get("labelSelector", "")
+                    svc = sel.split("=")[-1]
+                    ns = path.split("/namespaces/")[1].split("/")[0]
+                    if (ns, svc) in ready:
+                        return {"items": [{"endpoints": [{"conditions": {"ready": True}}]}]}
+                    return {"items": []}
+
+            def read_namespaced_service(self, svc, ns):
+                if (ns, svc) not in present:
+                    raise FakeExc(404)
+                return object()
+
+        class Custom:
+            def list_cluster_custom_object(self, *a, **k):
+                items = []
+                for (ns, svc), host in hosts.items():
+                    items.append(
+                        {
+                            "metadata": {"namespace": ns},
+                            "spec": {
+                                "hostnames": [host],
+                                "rules": [{"backendRefs": [{"name": svc, "namespace": ns}]}],
+                            },
+                        }
+                    )
+                return {"items": items}
+
+        return (CoreV1(), Custom())
+
+    def test_present_ready_and_host(self):
+        eps = [
+            {
+                "id": "argocd-ui",
+                "service": "argocd-server",
+                "namespace": "argocd",
+                "layer": "gitops",
+                "auth": "secret-admin",
+            }
+        ]
+        apis = self._fake_apis(
+            present={("argocd", "argocd-server")},
+            ready={("argocd", "argocd-server")},
+            hosts={("argocd", "argocd-server"): "argocd.cluster.lan"},
+        )
+        obs = portal_server.observe_cluster(eps, apis=apis)
+        o = obs[("argocd", "argocd-server")]
+        self.assertTrue(o.present)
+        self.assertTrue(o.ready)
+        self.assertEqual(o.hostname, "argocd.cluster.lan")
+
+    def test_absent_service(self):
+        eps = [{"id": "x", "service": "ghost", "namespace": "nope", "layer": "socle"}]
+        apis = self._fake_apis(present=set(), ready=set(), hosts={})
+        obs = portal_server.observe_cluster(eps, apis=apis)
+        self.assertFalse(obs[("nope", "ghost")].present)
+
+    def test_build_page_end_to_end_with_stub(self):
+        eps = [
+            {
+                "id": "argocd-ui",
+                "service": "argocd-server",
+                "namespace": "argocd",
+                "layer": "gitops",
+                "auth": "secret-admin",
+                "ui_hostname": "argocd.cluster.lan",
+            }
+        ]
+        apis = self._fake_apis(
+            present={("argocd", "argocd-server")},
+            ready={("argocd", "argocd-server")},
+            hosts={("argocd", "argocd-server"): "argocd.cluster.lan"},
+        )
+        # stub load_endpoints pour ne pas dépendre d'un fichier
+        orig = portal_server.load_endpoints
+        portal_server.load_endpoints = lambda path=None: eps
+        try:
+            html = portal_server.build_page(apis=apis)
+        finally:
+            portal_server.load_endpoints = orig
+        self.assertIn("<!doctype html>", html)
+        self.assertIn("argocd", html)
 
 
 if __name__ == "__main__":
