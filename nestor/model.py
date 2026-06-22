@@ -62,6 +62,12 @@ class Topology:
     hardening: dict[str, Any] = field(default_factory=dict)
     resources: dict[str, Any] | None = None
     target_kind: str = "prod"
+    # Chemin du kubeconfig de la cible (ADR 0090). SOURCE DE VÉRITÉ pour viser un
+    # cluster prod en LECTURE (`preview`/état réel) sans dépendre du contexte
+    # courant du poste (ambigu). Convention : `~/.kube/<stack>.config`, HORS dépôt
+    # (credentials réels, jamais commités). None → résolution par défaut (cf.
+    # résolution kubeconfig prod). Sans objet pour le banc Lima (kubeconfig généré).
+    kubeconfig: str | None = None
     # `layers` (ADR 0069) : ENSEMBLE de couches déclaré au top-level, ordonné par le
     # DAG (resolve_layers). Vide → rétrocompat : dérivé de `catalog.profile` (alias
     # déprécié-doux). Voir la propriété `declared_layers`.
@@ -163,6 +169,7 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
         hardening=data.get("hardening", {}) or {},
         resources=data.get("resources"),
         target_kind=target_kind,
+        kubeconfig=data.get("kubeconfig"),  # ADR 0090 ; None → résolution par défaut
         layers=list(data.get("layers") or []),  # ADR 0069 ; vide → dérivé du profil
     )
     # Cohérence HA : > 1 CP exige un control_plane_lb déclaré (ADR 0047/0055).

@@ -153,6 +153,18 @@ class Validation(unittest.TestCase):
             self.assertEqual(t.network["control_plane_lb"]["mode"], mode)
 
 
+class Kubeconfig(unittest.TestCase):
+    """Champ `kubeconfig` de la topologie (ADR 0090) : cible de lecture déclarée."""
+
+    def test_kubeconfig_parsed_when_declared(self):
+        t = topology_from_dict(_base(kubeconfig="~/.kube/dirqual.config"))
+        self.assertEqual(t.kubeconfig, "~/.kube/dirqual.config")
+
+    def test_kubeconfig_defaults_to_none(self):
+        # Absent → None (la résolution par défaut s'applique ailleurs, ADR 0090).
+        self.assertIsNone(topology_from_dict(_base()).kubeconfig)
+
+
 class Exposition(unittest.TestCase):
     """exposition.mode (ADR 0020/0071 réécrit) : mode UNIQUE `gateway` (en hostNetwork),
     `none` conservé, alias `lb-ipam`/`hostport` → `gateway`, défaut GLOBAL gateway."""

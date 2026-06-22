@@ -2,11 +2,14 @@
 
 ## État
 
-> **État : Brouillon** (2026-06-22) · **Fonde :
-> [ADR 0090](../decisions/0090-nestor-pilote-la-prod.md)** (Proposed).
+> **État : Actif** (2026-06-22) · **Fonde :
+> [ADR 0090](../decisions/0090-nestor-pilote-la-prod.md)** (Accepted).
 >
-> `Proposed` ⇒ **pas d'implémentation** tant que l'ADR n'est pas `Accepted` (ADR
-> 0057 §plans). Ce plan cadre le travail ; il ne le lance pas.
+> ADR `Accepted` ⇒ implémentation **incrémentale** autorisée (ADR 0057 §plans).
+>
+> **Suivi des étapes** : ✅ Étape 1 (champ `kubeconfig` du modèle + parsing +
+> tests). ⏳ Étapes 0/1bis/2-5 à venir (rapatriement, état réel K8s,
+> garde-fous).
 
 ## Objectif
 

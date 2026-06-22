@@ -69,3 +69,11 @@ hardening:
 
 # ─── target_kind : garde-fou d'intention (ADR 0053) — prod | lima
 target_kind: prod
+
+# ─── kubeconfig : cible de LECTURE déclarée (ADR 0090). Le chemin du kubeconfig
+# qui vise CE cluster, pour que `nestor preview`/l'état réel lisent le bon cluster
+# sans dépendre du contexte kubectl courant du poste (ambigu). Convention : un
+# fichier dédié par stack, HORS du dépôt (credentials réels, jamais commités).
+# `nestor` aide à le rapatrier (admin.conf du control-plane) et confirme la cible
+# avant toute action prod. None/absent → résolution par défaut.
+# kubeconfig: ~/.kube/socle.config

@@ -2,11 +2,13 @@
 
 ## Statut
 
-Proposed (2026-06-22) — mise en œuvre suivie par
-[`plan-nestor-pilote-prod.md`](../plans/plan-nestor-pilote-prod.md). Suite
-directe de [ADR 0053](0053-isolation-multi-cible-banc-prod.md) (isolation
-banc/prod) et [ADR 0084](0084-sondes-de-lecture-gatees-par-target-kind.md)
-(sondes gatées par `target_kind`).
+Accepted (2026-06-22) — mise en œuvre **incrémentale** suivie par
+[`plan-nestor-pilote-prod.md`](../plans/plan-nestor-pilote-prod.md) (promu
+`Proposed → Accepted` au démarrage de l'implémentation, étape 1 : champ
+`kubeconfig` du modèle). Suite directe de
+[ADR 0053](0053-isolation-multi-cible-banc-prod.md) (isolation banc/prod) et
+[ADR 0084](0084-sondes-de-lecture-gatees-par-target-kind.md) (sondes gatées par
+`target_kind`).
 
 ## Contexte
 
