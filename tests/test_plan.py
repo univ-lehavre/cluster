@@ -275,6 +275,24 @@ class DiffPhases(unittest.TestCase):
     def test_jamais_replays_whole_sequence(self):
         self.assertEqual(diff_phases(self.SEQ, set(), "jamais"), self.SEQ)
 
+    def test_observed_primes_over_jamais(self):
+        # RÉGRESSION (prod dirqual 2026-06-22) : un cluster sain SANS run consigné a
+        # freshness="jamais" ; l'observé (bootstrap + couches réelles) PRIME → ces phases
+        # ne sont PAS re-proposées au rejeu (cohérence avec preview). C'était le bug :
+        # next proposait de réinstaller bootstrap sur une prod Ready.
+        observed = {"up", "bootstrap", "ceph", "sc"}
+        self.assertEqual(diff_phases(self.SEQ, set(), "jamais", observed), ["datalake"])
+
+    def test_observed_primes_over_perime(self):
+        observed = set(self.SEQ)  # tout observé présent
+        self.assertEqual(diff_phases(self.SEQ, set(), "perime", observed), [])
+
+    def test_observed_combines_with_done_when_fresh(self):
+        # frais : on retire done ∪ observed (l'observé compte aussi, pas que l'historique).
+        self.assertEqual(
+            diff_phases(self.SEQ, {"up", "bootstrap"}, "frais", {"ceph"}), ["sc", "datalake"]
+        )
+
 
 class ObservedDonePhases(unittest.TestCase):
     """Le RÉEL prime : un cluster qui tourne marque up/bootstrap faits (ADR 0052/0056)."""

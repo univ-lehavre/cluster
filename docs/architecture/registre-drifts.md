@@ -7,8 +7,8 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **57 drifts** indexés — statut : 3 caduc, 51 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 25 code, 8 env, 20 harnais, 4 livrable.
+- **58 drifts** indexés — statut : 3 caduc, 52 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 26 code, 8 env, 20 harnais, 4 livrable.
 
 ## Livrable (bug — vaut pour tous les bancs ET la prod) (4)
 
@@ -19,7 +19,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L52` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | Application bloquée ComparisonError « dial tcp …:8081 i/o timeout » : l'application-controller ne joint pas le repo-server (génération de manifeste impossible). → NetworkPolicy `allow-argocd-internal-egress` (podSelector {} → podSelector {} intra-ns, ports 8081/8084/6379/8080/5556/5557) dans allow-egress.yaml. |
 | `L53` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | repo-server : « failed to list refs: Get `http://gitea-http…/atlas/` workflows.git/info/refs : context deadline exceeded » — clone du dépôt Gitea impossible. → NetworkPolicy `allow-reposerver-gitea-egress` ciblant le namespace gitea par namespaceSelector, ports 3000 (cible réelle du pod après DNAT) ET 80 (robustesse). Validé banc : repo-server clone, Application Synced/Healthy, scénario 27 PASS + 9 scénarios pertinents PASS (10/10). |
 
-## Code (défaut du livrable révélé au run) (25)
+## Code (défaut du livrable révélé au run) (26)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -48,6 +48,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L41` | ✅ corrige | topologies — DataOps sans Ceph (#158/#186 suite) | Le déploiement registry (puis CNPG) reste Pending : PVC non lié, pod registry 0/1 « Deployment does not have minimum availability ». → phase_dataops (run-phases.sh) choisit storageClass + backing S3 selon le profil (registry_storage_class / cnpg_storage_class / cnpg_s3_backing / cnpg_s3_endpoint), comme phase_monitoring. Le rôle CNPG est par ailleurs découplé du RGW via platform-s3-bucket (backing rgw\|seaweedfs, ADR 0036). |
 | `L45` | ✅ corrige | migration ansible_facts (échéance ansible-core 2.24) | Au run, `set_fact all_hostnames` échoue : « object of type 'HostVarsVars' has no attribute 'ansible_facts.hostname' » (bootstrap k8s-pre-install). → Passer une LISTE de clés pour la descente : `map('extract', hostvars, ['ansible_facts', 'hostname'])`. Validé e2e (bootstrap vert). |
 | `L56` | 🔄 en-cours (#251) | portail UI — exposition tout-Cilium (#232, scénario 28) | Aucune UI joignable via le Gateway. Le Gateway argocd reste PROGRAMMED=Unknown « Waiting for controller », la GatewayClass cilium reste Accepted=Unknown, et AUCUN Service type=LoadBalancer n'obtient d'IP. Le scénario 28 ne trouve qu'une HTTPRoute et ne peut sonder aucune UI. → (1) cni.sh applique les CRs inline (heredoc), plage LB-IPAM + interface L2 paramétrées par env (LB_IPAM_RANGE_START/STOP, L2_INTERFACE) dérivées du réseau réel par run-phases.sh (ADR 0023) ; (2) poser les CRDs Gateway API AVANT cni.sh (dépendance réelle Gateway-API → Cilium-gateway). Validé À CHAUD (HTTP 200 via Gateway, scénario 28 PASS). Re-preuve from-scratch différée → issue #251 (ADR 0034/0046). |
+| `L57` | ✅ corrige | installation DataOps sur la prod dirqual1-4 (2026-06-22) | Après l'installation DataOps en prod, les pods Dagster (daemon, webserver) restent en ImagePullBackOff : « failed to pull registry:80/dagster-celery-k8s: 1.13.7 : http: server gave HTTP response to HTTPS client ». L'image existe pourtant dans le registry (build/push OK) et un `curl` HTTP vers `http://registry:80/v2/` depuis le nœud répond 200 — containerd parle HTTPS à un registry HTTP. → Deux parades (ADR 0046/0051, pattern etcd-backup) dans dataops.yaml ET mlflow.yaml : (1) `meta: flush_handlers` juste après le rôle registry-node → containerd relit sa config AVANT le build/push d'images (qui pousse en HTTP) ; (2) `force_handlers: true` au play → le restart joue même si une tâche aval échoue (le filet qui manquait le 16/06). Diagnostic à chaud : `systemctl restart containerd` sur dirqual1 → pull OK, Dagster Running (les autres nœuds recyclés par le reboot de l'os-upgrade). Preuve from-scratch prod différée (la prod n'est pas détruite, ADR 0034). |
 
 ## Environnement (artefact d'un banc précis) (8)
 

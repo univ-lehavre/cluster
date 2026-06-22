@@ -6,6 +6,11 @@
   hosts:
     - cloud
     - vm
+  # serial: 1 — un nœud COMPLET à la fois (full-upgrade + reboot conditionnel) avant
+  # de passer au suivant : un seul nœud indisponible à la fois, jamais tout le parc en
+  # même temps. Aligne os-upgrade.yaml sur `secure.yml --tags upgrade` (serial:1) et la
+  # doctrine d'upgrade séquencé (ADR 0015). Le reboot relit aussi la config containerd.
+  serial: 1
   pre_tasks:
     - name: Audit-log — record playbook execution
       ansible.builtin.import_role:

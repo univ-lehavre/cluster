@@ -839,3 +839,34 @@ drifts:
       différée → issue #251 (ADR 0034/0046).
     statut: en-cours
     issue: '#251' # re-preuve L55/L56 par run atlas-ceph from-scratch (ADR 0058 §6)
+
+  - id: L57
+    campagne: 'installation DataOps sur la prod dirqual1-4 (2026-06-22)'
+    portee: code
+    symptome: >-
+      Après l'installation DataOps en prod, les pods Dagster (daemon, webserver)
+      restent en ImagePullBackOff : « failed to pull registry:80/dagster-celery-k8s:
+      1.13.7 : http: server gave HTTP response to HTTPS client ». L'image existe
+      pourtant dans le registry (build/push OK) et un `curl` HTTP vers
+      `http://registry:80/v2/` depuis le nœud répond 200 — containerd parle HTTPS
+      à un registry HTTP.
+    cause: >-
+      containerd tournait avec une config PÉRIMÉE. Le rôle platform-registry
+      (tasks/node.yaml) écrit la config HTTP du registry (certs.d/hosts.toml +
+      use_local_image_pull) et `notify: Restart containerd`, mais le handler n'a
+      JAMAIS flushé : le 2026-06-16, la tâche AVALE du même play
+      (platform-build-images, qui échouait faute de nerdctl — cf. fix nerdctl-full)
+      a fait échouer le play AVANT le flush des handlers (fin de play). Sans
+      force_handlers ni flush_handlers explicite, le notify est perdu si une tâche
+      ultérieure échoue → containerd a tourné 6 jours sur l'ancienne config
+      (constaté : actif depuis le 11/06, config réécrite le 16/06).
+    correctif: >-
+      Deux parades (ADR 0046/0051, pattern etcd-backup) dans dataops.yaml ET
+      mlflow.yaml : (1) `meta: flush_handlers` juste après le rôle registry-node
+      → containerd relit sa config AVANT le build/push d'images (qui pousse en
+      HTTP) ; (2) `force_handlers: true` au play → le restart joue même si une
+      tâche aval échoue (le filet qui manquait le 16/06). Diagnostic à chaud :
+      `systemctl restart containerd` sur dirqual1 → pull OK, Dagster Running
+      (les autres nœuds recyclés par le reboot de l'os-upgrade). Preuve
+      from-scratch prod différée (la prod n'est pas détruite, ADR 0034).
+    statut: corrige

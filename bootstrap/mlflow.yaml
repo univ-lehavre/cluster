@@ -23,6 +23,9 @@
   # build/pousse dans le registry → il DOIT vérifier EXPECTED_TARGET_KIND via audit-log
   # AVANT toute tâche distante (comme dataops.yaml Play 2). gather_facts requis :
   # platform-build-images teste ansible_architecture.
+  # force_handlers : même filet que dataops.yaml (incident 2026-06-16) — garantit le
+  # restart containerd même si platform-build-images échoue en aval (sinon handler perdu).
+  force_handlers: true
   pre_tasks:
     - name: Audit-log — record playbook execution (+ garde target_kind)
       ansible.builtin.import_role:
@@ -35,6 +38,12 @@
       ansible.builtin.import_role:
         name: platform-registry
         tasks_from: node
+      tags: registry-node
+
+    # FLUSH (ADR 0051, pattern etcd-backup) : containerd doit avoir RELU sa config avant
+    # le build/push ci-dessous (push vers registry:80 en HTTP). Cf. dataops.yaml.
+    - name: Recharger containerd si sa config a changé (avant build/push)
+      ansible.builtin.meta: flush_handlers
       tags: registry-node
 
     # Build (les 2 arches, build_all_arch) de l'image maison MLflow → registry:80.

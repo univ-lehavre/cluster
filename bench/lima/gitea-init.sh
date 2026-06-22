@@ -26,8 +26,16 @@ GITEA_ADMIN_EMAIL=${GITEA_ADMIN_EMAIL:-atlas-admin@example-org.lan}
 GITEA_ORG=${GITEA_ORG:-atlas}
 GITEA_REPO=${GITEA_REPO:-workflows}
 ARGOCD_NS=${ARGOCD_NS:-argocd}
-# Service HTTP interne de Gitea (cf. platform/gitea/service.yaml).
+# Service HTTP interne de Gitea (cf. platform/gitea/service.yaml). Sert au repoURL de
+# l'Application Argo CD (lu par le pod argocd-repo-server → nom RÉSOLVABLE depuis argocd).
 GITEA_SVC=${GITEA_SVC:-http://gitea-http.gitea.svc.cluster.local}
+# Endpoint API : l'`api()` ci-dessous tourne via `kubectl exec` DANS le pod gitea, donc
+# on tape Gitea en LOCAL (gitea écoute sur :3000). Évite toute résolution DNS — robuste
+# en prod où un search domain externe (resolv.conf, ndots:5) faisait timeouter le FQDN
+# `*.svc.cluster.local` côté glibc/curl (« Could not resolve host »), alors que CoreDNS
+# répondait (drift constaté sur dirqual, 2026-06-22). Sur le banc comme en prod, le pod
+# gitea s'atteint lui-même sur localhost:3000.
+GITEA_API=${GITEA_API:-http://localhost:3000}
 
 # KUBECTL : tableau hérité de run-phases.sh ; fallback autonome.
 if ! declare -p KUBECTL >/dev/null 2>&1; then
@@ -89,7 +97,7 @@ main() {
     api() {
         local method=$1 path=$2 body=${3:-}
         local args=(-sS -X "${method}" -H "Authorization: token ${token}"
-            -H "Content-Type: application/json" "${GITEA_SVC}/api/v1${path}")
+            -H "Content-Type: application/json" "${GITEA_API}/api/v1${path}")
         [ -n "${body}" ] && args+=(-d "${body}")
         gitea_cli curl "${args[@]}"
     }

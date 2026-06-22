@@ -93,6 +93,13 @@
   # l'intention (EXPECTED_TARGET_KIND), comme tout play qui mute des nœuds (cf. cri.yaml).
   # Son absence a laissé un montage banc s'exécuter sur la PROD (faille du 2026-06-16) :
   # le pre_task échoue AVANT toute tâche distante si l'inventaire ne correspond pas.
+  #
+  # force_handlers : FILET (incident 2026-06-16). Le handler « Restart containerd » de
+  # platform-registry était notifié PUIS perdu car la tâche AVAL (platform-build-images,
+  # qui échouait faute de nerdctl) faisait échouer le play AVANT le flush des handlers →
+  # containerd tournait des jours avec l'ancienne config (ImagePullBackOff « HTTP response
+  # to HTTPS client »). force_handlers garantit le restart même si une tâche aval échoue.
+  force_handlers: true
   pre_tasks:
     - name: Audit-log — record playbook execution (+ garde target_kind)
       ansible.builtin.import_role:
@@ -104,6 +111,14 @@
       ansible.builtin.import_role:
         name: platform-registry
         tasks_from: node
+      tags: registry-node
+
+    # FLUSH (ADR 0051, pattern etcd-backup) : containerd doit avoir RELU sa config
+    # (use_local_image_pull + certs.d) AVANT le build/push d'images ci-dessous, qui
+    # pousse vers registry:80 en HTTP. Sans ce flush, le handler ne jouerait qu'en fin
+    # de play — après le push — et le push échouerait sur l'ancienne config containerd.
+    - name: Recharger containerd si sa config a changé (avant build/push)
+      ansible.builtin.meta: flush_handlers
       tags: registry-node
 
     # Build (arm64) / re-tag (x86) des images maison vers registry:80, APRÈS la
