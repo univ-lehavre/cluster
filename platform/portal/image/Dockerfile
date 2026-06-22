@@ -19,7 +19,9 @@ COPY contract/endpoints.example.yaml /etc/portal/endpoints.yaml
 # `nestor` doit être importable comme paquet : un __init__ minimal (pas tout le paquet,
 # pour garder l'image mince — portal_server n'importe que `from nestor import portal`).
 RUN touch /app/nestor/__init__.py
-ENV PYTHONPATH=/app PORTAL_CONTRACT=/etc/portal/endpoints.yaml PORTAL_PORT=8080
+# PORTAL_LISTEN_PORT (hors du pattern `<SVC>_PORT` que k8s injecte par Service —
+# `PORTAL_PORT` collisionnerait avec la variable auto du Service `portal`).
+ENV PYTHONPATH=/app PORTAL_CONTRACT=/etc/portal/endpoints.yaml PORTAL_LISTEN_PORT=8080
 
 # Durcissement (ADR 0014) : utilisateur non-root dédié (le Deployment ajoute
 # runAsNonRoot/seccomp/FS RO — ici on crée l'UID pour cohérence). Pas de shell requis.

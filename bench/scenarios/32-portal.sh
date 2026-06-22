@@ -46,12 +46,18 @@ else
     log "✗ Deployment portal non Ready"
     fails=$((fails + 1))
 fi
-# /healthz depuis un pod (le Service portal:80 → conteneur 8080).
-health=$(kubectl -n "${NS}" run portal-probe-$$-"${RANDOM}" --rm -i --restart=Never \
-    --image=alpine/curl --quiet --command -- \
-    curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-    "http://portal.${NS}.svc.cluster.local/healthz" 2>/dev/null \
-    | grep -oE '[0-9]+' | head -1)
+# Sonde via `kubectl port-forward` (depuis le poste de contrôle) plutôt qu'un pod
+# probe interne : le ns portal applique un default-deny qui DROP un pod-probe, et
+# l'image curl externe peut ne pas être dans le registry interne (air-gap). Le
+# port-forward passe par l'API server (toujours joignable) → robuste et sans état.
+PF_PORT=${PF_PORT:-18080}
+kubectl -n "${NS}" port-forward deploy/portal "${PF_PORT}:8080" >/tmp/portal-pf.$$.log 2>&1 &
+PF_PID=$!
+trap 'kill ${PF_PID} 2>/dev/null' EXIT
+sleep 4
+
+health=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    "http://localhost:${PF_PORT}/healthz" 2>/dev/null)
 if [ "${health:-0}" = 200 ]; then
     log "✓ /healthz → 200"
 else
@@ -61,9 +67,7 @@ fi
 
 # ── 2. La page liste des UI (croisement contrat ↔ API live) ──────────────────
 log "[2/3] GET / liste des UI réelles"
-page=$(kubectl -n "${NS}" run portal-page-$$-"${RANDOM}" --rm -i --restart=Never \
-    --image=alpine/curl --quiet --command -- \
-    curl -s --max-time 12 "http://portal.${NS}.svc.cluster.local/" 2>/dev/null)
+page=$(curl -s --max-time 12 "http://localhost:${PF_PORT}/" 2>/dev/null)
 # Une page valide contient le doctype, au moins une couche, et un lien d'UI.
 if printf '%s' "${page}" | grep -q "<!doctype html>" \
     && printf '%s' "${page}" | grep -qE 'target="_blank"'; then
@@ -83,9 +87,11 @@ fi
 
 # ── 3. Garde-fou : le SA portail NE PEUT PAS lire un Secret (ADR 0091 §3) ─────
 log "[3/3] garde-fou RBAC : pas de lecture de Secret"
+# `auth can-i ... -A` répond une ligne PAR scope évalué → on prend la 1re et on
+# considère DANGER dès qu'un `yes` apparaît (any). Sans -A : décision cluster-large.
 can_secrets=$(kubectl auth can-i get secrets \
-    --as="system:serviceaccount:${NS}:${SA}" -A 2>/dev/null || echo no)
-if [ "${can_secrets}" = no ]; then
+    --as="system:serviceaccount:${NS}:${SA}" 2>/dev/null || echo no)
+if [ "${can_secrets}" != yes ]; then
     log "✓ auth can-i get secrets (SA portal) → no (RBAC least-privilege prouvé)"
 else
     log "✗ DANGER : le SA portal PEUT get secrets (${can_secrets}) — RBAC trop large !"

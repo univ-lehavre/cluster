@@ -176,4 +176,7 @@ def serve(port: int = 8080) -> None:  # pragma: no cover - boucle réseau
 
 
 if __name__ == "__main__":  # pragma: no cover
-    serve(int(os.environ.get("PORTAL_PORT", "8080")))
+    # NE PAS lire `PORTAL_PORT` : Kubernetes injecte automatiquement une variable
+    # `<SVCNAME>_PORT` par Service (le Service `portal` → PORTAL_PORT=tcp://IP:80),
+    # qui collisionnerait. On lit une variable HORS de ce pattern.
+    serve(int(os.environ.get("PORTAL_LISTEN_PORT", "8080")))
