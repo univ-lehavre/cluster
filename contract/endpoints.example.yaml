@@ -188,6 +188,51 @@ endpoints:
     source: platform/kube-prometheus-stack/gateway.yaml
     note: Tableaux de bord métriques (Prometheus datasource).
 
+  # ── Observabilité INTERROGEABLE (API, pas UI) — un consommateur peut requêter ──
+  - id: prometheus-api
+    service: kube-prometheus-stack-prometheus
+    namespace: monitoring
+    fqdn: kube-prometheus-stack-prometheus.monitoring.svc.cluster.local
+    port: 9090
+    protocol: http
+    auth: none # intra-cluster
+    layer: monitoring
+    source: platform/kube-prometheus-stack/
+    note: API PromQL (/api/v1/query). Datasource de Grafana ; requêtable directement.
+
+  - id: alertmanager-api
+    service: kube-prometheus-stack-alertmanager
+    namespace: monitoring
+    fqdn: kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local
+    port: 9093
+    protocol: http
+    auth: none # intra-cluster
+    layer: monitoring
+    source: platform/kube-prometheus-stack/
+    note: API Alertmanager (/api/v2/alerts). État des alertes actives.
+
+  - id: loki-api
+    service: loki
+    namespace: monitoring
+    fqdn: loki.monitoring.svc.cluster.local
+    port: 3100
+    protocol: http
+    auth: none # intra-cluster
+    layer: monitoring
+    source: platform/loki/
+    note: API LogQL (/loki/api/v1/query_range). Logs agrégés ; datasource Grafana.
+
+  - id: metrics-server
+    service: metrics-server
+    namespace: kube-system
+    fqdn: metrics-server.kube-system.svc.cluster.local
+    port: 443
+    protocol: https
+    auth: none # APIService agrégé (metrics.k8s.io) — `kubectl top`
+    layer: socle
+    source: platform/metrics-server/
+    note: Backe `kubectl top` (metrics.k8s.io). Pas d'UI ; consommé par le HPA / top.
+
   - id: mailpit-ui
     service: mailpit
     namespace: mailpit
@@ -196,9 +241,12 @@ endpoints:
     protocol: http
     auth: none # intra-cluster / réseau privé
     layer: monitoring
+    profil: local-path # BANC only (comme seaweedfs) — SMTP de test, absent en prod
     ui_hostname: mailpit.cluster.lan # exemple générique
     source: platform/mailpit/gateway.yaml
-    note: Boîte mail de test (capture les alertes/notifications du banc).
+    note: >-
+      Boîte mail de test (capture les alertes/notifications du banc). N'existe PAS
+      en prod (ns mailpit absent de dirqual) — outil de banc.
 
   - id: argocd-ui
     service: argocd-server
@@ -237,3 +285,35 @@ endpoints:
     ui_hostname: dashboard.cluster.lan # exemple générique (Gateway à poser, #232)
     source: platform/k8s-dashboard/
     note: Tableau de bord Kubernetes (cluster-admin, ADR 0010).
+
+# ── Matrice d'accès réseau (NetworkPolicy default-deny) ──────────────────────
+# ⚠️ CRITIQUE pour un consommateur. Le socle applique un régime DEFAULT-DENY par
+# namespace (platform/network-policies/) : un Service joignable au niveau DNS/port
+# peut être DROP par la policy si le namespace SOURCE n'est pas sur l'allowlist
+# d'ingress de la cible. Le contrat publie donc, par endpoint restreint, les
+# namespaces consommateurs AUTORISÉS. Source de vérité : platform/network-policies/.
+#
+# RÈGLE pour atlas : tout NOUVEAU namespace consommateur exige une PR cluster qui
+# (a) l'AJOUTE à l'allowlist d'ingress de la cible, ET (b) déclare ses propres
+# egress (le default-deny s'applique AUSSI aux namespaces atlas). Sans ça : DROP
+# silencieux (timeouts/TCP retries, pas une erreur claire).
+network_access:
+  - endpoint: postgres-rw / postgres-ro
+    ingress_from: [dagster, marquez, mlflow, citation-serving]
+    source: platform/network-policies/postgres/allow-postgres-ingress.yaml
+    note: >-
+      citation-ingest / citation-marts / citation-pwa sont BLOQUÉS vers pg-rw/pg-ro
+      tant qu'ils ne sont pas ajoutés à cette allowlist (PR cluster).
+  - endpoint: marquez-api (POST lineage :5000)
+    ingress_from: [dagster]
+    source: platform/network-policies/marquez/allow-openlineage-ingress.yaml
+    note: >-
+      Seul le ns dagster peut POSTer du lineage. Un code atlas émettant depuis son
+      PROPRE namespace serait DROP → ajouter ce ns à l'allowlist (PR cluster).
+  - endpoint: mlflow-tracking (:5000)
+    ingress_from: [] # AUCUNE restriction de source (port-only) — joignable de partout
+    source: platform/network-policies/mlflow/allow-web-ingress.yaml
+    note: Asymétrie assumée — pas d'allowlist source (contrairement à postgres/marquez).
+  - endpoint: registry (:80) / s3 datalake (RGW, rook-ceph)
+    ingress_from: [] # pas de default-deny restrictif côté cible — joignables
+    note: registry HTTP ouvert (air-gap, ADR 0011) ; rook-ceph sans default-deny.
