@@ -55,7 +55,8 @@ def _apis():
     cfg = client.Configuration.get_default_copy()
     cfg.retries = 0
     api = client.ApiClient(cfg)
-    return client.CoreV1Api(api), client.CustomObjectsApi(api)
+    # 3 clients TYPÉS : Core (services), Discovery (endpointslices), Custom (httproutes).
+    return client.CoreV1Api(api), client.DiscoveryV1Api(api), client.CustomObjectsApi(api)
 
 
 def observe_cluster(endpoints: list[dict], apis=None) -> dict[tuple[str, str], portal.Observed]:
@@ -63,9 +64,9 @@ def observe_cluster(endpoints: list[dict], apis=None) -> dict[tuple[str, str], p
 
     LECTURE SEULE : Services (présence), EndpointSlices (readiness), HTTPRoutes
     (hostname exposé). JAMAIS de Secret (le RBAC ne l'autorise pas, ADR 0091 §3).
-    `apis` injectable (tuple (core_v1, custom)) pour les tests sans cluster.
+    `apis` injectable (tuple (core_v1, discovery, custom)) pour les tests sans cluster.
     """
-    core_v1, custom = apis if apis is not None else _apis()
+    core_v1, discovery, custom = apis if apis is not None else _apis()
     observed: dict[tuple[str, str], portal.Observed] = {}
     # Hostnames exposés par les HTTPRoutes (gateway.networking.k8s.io), indexés par
     # service backend. Best-effort : si l'API Gateway n'est pas là, on continue.
@@ -75,7 +76,7 @@ def observe_cluster(endpoints: list[dict], apis=None) -> dict[tuple[str, str], p
         if not ns or not svc:
             continue
         present = _service_exists(core_v1, ns, svc)
-        ready = present and _endpoints_ready(core_v1, ns, svc)
+        ready = present and _endpoints_ready(discovery, ns, svc)
         observed[(ns, svc)] = portal.Observed(
             present=present, ready=ready, hostname=host_by_svc.get((ns, svc))
         )
@@ -88,29 +89,23 @@ def _service_exists(core_v1, ns: str, svc: str) -> bool:
     try:
         core_v1.read_namespaced_service(svc, ns)
         return True
-    except ApiException as exc:
-        if exc.status == 404:
-            return False
-        return False  # 403/autre : on ne peut pas affirmer présent
+    except ApiException:
+        return False  # 404 absent, 403/autre : on ne peut pas affirmer présent
 
 
-def _endpoints_ready(core_v1, ns: str, svc: str) -> bool:
-    """Au moins une adresse prête dans les EndpointSlices du service."""
+def _endpoints_ready(discovery, ns: str, svc: str) -> bool:
+    """Au moins une adresse prête dans les EndpointSlices du service (API typée)."""
     from kubernetes.client.exceptions import ApiException
 
     try:
-        slices = core_v1.api_client.call_api(
-            f"/apis/discovery.k8s.io/v1/namespaces/{ns}/endpointslices",
-            "GET",
-            query_params=[("labelSelector", f"kubernetes.io/service-name={svc}")],
-            response_type="object",
-            _return_http_data_only=True,
+        slices = discovery.list_namespaced_endpoint_slice(
+            ns, label_selector=f"kubernetes.io/service-name={svc}"
         )
     except ApiException:
         return False
-    for sl in (slices or {}).get("items", []):
-        for ep in sl.get("endpoints", []) or []:
-            if (ep.get("conditions") or {}).get("ready"):
+    for sl in slices.items or []:
+        for ep in sl.endpoints or []:
+            if ep.conditions and ep.conditions.ready:
                 return True
     return False
 

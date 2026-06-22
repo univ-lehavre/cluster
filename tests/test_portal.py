@@ -232,22 +232,22 @@ class ObserveCluster(unittest.TestCase):
             def __init__(self, status=404):
                 self.status = status
 
-        class CoreV1:
-            class api_client:  # noqa: N801
-                @staticmethod
-                def call_api(path, method, **kw):
-                    # endpointslices : renvoie un slice prêt si (ns,svc) ∈ ready
-                    sel = dict(kw.get("query_params") or []).get("labelSelector", "")
-                    svc = sel.split("=")[-1]
-                    ns = path.split("/namespaces/")[1].split("/")[0]
-                    if (ns, svc) in ready:
-                        return {"items": [{"endpoints": [{"conditions": {"ready": True}}]}]}
-                    return {"items": []}
+        from types import SimpleNamespace as NS
 
+        class CoreV1:
             def read_namespaced_service(self, svc, ns):
                 if (ns, svc) not in present:
                     raise FakeExc(404)
                 return object()
+
+        class Discovery:
+            # imite DiscoveryV1Api.list_namespaced_endpoint_slice (objets typés).
+            def list_namespaced_endpoint_slice(self, ns, label_selector=""):
+                svc = label_selector.split("=")[-1]
+                if (ns, svc) in ready:
+                    ep = NS(conditions=NS(ready=True))
+                    return NS(items=[NS(endpoints=[ep])])
+                return NS(items=[])
 
         class Custom:
             def list_cluster_custom_object(self, *a, **k):
@@ -264,7 +264,7 @@ class ObserveCluster(unittest.TestCase):
                     )
                 return {"items": items}
 
-        return (CoreV1(), Custom())
+        return (CoreV1(), Discovery(), Custom())
 
     def test_present_ready_and_host(self):
         eps = [
