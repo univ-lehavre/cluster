@@ -10,7 +10,7 @@ sinon, ne se verrait qu'au run. Il lève la duplication assumée de l'ADR 0043 :
 le contrat n'est plus une copie qui se périme en silence, il est vérifié.
 
 Subtilité centrale (le piège du check naïf) : le champ `service` du contrat ne se
-matérialise PAS toujours en `kind: Service` littéral dans `source`. Quatre formes
+matérialise PAS toujours en `kind: Service` littéral dans `source`. Cinq formes
 coexistent, qu'on prouve par l'ANCRAGE du nom dans la source (jamais « le fichier
 existe », qui serait un faux-vert) :
 
@@ -20,12 +20,16 @@ existe », qui serait un faux-vert) :
                   CNPG `Cluster pg` → pg-rw/pg-ro ; Rook `CephObjectStore datalake`
                   → rook-ceph-rgw-datalake. Le Service n'est PAS écrit.
   C. route      — le Service est référencé par `backendRefs[].name` d'une
-                  HTTPRoute (grafana, mailpit, argocd) ; le Service réel vient du
-                  chart d'install, pas de `source`. Renommer sans toucher la Route
-                  casse le routage réel → on veut que ça casse le check aussi.
+                  HTTPRoute ; le Service réel vient du chart d'install, pas de
+                  `source`. Renommer sans toucher la Route casse le routage réel
+                  → on veut que ça casse le check aussi.
   D. helm-only  — `source` est un répertoire (chart figé) SANS aucun manifeste
-                  `kind: Service` (k8s-dashboard) : la vérif d'ancrage n'est pas
-                  possible depuis le code seul → WARNING, jamais bloquant.
+                  `kind: Service` : la vérif d'ancrage n'est pas possible depuis le
+                  code seul → WARNING, jamais bloquant.
+  E. nodeport   — exposition L4 (ADR 0092) : le backend est servi par un chart figé
+                  mais un Service NodePort SÉPARÉ `<service>-nodeport`
+                  (platform/<brique>/nodeport.yaml) ancre l'exposition versionnée
+                  (k8s-dashboard via kong). Renommer le NodePort casse le check.
 
 Strictness (cf. docstring de `main`) : BLOQUANT = vérifiable depuis les
 `.example.yaml` + manifestes versionnés SEULS, et un écart = un bug réel pour
@@ -149,11 +153,12 @@ def resolve_service(
     route_backends: set[str],
     operator_crs: Iterable[tuple[str, str]],
 ) -> str | None:
-    """Prouve l'ANCRAGE d'un `service` dans une source, dans l'ordre A → C → B.
+    """Prouve l'ANCRAGE d'un `service` dans une source, dans l'ordre A → C → B → E.
 
-    Retourne le mode de preuve ("literal" | "route" | "generated") ou None si le
-    service n'est ancré par aucune voie reconnue (→ dérive bloquante côté appelant).
-    Jamais basé sur l'`id`/le nom de fichier : seulement sur ce qui est présent.
+    Retourne le mode de preuve ("literal" | "route" | "generated" | "nodeport") ou
+    None si le service n'est ancré par aucune voie reconnue (→ dérive bloquante côté
+    appelant). Jamais basé sur l'`id`/le nom de fichier : seulement sur ce qui est
+    présent.
     """
     if service in literal_services:
         return "literal"  # A
@@ -162,6 +167,12 @@ def resolve_service(
     for kind, name in operator_crs:
         if service in derive_operator_services(kind, name):
             return "generated"  # B
+    # E (ADR 0092) : le service est exposé en L4 par un Service NodePort SÉPARÉ nommé
+    # par convention `<service>-nodeport` (platform/<brique>/nodeport.yaml). Pour les
+    # UI helm-only (chart figé, pas de Service littéral du backend), ce NodePort EST
+    # la preuve d'ancrage versionnée de l'exposition.
+    if f"{service}-nodeport" in literal_services:
+        return "nodeport"
     return None
 
 
@@ -227,8 +238,12 @@ def check_endpoint(
             )
 
     # ── 2. Cohérence du namespace (uniquement si prouvable depuis le manifeste) ─
-    if mode == "literal":
-        svc_doc = literal_services[service]
+    # mode "nodeport" : on lit le ns du Service `<service>-nodeport` (ADR 0092).
+    ns_doc_key = (
+        service if mode == "literal" else (f"{service}-nodeport" if mode == "nodeport" else None)
+    )
+    if ns_doc_key is not None:
+        svc_doc = literal_services[ns_doc_key]
         svc_ns = (svc_doc.get("metadata") or {}).get("namespace")
         if svc_ns is None:
             # Helm figé (Marquez) : le rendu n'a pas de metadata.namespace.
@@ -236,7 +251,7 @@ def check_endpoint(
                 Finding(
                     WARNING,
                     f"endpoint {ep_id}: namespace '{namespace}' non vérifiable — le "
-                    f"manifeste Service '{service}' de {source} n'a pas de metadata.namespace "
+                    f"manifeste Service '{ns_doc_key}' de {source} n'a pas de metadata.namespace "
                     "(template helm figé).",
                 )
             )
@@ -245,7 +260,7 @@ def check_endpoint(
                 Finding(
                     ERROR,
                     f"endpoint {ep_id}: namespace contrat '{namespace}' ≠ "
-                    f"metadata.namespace '{svc_ns}' du Service '{service}' dans {source}.",
+                    f"metadata.namespace '{svc_ns}' du Service '{ns_doc_key}' dans {source}.",
                 )
             )
 

@@ -799,43 +799,57 @@ else
     fi
 fi
 
-# ─── Couche 7b — Exposition réseau (audit P6 #25 / #06) ────────────────────
-# Tous les Services applicatifs ont été passés en ClusterIP (#25). Un Service
-# de type NodePort ou LoadBalancer expose un port au-delà du cluster → ici,
-# c'est un DRIFT (régression de #25 ou exposition non tracée). Exceptions
-# TRACÉES :
-#   - `kubernetes-dashboard` (le chart Helm peut légitimement varier) ;
-#   - les Service LoadBalancer créés par un Gateway de bordure Cilium (label
-#     `gateway.networking.k8s.io/gateway-name`) : c'est le point d'entrée unique
-#     de l'exposition tout-Cilium (ADR 0020). Le principe #25 reste : services
-#     applicatifs en ClusterIP, exposition SEULEMENT via la bordure Gateway.
-section "Exposition réseau (Services NodePort / LoadBalancer)"
+# ─── Couche 7b — Exposition réseau (audit P6 #25 / ADR 0092) ───────────────
+# L'exposition des UI est en L4 NodePort (ADR 0092 : http://<IP-nœud>:<nodePort>,
+# zéro DNS/LB-IPAM). Les Services NodePort ATTENDUS sont :
+#   - ceux du contrat `exposed: true`, par convention `<service>-nodeport`
+#     (platform/<brique>/nodeport.yaml) ;
+#   - le `portal` (brique maison, exposé en NodePort lui-même) ;
+#   - `kubernetes-dashboard` (chart Helm) — toléré comme avant.
+# Tout AUTRE Service NodePort, et tout Service LoadBalancer (la LB-IPAM est une
+# DÉRIVE depuis ADR 0092 : plus de Gateway/IP virtuelle), reste un DRIFT.
+section "Exposition réseau (Services NodePort / LoadBalancer, ADR 0092)"
 if ! cluster_target_ready; then
     mark skip "non audité (garde-fou de cible / kubectl indisponible)"
 else
-    # Allowlist : `ns/nom` des Service portés par un Gateway (bordure ADR 0020).
-    gw_svcs=$(kubectl_q get svc -A -l gateway.networking.k8s.io/gateway-name \
-        -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' \
-        2>/dev/null || true)
-    exposed=$(kubectl_q get svc -A \
-        -o jsonpath='{range .items[?(@.spec.type=="NodePort")]}{.metadata.namespace}/{.metadata.name} (NodePort){"\n"}{end}{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name} (LoadBalancer){"\n"}{end}' \
-        2>/dev/null | grep -v '^kubernetes-dashboard/' | grep -v '^$' || true)
-    # Retirer les Service de bordure Gateway (exception tracée, ADR 0020).
-    if [ -n "$gw_svcs" ]; then
-        while IFS= read -r gw; do
-            [ -n "$gw" ] || continue
-            exposed=$(printf '%s\n' "$exposed" | grep -v "^${gw} " || true)
-        done <<<"$gw_svcs"
+    # Allowlist dérivée du contrat : `<service>-nodeport` pour chaque endpoint
+    # `exposed: true` (la convention de nom des manifestes platform/*/nodeport.yaml).
+    contract="$(dirname "${BASH_SOURCE[0]}")/../contract/endpoints.example.yaml"
+    allow_nodeports="portal"  # la brique maison portail (Service `portal`)
+    if [ -f "$contract" ] && command -v yq >/dev/null 2>&1; then
+        while IFS= read -r svc; do
+            [ -n "$svc" ] || continue
+            allow_nodeports="${allow_nodeports} ${svc}-nodeport"
+        done < <(yq -r '.endpoints[] | select(.exposed == true) | .service' "$contract" 2>/dev/null || true)
     fi
-    exposed=$(printf '%s' "$exposed" | grep -v '^$' || true)
-    if [ -z "$exposed" ]; then
-        mark ok "aucun Service NodePort/LoadBalancer hors cluster (hors bordure Gateway tracée)"
+    # LoadBalancer = drift inconditionnel (plus de LB-IPAM depuis ADR 0092).
+    lbs=$(kubectl_q get svc -A \
+        -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name} (LoadBalancer){"\n"}{end}' \
+        2>/dev/null | grep -v '^$' || true)
+    # NodePort non attendus (hors allowlist contrat + portal + dashboard).
+    nps=$(kubectl_q get svc -A \
+        -o jsonpath='{range .items[?(@.spec.type=="NodePort")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' \
+        2>/dev/null | grep -v '^kubernetes-dashboard/' | grep -v '^$' || true)
+    bad_nps=""
+    if [ -n "$nps" ]; then
+        while IFS= read -r np; do
+            [ -n "$np" ] || continue
+            name="${np#*/}"  # ns/nom → nom
+            case " $allow_nodeports " in
+                *" $name "*) : ;;  # attendu (contrat ou portail)
+                *) bad_nps="${bad_nps}${np} (NodePort hors contrat)"$'\n' ;;
+            esac
+        done <<<"$nps"
+    fi
+    drift=$(printf '%s%s' "$bad_nps" "$lbs" | grep -v '^$' || true)
+    if [ -z "$drift" ]; then
+        mark ok "exposition L4 conforme (NodePort du contrat + portal ; aucun LoadBalancer)"
     else
         while IFS= read -r svc; do
             [ -n "$svc" ] || continue
-            mark fail "Service exposé hors cluster : $svc" \
-                      "repasser ce Service en ClusterIP (cf. ADR 0003 / audit P6 #25) ou tracer l'exposition"
-        done <<<"$exposed"
+            mark fail "Service exposé non attendu : $svc" \
+                      "NodePort hors contrat → tracer dans contract/endpoints.example.yaml (exposed: true) ; LoadBalancer → DÉRIVE LB-IPAM, repasser en NodePort (ADR 0092)"
+        done <<<"$drift"
     fi
 fi
 
