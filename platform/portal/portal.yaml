@@ -70,6 +70,10 @@ spec:
       containers:
         - name: portal
           image: registry:80/portal:dev
+          # Tag MUTABLE (:dev) : le code/contrat embarqué évolue → Always pour que le
+          # nœud re-tire l'image à chaque (re)démarrage du pod (sinon IfNotPresent garde
+          # l'ancienne couche en cache local et un rollout ne voit jamais la nouvelle).
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080

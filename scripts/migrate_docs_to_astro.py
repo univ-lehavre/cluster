@@ -186,6 +186,20 @@ def first_h1_title(text: str) -> str | None:
     return m.group(1).replace("`", "").strip()
 
 
+def strip_first_h1(text: str) -> str:
+    """Retire le PREMIER titre H1 (`# …`) du corps + la ligne vide qui le suit.
+
+    Starlight rend déjà le `title` du frontmatter comme H1 de la page : conserver le
+    `# H1` du contenu le DUPLIQUE. On ne retire que le premier (les `#` suivants, rares,
+    sont du contenu légitime). Pur ; n'agit que sur la copie générée (cf. main)."""
+    m = re.search(r"^#\s+.+?\s*$", text, re.MULTILINE)
+    if not m:
+        return text
+    before, after = text[: m.start()], text[m.end() :]
+    after = after.lstrip("\n")  # absorbe la/les ligne(s) vide(s) après le H1 retiré
+    return (before.rstrip("\n") + ("\n\n" if before.strip() else "") + after).lstrip("\n")
+
+
 def has_frontmatter(text: str) -> bool:
     return text.lstrip().startswith("---")
 
@@ -231,6 +245,11 @@ def main() -> int:
             title = first_h1_title(new_text) or p.stem
             # échapper les guillemets et : dans le title YAML
             safe = title.replace('"', '\\"')
+            # Starlight REND le `title` du frontmatter comme H1 de la page. Si le corps
+            # garde son propre `# H1` (celui d'où vient le title), le titre est DUPLIQUÉ.
+            # On retire donc CE premier H1 de la COPIE générée — les fichiers SOURCES
+            # gardent leur `# H1` (README lisibles isolément hors du site, par choix).
+            new_text = strip_first_h1(new_text)
             new_text = f'---\ntitle: "{safe}"\n---\n\n{new_text}'
         # Starlight sert `index.md` comme index de dossier (PAS `README.md`).
         # docs/architecture/README.md → .../docs/architecture/index.md → /docs/architecture/

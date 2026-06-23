@@ -148,6 +148,30 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(grafana.verdict, MATCH)
         self.assertEqual(grafana.ui_url, "http://10.0.2.11:31234")
 
+    def test_scheme_https_for_tls_terminating_ui(self):
+        # Une UI qui termine elle-même le TLS (ex. dashboard Ceph mgr 8443) déclare
+        # `scheme: https` au contrat → l'URL générée est https://, pas http://.
+        eps = [
+            {
+                "id": "ceph-dashboard-ui",
+                "service": "rook-ceph-mgr-dashboard",
+                "namespace": "rook-ceph",
+                "layer": "socle",
+                "auth": "secret-admin",
+                "scheme": "https",
+                "exposed": True,
+            }
+        ]
+        obs = {
+            ("rook-ceph", "rook-ceph-mgr-dashboard"): Observed(
+                present=True, ready=True, node_port=30352, node_ip="10.0.2.11"
+            )
+        }
+        v = build_view(eps, obs)
+        ceph = next(e for e in v.all_entries() if e.id == "ceph-dashboard-ui")
+        self.assertEqual(ceph.verdict, MATCH)
+        self.assertEqual(ceph.ui_url, "https://10.0.2.11:30352")
+
     def test_missing_when_absent(self):
         v = build_view(_EP, {})  # rien observé
         argocd = next(e for e in v.all_entries() if e.id == "argocd-ui")
