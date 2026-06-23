@@ -54,8 +54,8 @@ class Catalogue(unittest.TestCase):
         self.assertEqual(in_catalog, on_disk)
 
     def test_entrees_uniques(self):
-        self.assertEqual(len(EPREUVES), 31)
-        self.assertEqual(len({e.num for e in EPREUVES}), 31)
+        self.assertEqual(len(EPREUVES), 32)
+        self.assertEqual(len({e.num for e in EPREUVES}), 32)
 
     def test_champs_dans_le_vocabulaire(self):
         for e in EPREUVES:
@@ -70,9 +70,10 @@ class Filtrage(unittest.TestCase):
         nums_ex = {e.num for e, _ in exclues}
         # En prod, seuls les offensifs (17/18/19/20/21) sont exclus.
         self.assertEqual(nums_ex, {"17", "18", "19", "20", "21"})
-        # 26 jouables : +30 (ha-3cp, jouable au catalogue car multi/local-path ;
-        # se SKIP au runtime si le banc n'a pas 3 CP) +31 (contrat, topo-agnostique).
-        self.assertEqual(len(jouables), 26)
+        # 27 jouables : +30 (ha-3cp, jouable au catalogue car multi/local-path ;
+        # se SKIP au runtime si le banc n'a pas 3 CP) +31 (contrat, topo-agnostique)
+        # +32 (portail, topo-agnostique base ; SKIP si portail non déployé).
+        self.assertEqual(len(jouables), 27)
 
     def test_backend_local_path_exclut_les_ceph(self):
         _, exclues = filter_epreuves(_topo(backend="local-path"))

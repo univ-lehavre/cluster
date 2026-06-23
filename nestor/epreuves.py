@@ -368,6 +368,19 @@ EPREUVES: list[Epreuve] = [
         "base",
         None,
     ),
+    # Portail (ADR 0091) : répond, liste les UI réelles, et NE PEUT PAS lire un Secret
+    # (RBAC least-privilege). SKIP neutre si le portail n'est pas déployé. base/agnostique
+    # (lit le contrat + l'API, indépendant du backend) ; terrain API.
+    Epreuve(
+        "32",
+        "Portail : répond, liste les UI, pas de lecture de Secret",
+        "intég",
+        "socle",
+        TOPO_AGNOSTIQUE,
+        TERRAIN_API,
+        "base",
+        None,
+    ),
 ]
 
 
