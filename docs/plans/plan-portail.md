@@ -8,6 +8,14 @@
 Promu `Brouillon → Actif` (et ADR 0091 `Proposed → Accepted`) au démarrage de
 l'étape 1 — logique pure de croisement contrat ↔ état (ADR 0057).
 
+> **Note (ADR [0092](../decisions/0092-exposition-hostport-l4.md),
+> 2026-06-23).** L'exposition du portail a basculé du Gateway hostNetwork (L7)
+> vers le **L4** (`hostPort`, `http://<IP-nœud>:<port>`) : le manifeste
+> `platform/portal/gateway.yaml` est **retiré**, remplacé par un `hostPort` posé
+> sur le conteneur (modèle mailpit) et l'accès se fait par l'IP du nœud, sans
+> DNS. Les mentions de `gateway.yaml`/Gateway ci-dessous reflètent l'étape telle
+> que menée à l'origine (avant ce renversement).
+
 ## ADR fondateurs
 
 - [0091](../decisions/0091-portail-acces-ui.md) — la décision (portail

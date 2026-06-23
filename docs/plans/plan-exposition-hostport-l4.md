@@ -2,8 +2,9 @@
 
 ## État
 
-> **État : Brouillon** (2026-06-23) · **Fonde :**
-> [ADR 0092](../decisions/0092-exposition-hostport-l4.md) (Accepted).
+> **État : Actif** (2026-06-23) · **Fonde :**
+> [ADR 0092](../decisions/0092-exposition-hostport-l4.md) (Accepted). Étapes 1-4
+> livrées (codées + validées sans cluster) ; 5-6 = preuve banc/prod.
 
 Applique le passage Gateway-L7 → L4 (`http://<IP-nœud>:<port>`, zéro DNS).
 Supersede le mécanisme
@@ -20,9 +21,13 @@ d'[ADR 0071](../decisions/0071-exposition-gateway-hostnetwork.md).
 
 ## Invariants
 
-- **Source = le contrat** : chaque UI exposée porte un `ui_nodeport` (figé,
-  `30000-32767`), unicité validée par `check_contract.py`. Aucun port en double,
-  aucun chevauchement avec les ports k8s réservés (6443/10250/2379…).
+- **NodePort AUTO, port OBSERVÉ (décision user)** : on ne fige PAS le `nodePort`
+  au contrat — k8s l'attribue dans `30000-32767`, et le **portail lit le port
+  réel** (`service.spec.ports[].nodePort`) via l'API à chaque chargement. Les
+  liens sont donc toujours justes même si le port change (recréation du
+  Service). Conséquence : pas de matrice de ports à gérer, pas de collision à
+  valider ; le contrat ne déclare PLUS `ui_hostname` ni `ui_nodeport` (l'accès =
+  `exposed: true`).
 - **kubeProxyReplacement** (déjà posé) sert NodePort + hostPort en eBPF — pas de
   LB-IPAM, pas de Gateway dans le chemin d'exposition.
 - **Vendored non modifiés** : un Service NodePort SÉPARÉ (mêmes labels), jamais
@@ -31,25 +36,28 @@ d'[ADR 0071](../decisions/0071-exposition-gateway-hostnetwork.md).
 
 ## Étapes
 
-### 1. Contrat : `ui_nodeport` + validation d'unicité
+### 1. Contrat : `exposed: true` (NodePort auto, port non figé)
 
-- **ÉDITER** `contract/endpoints.example.yaml` : remplacer `ui_hostname` par
-  `ui_nodeport` (valeur d'exemple `30000-32767`) sur les UI exposées ; matrice
-  de ports réservés en commentaire.
-- **ÉDITER** `scripts/check_contract.py` : valider unicité des `ui_nodeport` +
-  absence de chevauchement avec les ports k8s réservés.
+- **ÉDITER** `contract/endpoints.example.yaml` : remplacer `ui_hostname` par un
+  booléen `exposed: true` sur les UI à exposer en NodePort. Le port n'est PAS
+  déclaré (k8s l'attribue, le portail l'observe).
+- **ÉDITER** `scripts/check_contract.py` : valider que chaque `exposed: true` a
+  un Service NodePort correspondant (étape 3) et inversement.
 - **Preuve SANS cluster** : `check_contract` + tests.
 
-### 2. Portail : Service NodePort + liens `http://<IP-nœud>:<port>`
+### 2. Portail : Service NodePort + liens `http://<IP-nœud>:<nodePort observé>`
 
-- **ÉDITER** `platform/portal/portal.yaml` : Service `type: NodePort` (nodePort
-  figé) OU hostPort sur le conteneur (brique maison). Retirer
+- **ÉDITER** `platform/portal/portal.yaml` : Service `type: NodePort`. Retirer
   `platform/portal/gateway.yaml`.
-- **ÉDITER** `nestor/portal.py` (`_ui_url`/`render_html`) : générer
-  `http://<IP-nœud>:<ui_nodeport>` au lieu de `https://<ui_hostname>`. L'IP du
-  nœud est injectée (observée via l'API, un nœud Ready). Tests adaptés.
-- **Preuve banc** : portail joignable `http://<IP-nœud>:<nodePort>`, liens
-  cliquables.
+- **ÉDITER** `nestor/portal_server.py` (`observe_cluster`) : lire le `nodePort`
+  réel des Services exposés (`service.spec.ports[].node_port`) + l'IP d'un nœud
+  Ready (`list_node`). Plus de lecture des HTTPRoutes/hostnames.
+- **ÉDITER** `nestor/portal.py` : `Observed` gagne `node_port`/`node_ip` ; l'URL
+  devient `http://<node_ip>:<node_port>` (au lieu de `https://<hostname>`). Le
+  verdict MATCH/DRIFT se fonde sur présence + readiness + NodePort observé.
+  Tests adaptés (plus de `ui_hostname`).
+- **Preuve banc** : portail joignable, liens `http://<IP-nœud>:<nodePort>`
+  justes.
 
 ### 3. UI vendored : Services NodePort séparés
 
@@ -88,9 +96,19 @@ d'[ADR 0071](../decisions/0071-exposition-gateway-hostnetwork.md).
 
 ## Suivi
 
-- [ ] Étape 1 — contrat `ui_nodeport` + validation
-- [ ] Étape 2 — portail NodePort + liens IP:port
-- [ ] Étape 3 — UI vendored en NodePort
-- [ ] Étape 4 — drift state.sh allowlist
-- [ ] Étape 5 — bascule Cilium (retrait LB-IPAM/Gateway)
-- [ ] Étape 6 — bascule prod dirqual + preuve e2e
+- [x] Étape 1 — contrat `exposed: true` (9 entrées ; port non figé)
+- [x] Étape 2 — portail observe le NodePort + liens `http://<IP-nœud>:<port>`
+- [x] Étape 3 — UI vendored en NodePort (7 Services séparés + câblage rôles)
+- [x] Étape 4 — drift `state.sh` allowlist contrat + `check_contract` ancrage
+      NodePort
+- [x] Étape 5 — bascule Cilium L4 pur (cni.sh sans Gateway/LB-IPAM + retrait CR
+      résiduels ; 7 gateway.yaml + cilium-expo supprimés ; access.sh/scénarios
+      28-32/docs refondus). **PROUVÉE au banc** (banc.yaml from-scratch,
+      2026-06-23) : cni L4 pur (0 GatewayClass/Gateway/HTTPRoute/pool LB-IPAM,
+      `gatewayAPI` off, `kubeProxyReplacement=true`) ; 3 NodePort auto posés
+      (argocd 31358, gitea 31296, grafana 31088) ; **data path L4 OK** (curl
+      `NodeIP:nodePort` → 200/200/302 en eBPF). dataops/mlflow/portail non
+      montés = limite RAM banc (8 → 12 Go, fix `VM_MEMORY_DEFAULT`), PAS un bug
+      L4.
+- [ ] Étape 6 — PROD dirqual : **Phase 1 NodePort additive seule** (cohabitation
+      LB-IPAM, ne PAS rejouer cni.sh) ; rebuild from-scratch ≈ sept. 2026.

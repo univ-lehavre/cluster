@@ -17,9 +17,9 @@ chaîne DataOps et l'observabilité).
 
 > **Valeurs génériques (ADR
 > [0023](decisions/0023-plateforme-exemple-generique.md)).** Les noms d'hôtes,
-> IP et hostnames cités (`*.cluster.lan`, `10.0.0.0/22`…) sont des **exemples**.
-> Les briques nommées (Ceph, Cilium, Dagster…) sont en revanche les vraies
-> décisions techniques du dépôt — on les garde.
+> IP, ports et adresses cités (`10.0.0.0/22`, `http://<IP-nœud>:<nodePort>`…)
+> sont des **exemples**. Les briques nommées (Ceph, Cilium, Dagster…) sont en
+> revanche les vraies décisions techniques du dépôt — on les garde.
 
 ## Socle Kubernetes et exécution des conteneurs
 
@@ -109,18 +109,26 @@ fonctions — on s'appuie donc entièrement sur Cilium
 
 Les CRDs Gateway API ne sont **pas** embarquées par Cilium : elles sont posées
 en amont (version épinglée,
-[ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)). Détail
-des manifestes : [`platform/cilium-expo/`](../platform/cilium-expo/).
+[ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)).
+Toutefois, **les UI ne passent plus par le Gateway L7** : depuis
+l'[ADR 0092](decisions/0092-exposition-hostport-l4.md) l'accès aux UI se fait en
+**L4** (`NodePort`/`hostPort` sur l'IP du nœud, `http://<IP-nœud>:<port>` — zéro
+DNS, zéro LB-IPAM). Le dossier de manifestes `platform/cilium-expo/` et les
+`gateway.yaml` de brique ont été **retirés** avec cette bascule ; LB-IPAM et la
+Gateway API restent des features Cilium (chemin de prod optionnel).
 
 ### cert-manager (CA interne)
 
 cert-manager fabrique et **renouvelle automatiquement** les certificats TLS (le
-cadenas HTTPS) des UIs exposées par le Gateway. Comme le cluster n'est pas
-joignable depuis Internet, on ne peut pas employer une autorité publique type
-Let's Encrypt (ACME a besoin d'une validation externe) : cert-manager monte une
-**autorité interne** (CA), une chaîne
-`selfsigned-bootstrap → root-ca → internal-ca`, qui signe les certificats du
-cluster ([ADR 0021](decisions/0021-cert-manager-ca-interne.md)).
+cadenas HTTPS) internes du cluster. Depuis
+l'[ADR 0092](decisions/0092-exposition-hostport-l4.md) les UI sont exposées en
+**L4** (HTTP clair sur l'IP du nœud), donc **hors** du chemin cert-manager ;
+celui-ci reste le socle de CA interne (webhooks, gateway-shim de prod
+optionnel). Comme le cluster n'est pas joignable depuis Internet, on ne peut pas
+employer une autorité publique type Let's Encrypt (ACME a besoin d'une
+validation externe) : cert-manager monte une **autorité interne** (CA), une
+chaîne `selfsigned-bootstrap → root-ca → internal-ca`, qui signe les certificats
+du cluster ([ADR 0021](decisions/0021-cert-manager-ca-interne.md)).
 
 L'intégration se fait par **annotation** : on annote un `Gateway`
 (`cert-manager.io/cluster-issuer: internal-ca`), et le pont **gateway-shim**
@@ -322,7 +330,8 @@ fichiers volumineux : modèles sérialisés, graphiques) est du **S3** — RGW C
 en prod, SeaweedFS sur le banc léger
 ([ADR 0036](decisions/0036-backing-s3-unique-rgw.md)). L'API et l'UI partagent
 le port `5000` (`mlflow.mlflow.svc.cluster.local:5000`) ; l'UI est exposée hors
-cluster via le Gateway Cilium en HTTPS interne (`https://mlflow.cluster.lan`),
+cluster en **L4** sur un port du nœud (`http://<IP-nœud>:<nodePort>`, le portail
+observe le port réel ; [ADR 0092](decisions/0092-exposition-hostport-l4.md)),
 **sans authentification** — compromis assumé sur un réseau privé de confiance
 mono-admin ([ADR 0003](decisions/0003-pas-de-chiffrement-ceph-tailscale.md)).
 L'image est **maison** : la base officielle `ghcr.io/mlflow/mlflow:v3.4.0`
@@ -387,7 +396,9 @@ Manifestes : [`platform/k8s-dashboard/`](../platform/k8s-dashboard/).
 ### Portail d'accès aux UI
 
 Le **portail** est une vue unifiée des UI/endpoints de la plateforme pour
-l'opérateur : qu'est-ce qui est exposé, sous quel hostname, avec quelle
+l'opérateur : qu'est-ce qui est exposé, sur quelle adresse
+(`http://<IP-nœud>:<nodePort>`, le portail **observe le port réel** ;
+[ADR 0092](decisions/0092-exposition-hostport-l4.md)), avec quelle
 authentification, et **comment récupérer le credential** (la commande `kubectl`,
 jamais la valeur). Serveur **dynamique** in-cluster qui lit l'API k8s en lecture
 seule et la croise avec le [contrat](../contract/) ; sidebar par couche, liens

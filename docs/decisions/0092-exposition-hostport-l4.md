@@ -75,8 +75,10 @@ d'exposition.**
   Service NodePort est un objet **séparé** qui **ne touche ni le pod ni le
   chart** (CLAUDE.md interdit d'éditer les bundles vendored à la main) : il
   sélectionne les mêmes labels que le Service ClusterIP existant et Cilium-eBPF
-  route `NodeIP:<nodePort>` → endpoints. Le `nodePort` est **figé** (valeur
-  d'exemple dans la plage `30000-32767`) pour une URL stable.
+  route `NodeIP:<nodePort>` → endpoints. Le `nodePort` n'est **PAS figé** : k8s
+  l'attribue automatiquement dans `30000-32767`, et le **portail OBSERVE** le
+  port réel (`service.spec.ports[].nodePort`) via l'API pour construire le lien
+  — pas de matrice de ports à maintenir, pas de collision à valider (cf. §3).
 - **`hostPort` sur le conteneur** reste admis pour les **briques dont on possède
   le manifeste** (portal, mailpit) : modèle mailpit (`hostPort` posé directement
   sur le conteneur, port `> 1023` → **pas de capability `NET_BIND_SERVICE`**).
@@ -107,27 +109,29 @@ anti-L4 était déjà affaibli. La régression de **posture TLS** est réelle et
 UI, ou réintroduction du Gateway) reste possible sans nouvel ADR contraire si la
 topologie d'accès change (DNS/LB-IPAM ouverts au poste opérateur).
 
-### 3. Allocation des ports
+### 3. Allocation des ports : NodePort AUTO, port OBSERVÉ (pas figé)
 
-Le **contrat `contract/endpoints.example.yaml` est la source de vérité unique**
-des ports exposés. Chaque UI exposée porte un champ **`ui_nodeport`** (valeur
-d'exemple dans `30000-32767`), en **remplacement** de `ui_hostname` (qui
-n'identifie plus l'accès). L'unicité est **déclarative au contrat** et validée
-statiquement (modèle `scripts/check_contract.py`, qui croise déjà contrat ↔
-manifestes) : pas de doublon de `nodePort`, et **aucun chevauchement** avec les
-ports déjà pris du nœud — à proscrire absolument :
+Le `nodePort` n'est **PAS déclaré ni figé** : k8s l'attribue automatiquement
+dans `30000-32767` (alloué à la création du Service, garanti unique par
+l'apiserver — pas de matrice à maintenir ni de collision à valider). Le
+**contrat `contract/endpoints.example.yaml`** ne déclare donc qu'un booléen
+**`exposed: true`** (en remplacement de `ui_hostname`) : « cette UI est exposée
+en L4 », sans porter le port. Le **portail OBSERVE le port réel** à chaque
+chargement (`service.spec.ports[].nodePort` + l'IP d'un nœud Ready) → le lien
+`http://<IP-nœud>:<nodePort>` reste juste même si le Service est recréé.
 
-| Port(s)       | Usage réservé                              |
-| ------------- | ------------------------------------------ |
-| 80 / 443      | (n'est plus pris : Gateway retiré, cf. §6) |
-| 1025          | mailpit SMTP (`hostPort`, exemple stable)  |
-| 6443          | API server                                 |
-| 10250         | kubelet API                                |
-| 10257 / 10259 | controller-manager / scheduler             |
-| 2379 / 2380   | etcd                                       |
+Compromis assumé (décision opérateur) : l'URL d'une UI **peut changer** si son
+Service NodePort est recréé (k8s réattribue un port). C'est acceptable car le
+portail est le point d'entrée unique et affiche toujours le port courant — on ne
+mémorise jamais une URL figée. En contrepartie : zéro gestion de plage, zéro
+risque de collision avec un port déjà pris du nœud (l'apiserver exclut la plage
+système). `check_contract.py` valide la **correspondance** `exposed: true` ↔
+Service NodePort `<service>-nodeport` (ancrage versionné), pas un numéro de
+port.
 
-Les `hostPort` de briques maison (portal) prennent un port **`> 1023`**, **hors
-`30000-32767`**, **hors** ports k8s ci-dessus, **documenté au contrat**.
+Les `hostPort` de briques maison (mailpit SMTP, port `1025`) prennent un port
+**`> 1023`** fixé dans leur manifeste (on en possède le YAML), hors
+`30000-32767`.
 
 ### 4. Contrôle de drift (`state.sh`, allowlist)
 
@@ -147,19 +151,19 @@ est **tracée par cet ADR** (modèle de l'exception mailpit d'ADR 0071).
 ### 5. Le portail génère `http://<IP-nœud>:<port>`
 
 Le portail cesse d'observer le hostname via `HTTPRoute` et observe le
-**`nodePort` réel** lu sur le Service (`spec.ports[].nodePort`) ; le RBAC
-`services get/list` déjà accordé suffit, le droit `httproutes` devient mort. Il
-construit `http://<IP>:<nodeport>` à partir de (a) l'**IP du nœud** et (b) du
-**`ui_nodeport`** du contrat. Le verdict de drift devient « `nodePort` réel ≠
-attendu » au lieu de « hostname réel ≠ attendu ». L'**IP du nœud** est obtenue
-**par injection d'une variable d'environnement** (modèle mailpit
-`MAIL_SMARTHOST`), de préférence à l'ajout du RBAC `nodes` — moins de droit,
-plus simple. En multi-nœuds, l'IP affichée est celle d'un **control-plane
-désigné** (un NodePort répondant sur n'importe quel nœud, le portail n'en
-présente qu'une). Les NetworkPolicy d'UI suivent le modèle portal/mailpit :
-`allow-*-ingress` ouvrant le **containerPort** (pas le nodePort) **sans bloc
-`from:`** (la source vient du nœud, pas d'un pod sélectionnable), plus
-`allow-dns-egress` sous default-deny ([ADR 0019](0019-durcissement-reseau.md)).
+**`nodePort` réel** lu sur le Service (`spec.ports[].nodePort`) ; il construit
+`http://<IP>:<nodeport>` à partir de (a) l'**IP d'un nœud Ready** et (b) du
+**`nodePort` observé** (jamais un port déclaré). Le verdict de drift devient «
+déclaré `exposed: true` mais aucun `nodePort` observé » (Service NodePort
+manquant), au lieu de « hostname réel ≠ attendu ». L'**IP du nœud** est lue via
+`list_node` (InternalIP d'un nœud Ready) : le RBAC du portail gagne
+`nodes get/list` et perd `gateways/httproutes/applications` (devenus morts). En
+multi-nœuds, l'IP affichée est celle d'un nœud Ready quelconque (un NodePort
+répond sur tout nœud ; le portail n'en présente qu'une). Les NetworkPolicy d'UI
+suivent le modèle portal/mailpit : `allow-*-ingress` ouvrant le
+**containerPort** (pas le nodePort) **sans bloc `from:`** (la source vient du
+nœud, pas d'un pod sélectionnable), plus `allow-dns-egress` sous default-deny
+([ADR 0019](0019-durcissement-reseau.md)).
 
 ### 6. Sort du Gateway / HTTPRoute / LB-IPAM existant (dirqual)
 
@@ -208,15 +212,19 @@ mono-NIC, pas de plage IP — reste vraie et **mieux servie** par L4.
   acter explicitement ; vérifier au banc que chaque UI répond en HTTP clair
   (argocd OK via `server.insecure`, à confirmer pour grafana/dagster — cookies
   `Secure`/`SameSite`, en-têtes CSP/X-Frame-Options d'ADR 0091).
-- **Un port par UI** : plus de 443 partagé ; registre de ports au contrat,
-  risque de collision à valider (comme les FQDN aujourd'hui).
-- **Surface à amender** : `nestor/model.py` (dé-aliaser `hostport`),
-  `nestor/discover.py` (`detect_exposition`), `bootstrap/state.sh` (allowlist L4
-  - sonde `hostPort`), `contract/endpoints.example.yaml` (`ui_nodeport`,
-    en-tête, retrait `ui_hostname`), `nestor/portal.py` +
-    `nestor/portal_server.py` (générer `http://IP:port`, observer le `nodePort`,
-    IP par env), `platform/portal/{portal.yaml,gateway.yaml,README.md}`, 8×
-    `platform/*/gateway.yaml`, `tests/test_portal.py`.
+- **Un port par UI** : plus de 443 partagé ; le port est **auto-attribué** par
+  k8s (pas de registre au contrat, pas de collision à valider — cf. §3).
+- **Surface amendée** : `contract/endpoints.example.yaml` (`exposed: true`,
+  retrait `ui_hostname`), `nestor/portal.py` + `nestor/portal_server.py`
+  (observer le `nodePort` réel + l'IP nœud via `list_node`, générer
+  `http://IP:port`),
+  `platform/portal/{portal.yaml (Service NodePort + RBAC nodes),README.md}`
+  (retrait `gateway.yaml`), 7× `platform/*/nodeport.yaml` (Services NodePort des
+  UI vendored) + retrait des 7× `platform/*/gateway.yaml` et de
+  `platform/cilium-expo/`, `bootstrap/cni.sh` (L4 pur, retrait des CR
+  résiduels), `bootstrap/state.sh` (allowlist NodePort du contrat),
+  `scripts/check_contract.py` (ancrage `nodeport`), `tests/test_portal.py` +
+  `tests/test_check_contract.py`.
 
 **Risques à PROUVER au banc (jamais présumer —
 [ADR 0046](0046-corriger-le-code-pas-l-etat/) /
@@ -233,6 +241,9 @@ mono-NIC, pas de plage IP — reste vraie et **mieux servie** par L4.
 
 ## Voir aussi
 
+- [Plan de mise en œuvre](../plans/plan-exposition-hostport-l4.md) — les 6
+  étapes (contrat `exposed: true` → portail/UI NodePort → drift → bascule Cilium
+  → prod).
 - [ADR 0071](0071-exposition-gateway-hostnetwork.md) — Exposition Gateway
   hostNetwork (**amendé/renversé** par le présent ADR pour l'exposition des UI).
 - [ADR 0091](0091-portail-acces-ui.md) — Portail d'accès aux UI (prose

@@ -67,8 +67,9 @@ class ResolveLayersLocalPath(unittest.TestCase):
     def test_atlas_alias_is_full_mlops_chain(self):
         # ADR 0083 : `atlas` = alias COMPOSITE de la chaîne MLOps complète. Reproduit
         # l'ancien preset atlas (storage-simple → metrics-server → monitoring → gitops
-        # → dataops → gitops-seed) PLUS mlflow (ADR 0082) en queue. L'ordre vient du
-        # graphe atomique (resolve_layers), pas d'une table figée. FILET anti-drift.
+        # → dataops → gitops-seed) PLUS mlflow (ADR 0082) et portail (ADR 0091) en queue.
+        # L'ordre vient du graphe atomique (resolve_layers), pas d'une table figée.
+        # FILET anti-drift.
         self.assertEqual(
             resolve_layers(["atlas"], "local-path"),
             [
@@ -79,6 +80,7 @@ class ResolveLayersLocalPath(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "portal",
             ],
         )
 
@@ -107,7 +109,7 @@ class ResolveLayersCeph(unittest.TestCase):
     def test_atlas_alias_ceph_full_chain(self):
         # ADR 0083 : `atlas` en ceph = ancien atlas-ceph (ceph+sc+datalake → monitoring
         # → gitops → dataops → gitops-seed) PLUS metrics-server (sur-ensemble assumé,
-        # inoffensif) et mlflow (ADR 0082). Ordre du graphe atomique.
+        # inoffensif), mlflow (ADR 0082) et portail (ADR 0091). Ordre du graphe atomique.
         self.assertEqual(
             resolve_layers(["atlas"], "ceph"),
             [
@@ -120,6 +122,7 @@ class ResolveLayersCeph(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "portal",
             ],
         )
 

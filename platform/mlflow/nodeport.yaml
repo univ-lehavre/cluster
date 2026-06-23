@@ -1,0 +1,33 @@
+# Exposition L4 de l'UI MLflow par NodePort (ADR 0092) — accès direct
+# `http://<IP-nœud>:<nodePort>`, zéro DNS, zéro LB-IPAM, zéro Gateway dans le chemin.
+#
+# Service SÉPARÉ : il ne touche NI le pod NI le bundle MLflow vendored (CLAUDE.md
+# interdit d'éditer les manifestes vendored à la main). Il sélectionne EXACTEMENT
+# les mêmes labels que le Service ClusterIP `mlflow` (mlflow.yaml) et Cilium-eBPF
+# route `NodeIP:<nodePort>` → endpoints du serveur (API + UI, port 5000).
+#
+# Ce fichier NE porte PAS `metadata.namespace` (comme mlflow.yaml/gateway HTTPRoute) :
+# le rôle Ansible `platform-mlflow` l'applique dans le ns `mlflow` (`-n mlflow`).
+#
+# Le `nodePort` n'est PAS figé : Kubernetes l'attribue dans la plage 30000-32767
+# (ADR 0092). Le portail lit le `nodePort` réel sur le Service (spec.ports[].nodePort).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-nodeport
+  labels:
+    app.kubernetes.io/name: mlflow
+    app.kubernetes.io/instance: mlflow
+    app.kubernetes.io/component: tracking-server
+    app.kubernetes.io/part-of: dataops
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: mlflow
+    app.kubernetes.io/instance: mlflow
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
+      protocol: TCP

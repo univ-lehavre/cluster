@@ -79,6 +79,14 @@
         - marquez
         - marquez-web
 
+    # Exposition L4 NodePort de l'UI web (ADR 0092) — Service séparé du bundle
+    # vendored, même selector que le ClusterIP marquez-web. nodePort auto-attribué.
+    - name: Apply Marquez web NodePort service
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ marquez_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/marquez/nodeport.yaml'
+
   # Rescue DIAGNOSTIQUE (ADR 0050, #236) — calqué sur argocd/cnpg. Aucun delete.
   rescue:
     - name: Collect marquez pods state (diagnostic)

@@ -1,0 +1,31 @@
+# Exposition L4 NodePort de l'UI Marquez (web) — ADR 0092.
+# Service SÉPARÉ du bundle vendored (marquez.yaml) pour ne PAS toucher au rendu
+# helm FIGÉ (CLAUDE.md : on n'édite pas les manifestes vendored). Même selector
+# que le Service ClusterIP `marquez-web` : il pointe les mêmes pods web (port 3000).
+#
+# Accès : http://<IP-nœud>:<nodePort>. Le nodePort N'EST PAS figé — Kubernetes
+# l'attribue dans la plage NodePort (ADR 0092). Récupérer le port effectif via :
+#   kubectl -n marquez get svc marquez-web-nodeport -o jsonpath='{.spec.ports[0].nodePort}'
+#
+# Ce fichier ne porte PAS `metadata.namespace` (comme les autres manifestes de
+# platform/marquez) : le rôle Ansible l'applique avec `-n marquez`.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: marquez-web-nodeport
+  labels:
+    app.kubernetes.io/name: marquez
+    app.kubernetes.io/instance: marquez
+    app.kubernetes.io/component: web
+spec:
+  type: NodePort
+  ports:
+    - port: 3000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: marquez
+    app.kubernetes.io/instance: marquez
+    app.kubernetes.io/component: web

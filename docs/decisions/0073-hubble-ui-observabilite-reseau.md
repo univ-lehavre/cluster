@@ -10,6 +10,16 @@ sans UI ») : l'exclusion de l'UI y était délibérée mais conditionnelle («
 d'opt-in et d'exposition encadrée**, sans renier la posture de non-exposition
 de 0019.
 
+> **Note (ADR [0092](0092-exposition-hostport-l4.md), 2026-06-23).** Le
+> mécanisme d'exposition a depuis basculé du Gateway L7 (cilium-expo) vers le
+> **L4** (`NodePort`, `http://<IP-nœud>:<port>`). Quand hubble-ui est activé, il
+> est donc exposé par un **Service `NodePort`** (et non plus un
+> `Gateway`/`HTTPRoute`) ; les références ci-dessous au Gateway cilium-expo et
+> au patron `gateway.yaml` décrivent l'intention d'origine et restent valables
+> sur le plan de la **gouvernance d'opt-in**, mais le datapath d'exposition
+> actuel est L4. La conciliation avec 0019 (opt-in, défaut désactivé) est
+> inchangée.
+
 ## Contexte
 
 L'ADR 0019 a activé Hubble + Relay **sans UI** dans

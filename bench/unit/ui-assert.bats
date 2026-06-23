@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 #
-# Tests de la fonction pure classify_ui_http (atteignabilité UI via Gateway, #232
-# scénario 28). Aucun cluster requis : on source la lib et on vérifie les verdicts.
+# Tests de la fonction pure classify_ui_http (atteignabilité UI en L4 NodePort/
+# hostPort, ADR 0092 ; #232 scénario 28). Aucun cluster requis : on source la lib
+# et on vérifie les verdicts. Le 1ᵉʳ argument est un libellé d'UI opaque (le
+# verdict ne dépend que du code HTTP), conservé tel quel pour stabilité des tests.
 
 setup() {
     # shellcheck source=../../bench/lima/ui-assert.sh

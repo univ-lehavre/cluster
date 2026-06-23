@@ -220,12 +220,13 @@ Détail :
 
 ## Exposer une UI hors cluster
 
-Pour exposer une UI, ajoutez un `HTTPRoute` rattaché au
-[Gateway Cilium](composants.md#exposition-tout-cilium-lb-ipam--annonce-l2--gateway-api),
-avec TLS émis par la CA interne (annotation
-`cert-manager.io/cluster-issuer: internal-ca`) — patron :
-[`platform/dagster/gateway.yaml`](../platform/dagster/gateway.yaml). Le hostname
-`*.cluster.lan` est un **placeholder** ; l'admin réseau pose le vrai.
+Pour exposer une UI, exposez-la en **L4** sur un port du nœud : un Service
+`type: NodePort` (charts/bundles vendored) ou un `hostPort` sur le conteneur
+(briques dont vous possédez le manifeste). L'accès se fait alors en
+`http://<IP-nœud>:<nodePort>` (HTTP clair, zéro DNS, zéro LB-IPAM) ;
+[le portail](composants.md#portail-daccès-aux-ui) **observe le port réel**
+attribué (`service.spec.ports[].nodePort`) pour construire le lien — rien à
+figer côté hostname ([ADR 0092](decisions/0092-exposition-hostport-l4.md)).
 
 ## Observabilité — sans rien câbler
 

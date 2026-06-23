@@ -25,13 +25,18 @@
         state: present
         template: gitea-pvc.yaml.j2
 
-    - name: Apply gitea deployment and service
+    # nodeport.yaml : Service NodePort L4 (ADR 0092), après le deployment pour
+    # que le selector {app: gitea} ait sa cible. Service séparé du ClusterIP
+    # "gitea-http" (service.yaml) — apply idempotent comme ses voisins.
+    - name: Apply gitea deployment and services
       kubernetes.core.k8s:
         state: present
+        namespace: '{{ gitea_namespace }}'
         src: '{{ platform_repo_dir }}/platform/gitea/{{ item }}'
       loop:
         - service.yaml
         - deployment.yaml
+        - nodeport.yaml
 
     # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
     # allow ignoré). Ordre explicite via loop, pas un apply de dossier.

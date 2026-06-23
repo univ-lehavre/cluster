@@ -91,6 +91,15 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
     "gitops-seed": PhaseSpec(
         None, "init Gitea (données, ADR 0044 — script)", "init GitOps (seed Gitea)"
     ),
+    # Portail (ADR 0091/0092) : layer AUTONOME monté via le chemin générique `layers`.
+    # Le portail observe les Services NodePort des autres couches (lecture seule) — il
+    # n'a pas de dépendance dure (marche dès le socle, SKIP par endpoint absent), juste
+    # son image registry:80/portal:dev (registry + build-images, graphe atomique).
+    "portal": PhaseSpec(
+        "bootstrap/portal.yaml",
+        "portail d'accès aux UI (NodePort L4, lecture seule)",
+        "portail d'accès aux UI",
+    ),
     # hardening lance bootstrap/security/secure.yml AVEC --tags audit,detection et
     # un préflight d'env (phase_hardening, run-phases.sh) que `--apply` ne pose pas
     # — non lançable comme play unitaire ici, déléguée au chemin nommé run-phases.sh.

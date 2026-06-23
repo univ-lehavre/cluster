@@ -150,6 +150,23 @@ class ResolveService(unittest.TestCase):
             resolve_service("rook-ceph-rgw-datalake", literal, backends, crs), "generated"
         )
 
+    def test_nodeport_anchor_match(self):
+        # ADR 0092 : un Service `<service>-nodeport` séparé ancre l'exposition L4
+        # d'une UI helm-only (le backend lui-même n'est pas un Service littéral).
+        literal, backends, crs = index_source_docs(
+            [service_doc("kubernetes-dashboard-nodeport", "kubernetes-dashboard")]
+        )
+        self.assertEqual(
+            resolve_service("kubernetes-dashboard", literal, backends, crs), "nodeport"
+        )
+
+    def test_nodeport_renamed_is_unresolved(self):
+        # NodePort renommé (hors convention `<service>-nodeport`) → plus d'ancrage.
+        literal, backends, crs = index_source_docs(
+            [service_doc("dashboard-np", "kubernetes-dashboard")]
+        )
+        self.assertIsNone(resolve_service("kubernetes-dashboard", literal, backends, crs))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # check_endpoint : ancrage, namespace, fqdn, cas helm-only

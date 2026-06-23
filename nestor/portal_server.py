@@ -2,8 +2,9 @@
 
 Mince couche d'I/O autour de la logique pure `nestor.portal` :
 1. CHARGE le contrat (`endpoints.example.yaml`, embarqué dans l'image) ;
-2. OBSERVE l'API k8s (Services + EndpointSlices + HTTPRoutes) — lecture seule, RBAC
-   SANS secrets (ADR 0091 §3) ;
+2. OBSERVE l'API k8s (Services + EndpointSlices + Nodes) — lecture seule, RBAC SANS
+   secrets (ADR 0091 §3). L'accès UI est en L4 (ADR 0092) : on lit le NodePort réel
+   des Services type=NodePort + l'IP d'un nœud Ready (plus de HTTPRoutes/hostnames) ;
 3. CROISE via `portal.build_view`, REND via `portal.render_html` ;
 4. SERT la page sur `/` (et `/healthz`) avec http.server (stdlib, image mince).
 
@@ -37,7 +38,7 @@ def load_endpoints(path: str = CONTRACT_PATH) -> list[dict]:
 
 
 def _apis():
-    """Clients k8s (CoreV1 + CustomObjects) — in-cluster ou kubeconfig. Injectable.
+    """Clients k8s (CoreV1 + Discovery) — in-cluster ou kubeconfig. Injectable.
 
     Mappe ImportError / erreur de config en PortalUnavailable. Modèle nestor.smoke.
     """
@@ -55,42 +56,79 @@ def _apis():
     cfg = client.Configuration.get_default_copy()
     cfg.retries = 0
     api = client.ApiClient(cfg)
-    # 3 clients TYPÉS : Core (services), Discovery (endpointslices), Custom (httproutes).
-    return client.CoreV1Api(api), client.DiscoveryV1Api(api), client.CustomObjectsApi(api)
+    # 2 clients TYPÉS : Core (services + nodes), Discovery (endpointslices).
+    return client.CoreV1Api(api), client.DiscoveryV1Api(api)
 
 
 def observe_cluster(endpoints: list[dict], apis=None) -> dict[tuple[str, str], portal.Observed]:
     """Construit l'état observé {(ns, svc): Observed} pour les endpoints du contrat.
 
-    LECTURE SEULE : Services (présence), EndpointSlices (readiness), HTTPRoutes
-    (hostname exposé). JAMAIS de Secret (le RBAC ne l'autorise pas, ADR 0091 §3).
-    `apis` injectable (tuple (core_v1, discovery, custom)) pour les tests sans cluster.
+    LECTURE SEULE : Services (présence + NodePort attribué), EndpointSlices (readiness),
+    Nodes (IP d'un nœud Ready). JAMAIS de Secret (le RBAC ne l'autorise pas, ADR 0091 §3).
+    L'accès UI est en L4 (ADR 0092) : http://<node_ip>:<node_port observé>.
+    `apis` injectable (tuple (core_v1, discovery)) pour les tests sans cluster.
     """
-    core_v1, discovery, custom = apis if apis is not None else _apis()
+    core_v1, discovery = apis if apis is not None else _apis()
     observed: dict[tuple[str, str], portal.Observed] = {}
-    # Hostnames exposés par les HTTPRoutes (gateway.networking.k8s.io), indexés par
-    # service backend. Best-effort : si l'API Gateway n'est pas là, on continue.
-    host_by_svc = _httproute_hosts(custom)
+    node_ip = _ready_node_ip(core_v1)  # une fois pour tous : IP d'un nœud Ready
     for ep in endpoints:
         ns, svc = ep.get("namespace", ""), ep.get("service", "")
         if not ns or not svc:
             continue
-        present = _service_exists(core_v1, ns, svc)
+        # Présence + nodePort du Service du contrat (`svc`). Le nodePort peut y vivre
+        # directement (brique maison exposée en NodePort, ex. portal) OU sur un Service
+        # d'exposition SÉPARÉ `<svc>-nodeport` (UI vendored — ADR 0092 : on ne touche
+        # pas le ClusterIP du chart, on pose un NodePort à côté). On lit donc le port
+        # sur `svc` ET, à défaut, sur `<svc>-nodeport`.
+        present, node_port = _service_state(core_v1, ns, svc)
+        if node_port is None:
+            _np_present, np = _service_state(core_v1, ns, f"{svc}-nodeport")
+            node_port = np
         ready = present and _endpoints_ready(discovery, ns, svc)
         observed[(ns, svc)] = portal.Observed(
-            present=present, ready=ready, hostname=host_by_svc.get((ns, svc))
+            present=present,
+            ready=ready,
+            node_port=node_port,
+            node_ip=node_ip if node_port else None,
         )
     return observed
 
 
-def _service_exists(core_v1, ns: str, svc: str) -> bool:
+def _service_state(core_v1, ns: str, svc: str) -> tuple[bool, int | None]:
+    """(présent, nodePort) d'un Service. nodePort = le premier port type=NodePort
+    attribué (ADR 0092), None si le Service n'est pas exposé en NodePort ou absent."""
     from kubernetes.client.exceptions import ApiException
 
     try:
-        core_v1.read_namespaced_service(svc, ns)
-        return True
+        s = core_v1.read_namespaced_service(svc, ns)
     except ApiException:
-        return False  # 404 absent, 403/autre : on ne peut pas affirmer présent
+        return False, None  # 404 absent, 403/autre : on ne peut pas affirmer présent
+    node_port = None
+    spec = getattr(s, "spec", None)
+    if spec is not None and getattr(spec, "type", None) == "NodePort":
+        for p in getattr(spec, "ports", None) or []:
+            if getattr(p, "node_port", None):
+                node_port = p.node_port
+                break
+    return True, node_port
+
+
+def _ready_node_ip(core_v1) -> str | None:
+    """IP interne d'un nœud Ready (cible des NodePort, ADR 0092). None si inconnue."""
+    from kubernetes.client.exceptions import ApiException
+
+    try:
+        nodes = core_v1.list_node()
+    except ApiException:
+        return None
+    for n in getattr(nodes, "items", None) or []:
+        conds = getattr(getattr(n, "status", None), "conditions", None) or []
+        if not any(c.type == "Ready" and c.status == "True" for c in conds):
+            continue
+        for addr in getattr(n.status, "addresses", None) or []:
+            if addr.type == "InternalIP":
+                return addr.address
+    return None
 
 
 def _endpoints_ready(discovery, ns: str, svc: str) -> bool:
@@ -108,29 +146,6 @@ def _endpoints_ready(discovery, ns: str, svc: str) -> bool:
             if ep.conditions and ep.conditions.ready:
                 return True
     return False
-
-
-def _httproute_hosts(custom) -> dict[tuple[str, str], str]:
-    """{(ns_backend, svc_backend): premier hostname} d'après les HTTPRoutes (best-effort)."""
-    from kubernetes.client.exceptions import ApiException
-
-    out: dict[tuple[str, str], str] = {}
-    try:
-        routes = custom.list_cluster_custom_object("gateway.networking.k8s.io", "v1", "httproutes")
-    except ApiException:
-        return out
-    for r in (routes or {}).get("items", []):
-        ns = (r.get("metadata") or {}).get("namespace", "")
-        hosts = (r.get("spec") or {}).get("hostnames") or []
-        if not hosts:
-            continue
-        for rule in (r.get("spec") or {}).get("rules", []) or []:
-            for ref in rule.get("backendRefs", []) or []:
-                svc = ref.get("name")
-                bns = ref.get("namespace", ns)
-                if svc:
-                    out.setdefault((bns, svc), hosts[0])
-    return out
 
 
 def build_page(apis=None, *, contract_path: str = CONTRACT_PATH) -> str:

@@ -4,77 +4,66 @@
 # (#232, ADR 0048). Le développeur data travaille dans le dépôt `atlas` ; il ne
 # doit PAS opérer le cluster. Ce script rend le banc consommable depuis l'hôte :
 #
-#   1. pose les Gateways des UI dont le Service existe (dérivé du CONTRAT) ;
-#   2. ouvre UN forward SSH par Gateway (chaque Gateway a SA propre IP LB), sur
-#      un port hôte distinct (127.0.0.1:<port>), via la config SSH de Lima ;
-#   3. pose un bloc /etc/hosts `*.cluster.lan → 127.0.0.1` (URLs cliquables) ;
+#   1. lit le CONTRAT : les endpoints `exposed: true` (UI exposées en L4) ;
+#   2. pour chacun, lit le nodePort RÉEL du Service NodePort `<service>-nodeport`
+#      et l'IP interne d'un nœud Ready ;
+#   3. rend l'UI cliquable depuis le Mac (cf. NUANCE BANC ci-dessous) ;
 #   4. récupère et regroupe les secrets/tokens (un seul écran) ;
 #   5. génère `../atlas/.env.cluster.local` (gitignoré) consommable par atlas.
 #
-# POURQUOI SSH (et pas le portForward natif Lima ni des loopbacks 127.0.0.x) :
-#   - le portForward natif Lima exige un REBOOT de la VM (pas de reload à chaud)
-#     → casse temporairement le control-plane. Trop intrusif pour un accès.
-#   - macOS ne bind pas 127.0.0.0/8 hors .1 sans `ifconfig alias` (sudo).
-#   Le forward SSH dédié par Gateway est à chaud, sans sudo réseau, sans reboot.
+# EXPOSITION L4 NodePort (ADR 0092, remplace le Gateway L7 d'ADR 0071) — plus de
+# DNS, plus de SNI, plus de TLS de bordure : un Service `type: NodePort`
+# (`<service>-nodeport`) sert l'UI en HTTP clair sur `http://<IP-nœud>:<nodePort>`.
+# Plus AUCUN Gateway, plus AUCUN forward SSH, plus AUCUN bloc /etc/hosts.
 #
-# Source de vérité : contract/endpoints.example.yaml (ui_hostname/layer/auth) —
+# NUANCE BANC LIMA (cruciale) : le réseau Lima (vmnet/vz) est ISOLÉ du Mac → le
+# poste de contrôle n'atteint PAS l'IP interne du nœud (`10.x` user-v2). Pour
+# rendre l'UI cliquable DEPUIS LE MAC, on ouvre donc un
+# `kubectl port-forward svc/<service>-nodeport <localport>:<port>` en arrière-plan
+# (PAS de forward SSH, PAS de Gateway) et on affiche `http://127.0.0.1:<localport>`.
+#   → EN PROD le poste atteint directement le réseau des nœuds : l'accès se fait
+#     en `http://<IP-nœud>:<nodePort>` SANS port-forward (cf. node_internal_ip /
+#     le nodePort affichés en complément). Ce script tourne AU BANC, donc il pose
+#     le port-forward ; la prod est en accès direct (ADR 0092 §«topologie d'accès»).
+#
+# Source de vérité : contract/endpoints.example.yaml (`exposed`/layer/auth) —
 # rien n'est codé en dur (ADR 0023). Orchestration de CLIs → bash (ADR 0017) ;
-# la LOGIQUE DE DÉCISION pure (bloc hosts, port par index, lignes .env) est
-# isolée en fonctions testables (bench/unit/access.bats), sans cluster.
+# la LOGIQUE DE DÉCISION pure (port hôte par index, ligne d'URL, lignes .env)
+# est isolée en fonctions testables (bench/unit/access.bats), sans cluster.
 #
-# Tout l'état (Gateways, /etc/hosts, forwards) est posé par du CODE reproductible
-# — pas de `kubectl apply` manuel laissé en place (ADR 0046).
+# Tout l'état (port-forwards) est posé par du CODE reproductible — pas de
+# `kubectl apply`/`port-forward` manuel laissé en place (ADR 0046).
 #
 # Usage :
-#   bench/lima/access.sh            # pose tout + affiche URLs/secrets + génère .env
-#   bench/lima/access.sh --stop     # arrête les forwards, retire le bloc /etc/hosts
-#   bench/lima/access.sh --print-hosts   # imprime le bloc /etc/hosts (pas de sudo)
-#   bench/lima/access.sh --no-hosts      # tout sauf /etc/hosts (URLs en --resolve)
+#   bench/lima/access.sh            # ouvre les port-forwards + affiche URLs/secrets + .env
+#   bench/lima/access.sh --stop     # arrête les kubectl port-forward
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=bench/lima/lib.sh
 . "${HERE}/lib.sh" # log/ok/warn/die/need + REPO
 
-CP="${CP:-cp1}"                       # control-plane (relais SSH des forwards)
 KUBECONFIG_LOCAL="${KUBECONFIG_LOCAL:-${HERE}/.work/kubeconfig}"
 KUBECTL=(kubectl --kubeconfig "${KUBECONFIG_LOCAL}")
 CONTRACT="${CONTRACT:-${REPO}/contract/endpoints.example.yaml}"
 ATLAS_DIR="${ATLAS_DIR:-${REPO}/../atlas}" # dépôt applicatif voisin (../atlas)
-HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
-HOSTS_TAG="cluster.lan (banc Lima — bench/lima/access.sh)"
-# Port hôte de base : la i-ème UI écoute sur BASE+i (8443, 8444, …). Non
-# privilégié → aucun sudo pour les forwards (sudo seulement pour /etc/hosts).
+# Port hôte de base du port-forward banc : la i-ème UI écoute sur BASE+i (8443,
+# 8444, …). Non privilégié → aucun sudo. NB : c'est un port LOCAL du Mac ; il ne
+# vaut QU'AU BANC (en prod on vise directement <IP-nœud>:<nodePort>, cf. en-tête).
 BASE_PORT="${BASE_PORT:-8443}"
-SSH_CFG="${HOME}/.lima/${CP}/ssh.config"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Fonctions PURES (aucun kubectl / réseau / sudo) — testées en bats.
 # ════════════════════════════════════════════════════════════════════════════
 
-# host_port_for INDEX → port hôte de la i-ème UI (BASE_PORT + INDEX).
+# host_port_for INDEX → port hôte local du port-forward de la i-ème UI
+# (BASE_PORT + INDEX). Au banc uniquement (cf. en-tête).
 host_port_for() { printf '%s\n' "$((BASE_PORT + $1))"; }
 
-# render_hosts_block HOSTNAME... → bloc /etc/hosts délimité, idempotent.
-# Tous les hostnames pointent sur 127.0.0.1 (les forwards écoutent en local) ;
-# c'est le PORT (un par UI) qui distingue le backend, pas l'IP.
-render_hosts_block() {
-    printf '# >>> %s >>>\n' "${HOSTS_TAG}"
-    local h
-    for h in "$@"; do
-        printf '127.0.0.1\t%s\n' "${h}"
-    done
-    printf '# <<< %s <<<\n' "${HOSTS_TAG}"
-}
-
-# strip_hosts_block < fichier → contenu SANS le bloc délimité (retrait idempotent).
-# Lit stdin, écrit stdout. Sûr si le bloc est absent (renvoie le fichier inchangé).
-strip_hosts_block() {
-    awk -v tag="${HOSTS_TAG}" '
-        $0 == "# >>> " tag " >>>" { skip = 1; next }
-        $0 == "# <<< " tag " <<<" { skip = 0; next }
-        !skip { print }
-    '
+# url_line LAYER URL AUTH → ligne d'affichage alignée d'une UI (pure, testable).
+# Forme : `    [<layer>] <url>   (auth: <auth>)`.
+url_line() {
+    printf '    [%-10s] %s   (auth: %s)\n' "$1" "$2" "$3"
 }
 
 # env_line KEY VALUE → ligne `KEY=VALUE` pour le .env (valeur vide tolérée).
@@ -92,155 +81,107 @@ read_lines() {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-# Lecture du contrat (yq) — quelles UI exposer (ui_hostname/namespace/service…).
+# Lecture du contrat (yq) — quelles UI exposer (exposed:true → NodePort L4).
 # ════════════════════════════════════════════════════════════════════════════
 
-# ui_hostnames → liste des ui_hostname déclarés dans le contrat (un par ligne).
-ui_hostnames() {
-    yq -r '.endpoints[] | select(.ui_hostname) | .ui_hostname' "${CONTRACT}"
-}
-
-# ui_rows → lignes `ui_hostname<TAB>namespace<TAB>service<TAB>layer<TAB>auth`,
-# triées par hostname pour un ordre stable (port par index déterministe).
-ui_rows() {
-    yq -r '.endpoints[] | select(.ui_hostname)
-        | [.ui_hostname, .namespace, .service, (.layer // "-"), (.auth // "none")]
+# exposed_rows → lignes `namespace<TAB>service<TAB>layer<TAB>auth` des endpoints
+# `exposed: true`, triées pour un ordre stable (port hôte par index déterministe).
+exposed_rows() {
+    yq -r '.endpoints[] | select(.exposed == true)
+        | [.namespace, .service, (.layer // "-"), (.auth // "none")]
         | @tsv' "${CONTRACT}" | sort
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-# Actions impures (kubectl, ssh, sudo) — orchestration.
+# Actions impures (kubectl, sudo) — orchestration.
 # ════════════════════════════════════════════════════════════════════════════
 
 svc_exists() { "${KUBECTL[@]}" -n "$1" get svc "$2" -o name > /dev/null 2>&1; }
 
-# brique_for NS → dossier platform/<brique> du gateway.yaml. Convention du dépôt :
-# <brique> = namespace, sauf grafana (chart kube-prometheus-stack).
-brique_for() { [ "$1" = monitoring ] && echo kube-prometheus-stack || echo "$1"; }
-
-# IP du nœud servant le Gateway en hostNetwork (ADR 0071 : plus de Service LB —
-# l'Envoy bind 80/443 sur l'IP du nœud). Banc mono-CP : l'InternalIP du
-# control-plane. Vide si introuvable. `|| true` : sous `set -e`, un kubectl
-# non-zéro (hoquet d'API) ne doit pas tuer `node_ip=$(gateway_node_ip)`.
-gateway_node_ip() {
+# IP interne d'un nœud Ready (status.addresses InternalIP). En PROD c'est l'IP
+# que le poste opérateur compose directement (`http://<IP>:<nodePort>`, ADR 0092).
+# Banc mono-CP : l'InternalIP du control-plane (non routable depuis le Mac, d'où
+# le port-forward — cf. en-tête). Vide si introuvable. `|| true` : sous `set -e`,
+# un kubectl non-zéro (hoquet d'API) ne doit pas tuer `ip=$(node_internal_ip)`.
+node_internal_ip() {
     "${KUBECTL[@]}" get nodes \
         -l node-role.kubernetes.io/control-plane \
         -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' \
         2> /dev/null || true
 }
 
-# Gate L7 : l'Envoy du Gateway répond-il sur node_ip:443 pour ce hostname ? On
-# envoie le SNI/Host attendu et on accepte TOUT code HTTP (même 404/503) — ce qui
-# compte, c'est qu'Envoy ACCEPTE la connexion TLS et ROUTE (data path vivant). Un
-# échec de CONNEXION (rc 7 → code 000) = pas prêt. On ne lit JAMAIS .status du
-# Gateway (#42786 : `Programmed: False` persistant en hostNetwork malgré data path
-# OK ; ADR 0071 §6) — on gate sur le comportement réel.
-gate_gateway_l7() {
-    local node_ip=$1 host=$2 attempts=0 code
-    while [ "${attempts}" -lt 30 ]; do
-        # --resolve épingle le SNI/Host sur node_ip:443 (pas de DNS requis) ; -k :
-        # CA interne (cert-manager, ADR 0021) hors du trust store local.
-        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 3 \
-            --resolve "${host}:443:${node_ip}" "https://${host}/" 2> /dev/null || echo "")
-        [ -n "${code}" ] && [ "${code}" != "000" ] && return 0
-        attempts=$((attempts + 1))
-        sleep 2
-    done
-    return 1
+# node_port_of NS SERVICE → nodePort RÉEL du Service NodePort `<service>-nodeport`
+# (.spec.ports[0].nodePort). Vide si le Service manque. `|| true` : idem ci-dessus.
+node_port_of() {
+    "${KUBECTL[@]}" -n "$1" get svc "$2-nodeport" \
+        -o 'jsonpath={.spec.ports[0].nodePort}' 2> /dev/null || true
 }
 
-# Pose les Gateways des UI dont le Service existe (idempotent).
-apply_gateways() {
-    log "Pose des Gateways des UI présentes (dérivé du contrat)"
-    local hostname ns svc layer auth brique gw
-    while IFS=$'\t' read -r hostname ns svc layer auth; do
-        svc_exists "${ns}" "${svc}" || { warn "${hostname} : service ${ns}/${svc} absent — Gateway non posé"; continue; }
-        brique=$(brique_for "${ns}")
-        gw="${REPO}/platform/${brique}/gateway.yaml"
-        [ -f "${gw}" ] || { warn "${hostname} : ${gw#"${REPO}/"} absent — Gateway non posé"; continue; }
-        "${KUBECTL[@]}" apply -f "${gw}" > /dev/null && ok "${hostname} : Gateway posé (${brique})"
-    done < <(ui_rows)
-}
-
-# Ouvre un forward SSH dédié 127.0.0.1:<port> → <ip_lb>:443 (sans multiplexing :
-# le ssh.config Lima a ControlMaster auto, qui empêcherait un canal persistant).
-# IMPORTANT : `ssh -fN` se met en arrière-plan mais HÉRITE des descripteurs du
-# script — si on ne ferme pas stdin/out/err, un `| tail` en aval reste bloqué
-# (le pipe ne se ferme jamais). On détache donc explicitement les 3 flux.
+# Ouvre un kubectl port-forward 127.0.0.1:<lport> → svc/<service>-nodeport:<port>
+# en arrière-plan (BANC : le réseau Lima est isolé du Mac, cf. en-tête). PAS de
+# forward SSH, PAS de Gateway (ADR 0092). IMPORTANT : `kubectl port-forward` mis
+# en arrière-plan HÉRITE des descripteurs du script — si on ne ferme pas
+# stdin/out/err, un `| tail` en aval reste bloqué (le pipe ne se ferme jamais).
+# On détache donc explicitement les 3 flux.
 open_forward() {
-    local lport=$1 node_ip=$2
-    pkill -f "ssh.*-L 127.0.0.1:${lport}:" 2> /dev/null || true
-    ssh -F "${SSH_CFG}" -o ControlMaster=no -o ControlPath=none -fN \
-        -L "127.0.0.1:${lport}:${node_ip}:443" "lima-${CP}" < /dev/null > /dev/null 2>&1
+    local lport=$1 ns=$2 svc=$3 port=$4
+    pkill -f "kubectl.*port-forward.*127.0.0.1:${lport}:" 2> /dev/null || true
+    "${KUBECTL[@]}" -n "${ns}" port-forward "svc/${svc}-nodeport" \
+        "127.0.0.1:${lport}:${port}" < /dev/null > /dev/null 2>&1 &
+    disown 2> /dev/null || true
 }
 
-# Pour chaque UI : lit l'IP LB → ouvre un forward sur BASE_PORT+index. Mémorise
-# le mapping hostname→port dans le tableau global UI_PORTS (pour l'affichage/.env).
+# Pour chaque UI exposée : lit le nodePort réel → ouvre un port-forward banc sur
+# BASE_PORT+index. Mémorise hostname→ligne d'URL dans UI_LINES (affichage/.env).
 #
 # NB : on COLLECTE d'abord les lignes du contrat dans un tableau, PUIS on itère —
-# au lieu de `while … < <(ui_rows)`. Raison : `ssh -fN` détaché hériterait du
-# descripteur du process substitution et le maintiendrait ouvert → la boucle
-# `read` ne verrait jamais EOF (script bloqué). Collecte préalable = pas de FD
-# hérité par le ssh d'arrière-plan.
-declare -a UI_PORTS=()
+# au lieu de `while … < <(exposed_rows)`. Raison : le `kubectl port-forward`
+# détaché hériterait du descripteur du process substitution et le maintiendrait
+# ouvert → la boucle `read` ne verrait jamais EOF (script bloqué). Collecte
+# préalable = pas de FD hérité par le port-forward d'arrière-plan.
+declare -a UI_LINES=()
 start_forwards() {
-    [ -f "${SSH_CFG}" ] || die "config SSH Lima absente : ${SSH_CFG} (banc démarré ?)"
-    log "Ouverture des forwards SSH (un par Gateway, vers l'IP du nœud:443)"
-    UI_PORTS=()
+    log "Ouverture des port-forwards (un par UI exposée → Service NodePort)"
+    log "  BANC : le réseau Lima est isolé du Mac → port-forward kubectl (pas de"
+    log "  forward SSH, pas de Gateway). EN PROD : accès direct http://<IP-nœud>:<nodePort>."
+    UI_LINES=()
     local node_ip
-    node_ip=$(gateway_node_ip)
+    node_ip=$(node_internal_ip)
     [ -n "${node_ip}" ] || die "pas d'IP nœud control-plane (banc démarré ?)"
     local rows
-    read_lines rows < <(ui_rows)
-    local i=0 row hostname ns svc layer auth lport
+    read_lines rows < <(exposed_rows)
+    local i=0 row ns svc layer auth nodeport lport
     for row in "${rows[@]}"; do
-        IFS=$'\t' read -r hostname ns svc layer auth <<< "${row}"
-        # Gate L7 RÉEL (contourne #42786 : Programmed:False persistant en hostNetwork
-        # alors que le data path marche) — on NE gate PAS sur .status (ADR 0071 §6).
-        if ! gate_gateway_l7 "${node_ip}" "${hostname}"; then
-            warn "${hostname} : Gateway non joignable en L7 (curl) — ignoré"
+        IFS=$'\t' read -r ns svc layer auth <<< "${row}"
+        if ! svc_exists "${ns}" "${svc}-nodeport"; then
+            warn "${ns}/${svc} : Service ${svc}-nodeport absent — UI ignorée"
+            i=$((i + 1))
+            continue
+        fi
+        nodeport=$(node_port_of "${ns}" "${svc}")
+        if [ -z "${nodeport}" ]; then
+            warn "${ns}/${svc} : nodePort introuvable — UI ignorée"
             i=$((i + 1))
             continue
         fi
         lport=$(host_port_for "${i}")
-        if open_forward "${lport}" "${node_ip}"; then
-            ok "${hostname} → 127.0.0.1:${lport} (nœud ${node_ip}:443)"
-            UI_PORTS+=("${hostname}:${lport}")
+        if open_forward "${lport}" "${ns}" "${svc}" "${nodeport}"; then
+            ok "${ns}/${svc} → http://127.0.0.1:${lport} (prod : http://${node_ip}:${nodeport})"
+            # Stocke la ligne d'affichage déjà rendue (banc cliquable + rappel prod).
+            UI_LINES+=("$(url_line "${layer}" "http://127.0.0.1:${lport}" "${auth}")")
         else
-            warn "${hostname} : forward SSH échoué"
+            warn "${ns}/${svc} : port-forward échoué"
         fi
         i=$((i + 1))
     done
 }
 
 stop_forwards() {
-    if pkill -f "ssh.*-L 127.0.0.1:.*:443" 2> /dev/null; then
-        ok "forwards SSH arrêtés"
+    if pkill -f "kubectl.*port-forward" 2> /dev/null; then
+        ok "kubectl port-forwards arrêtés"
     else
-        warn "aucun forward SSH actif"
+        warn "aucun kubectl port-forward actif"
     fi
-}
-
-# Pose le bloc /etc/hosts (sudo demandé EXPLICITEMENT). Idempotent.
-apply_hosts() {
-    local hostnames block tmp
-    read_lines hostnames < <(ui_hostnames)
-    block=$(render_hosts_block "${hostnames[@]}")
-    log "Pose du bloc /etc/hosts (${#hostnames[@]} hostnames → 127.0.0.1) — sudo requis"
-    tmp=$(mktemp)
-    strip_hosts_block < "${HOSTS_FILE}" > "${tmp}"
-    printf '%s\n' "${block}" >> "${tmp}"
-    if sudo cp "${tmp}" "${HOSTS_FILE}"; then ok "/etc/hosts à jour"; else die "écriture /etc/hosts refusée (sudo ?)"; fi
-    rm -f "${tmp}"
-}
-
-remove_hosts() {
-    local tmp
-    log "Retrait du bloc /etc/hosts — sudo requis"
-    tmp=$(mktemp)
-    strip_hosts_block < "${HOSTS_FILE}" > "${tmp}"
-    if sudo cp "${tmp}" "${HOSTS_FILE}"; then ok "bloc /etc/hosts retiré"; else warn "retrait /etc/hosts refusé"; fi
-    rm -f "${tmp}"
 }
 
 # Lit une clé d'un Secret (base64 → clair). Vide si le Secret/la clé manquent.
@@ -250,30 +191,15 @@ secret_val() {
         | base64 -d 2> /dev/null || true
 }
 
-# port_of HOSTNAME → port hôte mappé (depuis UI_PORTS) ; vide si non forwardé.
-# `return 0` final explicite : sans lui, une UI non forwardée (dashboard) ferait
-# retourner le code du dernier test (1) → sous `set -e`, `port=$(port_of …)` tue
-# le script. On veut « vide + succès », pas « échec ».
-port_of() {
-    local h=$1 e
-    for e in "${UI_PORTS[@]}"; do
-        [ "${e%%:*}" = "${h}" ] && { printf '%s\n' "${e##*:}"; return 0; }
-    done
-    return 0
-}
-
-# Affiche les URLs cliquables (port mappé par UI) + l'auth attendue.
+# Affiche les URLs cliquables (port-forward banc) + l'auth attendue.
 print_urls() {
-    log "UI accessibles via le Gateway (TLS terminé par la CA interne, ADR 0021)."
-    log "  Le certificat est signé par une CA INTERNE (réseau privé, pas d'autorité"
-    log "  publique) → le navigateur affiche un avertissement « non sécurisé » : c'est"
-    log "  ATTENDU et sans danger ici (ADR 0003/0021). Accepter le certificat une fois."
-    local hostname ns svc layer auth port
-    while IFS=$'\t' read -r hostname ns svc layer auth; do
-        port=$(port_of "${hostname}")
-        [ -n "${port}" ] || continue
-        printf '    [%-10s] https://%s:%s   (auth: %s)\n' "${layer}" "${hostname}" "${port}" "${auth}"
-    done < <(ui_rows)
+    log "UI exposées en L4 NodePort (HTTP clair, réseau privé — ADR 0092/0003)."
+    log "  Au BANC : http://127.0.0.1:<port> (port-forward kubectl ci-dessous)."
+    log "  En PROD : http://<IP-nœud>:<nodePort> en accès DIRECT (aucun forward)."
+    local line
+    for line in "${UI_LINES[@]}"; do
+        printf '%s' "${line}"
+    done
 }
 
 # Affiche les secrets/tokens regroupés (un seul écran).
@@ -295,11 +221,9 @@ generate_env() {
     [ -d "${ATLAS_DIR}" ] || { warn "dépôt atlas absent (${ATLAS_DIR}) — .env non généré"; return 0; }
     local out="${ATLAS_DIR}/.env.cluster.local"
     log "Génération de ${out#"${REPO}/../"} (gitignoré)"
-    local pg_user pg_pwd gitea_user gitea_pwd
+    local pg_user pg_pwd
     pg_user=$(secret_val postgres pg-role-pgvector username)
     pg_pwd=$(secret_val postgres pg-role-pgvector password)
-    gitea_user=$(secret_val gitea gitea-admin username)
-    gitea_pwd=$(secret_val gitea gitea-admin password)
     {
         echo "# Généré par cluster/bench/lima/access.sh — NE PAS COMMITER (gitignoré)."
         echo "# Banc Lima local ; valeurs de déploiement (ADR 0023). Régénérer après un run."
@@ -314,9 +238,8 @@ generate_env() {
         env_line OPENLINEAGE_ENDPOINT "api/v1/lineage"
         env_line OPENLINEAGE_NAMESPACE dagster
         env_line REGISTRY "registry:80"
-        env_line GITEA_PUSH_URL "http://${gitea_user}:${gitea_pwd}@127.0.0.1:3000/atlas/workflows.git"
     } > "${out}"
-    ok "${out##*/} généré (PG, OpenLineage, registry, push Gitea)"
+    ok "${out##*/} généré (PG, OpenLineage, registry)"
     warn "Vérifier qu'il est bien ignoré par git côté atlas (/.env.cluster.local)."
 }
 
@@ -327,33 +250,22 @@ main() {
     local mode="${1:-up}"
     need yq
     need kubectl
-    need ssh
     case "${mode}" in
         --stop)
             stop_forwards
-            remove_hosts
             return 0
             ;;
-        --print-hosts)
-            local hostnames
-            read_lines hostnames < <(ui_hostnames)
-            render_hosts_block "${hostnames[@]}"
-            return 0
-            ;;
-        up | --no-hosts) ;;
-        *) die "usage : $0 [--stop|--print-hosts|--no-hosts]" ;;
+        up) ;;
+        *) die "usage : $0 [--stop]" ;;
     esac
 
     [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent (${KUBECONFIG_LOCAL}) — lancer 'run-phases.sh atlas'"
     require_lima
-    apply_gateways
     start_forwards
-    [ "${mode}" = --no-hosts ] || apply_hosts
     print_urls
     print_secrets
     generate_env
     log "Prêt. Travaillez dans ${ATLAS_DIR##*/} ; 'git push' (Gitea → Argo CD réconcilie)."
-    [ "${mode}" = --no-hosts ] && warn "Sans /etc/hosts : ouvrez les URLs avec curl --resolve <host>:<port>:127.0.0.1."
     log "Pour tout arrêter : $0 --stop"
 }
 

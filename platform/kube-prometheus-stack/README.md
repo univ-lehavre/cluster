@@ -27,16 +27,16 @@ L'ordre n'est **pas** négociable (un `kubectl apply` global échoue) :
 kubectl apply --server-side -f platform/kube-prometheus-stack/crds.yaml
 
 # 2. cert-manager doit être déployé (palier 1.3) — il fournit le cert du webhook
-#    operator (admissionWebhooks.certManager.enabled=true). Les CRDs Gateway API
-#    doivent aussi préexister (posées par Cilium / cilium-expo).
+#    operator (admissionWebhooks.certManager.enabled=true).
 
 # 3. Le stack : l'operator attend le Secret du webhook créé par cert-manager,
 #    puis les CRs (Prometheus/Alertmanager/PrometheusRule) passent par son webhook.
 kubectl apply -f platform/kube-prometheus-stack/kube-prometheus-stack.yaml
 kubectl -n monitoring rollout status deploy/kube-prometheus-stack-operator
 
-# 4. Exposition Grafana
-kubectl apply -f platform/kube-prometheus-stack/gateway.yaml
+# 4. Exposition Grafana en L4 (NodePort, http://<IP-nœud>:<port>, ADR 0092) :
+#    plus de Gateway/HTTPRoute ni de gateway.yaml (retirés avec la bascule L4) —
+#    un Service NodePort sélectionne le Service ClusterIP de Grafana.
 
 # 5. SEULEMENT APRÈS : activer le monitoring Ceph (storage/ceph/cluster.yaml
 #    monitoring.enabled=true déjà posé) — Rook crée le ServiceMonitor mgr.

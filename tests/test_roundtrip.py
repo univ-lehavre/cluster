@@ -22,11 +22,16 @@ class Closure(unittest.TestCase):
         self.assertEqual(roundtrip.closure("monitoring"), ["monitoring"])
         # mlflow est une FEUILLE (rien ne dépend d'elle) — clôture = elle-même.
         self.assertEqual(roundtrip.closure("mlflow"), ["mlflow"])
+        # portail (layer autonome ADR 0091) : FEUILLE — rien ne dépend de lui (il
+        # OBSERVE les UI des autres couches sans arête de données) → clôture = lui-même.
+        self.assertEqual(roundtrip.closure("portal"), ["portal"])
 
-    def test_dataops_pulls_mlflow(self):
-        # mlflow (layer autonome ADR 0082) dépend de la base CNPG posée par dataops
-        # → défaire dataops oblige à défaire mlflow d'abord (ordre inverse, ADR 0054).
-        self.assertEqual(roundtrip.closure("dataops"), ["dataops", "mlflow"])
+    def test_dataops_pulls_mlflow_and_portal(self):
+        # mlflow (layer autonome ADR 0082) dépend de la base CNPG posée par dataops ;
+        # le portail (ADR 0091) dépend du registry/build-images de dataops (image maison)
+        # → défaire dataops oblige à défaire mlflow ET portail d'abord (ordre inverse,
+        # ADR 0054). portail en QUEUE (poids 9, après mlflow poids 8).
+        self.assertEqual(roundtrip.closure("dataops"), ["dataops", "mlflow", "portal"])
 
     def test_gitops_pulls_seed(self):
         self.assertEqual(roundtrip.closure("gitops"), ["gitops", "gitops-seed"])
@@ -64,11 +69,30 @@ class Closure(unittest.TestCase):
         # (base CNPG) → tout ce qui tire dataops tire aussi mlflow, défaite en dernier.
         self.assertEqual(
             roundtrip.closure("ceph"),
-            ["ceph", "sc", "datalake", "monitoring", "gitops", "dataops", "gitops-seed", "mlflow"],
+            [
+                "ceph",
+                "sc",
+                "datalake",
+                "monitoring",
+                "gitops",
+                "dataops",
+                "gitops-seed",
+                "mlflow",
+                "portal",
+            ],
         )
         self.assertEqual(
             roundtrip.closure("sc"),
-            ["sc", "datalake", "monitoring", "gitops", "dataops", "gitops-seed", "mlflow"],
+            [
+                "sc",
+                "datalake",
+                "monitoring",
+                "gitops",
+                "dataops",
+                "gitops-seed",
+                "mlflow",
+                "portal",
+            ],
         )
 
     def test_unknown_phase_rejected(self):

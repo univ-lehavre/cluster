@@ -1,9 +1,11 @@
 #!/usr/bin/env bats
 #
-# Tests des fonctions PURES de bench/lima/access.sh (accès dev, ADR 0048) :
-# host_port_for, render_hosts_block, strip_hosts_block, env_line, read_lines.
-# Aucun cluster, aucun réseau : on source le script (le garde BASH_SOURCE != $0
-# empêche `main`) et on vérifie les sorties.
+# Tests des fonctions PURES de bench/lima/access.sh (accès dev, ADR 0048/0092) :
+# host_port_for, url_line, env_line, read_lines. Aucun cluster, aucun réseau : on
+# source le script (le garde BASH_SOURCE != $0 empêche `main`) et on vérifie les
+# sorties. L'exposition est en L4 NodePort (ADR 0092) : plus de Gateway, plus de
+# forward SSH, plus de bloc /etc/hosts (fonctions render_/strip_hosts_block
+# retirées).
 
 setup() {
     # shellcheck source=../../bench/lima/access.sh
@@ -21,28 +23,17 @@ setup() {
     [ "$output" = "8447" ]
 }
 
-@test "render_hosts_block : bloc délimité + une ligne 127.0.0.1 par hostname" {
-    run render_hosts_block argocd.cluster.lan gitea.cluster.lan
+@test "url_line : ligne alignée [layer] url (auth: ...)" {
+    run url_line gitops http://127.0.0.1:8443 secret-admin
     [ "$status" -eq 0 ]
-    [[ "${lines[0]}" == "# >>> "* ]]
-    [[ "${output}" == *$'127.0.0.1\targocd.cluster.lan'* ]]
-    [[ "${output}" == *$'127.0.0.1\tgitea.cluster.lan'* ]]
-    [[ "${lines[-1]}" == "# <<< "* ]]
+    [[ "${output}" == *"[gitops"* ]]
+    [[ "${output}" == *"http://127.0.0.1:8443"* ]]
+    [[ "${output}" == *"(auth: secret-admin)"* ]]
 }
 
-@test "strip_hosts_block : retire le bloc, conserve le reste (idempotent)" {
-    input=$(printf '1.2.3.4 garde\n%s\n5.6.7.8 garde2\n' "$(render_hosts_block argocd.cluster.lan)")
-    run bash -c "printf '%s' \"\$1\" | { $(declare -f strip_hosts_block); HOSTS_TAG='${HOSTS_TAG}'; strip_hosts_block; }" _ "${input}"
-    [ "$status" -eq 0 ]
-    [[ "${output}" == *"1.2.3.4 garde"* ]]
-    [[ "${output}" == *"5.6.7.8 garde2"* ]]
-    [[ "${output}" != *"argocd.cluster.lan"* ]]
-}
-
-@test "strip_hosts_block : sans bloc, renvoie le fichier inchangé" {
-    run bash -c "printf '%s\n' 'a' 'b' | { $(declare -f strip_hosts_block); HOSTS_TAG='${HOSTS_TAG}'; strip_hosts_block; }"
-    [ "${lines[0]}" = "a" ]
-    [ "${lines[1]}" = "b" ]
+@test "url_line : auth none tolérée" {
+    run url_line socle http://127.0.0.1:8450 none
+    [[ "${output}" == *"(auth: none)"* ]]
 }
 
 @test "env_line : KEY=VALUE" {

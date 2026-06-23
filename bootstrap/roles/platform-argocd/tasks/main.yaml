@@ -54,13 +54,15 @@
         state: present
         src: '{{ platform_repo_dir }}/platform/argocd/appproject-atlas.yaml'
 
-    # Exposition UI (Gateway + HTTPRoute, TLS bordure cert-manager). Optionnel :
-    # exige les CRDs Gateway API + cert-manager (argocd_apply_gateway).
-    - name: Apply the Argo CD Gateway and HTTPRoute (UI exposure)
+    # Exposition UI en L4 (NodePort, ADR 0092) : http://<IP-nœud>:<nodePort>,
+    # zéro DNS. Service séparé du bundle vendored, même selector que le ClusterIP
+    # argocd-server. nodePort auto-attribué (pas figé). Sans dépendance CRD,
+    # appliqué inconditionnellement (contrairement au Gateway L7).
+    - name: Apply the Argo CD NodePort Service (L4 UI exposure)
       kubernetes.core.k8s:
         state: present
-        src: '{{ platform_repo_dir }}/platform/argocd/gateway.yaml'
-      when: argocd_apply_gateway | bool
+        namespace: '{{ argocd_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argocd/nodeport.yaml'
 
     - name: Wait for the argocd-server deployment to be Ready
       kubernetes.core.k8s_info:

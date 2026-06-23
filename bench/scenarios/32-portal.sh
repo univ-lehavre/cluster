@@ -2,7 +2,7 @@
 #
 # Scénario 32 — PORTAIL : le portail répond, liste les UI, et NE PEUT PAS lire un
 # Secret (ADR 0091). Trois preuves complémentaires du scénario 28 (qui, lui, vérifie
-# que les liens du portail — les HTTPRoute — sont atteignables via le Gateway) :
+# que les liens du portail — les NodePort L4 des UI, ADR 0092 — sont atteignables) :
 #
 #   1. le pod portail est Ready et répond sur /healthz (200) ;
 #   2. la page rendue (GET /) LISTE des UI réelles (au moins une entrée de couche +

@@ -115,3 +115,33 @@ redcap_build_images:
     build_context: '{{ build_workdir }}/redcap'
     dockerfile: '{{ build_workdir }}/redcap/Dockerfile'
     build_all_arch: true
+
+# Image maison du PORTAIL d'accès aux UI (ADR 0091/0092). Liste SÉPARÉE de
+# build_images : consommée UNIQUEMENT par la layer autonome bootstrap/portal.yaml
+# (override `build_images` au niveau import_role), JAMAIS par dataops/mlflow.
+#
+# CAS PARTICULIER — contexte de build MULTI-DOSSIER. Le Dockerfile du portail
+# (platform/portal/image/Dockerfile) fait `COPY nestor/portal*.py` ET
+# `COPY contract/endpoints.example.yaml` → son contexte effectif est la RACINE du
+# dépôt (nestor/ + contract/), pas un sous-dossier auto-suffisant comme Dagster/
+# MLflow/REDCap. Le mécanisme générique `src_context` de platform-build-images copie
+# UN seul dossier → il ne couvre pas ce cas. Donc PAS de `src_context` ici : le play
+# bootstrap/portal.yaml RÉPLIQUE node-side l'arborescence minimale (nestor/portal*.py
+# + contract/endpoints.example.yaml + le Dockerfile à la racine du contexte) sous
+# `build_workdir/portal/` AVANT d'importer ce rôle. Le rôle se contente alors de
+# builder ce contexte déjà préparé (build_context/dockerfile pointent dessus).
+#
+# PAS de `official_image` : image 100 % maison (FROM python:3.12-slim + pip install
+# kubernetes/pyyaml + COPY du code/contrat). `build_all_arch: true` : aucune
+# officielle amd64 à retaguer → BUILD sur TOUTE arche (x86 prod inclus ; un retag y
+# ramènerait une image SANS le code, comme émetteur/mlflow/redcap). `force_rebuild:
+# true` : tag `:dev` MUTABLE — le code portail (nestor/portal*.py) ET le contrat
+# embarqué (contract/endpoints.example.yaml) évoluent ; sans rebuild, le skip-si-présent
+# servirait à jamais une image périmée (raisonnement émetteur, defaults L51-53).
+portal_build_images:
+  - name: portal
+    tag: dev
+    build_context: '{{ build_workdir }}/portal'
+    dockerfile: '{{ build_workdir }}/portal/Dockerfile'
+    build_all_arch: true
+    force_rebuild: true

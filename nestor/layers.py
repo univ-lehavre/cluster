@@ -50,7 +50,7 @@ LAYER_PHASES: dict[str, list[str]] = {
     # (graphe atomique) ; ici un simple ENSEMBLE. `gitops-seed` est listé explicitement
     # (phase de QUEUE non tirée par la clôture de [gitops]). N'EST PAS un profil
     # (profile reste le préfixe cumulatif base⊂…⊂dataops, ADR 0039) : `layers: [atlas]`.
-    "atlas": ["metrics", "store", "obs", "gitops", "dataops", "gitops-seed", "mlflow"],
+    "atlas": ["metrics", "store", "obs", "gitops", "dataops", "gitops-seed", "mlflow", "portal"],
 }
 
 # Phases applicatives composables au grain phase (queue, hors socle up/bootstrap).
@@ -68,6 +68,7 @@ _QUEUE_PHASES = frozenset(
         "dataops",
         "mlflow",
         "gitops-seed",
+        "portal",
     }
 )
 

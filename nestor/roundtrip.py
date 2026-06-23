@@ -56,6 +56,7 @@ KNOWN_PHASES = (
     "mlflow",
     "gitops",
     "gitops-seed",
+    "portal",
 )
 
 
