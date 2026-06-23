@@ -188,6 +188,24 @@ endpoints:
     source: platform/kube-prometheus-stack/nodeport.yaml
     note: Tableaux de bord métriques (Prometheus datasource).
 
+  - id: ceph-dashboard-ui
+    service: rook-ceph-mgr-dashboard
+    namespace: rook-ceph
+    fqdn: rook-ceph-mgr-dashboard.rook-ceph.svc.cluster.local
+    port: 8443
+    protocol: https # le dashboard Ceph (mgr) termine le TLS lui-même
+    scheme: https # le portail génère https://<IP-nœud>:<nodePort> (pas http)
+    auth: secret-admin # Secret rook-ceph-dashboard-password (login admin)
+    login: admin
+    layer: socle
+    profil: ceph # présent UNIQUEMENT en profil Ceph (absent en local-path)
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
+    source: storage/ceph/nodeport.yaml
+    note: >-
+      Dashboard Ceph (santé OSD/pools/capacité). Activé dans le CephCluster
+      (dashboard.enabled). HTTPS via cert auto-signé du mgr → avertissement
+      navigateur attendu (réseau privé, ADR 0003).
+
   # ── Observabilité INTERROGEABLE (API, pas UI) — un consommateur peut requêter ──
   - id: prometheus-api
     service: kube-prometheus-stack-prometheus

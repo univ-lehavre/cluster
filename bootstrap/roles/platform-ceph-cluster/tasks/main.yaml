@@ -172,6 +172,15 @@
       retries: '{{ ceph_health_retries }}'
       delay: '{{ ceph_health_delay }}'
 
+    # Exposition L4 du dashboard Ceph (mgr) en NodePort (ADR 0092) : Service SÉPARÉ
+    # qui reprend le selector du mgr actif (storage/ceph/nodeport.yaml), sans toucher
+    # le CephCluster. Appliqué APRÈS HEALTH_OK (le mgr dashboard est alors dispo).
+    # Accès https://<IP-nœud>:<nodePort> (le dashboard termine le TLS). Idempotent.
+    - name: Expose the Ceph mgr dashboard in NodePort (L4, ADR 0092)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ ceph_manifests_dir }}/nodeport.yaml'
+
     # ── Stabilisation de la generation (idempotence) ────────────────────────────
     # CAUSE RACINE du faux « changed=1 » au rejeu, ENFIN capturée par --diff (Run
     # #14, atlas-ceph ×3) : quand on applique un CephCluster au spec MINIMAL,
