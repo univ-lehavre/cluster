@@ -2,7 +2,7 @@
 
 unittest stdlib. Couvre le filtrage par profil/backend/nœuds/offensif ET deux
 garde-fous de PARITÉ anti-dérive (ADR 0058) :
-  - catalogue ↔ glob bench/scenarios/NN-*.sh (le code couvre exactement les 29) ;
+  - catalogue ↔ glob bench/scenarios/NN-*.sh (le code couvre exactement les 33) ;
   - classification offensive ↔ run-all.sh (`is_destructive`/`needs_ssh`).
 """
 
@@ -54,8 +54,8 @@ class Catalogue(unittest.TestCase):
         self.assertEqual(in_catalog, on_disk)
 
     def test_entrees_uniques(self):
-        self.assertEqual(len(EPREUVES), 32)
-        self.assertEqual(len({e.num for e in EPREUVES}), 32)
+        self.assertEqual(len(EPREUVES), 33)
+        self.assertEqual(len({e.num for e in EPREUVES}), 33)
 
     def test_champs_dans_le_vocabulaire(self):
         for e in EPREUVES:
@@ -70,10 +70,11 @@ class Filtrage(unittest.TestCase):
         nums_ex = {e.num for e, _ in exclues}
         # En prod, seuls les offensifs (17/18/19/20/21) sont exclus.
         self.assertEqual(nums_ex, {"17", "18", "19", "20", "21"})
-        # 27 jouables : +30 (ha-3cp, jouable au catalogue car multi/local-path ;
+        # 28 jouables : +30 (ha-3cp, jouable au catalogue car multi/local-path ;
         # se SKIP au runtime si le banc n'a pas 3 CP) +31 (contrat, topo-agnostique)
-        # +32 (portail, topo-agnostique base ; SKIP si portail non déployé).
-        self.assertEqual(len(jouables), 27)
+        # +32 (portail, topo-agnostique base ; SKIP si portail non déployé)
+        # +33 (cache CNPG, dataops/topo-agnostique ; SKIP si base cache absente).
+        self.assertEqual(len(jouables), 28)
 
     def test_backend_local_path_exclut_les_ceph(self):
         _, exclues = filter_epreuves(_topo(backend="local-path"))
