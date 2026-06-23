@@ -14,11 +14,6 @@ platform_repo_dir: '{{ playbook_dir }}/..'
 # Namespace d'Argo CD.
 argocd_namespace: argocd
 
-# Appliquer aussi le Gateway/HTTPRoute d'exposition de l'UI ? Exige les CRDs
-# Gateway API (posées par platform-registry/cluster) ET cert-manager (TLS de
-# bordure). Sur un banc qui n'a ni l'un ni l'autre, surcharger à false.
-argocd_apply_gateway: true
-
 # Timeouts du gate Ready (alignés sur les autres rôles plateforme).
 argocd_ready_retries: 60
 argocd_ready_delay: 5
