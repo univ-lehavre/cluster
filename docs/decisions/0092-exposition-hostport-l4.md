@@ -233,6 +233,9 @@ mono-NIC, pas de plage IP — reste vraie et **mieux servie** par L4.
 
 ## Voir aussi
 
+- [Plan de mise en œuvre](../plans/plan-exposition-hostport-l4.md) — les 6
+  étapes (contrat `ui_nodeport` → portail/UI NodePort → drift → bascule Cilium →
+  prod).
 - [ADR 0071](0071-exposition-gateway-hostnetwork.md) — Exposition Gateway
   hostNetwork (**amendé/renversé** par le présent ADR pour l'exposition des UI).
 - [ADR 0091](0091-portail-acces-ui.md) — Portail d'accès aux UI (prose
