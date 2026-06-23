@@ -11,6 +11,64 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.42.0](https://github.com/univ-lehavre/cluster/compare/v2.41.1...v2.42.0) (2026-06-23)
+
+
+### Features
+
+* **dagster:** dériver pgvector-pg-auth pour les code-locations atlas ([2953aef](https://github.com/univ-lehavre/cluster/commit/2953aef26ff16fc6b7165f17841e0695e727ac94))
+* **dagster:** dériver pgvector-pg-auth pour les code-locations atlas ([ac0faab](https://github.com/univ-lehavre/cluster/commit/ac0faab48976b6b0fa87db3028a5202fdbc73476))
+* **docs:** migrer la documentation de VitePress vers Astro Starlight ([6145909](https://github.com/univ-lehavre/cluster/commit/6145909f52287563341a726aa0e5bf2b77d9a310))
+* **docs:** migrer la documentation VitePress → Astro Starlight (ADR 0089) ([f2913b8](https://github.com/univ-lehavre/cluster/commit/f2913b8903c63ca9d63549c91fcfbd7a0ac0916b))
+* **nestor:** champ kubeconfig dans la topologie (adr 0090, étape 1) ([7237244](https://github.com/univ-lehavre/cluster/commit/72372444c20b7eb204661653b2018eba3218d60f))
+* **nestor:** preview lit l'état réel d'un cluster prod (adr 0090) ([9081d08](https://github.com/univ-lehavre/cluster/commit/9081d087ce865c6e5713a89730d00327222187bd))
+* **nestor:** preview lit l'état réel d'un cluster prod (ADR 0090) ([d8e220f](https://github.com/univ-lehavre/cluster/commit/d8e220fc9f9d349f4793677f9d6b73c2671a06f8))
+* **nestor:** stack select complète la topo avec kubeconfig + preview réoriente (adr 0090) ([ec38194](https://github.com/univ-lehavre/cluster/commit/ec38194ba6cfbd6f56cf6c74f55dc66717173635))
+* **portal:** image, RBAC sans secrets, Gateway hostNetwork (étapes 3-5, adr 0091) ([85390a0](https://github.com/univ-lehavre/cluster/commit/85390a0bee47e56c4ea74579bf40ab70ae47b0d1))
+* **portal:** logique pure de croisement contrat ↔ état (étape 1, adr 0091) ([0c893eb](https://github.com/univ-lehavre/cluster/commit/0c893eb2112eef511e16b228a08d977193ab7e85))
+* **portal:** logique pure de croisement contrat ↔ état (étape 1, ADR 0091) ([6f5517c](https://github.com/univ-lehavre/cluster/commit/6f5517c699690b266429f653e2b385678813ca10))
+* **portal:** serveur in-cluster + rendu HTML (étape 2, adr 0091) ([5589a6a](https://github.com/univ-lehavre/cluster/commit/5589a6ae441a7162091ebe0cc0c6e5e5c5093d6d))
+* **portal:** serveur in-cluster, image, RBAC sans secrets, Gateway (étapes 2-5, ADR 0091) ([f8d00e7](https://github.com/univ-lehavre/cluster/commit/f8d00e76fa0ee88ff545c02dc71f98094c74b2dc))
+
+
+### Bug Fixes
+
+* **build-images:** installer nerdctl-full épinglé sur le nœud builder ([199e290](https://github.com/univ-lehavre/cluster/commit/199e29098952156b52e14cd2f780f72910b8445b))
+* **build-images:** installer nerdctl-full épinglé sur le nœud builder ([311b6d8](https://github.com/univ-lehavre/cluster/commit/311b6d8a683ac9de5f7a4544118e002a1d156808))
+* **dataops:** workspace Dagster vise la code-location par nom court (gRPC FQDN timeout) ([6510827](https://github.com/univ-lehavre/cluster/commit/6510827147bd69830198af58f28d468b4e8908a2))
+* **dataops:** workspace Dagster vise toy-codeloc par nom court (gRPC FQDN timeout) ([a6d5fec](https://github.com/univ-lehavre/cluster/commit/a6d5fecc022e46fcf3d397ccc500f5dd1a35112c))
+* **marquez:** connexion CNPG par nom court (fqdn pg timeoute en prod) ([d2f6c7c](https://github.com/univ-lehavre/cluster/commit/d2f6c7c706f1b153a2b200868347c9dc7edd8971))
+* **marquez:** connexion CNPG par nom court (fqdn pg timeoute en prod) ([44dc381](https://github.com/univ-lehavre/cluster/commit/44dc38192c3795c57d8897bdb4567244e7cffd44))
+* **nestor+e2e:** next cohérent avec preview (réel prime) + émetteur buildé sur x86 ([ed0480e](https://github.com/univ-lehavre/cluster/commit/ed0480e5cb6cdc2e0e167f8cfcc3afa5efba0646))
+* **nestor:** preview+next résolvent le kubeconfig prod ; gitea-init via localhost ([b18d282](https://github.com/univ-lehavre/cluster/commit/b18d28263bc63bfeadbe31b52cd092197c2dd4ee))
+* **nestor:** stack select prod ne bloque plus + écrit le champ kubeconfig ([62887f8](https://github.com/univ-lehavre/cluster/commit/62887f85232c9f64c1562f3f0bf9664cecfc16e2))
+* **prod:** garantir le restart containerd après config registry + os-upgrade serial ([ae0c058](https://github.com/univ-lehavre/cluster/commit/ae0c0586c5b084df5274c262226848f54b0fcd51))
+* **prod:** garantir le restart containerd après config registry + os-upgrade serial ([fd40a39](https://github.com/univ-lehavre/cluster/commit/fd40a39f9c23d6ae16bfc50dbf468f29f5bc39b3))
+
+
+### Documentation
+
+* **adr:** 0091 portail d'accès aux UI + plan (proposed) ([30e49dc](https://github.com/univ-lehavre/cluster/commit/30e49dc8880d5eb76554733be54fdacaa7aaa281))
+* **adr:** 0091 portail d'accès aux UI + plan (proposed) ([05379f4](https://github.com/univ-lehavre/cluster/commit/05379f45c0234ca0735d26e1fd9af8ecb11b2071))
+* **adr:** adr 0090 — confirmer le kubeconfig prod + rapatriement assisté ([c53785b](https://github.com/univ-lehavre/cluster/commit/c53785b909ed9600a69ec6065e215ae47bf4013d))
+* **adr:** ADR 0090 — confirmer le kubeconfig prod + rapatriement assisté ([5b63c2f](https://github.com/univ-lehavre/cluster/commit/5b63c2f5ce433b5e111beae5b55df81bec824f33))
+* **adr:** adr 0090 + plan — nestor lit l'état réel d'un cluster prod ([0fda406](https://github.com/univ-lehavre/cluster/commit/0fda406898f46f1b67f4f8c6afa1a51a4652c048))
+* **adr:** ADR 0090 + plan — nestor lit l'état réel d'un cluster prod ([baed263](https://github.com/univ-lehavre/cluster/commit/baed263b452605ebfbcbe170707a2c6a6f1621d2))
+* **adr:** promouvoir 0091 portail Accepted + plan Actif (démarrage étape 1) ([c23ea44](https://github.com/univ-lehavre/cluster/commit/c23ea4405c47355f683d604659c696ddbf1b0291))
+* **audit:** ajouter les URL de preuve à l'answer-sheet badge ([e9db612](https://github.com/univ-lehavre/cluster/commit/e9db61234b5674f3225edde9cc26a08945327cb2))
+* **audit:** answer-sheet OpenSSF Best Practices Badge (passing) ([1d3d04c](https://github.com/univ-lehavre/cluster/commit/1d3d04cf84602ae2ca5ebb4e7a66017281b3e8c7))
+* **audit:** answer-sheet OpenSSF Best Practices Badge (passing) ([872cb34](https://github.com/univ-lehavre/cluster/commit/872cb34e8980dc992150f6407f8dd7d8bc6cde0f))
+* **audit:** faisabilité silver/gold du badge — décision : rester à passing ([5ad7c99](https://github.com/univ-lehavre/cluster/commit/5ad7c997bb7c16af57773b3ae67190ea6bfcded9))
+* bloc « le dépôt en chiffres » à 11 plans (résidu de plan supprimé) ([b2c77db](https://github.com/univ-lehavre/cluster/commit/b2c77db55d3555b7df7be38eed0c0d3494cbcc53))
+* **composants:** rattacher le portail (README atteignable, adr 0029) ([bff2c11](https://github.com/univ-lehavre/cluster/commit/bff2c11b36e26d397fd90c71137161975eead850))
+* **contract:** mettre le contrat à jour des écarts de l'audit cluster↔atlas ([184a419](https://github.com/univ-lehavre/cluster/commit/184a419c0c0e1d90c1f33908bcf7922a2367ec89))
+* **contract:** mettre le contrat à jour des écarts de l'audit cluster↔atlas ([a62e3bc](https://github.com/univ-lehavre/cluster/commit/a62e3bc2f81176ed7e9940eeb2fcc6c2268fba3d))
+* **dns:** documenter le piège FQDN→nom court (contrat + guide-dev + drift L58) ([202864b](https://github.com/univ-lehavre/cluster/commit/202864b31d36d13de8d2f9d49c980246d7680daa))
+* encart anglais (readme/contributing/security) — critère english du badge ([49479c3](https://github.com/univ-lehavre/cluster/commit/49479c3d7beab27cb98d47065db1aa848edd3523))
+* régénérer le bloc « le dépôt en chiffres » (adr 0090 accepted, plan actif) ([92d14c0](https://github.com/univ-lehavre/cluster/commit/92d14c0b0f1c2d45781e5b98b8c3207ced8a513d))
+* réintégrer badge Best Practices + Trademarks→Conformité + encart anglais + audit silver/gold ([1827d84](https://github.com/univ-lehavre/cluster/commit/1827d84d42a8ecdd0224861f6a0886422f714157))
+* réintégrer le badge Best Practices (validé) + section Conformité ([3910cc6](https://github.com/univ-lehavre/cluster/commit/3910cc66c149b81d932c5a25595edb299cd86a72))
+
 ## [2.41.1](https://github.com/univ-lehavre/cluster/compare/v2.41.0...v2.41.1) (2026-06-22)
 
 
