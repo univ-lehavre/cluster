@@ -15,7 +15,7 @@
 #   BANC_JETABLE=1 [FAULT_TARGET=join|init|cri-keyring|cnpg-sc|argocd-netpol|addon] bench/lima/run-phases.sh bootstrap-fault # arrêt injecté : preuve de reprise (ADR 0050/0052 §5) — DESTRUCTIF. compensation (join/init) ou reprise classe a (cri-keyring/cnpg-sc/argocd-netpol/addon)
 #   bench/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
 #   bench/lima/run-phases.sh metrics-server # Metrics API (kubectl top) + gate APIService Available (#252)
-#   bench/lima/run-phases.sh platform-prereqs # CRDs Gateway API + containerd insecure-registry
+#   bench/lima/run-phases.sh platform-prereqs # containerd insecure-registry (registry:80 HTTP)
 #   bench/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
 #   bench/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
 #   bench/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman) + gate Ready
@@ -117,9 +117,6 @@ VM_MEMORY_SET=${VM_MEMORY:+1}
 VM_MEMORY_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 12GiB || echo 8GiB)
 VM_MEMORY=${VM_MEMORY:-${VM_MEMORY_DEFAULT}}
 VM_DISK=${VM_DISK:-40GiB}
-
-# CRDs Gateway API (alignées sur Cilium 1.19.x — ADR 0006 ; cf. platform/cilium-expo).
-GWAPI_VERSION=1.4.1
 
 # Disques Ceph par nœud : 3 HDD (data) + 1 block.db. Tailles fonctionnelles
 # (pas perf), à l'image du banc Vagrant (3 × 10 GiB + 5 GiB).
@@ -307,24 +304,24 @@ preflight() {
 
 # detect_storage_profile : DÉRIVE le profil de stockage de l'ÉTAT RÉEL du cluster
 # (ADR 0065 : un état se détecte, il ne se re-saisit pas — drift L44 / #319). Pose
-# STORAGE_SC / STORAGE_BACKING / STORAGE_ENDPOINT / STORAGE_APPLY_GW selon la
-# StorageClass présente, AU LIEU de brancher sur WITH_CEPH dans chaque phase
-# post-bootstrap (monitoring/dataops/gitops). Détection FIABLE ou refus franc :
-# pas de profil par défaut silencieux (la leçon de L44).
-#   - SC `rook-ceph-block-replicated` présente → profil Ceph (RGW, gateway) ;
-#   - SC `local-path` présente → profil léger (SeaweedFS, pas de gateway) ;
+# STORAGE_SC / STORAGE_BACKING / STORAGE_ENDPOINT selon la StorageClass présente,
+# AU LIEU de brancher sur WITH_CEPH dans chaque phase post-bootstrap
+# (monitoring/dataops/gitops). Détection FIABLE ou refus franc : pas de profil par
+# défaut silencieux (la leçon de L44).
+#   - SC `rook-ceph-block-replicated` présente → profil Ceph (RGW) ;
+#   - SC `local-path` présente → profil léger (SeaweedFS) ;
 #   - aucune des deux → die (socle non monté ? cluster injoignable ?).
+# L'exposition des UI est en L4 NodePort (ADR 0092), indépendante du profil de
+# stockage — il n'y a plus de drapeau Gateway à dériver ici.
 detect_storage_profile() {
     if "${KUBECTL[@]}" get sc rook-ceph-block-replicated -o name > /dev/null 2>&1; then
         STORAGE_SC=rook-ceph-block-replicated
         STORAGE_BACKING=rgw
         STORAGE_ENDPOINT=http://rook-ceph-rgw-datalake.rook-ceph:80
-        STORAGE_APPLY_GW=true
     elif "${KUBECTL[@]}" get sc local-path -o name > /dev/null 2>&1; then
         STORAGE_SC=local-path
         STORAGE_BACKING=seaweedfs
         STORAGE_ENDPOINT=http://seaweedfs.s3.svc.cluster.local:8333
-        STORAGE_APPLY_GW=false
     else
         die "profil de stockage indétectable : ni la SC 'rook-ceph-block-replicated' ni 'local-path' (socle monté ? cluster joignable ?)"
     fi
@@ -744,27 +741,17 @@ phase_metrics_server() {
 
 # ── Phase platform-prereqs — pré-requis transverses de la couche plateforme ──
 # Pose ce dont les addons plateforme ont besoin et que le bootstrap nu n'installe
-# pas : (1) les CRDs Gateway API — RÉAPPLIQUÉES ici par IDEMPOTENCE (la pose
-# PRIMAIRE est désormais au bootstrap, AVANT cni.sh : l'operator Cilium les exige
-# à son démarrage pour armer le contrôleur Gateway — drift L56, ADR 0006/0020) ;
-# (2) la config containerd « insecure registry » sur chaque nœud pour le registry
+# pas : la config containerd « insecure registry » sur chaque nœud pour le registry
 # interne HTTP (registry:80, ADR 0011) — sinon ImagePullBackOff « HTTP response
-# to HTTPS client » au pull des images applicatives.
+# to HTTPS client » au pull des images applicatives. (L'exposition des UI est en
+# L4 NodePort, ADR 0092 — plus de CRD Gateway API à poser.)
 phase_platform_prereqs() {
     preflight
     [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
 
-    # Réapplication idempotente (posées au bootstrap avant Cilium — drift L56).
-    log "Phase platform-prereqs — CRDs Gateway API (v${GWAPI_VERSION}, idempotent)"
-    local base="https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v${GWAPI_VERSION}/config/crd/standard"
-    local crd
-    for crd in gatewayclasses gateways httproutes referencegrants grpcroutes; do
-        "${KUBECTL[@]}" apply -f "${base}/gateway.networking.k8s.io_${crd}.yaml" > /dev/null \
-            || die "échec apply CRD Gateway API ${crd} (réseau ?)"
-    done
-    ok "CRDs Gateway API posées"
-
-    log "Configuration containerd insecure-registry (registry:80 HTTP) sur chaque nœud"
+    # Exposition L4 NodePort (ADR 0092) : plus de CRD Gateway API à poser — aucun
+    # objet Gateway/HTTPRoute n'est déployé (la bordure L7 est retirée).
+    log "Phase platform-prereqs — containerd insecure-registry (registry:80 HTTP) sur chaque nœud"
     configure_insecure_registry
 }
 
@@ -1062,9 +1049,8 @@ phase_dataops() {
 # Déploie le socle GitOps via bootstrap/gitops.yaml (ADR 0022/0044) : Gitea
 # (forge git intra-banc air-gapped) puis Argo CD (moteur). INFRA, posée par
 # Ansible (anti-bootstrap-circulaire). Profil banc atlas = local-path (ADR 0044,
-# pas de Ceph). L'UI Argo CD via Gateway exige cert-manager + CRDs Gateway API ;
-# sur le banc léger sans cert-manager, on n'applique PAS le Gateway
-# (argocd_apply_gateway=false) — la réconciliation GitOps reste prouvable sans UI.
+# pas de Ceph). L'UI Argo CD est exposée en L4 NodePort (ADR 0092), sans
+# dépendance cert-manager/Gateway — appliquée inconditionnellement.
 #
 # L'INIT du dépôt Gitea (org + repo + seed atlas + webhook) est l'étape suivante
 # (test e2e, #231) — hors de cette phase qui ne fait que poser le socle.
@@ -1074,18 +1060,13 @@ phase_gitops() {
     [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
     log "Phase gitops — socle GitOps via Ansible (Gitea → Argo CD)"
 
-    # storageClass du PVC Gitea + exposition UI : SUIVENT le profil DÉTECTÉ du
-    # cluster (comme dataops/monitoring). SC rook-ceph présente → Ceph + Gateway UI
-    # (cert-manager présent, posé par dataops) ; sinon local-path → léger, pas de
-    # Gateway (cert-manager non garanti).
-    # Profil DÉTECTÉ du cluster (ADR 0065 — plus de WITH_CEPH, #319/drift L44).
+    # storageClass du PVC Gitea : SUIT le profil DÉTECTÉ du cluster (comme
+    # dataops/monitoring). L'exposition UI est en NodePort (ADR 0092), sans drapeau.
     detect_storage_profile
-    log "  argocd_apply_gateway=${STORAGE_APPLY_GW}"
     KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
         "${REPO}/bootstrap/gitops.yaml" \
         -e dataops_k8s_host=localhost \
         -e "gitea_storage_class=${STORAGE_SC}" \
-        -e "argocd_apply_gateway=${STORAGE_APPLY_GW}" \
         || die "gitops.yaml : échec du déploiement du socle GitOps"
     ok "socle GitOps déployé (Ansible) — Gitea + Argo CD Ready"
 
@@ -1654,18 +1635,13 @@ run_ha_3cp() {
 # LB-IPAM du /24 du primaire ; fetch le kubeconfig local après.
 phase_ha_cni() {
     local vip_iface=$1
-    apply_gwapi_crds_in_vm "${CP}" "${GWAPI_VERSION}"
-    # Mode d'exposition UNIQUE (ADR 0020/0071 réécrit) : `gateway` en hostNetwork —
-    # l'Envoy du Gateway bind 80/443 sur l'IP du nœud, SANS LB-IPAM (le banc Lima n'a
-    # pas de plage L2 annonçable jetable). C'est le défaut. `none` n'arme aucune bordure.
-    # EXPOSITION_MODE vient de `topology.py up` (topo.exposition_mode, alias déjà résolus).
-    # LB-IPAM reste à 0 sur le banc (chemin prod optionnel, ADR 0071 §4).
-    local hostnet=1
-    [ "${EXPOSITION_MODE:-gateway}" = none ] && hostnet=0
-    run_cni "${CP}" \
-        "CILIUM_GATEWAY_HOSTNETWORK=${hostnet}" \
-        "CILIUM_LB_IPAM_ENABLED=0" \
-        "L2_INTERFACE=${vip_iface}"
+    # Exposition L4 NodePort (ADR 0092, supersede 0071) : plus de Gateway L7 ni
+    # LB-IPAM. cni.sh pose Cilium en L4 pur (NodePort en eBPF par kubeProxyReplacement)
+    # et retire tout CR d'exposition résiduel. Aucune variable d'exposition à passer ;
+    # les CRD Gateway API ne sont plus pré-installées (plus aucun objet Gateway).
+    # vip_iface (argument conservé pour la signature ha-cni) n'est plus utilisé ici.
+    : "${vip_iface:-}"
+    run_cni "${CP}"
     fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc
 }
 

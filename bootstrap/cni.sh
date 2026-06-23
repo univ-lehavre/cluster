@@ -21,38 +21,19 @@ CILIUM_POD_CIDR="${CILIUM_POD_CIDR:-10.244.0.0/16}"
 CILIUM_CLUSTER_NAME="${CILIUM_CLUSTER_NAME:-}"
 CILIUM_CLUSTER_ID="${CILIUM_CLUSTER_ID:-}"
 
-# ── Exposition tout-Cilium (ADR 0020/0071) ──────────────────────────────────
-# Mode UNIQUE par défaut : le Gateway est exposé en hostNetwork — l'Envoy bind
-# 80/443 DIRECTEMENT sur l'IP du nœud (0.0.0.0/::), SANS Service LoadBalancer
-# (mutuellement exclusif avec hostNetwork en 1.19 → pas de LB-IPAM requise). =1
-# (défaut) arme les flags Helm hostNetwork + pose le GatewayClass.
-CILIUM_GATEWAY_HOSTNETWORK="${CILIUM_GATEWAY_HOSTNETWORK:-1}"
-# LB-IPAM + L2 (chemin PROD OPTIONNEL, ADR 0071 §4) : IP virtuelle annoncée sur le
-# LAN, plage négociée avec l'admin réseau. =0 par défaut (hostNetwork ne le
-# requiert pas) ; =1 ré-arme l2announcements + pose CiliumLoadBalancerIPPool + L2.
-# `CILIUM_EXPO_ENABLED` reste accepté comme ALIAS rétrocompat (ancien nom : « pose
-# les CRs d'exposition »). S'il vaut 0, on n'arme NI hostNetwork NI LB-IPAM (none).
-CILIUM_LB_IPAM_ENABLED="${CILIUM_LB_IPAM_ENABLED:-0}"
-if [ "${CILIUM_EXPO_ENABLED:-}" = 0 ]; then
-  CILIUM_GATEWAY_HOSTNETWORK=0
-  CILIUM_LB_IPAM_ENABLED=0
-fi
+# ── Exposition L4 NodePort (ADR 0092, supersede ADR 0071) ────────────────────
+# Mode UNIQUE : exposition L4 par Service NodePort (http://<IP-nœud>:<nodePort>,
+# zéro DNS, zéro LB-IPAM, zéro Gateway). NodePort est servi en eBPF par
+# `kubeProxyReplacement=true` (posé plus bas) — AUCUN flag Helm ni CR n'est requis.
+# Le contrôleur Gateway API, le GatewayClass et le chemin LB-IPAM (Gateway L7
+# hostNetwork de l'ex-ADR 0071) sont RETIRÉS : plus de bordure L7, plus d'IP
+# virtuelle annoncée. Le poste opérateur atteint les nœuds → l'IP du nœud suffit.
 #
-# Les CRs (GatewayClass + éventuels CiliumLoadBalancerIPPool/L2 policy) sont
-# générés INLINE (heredoc) car cni.sh tourne DANS la VM sans le repo monté —
-# platform/cilium-expo/*.yaml restent la référence documentaire versionnée.
-# Plage et interface DÉRIVÉES de l'environnement (ADR 0023) — l'appelant injecte
-# le concret (banc Lima vs prod) ; pertinents UNIQUEMENT si LB-IPAM=1. Le pool
-# DOIT être dans le même sous-réseau L2 que les nœuds (annonce = ARP).
-# Hubble UI (ADR 0073) : OPT-IN, désactivé par défaut (=0) — l'ADR 0019 excluait
-# l'UI (surface web sans valeur mono-admin) ; 0073 la rend activable sans la rendre
-# défaut. =1 ajoute le sous-chart hubble-ui à la release Cilium (même version, même
-# ns kube-system). Exposition via Gateway (platform/cilium-expo/), jamais en Service brut.
+# Bascule depuis un cluster ex-LB-IPAM/Gateway (ex. dirqual) : cni.sh est ADDITIF
+# (Helm/kubectl apply) — il ne supprime pas les CR d'un mode précédent. On RETIRE
+# donc explicitement (best-effort, --ignore-not-found) le pool/L2/GatewayClass
+# résiduels, pour une bascule propre sur cluster vivant (corriger le code, ADR 0046).
 HUBBLE_UI_ENABLED="${HUBBLE_UI_ENABLED:-0}"
-LB_IPAM_RANGE_START="${LB_IPAM_RANGE_START:-10.0.0.240}"
-LB_IPAM_RANGE_STOP="${LB_IPAM_RANGE_STOP:-10.0.0.250}"
-L2_INTERFACE="${L2_INTERFACE:-eth0}"
-GATEWAY_CLASS_NAME="${GATEWAY_CLASS_NAME:-cilium}"
 
 # --- Installer le CLI cilium (idempotent) ---------------------------------
 if command -v cilium > /dev/null 2>&1; then
@@ -92,10 +73,13 @@ fi
 #
 # Exposition réseau tout-Cilium (ADR 0020). Cilium remplace MetalLB ET
 # ingress-nginx : kube-proxy replacement (datapath eBPF), LB-IPAM + L2
-# announcements (IP LoadBalancer + annonce ARP), Gateway API (bordure L7). Les
-# pools/policies/Gateway sont des CRs versionnés sous platform/cilium-expo/ ;
-# ici on n'arme que les FEATURES côté agent. Appliqué à l'install ET à l'upgrade
-# → convergent en rejouant le script (même invariant que le durcissement 0019).
+# announcements (IP LoadBalancer + annonce ARP), Gateway API (bordure L7). Ici on
+# n'arme que les FEATURES côté agent. Appliqué à l'install ET à l'upgrade →
+# convergent en rejouant le script (même invariant que le durcissement 0019).
+# NB : les UI ne passent plus par le Gateway L7 — elles sont exposées en L4
+# (NodePort/hostPort sur l'IP du nœud, ADR 0092) ; LB-IPAM/Gateway restent des
+# features Cilium disponibles (chemin de prod optionnel), mais le dossier de CRs
+# platform/cilium-expo/ a été retiré avec la bascule L4.
 CILIUM_ARGS=(
   --version "${CILIUM_VERSION}"
   --set ipam.operator.clusterPoolIPv4PodCIDRList="${CILIUM_POD_CIDR}"
@@ -117,39 +101,11 @@ CILIUM_ARGS=(
   --set kubeProxyReplacement=true
   --set k8sServiceHost=cluster-api
   --set k8sServicePort=6443
-  # Gateway API (remplace ingress-nginx). Active enable-envoy-config ; l7Proxy
-  # est déjà à true par défaut. Les CRDs Gateway API (v1.4.1) sont pré-installés
-  # par platform/cilium-expo/ (Cilium ne les embarque pas). On n'active PAS
-  # ingressController.enabled (API Ingress historique, distincte).
-  --set gatewayAPI.enabled=true
+  # Exposition L4 (ADR 0092) : NodePort est servi en eBPF par kubeProxyReplacement
+  # ci-dessus. AUCUN flag Gateway API (gatewayAPI.enabled / hostNetwork) ni LB-IPAM
+  # (l2announcements) — la bordure L7 et l'IP virtuelle de l'ex-ADR 0071 sont retirées.
+  # ingressController.enabled n'est pas non plus posé (API Ingress historique).
 )
-# ── Gateway en hostNetwork (ADR 0071) : l'Envoy du Gateway bind 80/443 sur l'IP
-# du nœud (0.0.0.0/::), pas de Service LoadBalancer (désactivé automatiquement par
-# hostNetwork en 1.19 → pas de LB-IPAM requise). Ports privilégiés 80/443 : DEUX
-# réglages (keepCapNetBindService + ajout de NET_BIND_SERVICE aux capabilities).
-# À VÉRIFIER AU BANC : chemin envoy.* (Envoy standalone DaemonSet `cilium-envoy`)
-# vs ciliumAgent.* (Envoy embedded dans l'agent). On pose envoy.* (probable en
-# 1.19.4) ; si le bind 80/443 échoue, sonder `kubectl get ds -n kube-system
-# cilium-envoy` et basculer sur securityContext.capabilities.ciliumAgent.
-if [ "${CILIUM_GATEWAY_HOSTNETWORK}" = 1 ]; then
-  CILIUM_ARGS+=(
-    --set gatewayAPI.hostNetwork.enabled=true
-    --set envoy.securityContext.capabilities.keepCapNetBindService=true
-    --set "envoy.securityContext.capabilities.add={NET_BIND_SERVICE}"
-  )
-fi
-# ── LB-IPAM + L2 announcements (chemin PROD OPTIONNEL, ADR 0071 §4) : seulement
-# si CILIUM_LB_IPAM_ENABLED=1. LB-IPAM n'a pas de flag (actif dès qu'un
-# CiliumLoadBalancerIPPool existe) ; L2 crée un Lease par Service LB renouvelé en
-# continu → relever k8sClientRateLimit (défauts 5-10 QPS vite saturés ; qps/burst
-# dimensionnés ~250 services LB). L2 = BETA en 1.19.
-if [ "${CILIUM_LB_IPAM_ENABLED}" = 1 ]; then
-  CILIUM_ARGS+=(
-    --set l2announcements.enabled=true
-    --set k8sClientRateLimit.qps=50
-    --set k8sClientRateLimit.burst=100
-  )
-fi
 # Hubble UI (ADR 0073) : posé UNIQUEMENT si HUBBLE_UI_ENABLED=1 (opt-in, défaut 0).
 # Même release/version Cilium que hubble.relay → pas de dispersion de versions
 # (ADR 0019/0020). Convergent : rejouer cni.sh avec/ sans le flag aligne la ConfigMap.
@@ -201,66 +157,20 @@ else
   exit 1
 fi
 
-# ─── Exposition tout-Cilium : application des CRs (ADR 0020/0071) ───────────
-# GatewayClass : posée dès qu'une exposition est armée (hostNetwork OU LB-IPAM) —
-# le contrôleur Gateway en a besoin dans les DEUX chemins (#232, scénario 28).
-# CiliumLoadBalancerIPPool + CiliumL2AnnouncementPolicy : UNIQUEMENT en chemin
-# LB-IPAM (inutiles en hostNetwork, où l'Envoy bind l'IP du nœud — ADR 0071).
-# APRÈS convergence Cilium (CRDs/contrôleurs prêts). Idempotent (kubectl apply).
-#
-# apiVersions (alignées Cilium 1.19) — pièges :
-#   - CiliumLoadBalancerIPPool : cilium.io/v2 (PROMU en 1.19) ;
-#   - CiliumL2AnnouncementPolicy : cilium.io/v2alpha1 (RESTE alpha) ;
-#   - GatewayClass : gateway.networking.k8s.io/v1 (GA), controllerName EXACT
-#     io.cilium/gateway-controller.
-if [ "${CILIUM_GATEWAY_HOSTNETWORK}" = 1 ] || [ "${CILIUM_LB_IPAM_ENABLED}" = 1 ]; then
-  echo "Application du GatewayClass (classe ${GATEWAY_CLASS_NAME})…"
-  kubectl apply -f - <<EOF
-apiVersion: gateway.networking.k8s.io/v1
-kind: GatewayClass
-metadata:
-  name: ${GATEWAY_CLASS_NAME}
-spec:
-  controllerName: io.cilium/gateway-controller
-EOF
-  echo "✓ GatewayClass appliqué."
-else
-  echo "ℹ️  exposition désactivée (none) — GatewayClass NON appliqué."
-fi
-
-# LB-IPAM + L2 : seulement en chemin prod optionnel (ADR 0071 §4).
-if [ "${CILIUM_LB_IPAM_ENABLED}" = 1 ]; then
-  echo "Application des CRs LB-IPAM + L2…"
-  echo "  pool ${LB_IPAM_RANGE_START}-${LB_IPAM_RANGE_STOP}, L2 sur ${L2_INTERFACE}"
-  kubectl apply -f - <<EOF
-apiVersion: cilium.io/v2
-kind: CiliumLoadBalancerIPPool
-metadata:
-  name: default-pool
-spec:
-  blocks:
-    - start: "${LB_IPAM_RANGE_START}"
-      stop: "${LB_IPAM_RANGE_STOP}"
----
-apiVersion: cilium.io/v2alpha1
-kind: CiliumL2AnnouncementPolicy
-metadata:
-  name: default-l2
-spec:
-  serviceSelector:
-    matchLabels: {}
-  nodeSelector:
-    matchExpressions:
-      - key: node-role.kubernetes.io/control-plane
-        operator: DoesNotExist
-  interfaces:
-    - "^${L2_INTERFACE}\$"
-  loadBalancerIPs: true
-EOF
-  echo "✓ CRs LB-IPAM + L2 appliqués."
-else
-  echo "ℹ️  LB-IPAM désactivé (chemin par défaut hostNetwork) — pool/L2 NON appliqués."
-fi
+# ─── Bascule vers L4 pur : retrait des CR d'exposition résiduels (ADR 0092) ──
+# cni.sh est ADDITIF — il ne supprime pas les objets d'un mode précédent. Sur un
+# cluster monté en ex-Gateway/LB-IPAM (ADR 0071), on retire explicitement le
+# GatewayClass, le CiliumLoadBalancerIPPool et la CiliumL2AnnouncementPolicy
+# par défaut pour une bascule PROPRE (corriger le code, pas l'état — ADR 0046).
+# Best-effort (--ignore-not-found) : sur un cluster monté nativement en L4, il n'y
+# a rien à retirer. Les CRD Gateway peuvent rester (inoffensives, plus aucun
+# Gateway/HTTPRoute ne les utilise). L'exposition se fait par Service NodePort,
+# appliqué par les rôles plateforme (platform/*/nodeport.yaml).
+echo "Retrait des CR d'exposition L7/LB-IPAM résiduels (bascule L4, ADR 0092)…"
+kubectl delete ciliumloadbalancerippool default-pool --ignore-not-found 2>/dev/null || true
+kubectl delete ciliuml2announcementpolicy default-l2 --ignore-not-found 2>/dev/null || true
+kubectl delete gatewayclass cilium --ignore-not-found 2>/dev/null || true
+echo "✓ exposition L4 NodePort (aucun Gateway, aucun pool LB-IPAM)."
 
 # ─── Retrait de kube-proxy (ADR 0020) ──────────────────────────────────────
 # ORDRE OBLIGATOIRE : on ne retire kube-proxy qu'APRÈS avoir vérifié que Cilium
