@@ -1,108 +1,143 @@
 #!/usr/bin/env bash
 #
-# Scénario 28 — PORTAIL : les UI exposées répondent-elles via le Gateway ? (#232)
+# Scénario 28 — PORTAIL : les UI exposées répondent-elles via le NodePort L4 ? (#232, ADR 0092)
 #
-# Un portail à liens morts est pire qu'aucun portail. Ce scénario découvre les
-# HTTPRoute RÉELLEMENT posés (état du cluster, pas le contrat — robuste, sans yq)
-# et vérifie que chaque hostname répond À TRAVERS le Gateway Cilium (HTTPRoute +
-# TLS bordure cert-manager). C'est le chemin exact qu'un lien du portail emprunte.
+# Un portail à liens morts est pire qu'aucun portail. Depuis l'ADR 0092 l'exposition
+# n'est plus L7 (Gateway/HTTPRoute/SNI, TLS de bordure) mais L4 : chaque UI exposée
+# est servie par un Service `type: NodePort` sur `http://<IP-nœud>:<nodePort>` (zéro
+# DNS, zéro LB-IPAM, zéro Gateway dans le chemin). Ce scénario suit EXACTEMENT le
+# data path d'un lien du portail :
 #
-# Les hostnames `*.cluster.lan` sont des PLACEHOLDERS non résolus en DNS cluster
-# (l'admin réseau pose les vrais) : on sonde donc l'IP qui sert le Gateway via
-# `curl --resolve host:443:IP` qui pose à la fois le SNI TLS ET l'en-tête Host
-# (le Gateway Envoy choisit le certificat par SNI — sans SNI il RESET). En mode
-# `gateway`-hostNetwork (ADR 0071), l'Envoy bind 80/443 sur l'IP DU NŒUD (plus de
-# Service LoadBalancer) → on sonde l'InternalIP du control-plane. TLS auto-signé
-# toléré (CA interne). « Atteignable » = code < 400, ou 401/403 (protégé mais
-# vivant) — cf. classify_ui_http. Échec = timeout, 404 (route morte), 5xx.
+#   1. itère sur les endpoints `exposed: true` du CONTRAT (source de vérité unique,
+#      contract/endpoints.example.yaml — lu via yq) ;
+#   2. pour chacun, trouve le Service NodePort (`<service>-nodeport`, ou `portal`
+#      lui-même qui EST un NodePort) et lit son `nodePort` RÉEL (spec.ports[].nodePort,
+#      attribué par k8s dans 30000-32767 — jamais figé, ADR 0092) ;
+#   3. sonde `http://<IP-interne-nœud>:<nodePort>/` depuis un pod ÉPHÉMÈRE DANS le
+#      cluster (les nodePort répondent aussi NodeIP-interne→endpoints en eBPF Cilium,
+#      kubeProxyReplacement) — pas de dépendance au réseau du poste de contrôle.
 #
-# C'est aussi la preuve du MULTIPLEXAGE SNI : plusieurs HTTPRoute (grafana, argocd,
-# gitea…) partagent le 443 du nœud, chacun routé par hostname (ADR 0071 §risque 2).
+# « Atteignable » = curl rend un code HTTP != 000 : le data path L4 répond (le backend
+# a parlé HTTP). On ne juge PAS le code applicatif (200/302/401/403…) : en L4 il n'y a
+# plus de Gateway à blâmer, seul le chemin TCP→HTTP compte. 000 = pas de réponse
+# (timeout/RST) = NodePort mort.
 #
-# INDÉPENDANT du déploiement. SKIP NEUTRE si aucun HTTPRoute — sauf STRICT_UI=1.
+# CAS HTTPS : kubernetes-dashboard sert l'UI derrière Kong qui TERMINE le TLS
+# (8443) ; son NodePort expose donc du HTTPS. On le sonde en `https://` + `-k`
+# (cert auto-signé). Les autres UI sont en HTTP clair (ADR 0092 §2 : perte assumée
+# du TLS de bordure).
 #
-# Variables : STRICT_UI=1 (échoue si aucune UI), GATEWAY_NS/GATEWAY_NAME (auto-détectés).
+# INDÉPENDANT du déploiement. SKIP NEUTRE si aucun endpoint `exposed: true` n'a son
+# Service NodePort posé — sauf STRICT_UI=1.
+#
+# Variables : STRICT_UI=1 (échoue si aucune UI atteignable), CONTRACT (chemin du contrat).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 STRICT_UI=${STRICT_UI:-0}
+CONTRACT=${CONTRACT:-../../contract/endpoints.example.yaml}
 
 # shellcheck source=bench/scenarios/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# shellcheck source=bench/lima/ui-assert.sh
-. ../lima/ui-assert.sh
+if [ ! -f "${CONTRACT}" ]; then
+    log "✗ contrat introuvable : ${CONTRACT}"
+    exit 1
+fi
 
-# Liste les HTTPRoute (tous namespaces) sous forme "ns/route hostname".
-routes=$(kubectl get httproute -A \
-    -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{" "}{.spec.hostnames[0]}{"\n"}{end}' 2>/dev/null \
-    | awk 'NF==2')
+# IP INTERNE d'un nœud Ready : cible des NodePort, identique pour toutes les UI
+# (un NodePort répond sur n'importe quel nœud). Sondée depuis un pod, donc l'IP
+# interne du cluster suffit (pas besoin de l'IP routable du poste de contrôle).
+node_ip=$(kubectl get nodes \
+    -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+if [ -z "${node_ip}" ]; then
+    log "✗ aucune InternalIP de nœud — cluster injoignable ?"
+    exit 1
+fi
 
-if [ -z "${routes}" ]; then
+# Endpoints exposés du contrat : "service<TAB>namespace<TAB>id".
+exposed=$(yq -r \
+    '.endpoints[] | select(.exposed == true) | [.service, .namespace, .id] | @tsv' \
+    "${CONTRACT}" 2>/dev/null)
+
+if [ -z "${exposed}" ]; then
     if [ "${STRICT_UI}" = 1 ]; then
-        log "✗ STRICT_UI=1 et aucun HTTPRoute trouvé — les UI ne sont pas exposées."
+        log "✗ STRICT_UI=1 et aucun endpoint exposed:true au contrat."
         exit 1
     fi
-    log "skip — aucun HTTPRoute (UI non exposées ; poser les Gateway après cert-manager)."
+    log "skip — aucun endpoint exposed:true au contrat (UI non exposées en L4)."
     exit 0
 fi
-log "✓ HTTPRoute découverts :"
-printf '%s\n' "${routes}" | sed 's/^/    /'
 
-# IP servant le Gateway. En mode hostNetwork (ADR 0071, défaut), l'Envoy bind sur
-# l'IP du nœud → InternalIP du control-plane (la même pour TOUS les hostnames :
-# c'est le 443 partagé qui multiplexe par SNI). En chemin LB-IPAM optionnel
-# (CILIUM_LB_IPAM_ENABLED=1), on retombe sur l'IP LoadBalancer du Service Gateway.
-# Calculée UNE fois (indépendante du ns en hostNetwork).
-gw_ip() {
-    local ns=$1 ip
-    # 1) hostNetwork : IP du nœud control-plane (cas par défaut).
-    ip=$(kubectl get nodes -l node-role.kubernetes.io/control-plane \
-        -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
-    [ -n "${ip}" ] && { printf '%s\n' "${ip}"; return; }
-    # 2) repli LB-IPAM : 1re IP d'un Service LoadBalancer du ns du Gateway.
-    kubectl -n "${ns}" get svc -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.status.loadBalancer.ingress[0].ip}{"\n"}{end}' 2>/dev/null \
-        | grep -E '^[0-9]' | head -1
+# nodeport_svc SERVICE — nom du Service NodePort pour un service du contrat.
+# Convention ADR 0092 : un Service séparé `<service>-nodeport` (ne touche pas le
+# bundle vendored). EXCEPTION portal : son propre Service `portal` EST déjà un
+# NodePort (brique maison) — pas de suffixe.
+nodeport_svc() {
+    case "$1" in
+        portal) printf 'portal\n' ;;
+        *) printf '%s-nodeport\n' "$1" ;;
+    esac
 }
 
-fails=0 total=0
-while read -r nsroute host; do
-    [ -n "${host}" ] || continue
+fails=0 total=0 found=0
+while IFS=$'\t' read -r service ns id; do
+    [ -n "${service}" ] || continue
     total=$((total + 1))
-    ns=${nsroute%%/*}
-    ip=$(gw_ip "${ns}")
-    if [ -z "${ip}" ]; then
-        log "$(classify_ui_http "${host}" "" | sed 's/^[^|]*|//') (pas d'IP nœud/LB pour ${ns})"
-        fails=$((fails + 1)); continue
+    svc=$(nodeport_svc "${service}")
+
+    # nodePort RÉEL attribué par k8s (jamais figé, ADR 0092).
+    nodeport=$(kubectl -n "${ns}" get svc "${svc}" \
+        -o 'jsonpath={.spec.ports[0].nodePort}' 2>/dev/null)
+    if [ -z "${nodeport}" ]; then
+        # Service NodePort absent (UI non déployée ou pas encore exposée) — pas
+        # un échec dur : le contrat couvre tous les profils, ce déploiement peut
+        # ne pas porter cette UI.
+        log "· ${id} : Service NodePort ${ns}/${svc} absent — ignoré (UI non déployée)."
+        continue
     fi
-    # Sonde HTTPS via l'IP du Gateway. INDISPENSABLE : envoyer le SNI TLS =
-    # hostname (curl --resolve host:443:IP), pas seulement l'en-tête Host HTTP.
-    # Le Gateway Envoy sélectionne le certificat par SNI ; sans SNI, il RESET le
-    # handshake (faux négatif). busybox wget ne pose pas le SNI → on utilise curl
-    # (--resolve = SNI + Host + cert matching). TLS auto-signé toléré (-k, CA
-    # interne). Code HTTP via -w. (Bug historique : wget --header Host = pas de
-    # SNI → « Connection reset » alors que curl --resolve donne 200.)
+    found=$((found + 1))
+
+    # Schéma : k8s-dashboard est en HTTPS (Kong termine le TLS) → https + -k.
+    scheme=http; insecure=
+    if [ "${id}" = k8s-dashboard-ui ]; then
+        scheme=https; insecure=-k
+    fi
+    url="${scheme}://${node_ip}:${nodeport}/"
+
+    # Sonde DANS le cluster depuis un pod éphémère : le data path L4 (NodeIP:nodePort
+    # → endpoints, eBPF Cilium) répond aussi en interne. alpine/curl rend le code
+    # HTTP, 000 si pas de réponse (timeout/RST).
+    # shellcheck disable=SC2086
     code=$(kubectl -n "${ns}" run ui-probe-$$-"${RANDOM}" --rm -i --restart=Never \
         --image=alpine/curl --quiet --command -- \
-        curl -sk -o /dev/null -w '%{http_code}' --max-time 12 \
-        --resolve "${host}:443:${ip}" "https://${host}/" 2>/dev/null \
+        curl -s ${insecure} -o /dev/null -w '%{http_code}' --max-time 12 "${url}" 2>/dev/null \
         | grep -oE '[0-9]+' | head -1)
-    verdict=$(classify_ui_http "${host}" "${code}")
-    if [ "${verdict%%|*}" = ok ]; then
-        log "✓ ${verdict#*|}"
+    code=${code:-000}
+
+    if [ "${code}" != 000 ]; then
+        log "✓ ${id} : HTTP ${code} sur ${url} — NodePort L4 atteignable."
     else
-        log "✗ ${verdict#*|}"
+        log "✗ ${id} : aucune réponse (000) sur ${url} — NodePort L4 mort."
         fails=$((fails + 1))
     fi
 done <<EOF
-${routes}
+${exposed}
 EOF
 
 echo
+if [ "${found}" -eq 0 ]; then
+    if [ "${STRICT_UI}" = 1 ]; then
+        log "✗ STRICT_UI=1 et aucun Service NodePort d'UI posé — UI non exposées."
+        exit 1
+    fi
+    log "skip — aucun Service NodePort d'UI posé (UI non exposées sur ce déploiement)."
+    exit 0
+fi
 if [ "${fails}" -eq 0 ]; then
-    log "🎉 ${total} UI atteignable(s) via le Gateway — liens de portail fonctionnels."
+    log "🎉 ${found}/${total} UI atteignable(s) en NodePort L4 — liens de portail fonctionnels."
 else
-    log "✗ ${fails}/${total} UI non atteignable(s) — voir ci-dessus."
+    log "✗ ${fails}/${found} UI non atteignable(s) — voir ci-dessus."
     exit 1
 fi

@@ -293,12 +293,11 @@ component_targeted() {
             # du PRODUCTEUR (n'existe QU'en Ceph ; en local-path c'est SeaweedFS, pas
             # d'OBC). component_profile=ceph le filtre hors du graphe local-path.
             printf -- '-n rook-ceph objectbucketclaim.objectbucket.io mlflow-artifacts\n' ;;
-        gitea)
-            printf -- '-n gitea httproute.gateway.networking.k8s.io gitea\n'
-            printf -- '-n gitea gateway.gateway.networking.k8s.io gitea\n' ;;
+        # gitea/argocd : depuis la bascule L4 (ADR 0092) les UI sont des Services
+        # NodePort dans le ns du composant (plus de HTTPRoute/Gateway — gateway.yaml
+        # retirés). Ces Services sont GC par la suppression du ns que gitea/argocd
+        # POSSÈDENT (component_namespace) → aucun targeted L4 à émettre.
         argocd)
-            printf -- '-n argocd httproute.gateway.networking.k8s.io argocd-server\n'
-            printf -- '-n argocd gateway.gateway.networking.k8s.io argocd\n'
             printf -- '-n argocd appproject.argoproj.io atlas\n' ;;
         gitops-seed)
             # Application `atlas-workflows` (PAS `atlas` = l'AppProject, cf. composant argocd).
@@ -411,7 +410,7 @@ component_deps() {
         # + artefact store S3 (s3-backing-mlflow, résout $S3 = datalake|seaweedfs) + une
         # IMAGE MAISON (officielle + psycopg2, le driver PostgreSQL manque à l'officielle)
         # → registry + build-images requis AVANT mlflow (push/pull registry:80/mlflow),
-        # comme dagster/marquez. Le ns mlflow n'expose pas d'UI Gateway TLS dans le graphe banc.
+        # comme dagster/marquez. Le ns mlflow n'expose pas d'UI L4 dans le graphe banc.
         mlflow)           printf 'cnpg-cluster-pg s3-backing-mlflow registry build-images\n' ;;
         gitea)            printf 'cert-manager gateway-api %s\n' "$SC" ;;
         argocd)           printf 'cert-manager gateway-api gitea\n' ;;
