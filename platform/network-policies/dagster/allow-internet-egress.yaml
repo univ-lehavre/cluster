@@ -1,8 +1,15 @@
-# Egress Internet (HTTPS/HTTP sortant) pour les run workers Dagster qui
-# synchronisent un snapshot de données ouvert depuis un store objet public
-# (ex. `aws s3 sync s3://<bucket-public> … --no-sign-request`, AWS Open Data).
-# Sans ce flux, le sync timeout sous default-deny (ADR 0019) : le ns `dagster`
-# n'a d'egress que vers DNS / api-server / Postgres / registry / Marquez.
+# Egress Internet (HTTPS/HTTP sortant) pour les run workers Dagster qui ingèrent
+# des données ouvertes par pull HTTP depuis des hôtes publics, p.ex. :
+#   - `aws s3 sync s3://<bucket-public> … --no-sign-request` (AWS Open Data) ;
+#   - le GKG 15 min de GDELT (`data.gdeltproject.org`) + un dump de référentiel
+#     ouvert type ROR (Zenodo) — collecte « veille médiatique » mediawatch (#471).
+# Sans ce flux, le pull timeout sous default-deny (ADR 0019) : le ns `dagster`
+# n'a d'egress que vers DNS / api-server / Postgres / registry / Marquez / MLflow.
+#
+# CHOIX (egress LARGE assumé, #471) : on NE crée PAS de CiliumNetworkPolicy FQDN
+# par destination (GDELT/Zenodo). Ces hôtes n'ont pas d'IP fixe et le FQDN-filtering
+# Cilium ajoute de la complexité pour un gain marginal sur réseau privé (ADR 0003).
+# La borne de sécurité reste les PORTS (443/80) + le ns unique `dagster`.
 #
 # Idiome du dépôt : `ipBlock: 0.0.0.0/0` RESTREINT PAR PORTS (calque
 # argocd/allow-reposerver-egress, cf. ../argocd/allow-egress.yaml). On NE filtre
