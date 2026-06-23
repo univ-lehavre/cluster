@@ -69,6 +69,14 @@ spec:
         ensure: present
         passwordSecret:
           name: pg-role-mlflow
+      # Cache partagé des flux atlas (ADR 0093) : backing service réutilisant CNPG.
+      # passwordSecret OBLIGATOIRE (un rôle managé sans lui = rolpassword NULL,
+      # connexion impossible).
+      - name: cache
+        login: true
+        ensure: present
+        passwordSecret:
+          name: pg-role-cache
   # Sauvegardes/WAL archivés via le plugin Barman Cloud (TLS plugin<->operator par
   # cert-manager). L'ObjectStore S3 est défini dans objectstore.yaml.
   plugins:
