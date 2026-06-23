@@ -59,6 +59,7 @@ class Entry:
     namespace: str
     verdict: str
     ui_url: str | None  # http://<node_ip>:<node_port> si exposé en NodePort, sinon None
+    login: str | None  # identifiant à saisir (affiché), None si auth=none/token
     secret_cmd: str | None  # commande kubectl pour le credential, None si auth=none
     note: str = ""
 
@@ -113,6 +114,7 @@ def _secret_ref(endpoint: dict, secrets: dict | None) -> tuple[str, str]:
         "argocd-ui": ("argocd-initial-admin-secret", "password"),
         "gitea-ui": ("gitea-admin", "password"),
         "grafana-ui": ("kube-prometheus-stack-grafana", "admin-password"),
+        "ceph-dashboard-ui": ("rook-ceph-dashboard-password", "password"),
     }
     if sid in known:
         return known[sid]
@@ -123,13 +125,46 @@ def _secret_ref(endpoint: dict, secrets: dict | None) -> tuple[str, str]:
     return ("<secret>", "password")
 
 
-def _ui_url(observed: Observed) -> str | None:
-    """URL cliquable de l'UI en L4 (ADR 0092) : http://<IP-nœud>:<nodePort observé>.
+# Logins connus par convention (l'identifiant à saisir à côté du mot de passe).
+# Le contrat peut surcharger via le champ `login`; sinon on dérive par id/auth.
+_KNOWN_LOGIN = {
+    "argocd-ui": "admin",
+    "grafana-ui": "admin",
+    "gitea-ui": "gitea_admin",
+    "ceph-dashboard-ui": "admin",
+}
 
-    None si le Service n'est pas exposé en NodePort (pas de `node_port`) ou si l'IP
-    d'un nœud est inconnue : on n'invente jamais d'URL, on n'affiche que l'observé."""
+
+def login_for(endpoint: dict) -> str | None:
+    """Identifiant (login) à saisir pour un endpoint, ou None si sans objet.
+
+    Le mot de passe se récupère par `secret_command` (jamais sa valeur) ; le login,
+    lui, n'est pas un secret — on l'AFFICHE. Source : champ `login` du contrat s'il
+    existe, sinon convention connue (admin/gitea_admin…), sinon le rôle pour CNPG.
+    `auth: none` → None. `token` : pas de login (le jeton EST l'identité)."""
+    auth = endpoint.get("auth", "none")
+    if auth in (None, "none", "token"):
+        return None
+    if endpoint.get("login"):
+        return str(endpoint["login"])
+    sid = endpoint.get("id", "")
+    if sid in _KNOWN_LOGIN:
+        return _KNOWN_LOGIN[sid]
+    if auth == "secret-role":
+        # Rôle CNPG : le login EST le nom du rôle (basic-auth pg).
+        return endpoint.get("role", "<rôle>")
+    return None
+
+
+def _ui_url(observed: Observed, scheme: str = "http") -> str | None:
+    """URL cliquable de l'UI en L4 (ADR 0092) : <scheme>://<IP-nœud>:<nodePort observé>.
+
+    `scheme` = http par défaut ; https si l'UI termine elle-même le TLS (ex. dashboard
+    Ceph mgr sur 8443, déclaré `scheme: https` au contrat). None si le Service n'est pas
+    exposé en NodePort (pas de `node_port`) ou si l'IP d'un nœud est inconnue : on
+    n'invente jamais d'URL, on n'affiche que l'observé."""
     if observed.node_port and observed.node_ip:
-        return f"http://{observed.node_ip}:{observed.node_port}"
+        return f"{scheme}://{observed.node_ip}:{observed.node_port}"
     return None
 
 
@@ -185,7 +220,8 @@ def build_view(
                 service=svc,
                 namespace=ns,
                 verdict=_verdict(ep, obs, target_is_prod=target_is_prod),
-                ui_url=_ui_url(obs),
+                ui_url=_ui_url(obs, ep.get("scheme", "http")),
+                login=login_for(ep),
                 secret_cmd=secret_command(ep, secrets),
                 note=ep.get("note", "") or "",
             )
@@ -200,6 +236,7 @@ def build_view(
                 namespace=ex.get("namespace", ""),
                 verdict=EXTRA,
                 ui_url=_ui_url(Observed(node_port=ex.get("node_port"), node_ip=ex.get("node_ip"))),
+                login=None,
                 secret_cmd=None,
                 note="exposé/observé mais absent du contrat",
             )
@@ -247,6 +284,8 @@ section h2{letter-spacing:.04em}
 .badge.drift{background:#fff3cd;color:#9a6700}
 .badge.extra{background:#e7e0fb;color:#5a32a3}
 .note{color:#666;font-size:.82rem;margin:.2rem 0 0}
+.login{font-size:.82rem;color:#444;margin:.3rem 0 0}
+.login code{background:#eee;padding:.05rem .3rem;border-radius:3px}
 .secret{margin:.3rem 0 0}
 .secret code{display:block;background:#1e1e1e;color:#d4d4d4;padding:.4rem .6rem}
 .secret code{border-radius:4px;font-size:.78rem;overflow-x:auto;white-space:pre}
@@ -275,9 +314,12 @@ def _render_entry(e: Entry) -> str:
     parts = [f'<div class="entry">{title}{badge}']
     if e.note:
         parts.append(f'<p class="note">{_esc(e.note)}</p>')
+    if e.login:
+        parts.append(f'<p class="login">identifiant : <code>{_esc(e.login)}</code></p>')
     if e.secret_cmd:
+        label = "mot de passe" if e.login else "credential"
         parts.append(
-            f'<div class="secret"><span>credential :</span><code>{_esc(e.secret_cmd)}</code></div>'
+            f'<div class="secret"><span>{label} :</span><code>{_esc(e.secret_cmd)}</code></div>'
         )
     parts.append("</div>")
     return "".join(parts)

@@ -33,6 +33,11 @@
         namespace: '{{ portal_namespace }}'
         src: '{{ platform_repo_dir }}/platform/network-policies/portal/portal-netpol.yaml'
 
+    # NB tag mutable : l'image registry:80/portal:dev a un tag MUTABLE (le code/contrat
+    # embarqué évolue). Un apply qui ne change pas le Deployment NE recrée PAS le pod →
+    # après un rebuild de l'image, relancer manuellement `kubectl -n portal rollout restart
+    # deploy/portal` pour tirer la dernière (on ne le force PAS ici : un restart horodaté
+    # casserait l'idempotence du rejeu, ADR 0052 ; le rebuild from-scratch recrée le pod).
     - name: Wait for the portal to be Ready
       kubernetes.core.k8s_info:
         kind: Deployment

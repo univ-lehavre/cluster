@@ -75,7 +75,15 @@ def observe_cluster(endpoints: list[dict], apis=None) -> dict[tuple[str, str], p
         ns, svc = ep.get("namespace", ""), ep.get("service", "")
         if not ns or not svc:
             continue
+        # Présence + nodePort du Service du contrat (`svc`). Le nodePort peut y vivre
+        # directement (brique maison exposée en NodePort, ex. portal) OU sur un Service
+        # d'exposition SÉPARÉ `<svc>-nodeport` (UI vendored — ADR 0092 : on ne touche
+        # pas le ClusterIP du chart, on pose un NodePort à côté). On lit donc le port
+        # sur `svc` ET, à défaut, sur `<svc>-nodeport`.
         present, node_port = _service_state(core_v1, ns, svc)
+        if node_port is None:
+            _np_present, np = _service_state(core_v1, ns, f"{svc}-nodeport")
+            node_port = np
         ready = present and _endpoints_ready(discovery, ns, svc)
         observed[(ns, svc)] = portal.Observed(
             present=present,
@@ -88,7 +96,7 @@ def observe_cluster(endpoints: list[dict], apis=None) -> dict[tuple[str, str], p
 
 def _service_state(core_v1, ns: str, svc: str) -> tuple[bool, int | None]:
     """(présent, nodePort) d'un Service. nodePort = le premier port type=NodePort
-    attribué (ADR 0092), None si le Service n'est pas exposé en NodePort."""
+    attribué (ADR 0092), None si le Service n'est pas exposé en NodePort ou absent."""
     from kubernetes.client.exceptions import ApiException
 
     try:

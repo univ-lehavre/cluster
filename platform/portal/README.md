@@ -38,15 +38,22 @@ Ready. La logique est pure et testée (`nestor/portal.py`,
 
 ## Déploiement
 
+Par le **rôle Ansible** `platform-portal` (chemin codé, ADR 0046) — build de
+l'image node-side + RBAC + Deployment + Service NodePort + NetworkPolicies +
+gate Ready :
+
 ```bash
-# 1. image (depuis la racine — contexte = dépôt, contrat embarqué)
-nerdctl build -f platform/portal/image/Dockerfile -t registry:80/portal:dev . && \
-  nerdctl push registry:80/portal:dev
-# 2. RBAC + Deployment + NetworkPolicies (Service NodePort inclus dans portal.yaml)
-kubectl apply -f platform/network-policies/portal/portal-netpol.yaml
-kubectl apply -f platform/portal/portal.yaml
-kubectl -n portal rollout status deploy/portal
+# banc : layer du chemin `atlas` (topologies/banc.yaml) ; ou phase dédiée :
+bench/lima/run-phases.sh portal
+# prod : le playbook contre l'inventaire réel
+ansible-playbook -i bootstrap/hosts.yaml bootstrap/portal.yaml -e dataops_k8s_host=localhost
 ```
+
+> **Tag mutable** : l'image `registry:80/portal:dev` a un tag mutable (le
+> code/contrat embarqué évolue). Après un **rebuild** de l'image, le pod ne se
+> recrée pas tout seul (Deployment inchangé) → forcer une fois :
+> `kubectl -n portal rollout restart deploy/portal`. Le rebuild from-scratch
+> recrée le pod de toute façon.
 
 Vérifier qu'il ne peut PAS lire un Secret (garde-fou) :
 

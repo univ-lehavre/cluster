@@ -19,6 +19,7 @@ from nestor.portal import (  # noqa: E402
     MISSING,
     Observed,
     build_view,
+    login_for,
     render_html,
     secret_command,
 )
@@ -108,6 +109,31 @@ class SecretCommand(unittest.TestCase):
         # Le portail montre la COMMANDE, jamais une valeur de secret (ADR 0091 §3).
         cmd = secret_command({"id": "gitea-ui", "namespace": "gitea", "auth": "secret-admin"})
         self.assertIn("jsonpath", cmd)  # une commande de lecture, pas un littéral
+
+
+class LoginFor(unittest.TestCase):
+    def test_none_for_no_auth(self):
+        self.assertIsNone(login_for({"id": "x", "auth": "none"}))
+        self.assertIsNone(login_for({"id": "x"}))  # auth absent = none
+
+    def test_none_for_token(self):
+        # token : le jeton EST l'identité, pas de login à saisir.
+        self.assertIsNone(login_for({"id": "k8s-dashboard-ui", "auth": "token"}))
+
+    def test_known_logins(self):
+        self.assertEqual(login_for({"id": "argocd-ui", "auth": "secret-admin"}), "admin")
+        self.assertEqual(login_for({"id": "grafana-ui", "auth": "secret-admin"}), "admin")
+        self.assertEqual(login_for({"id": "gitea-ui", "auth": "secret-admin"}), "gitea_admin")
+
+    def test_contract_login_overrides(self):
+        # le champ `login` du contrat prime sur la convention.
+        ep = {"id": "argocd-ui", "auth": "secret-admin", "login": "root"}
+        self.assertEqual(login_for(ep), "root")
+
+    def test_secret_role_login_is_the_role(self):
+        self.assertEqual(
+            login_for({"id": "pg", "auth": "secret-role", "role": "dagster"}), "dagster"
+        )
 
 
 class Verdicts(unittest.TestCase):
@@ -224,6 +250,13 @@ class RenderHtml(unittest.TestCase):
         self.assertNotIn("<script>", html)
         self.assertIn("&lt;script&gt;", html)
 
+    def test_page_shows_login_next_to_password(self):
+        # Le portail affiche l'identifiant À CÔTÉ de la commande mot de passe (#login).
+        html = render_html(build_view(_EP, {}))
+        self.assertIn("identifiant", html)
+        self.assertIn("<code>admin</code>", html)  # login argocd/grafana affiché
+        self.assertIn("mot de passe", html)  # le libellé bascule quand un login existe
+
 
 class _FakeApiException(Exception):
     def __init__(self, status):
@@ -250,9 +283,11 @@ class ObserveCluster(unittest.TestCase):
 
         class CoreV1:
             def read_namespaced_service(self, svc, ns):
-                if (ns, svc) not in present:
-                    raise FakeExc(404)
+                # Un Service existe s'il est dans `present` (backend ClusterIP) OU s'il a
+                # un nodePort déclaré (Service d'exposition `<svc>-nodeport`, ADR 0092).
                 np = node_ports.get((ns, svc))
+                if (ns, svc) not in present and np is None:
+                    raise FakeExc(404)
                 if np is not None:
                     spec = NS(type="NodePort", ports=[NS(node_port=np)])
                 else:
@@ -296,6 +331,32 @@ class ObserveCluster(unittest.TestCase):
         self.assertTrue(o.present)
         self.assertTrue(o.ready)
         self.assertEqual(o.node_port, 30808)
+        self.assertEqual(o.node_ip, "10.0.2.11")
+
+    def test_nodeport_on_separate_service(self):
+        # ADR 0092 : pour une UI vendored, le ClusterIP du contrat (argocd-server) n'a
+        # PAS de nodePort — il vit sur un Service SÉPARÉ `<svc>-nodeport`. Le portail
+        # doit lire le port sur argocd-server-nodeport, pas sur argocd-server (sinon DRIFT
+        # à tort, le bug observé sur dirqual).
+        eps = [
+            {
+                "id": "argocd-ui",
+                "service": "argocd-server",
+                "namespace": "argocd",
+                "layer": "gitops",
+                "exposed": True,
+            }
+        ]
+        apis = self._fake_apis(
+            present={("argocd", "argocd-server")},  # ClusterIP présent (backend)
+            ready={("argocd", "argocd-server")},
+            node_ports={("argocd", "argocd-server-nodeport"): 32747},  # port sur le Service séparé
+        )
+        obs = portal_server.observe_cluster(eps, apis=apis)
+        o = obs[("argocd", "argocd-server")]
+        self.assertTrue(o.present)
+        self.assertTrue(o.ready)
+        self.assertEqual(o.node_port, 32747)  # lu sur argocd-server-nodeport
         self.assertEqual(o.node_ip, "10.0.2.11")
 
     def test_clusterip_service_has_no_nodeport(self):
