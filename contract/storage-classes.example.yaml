@@ -91,3 +91,41 @@ profils:
       note: >-
         Backing S3 léger = SeaweedFS (ADR 0036), creds de test statiques. Pas
         d'ObjectBucketClaim (pas de provisioner bucket en profil léger).
+
+# ── Dimensionnement des volumes : qui décide quoi ────────────────────────────
+# RÈGLE : le cluster fournit des StorageClasses EXTENSIBLES + une capacité ; ATLAS
+# DÉCIDE les tailles de SES volumes (il connaît sa volumétrie : embeddings pgvector,
+# artefacts MLflow, datasets datalake — le cluster ne peut pas la deviner). Le
+# cluster n'IMPOSE pas de taille à atlas.
+dimensionnement:
+  responsabilite: >-
+    atlas dimensionne ses propres PVC/données. Le cluster garantit des SC
+    extensibles (expansion: true sur les SC bloc Ceph) et une capacité partagée ;
+    il ne fige PAS de taille côté atlas.
+  # Volumes possédés par le CLUSTER (atlas n'y touche pas) — valeurs d'exemple
+  # (ADR 0023), dérivées des rôles plateforme. Indicatif, pas un quota atlas.
+  volumes_cluster:
+    - cnpg_postgres: 5Gi par instance ×3 (réplication CNPG) # base pgvector incluse
+    - registry: 1Ti # images applicatives
+    - prometheus: 10Gi
+    - loki: 5Gi
+    - gitea: 10Gi
+  # Ce qu'atlas dimensionne LUI-MÊME :
+  volumes_atlas:
+    - pgvector_data: >-
+        la base logique pgvector grandit avec les embeddings ; vit dans le PVC CNPG
+        (SC rook-ceph-block-replicated, EXTENSIBLE). Étendre = patcher la taille du
+        Cluster CNPG (resize en ligne, expansion: true).
+    - mlflow_artifacts: objet S3 (datalake RGW) — pas de PVC à dimensionner, croît dans le pool.
+    - datalake_objets: objet S3 (ObjectBucketClaim) — capacité = celle du pool Ceph.
+  # Capacité du cluster (exemple générique ; valeur RÉELLE lue à chaud, jamais figée
+  # au contrat) : interroger `kubectl -n rook-ceph get cephcluster -o
+  # jsonpath='{.items[0].status.ceph.capacity}'` (bytesAvailable/Total/Used).
+  capacite_note: >-
+    capacité partagée Ceph, abondante (ordre de centaines de Tio sur un parc
+    multi-nœuds). Lire le disponible réel via le status du CephCluster.
+  expansion_procedure: >-
+    PVC sur SC `expansion: true` : éditer `.spec.resources.requests.storage` du PVC
+    (ou du Cluster CNPG pour pgvector) à une valeur SUPÉRIEURE → resize en ligne
+    (Ceph RBD). Jamais de réduction. Les SC `expansion: false` (CephFS) ne se
+    redimensionnent pas → recréer.
