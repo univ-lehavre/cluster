@@ -74,7 +74,7 @@ endpoints:
     auth: none
     layer: dataops
     source: platform/marquez/marquez.yaml
-    ui_hostname: marquez.cluster.lan # exemple générique (Gateway + cert-manager)
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     note: UI de visualisation du lineage.
 
   # ── Orchestrateur (Dagster, ns dagster) ───────────────────────────────────
@@ -87,7 +87,7 @@ endpoints:
     auth: none
     layer: dataops
     source: platform/dagster/dagster.yaml
-    ui_hostname: dagster.cluster.lan # exemple générique
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     note: >-
       Orchestrateur livré VIDE ; le code (assets/code-locations) est déployé
       par atlas (ADR 0022/0026). Event log dans la base `dagster` (CNPG).
@@ -111,7 +111,7 @@ endpoints:
     protocol: http
     auth: none # intra-cluster
     layer: dataops
-    ui_hostname: mlflow.cluster.lan # exemple générique (Gateway + cert-manager)
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/mlflow/mlflow.yaml
     note: >-
       Serveur de suivi de modèles (addon socle, précédent Dagster ADR 0026).
@@ -184,7 +184,7 @@ endpoints:
     protocol: http
     auth: secret-admin # Secret kube-prometheus-stack-grafana (clé admin-password)
     layer: monitoring
-    ui_hostname: grafana.cluster.lan # exemple générique (Gateway + cert-manager)
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/kube-prometheus-stack/gateway.yaml
     note: Tableaux de bord métriques (Prometheus datasource).
 
@@ -242,7 +242,7 @@ endpoints:
     auth: none # intra-cluster / réseau privé
     layer: monitoring
     profil: local-path # BANC only (comme seaweedfs) — SMTP de test, absent en prod
-    ui_hostname: mailpit.cluster.lan # exemple générique
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/mailpit/gateway.yaml
     note: >-
       Boîte mail de test (capture les alertes/notifications du banc). N'existe PAS
@@ -256,7 +256,7 @@ endpoints:
     protocol: http
     auth: secret-admin # Secret argocd-initial-admin-secret (clé password)
     layer: gitops
-    ui_hostname: argocd.cluster.lan # exemple générique
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/argocd/gateway.yaml
     note: >-
       UI GitOps (état des Application, sync/health). CLI gRPC via Gateway non
@@ -270,7 +270,7 @@ endpoints:
     protocol: http
     auth: secret-admin # Secret gitea-admin (créé à l'init du dépôt, clé password)
     layer: gitops
-    ui_hostname: gitea.cluster.lan # exemple générique (Gateway à poser, #232)
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/gitea/service.yaml
     note: Forge git intra-banc (air-gapped) — source des workflows atlas (ADR 0044).
 
@@ -282,7 +282,7 @@ endpoints:
     protocol: https
     auth: token # jeton du ServiceAccount admin-user (kubectl create token), ADR 0010
     layer: socle
-    ui_hostname: dashboard.cluster.lan # exemple générique (Gateway à poser, #232)
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/k8s-dashboard/
     note: Tableau de bord Kubernetes (cluster-admin, ADR 0010).
 
@@ -294,7 +294,7 @@ endpoints:
     protocol: http
     auth: none # vue lecture seule ; aucun secret exposé (ADR 0091 §3)
     layer: socle
-    ui_hostname: portail.cluster.lan # exemple générique (Gateway hostNetwork, ADR 0071)
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/portal/
     note: >-
       Portail d'accès aux UI (ADR 0091) : vue unifiée des endpoints de la plateforme
