@@ -24,17 +24,13 @@ kind: ClusterRole
 metadata:
   name: portal-read
 rules:
+  # Exposition L4 (ADR 0092) : Services (présence + NodePort attribué), EndpointSlices
+  # (readiness), Nodes (IP d'un nœud Ready, cible des NodePort). JAMAIS de Secret.
   - apiGroups: ['']
-    resources: ['services']
+    resources: ['services', 'nodes']
     verbs: ['get', 'list']
   - apiGroups: ['discovery.k8s.io']
     resources: ['endpointslices']
-    verbs: ['get', 'list']
-  - apiGroups: ['gateway.networking.k8s.io']
-    resources: ['gateways', 'httproutes']
-    verbs: ['get', 'list']
-  - apiGroups: ['argoproj.io']
-    resources: ['applications']
     verbs: ['get', 'list']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -102,10 +98,14 @@ spec:
 ---
 apiVersion: v1
 kind: Service
+# Exposition L4 (ADR 0092) : NodePort → le portail est joignable sur
+# http://<IP-nœud>:<nodePort auto>. Pas de Gateway/HTTPRoute (supprimés), pas de
+# nodePort figé (k8s l'attribue ; le portail observe son propre port comme les autres).
 metadata:
   name: portal
   namespace: portal
 spec:
+  type: NodePort
   selector:
     app: portal
   ports:

@@ -9,11 +9,16 @@ Ce module est PUR (ADR 0017) : il prend le CONTRAT (le « DEVRAIT ») et un ÉTA
 (le « EST », injecté — l'I/O API k8s vit en bordure, étape 2) et rend la vue. Aucun
 accès cluster, aucune lecture de Secret : testable sans cluster.
 
-Verdicts (ADR 0091) :
-- MATCH   : le contrat le déclare ET l'état le confirme (Service présent + endpoints).
+Verdicts (ADR 0091, exposition L4 NodePort — ADR 0092) :
+- MATCH   : le contrat le déclare ET l'état le confirme (Service présent + endpoints
+            prêts ; si `exposed`, un NodePort est observé).
 - MISSING : le contrat le déclare mais l'état ne le trouve pas (sauf banc-only en prod).
-- DRIFT   : présent mais incohérent (hostname réel ≠ attendu, endpoints non prêts).
+- DRIFT   : présent mais incohérent (endpoints non prêts, ou `exposed` sans NodePort).
 - EXTRA   : exposé/observé mais absent du contrat.
+
+L'accès aux UI est en L4 (ADR 0092) : `http://<IP-nœud>:<nodePort>`. Le nodePort n'est
+PAS figé au contrat — k8s l'attribue, le portail l'OBSERVE (`node_port`) et lit l'IP
+d'un nœud Ready (`node_ip`). Plus de hostname/SNI/HTTPRoute.
 """
 
 from __future__ import annotations
@@ -31,14 +36,17 @@ EXTRA = "EXTRA"
 class Observed:
     """État RÉEL d'un service, injecté par la bordure (API k8s) — PUR ici.
 
-    `present`  : un Service `(namespace, service)` existe.
-    `ready`    : au moins un endpoint prêt (EndpointSlice non vide).
-    `hostname` : hostname réellement exposé (HTTPRoute), None si non exposé en bordure.
+    `present`   : un Service `(namespace, service)` existe.
+    `ready`     : au moins un endpoint prêt (EndpointSlice non vide).
+    `node_port` : NodePort attribué par k8s (ADR 0092), None si le Service n'est pas
+                  type=NodePort (UI non exposée en L4).
+    `node_ip`   : IP d'un nœud Ready où joindre le NodePort, None si inconnue.
     """
 
     present: bool = False
     ready: bool = False
-    hostname: str | None = None
+    node_port: int | None = None
+    node_ip: str | None = None
 
 
 @dataclass(frozen=True)
@@ -50,7 +58,7 @@ class Entry:
     service: str
     namespace: str
     verdict: str
-    ui_url: str | None  # https://<ui_hostname> si exposé, sinon None
+    ui_url: str | None  # http://<node_ip>:<node_port> si exposé en NodePort, sinon None
     secret_cmd: str | None  # commande kubectl pour le credential, None si auth=none
     note: str = ""
 
@@ -115,26 +123,30 @@ def _secret_ref(endpoint: dict, secrets: dict | None) -> tuple[str, str]:
     return ("<secret>", "password")
 
 
-def _ui_url(endpoint: dict, observed: Observed) -> str | None:
-    """URL cliquable de l'UI : https://<hostname réel observé> si exposé en bordure,
-    sinon https://<ui_hostname attendu> si déclaré, sinon None (pas d'UI)."""
-    host = observed.hostname or endpoint.get("ui_hostname")
-    return f"https://{host}" if host else None
+def _ui_url(observed: Observed) -> str | None:
+    """URL cliquable de l'UI en L4 (ADR 0092) : http://<IP-nœud>:<nodePort observé>.
+
+    None si le Service n'est pas exposé en NodePort (pas de `node_port`) ou si l'IP
+    d'un nœud est inconnue : on n'invente jamais d'URL, on n'affiche que l'observé."""
+    if observed.node_port and observed.node_ip:
+        return f"http://{observed.node_ip}:{observed.node_port}"
+    return None
 
 
 def _verdict(endpoint: dict, observed: Observed, *, target_is_prod: bool) -> str:
-    """Verdict d'un endpoint déclaré vs son état observé (ADR 0091)."""
+    """Verdict d'un endpoint déclaré vs son état observé (ADR 0091/0092)."""
     # Un endpoint banc-only (profil local-path) absent d'une cible prod n'est pas un
     # défaut : c'est attendu (ex. seaweedfs, mailpit). MATCH par convention.
     if not observed.present:
         if target_is_prod and endpoint.get("profil") == "local-path":
             return MATCH
         return MISSING
-    # Présent mais endpoints pas prêts, OU exposé sous un hostname ≠ attendu → DRIFT.
-    expected_host = endpoint.get("ui_hostname")
+    # Présent mais endpoints pas prêts → DRIFT.
     if not observed.ready:
         return DRIFT
-    if expected_host and observed.hostname and observed.hostname != expected_host:
+    # Déclaré exposé (NodePort attendu) mais aucun NodePort observé → DRIFT (le
+    # Service NodePort manque ou n'a pas reçu de port).
+    if endpoint.get("exposed") and not observed.node_port:
         return DRIFT
     return MATCH
 
@@ -173,7 +185,7 @@ def build_view(
                 service=svc,
                 namespace=ns,
                 verdict=_verdict(ep, obs, target_is_prod=target_is_prod),
-                ui_url=_ui_url(ep, obs),
+                ui_url=_ui_url(obs),
                 secret_cmd=secret_command(ep, secrets),
                 note=ep.get("note", "") or "",
             )
@@ -187,7 +199,9 @@ def build_view(
                 service=ex.get("service", "?"),
                 namespace=ex.get("namespace", ""),
                 verdict=EXTRA,
-                ui_url=_ui_url(ex, Observed(hostname=ex.get("hostname"))),
+                ui_url=_ui_url(
+                    Observed(node_port=ex.get("node_port"), node_ip=ex.get("node_ip"))
+                ),
                 secret_cmd=None,
                 note="exposé/observé mais absent du contrat",
             )

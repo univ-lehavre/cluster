@@ -32,7 +32,7 @@ _EP = [
         "port": 80,
         "auth": "secret-admin",
         "layer": "monitoring",
-        "ui_hostname": "grafana.cluster.lan",
+        "exposed": True,
     },
     {
         "id": "argocd-ui",
@@ -41,7 +41,7 @@ _EP = [
         "port": 80,
         "auth": "secret-admin",
         "layer": "gitops",
-        "ui_hostname": "argocd.cluster.lan",
+        "exposed": True,
     },
     {
         "id": "mlflow-tracking",
@@ -67,7 +67,7 @@ _EP = [
         "port": 443,
         "auth": "token",
         "layer": "socle",
-        "ui_hostname": "dashboard.cluster.lan",
+        "exposed": True,
     },
 ]
 
@@ -111,16 +111,16 @@ class SecretCommand(unittest.TestCase):
 
 
 class Verdicts(unittest.TestCase):
-    def test_match_when_present_ready_right_host(self):
+    def test_match_when_present_ready_with_nodeport(self):
         obs = {
             ("monitoring", "kube-prometheus-stack-grafana"): Observed(
-                present=True, ready=True, hostname="grafana.cluster.lan"
+                present=True, ready=True, node_port=31234, node_ip="10.0.2.11"
             )
         }
         v = build_view(_EP, obs)
         grafana = next(e for e in v.all_entries() if e.id == "grafana-ui")
         self.assertEqual(grafana.verdict, MATCH)
-        self.assertEqual(grafana.ui_url, "https://grafana.cluster.lan")
+        self.assertEqual(grafana.ui_url, "http://10.0.2.11:31234")
 
     def test_missing_when_absent(self):
         v = build_view(_EP, {})  # rien observé
@@ -132,14 +132,27 @@ class Verdicts(unittest.TestCase):
         v = build_view(_EP, obs)
         self.assertEqual(next(e for e in v.all_entries() if e.id == "argocd-ui").verdict, DRIFT)
 
-    def test_drift_when_hostname_differs(self):
+    def test_drift_when_exposed_but_no_nodeport(self):
+        # déclaré exposed mais aucun NodePort observé (Service NodePort manquant) → DRIFT.
         obs = {
             ("monitoring", "kube-prometheus-stack-grafana"): Observed(
-                present=True, ready=True, hostname="autre.cluster.lan"
+                present=True, ready=True, node_port=None
             )
         }
         v = build_view(_EP, obs)
         self.assertEqual(next(e for e in v.all_entries() if e.id == "grafana-ui").verdict, DRIFT)
+
+    def test_no_url_when_node_ip_unknown(self):
+        # NodePort observé mais IP nœud inconnue → pas d'URL inventée (mais MATCH).
+        obs = {
+            ("monitoring", "kube-prometheus-stack-grafana"): Observed(
+                present=True, ready=True, node_port=31234, node_ip=None
+            )
+        }
+        v = build_view(_EP, obs)
+        grafana = next(e for e in v.all_entries() if e.id == "grafana-ui")
+        self.assertEqual(grafana.verdict, MATCH)
+        self.assertIsNone(grafana.ui_url)
 
     def test_banc_only_absent_in_prod_is_match(self):
         # mailpit (profil local-path) absent en prod → MATCH (attendu), pas MISSING.
@@ -186,7 +199,7 @@ class RenderHtml(unittest.TestCase):
     def test_page_has_layers_links_and_no_iframe(self):
         obs = {
             ("argocd", "argocd-server"): Observed(
-                present=True, ready=True, hostname="argocd.cluster.lan"
+                present=True, ready=True, node_port=30808, node_ip="10.0.2.11"
             )
         }
         html = render_html(build_view(_EP, obs))
@@ -194,7 +207,7 @@ class RenderHtml(unittest.TestCase):
         self.assertIn("gitops", html)  # une couche
         self.assertIn('target="_blank"', html)  # lien nouvel onglet
         self.assertNotIn("<iframe", html)  # JAMAIS d'iframe (ADR 0091 §2)
-        self.assertIn("argocd.cluster.lan", html)
+        self.assertIn("http://10.0.2.11:30808", html)  # URL L4 (ADR 0092)
 
     def test_page_shows_secret_command_not_value(self):
         html = render_html(build_view(_EP, {}))
@@ -220,9 +233,10 @@ class _FakeApiException(Exception):
 class ObserveCluster(unittest.TestCase):
     """observe_cluster avec une API k8s STUBÉE (aucun cluster)."""
 
-    def _fake_apis(self, present, ready, hosts):
-        # core_v1 stub : read_namespaced_service lève 404 si absent ; endpointslices
-        # via call_api ; custom stub : list_cluster_custom_object → httproutes.
+    def _fake_apis(self, present, ready, node_ports, node_ip="10.0.2.11"):
+        # core_v1 stub : read_namespaced_service rend un Service typé (spec.type/ports
+        # avec node_port) ou lève 404 ; list_node rend un nœud Ready avec InternalIP.
+        # Discovery : list_namespaced_endpoint_slice (objets typés).
         # FakeExc HÉRITE de la vraie ApiException (catchée par les `except ApiException`
         # des helpers) — on NE remplace PAS la classe globale (sinon pollution de
         # test_smoke qui construit de vraies ApiException).
@@ -238,10 +252,20 @@ class ObserveCluster(unittest.TestCase):
             def read_namespaced_service(self, svc, ns):
                 if (ns, svc) not in present:
                     raise FakeExc(404)
-                return object()
+                np = node_ports.get((ns, svc))
+                if np is not None:
+                    spec = NS(type="NodePort", ports=[NS(node_port=np)])
+                else:
+                    spec = NS(type="ClusterIP", ports=[NS(node_port=None)])
+                return NS(spec=spec)
+
+            def list_node(self):
+                ready_cond = NS(type="Ready", status="True")
+                addr = NS(type="InternalIP", address=node_ip)
+                node = NS(status=NS(conditions=[ready_cond], addresses=[addr]))
+                return NS(items=[node] if node_ip else [])
 
         class Discovery:
-            # imite DiscoveryV1Api.list_namespaced_endpoint_slice (objets typés).
             def list_namespaced_endpoint_slice(self, ns, label_selector=""):
                 svc = label_selector.split("=")[-1]
                 if (ns, svc) in ready:
@@ -249,24 +273,9 @@ class ObserveCluster(unittest.TestCase):
                     return NS(items=[NS(endpoints=[ep])])
                 return NS(items=[])
 
-        class Custom:
-            def list_cluster_custom_object(self, *a, **k):
-                items = []
-                for (ns, svc), host in hosts.items():
-                    items.append(
-                        {
-                            "metadata": {"namespace": ns},
-                            "spec": {
-                                "hostnames": [host],
-                                "rules": [{"backendRefs": [{"name": svc, "namespace": ns}]}],
-                            },
-                        }
-                    )
-                return {"items": items}
+        return (CoreV1(), Discovery())
 
-        return (CoreV1(), Discovery(), Custom())
-
-    def test_present_ready_and_host(self):
+    def test_present_ready_and_nodeport(self):
         eps = [
             {
                 "id": "argocd-ui",
@@ -274,22 +283,37 @@ class ObserveCluster(unittest.TestCase):
                 "namespace": "argocd",
                 "layer": "gitops",
                 "auth": "secret-admin",
+                "exposed": True,
             }
         ]
         apis = self._fake_apis(
             present={("argocd", "argocd-server")},
             ready={("argocd", "argocd-server")},
-            hosts={("argocd", "argocd-server"): "argocd.cluster.lan"},
+            node_ports={("argocd", "argocd-server"): 30808},
         )
         obs = portal_server.observe_cluster(eps, apis=apis)
         o = obs[("argocd", "argocd-server")]
         self.assertTrue(o.present)
         self.assertTrue(o.ready)
-        self.assertEqual(o.hostname, "argocd.cluster.lan")
+        self.assertEqual(o.node_port, 30808)
+        self.assertEqual(o.node_ip, "10.0.2.11")
+
+    def test_clusterip_service_has_no_nodeport(self):
+        eps = [{"id": "x", "service": "internal", "namespace": "ns", "layer": "socle"}]
+        apis = self._fake_apis(
+            present={("ns", "internal")},
+            ready=set(),
+            node_ports={},  # ClusterIP
+        )
+        obs = portal_server.observe_cluster(eps, apis=apis)
+        o = obs[("ns", "internal")]
+        self.assertTrue(o.present)
+        self.assertIsNone(o.node_port)
+        self.assertIsNone(o.node_ip)  # pas de node_ip si pas de node_port
 
     def test_absent_service(self):
         eps = [{"id": "x", "service": "ghost", "namespace": "nope", "layer": "socle"}]
-        apis = self._fake_apis(present=set(), ready=set(), hosts={})
+        apis = self._fake_apis(present=set(), ready=set(), node_ports={})
         obs = portal_server.observe_cluster(eps, apis=apis)
         self.assertFalse(obs[("nope", "ghost")].present)
 
@@ -301,13 +325,13 @@ class ObserveCluster(unittest.TestCase):
                 "namespace": "argocd",
                 "layer": "gitops",
                 "auth": "secret-admin",
-                "ui_hostname": "argocd.cluster.lan",
+                "exposed": True,
             }
         ]
         apis = self._fake_apis(
             present={("argocd", "argocd-server")},
             ready={("argocd", "argocd-server")},
-            hosts={("argocd", "argocd-server"): "argocd.cluster.lan"},
+            node_ports={("argocd", "argocd-server"): 30808},
         )
         # stub load_endpoints pour ne pas dépendre d'un fichier
         orig = portal_server.load_endpoints
@@ -317,7 +341,7 @@ class ObserveCluster(unittest.TestCase):
         finally:
             portal_server.load_endpoints = orig
         self.assertIn("<!doctype html>", html)
-        self.assertIn("argocd", html)
+        self.assertIn("http://10.0.2.11:30808", html)
 
 
 if __name__ == "__main__":
