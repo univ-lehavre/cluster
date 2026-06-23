@@ -49,6 +49,7 @@ _ARMS = {
             "dataops",
             "gitops-seed",
             "mlflow",
+            "portal",
         ],
     ),
     "storage-real": (
@@ -78,6 +79,7 @@ _ARMS = {
             "dataops",
             "gitops-seed",
             "mlflow",
+            "portal",
         ],
     ),
 }

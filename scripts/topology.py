@@ -758,6 +758,10 @@ _LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool | str]] = {
     # mauvais nom, `_observed_layers` ne la voyait jamais faite → `next` la re-proposait en
     # boucle même après un montage réussi.
     "gitops-seed": ("application", "atlas-workflows", "argocd", False),
+    # Portail (layer autonome ADR 0091/0092) : le portail est un Deployment `portal`
+    # (nom posé par platform/portal/portal.yaml) dans le ns `portal`. Sa présence Ready
+    # prouve la couche montée (sinon next/preview la croiraient toujours à monter).
+    "portal": ("deployment", "portal", "portal", True),
 }
 
 # Kinds dont la SANTÉ se lit via `status.readyReplicas` (workloads répliqués).

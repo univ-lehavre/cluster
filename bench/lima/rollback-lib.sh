@@ -238,6 +238,7 @@ component_namespace() {
         dagster)          printf 'dagster\n' ;;
         marquez)          printf 'marquez\n' ;;
         mlflow)           printf 'mlflow\n' ;;           # POSSESSEUR du ns mlflow (layer autonome)
+        portal)           printf 'portal\n' ;;           # POSSESSEUR du ns portal (layer autonome)
         gitea)            printf 'gitea\n' ;;
         argocd)           printf 'argocd\n' ;;
         # ∅ : racines (bootstrap→kube-system NON supprimable, build-images,
@@ -412,6 +413,12 @@ component_deps() {
         # → registry + build-images requis AVANT mlflow (push/pull registry:80/mlflow),
         # comme dagster/marquez. Le ns mlflow n'expose pas d'UI L4 dans le graphe banc.
         mlflow)           printf 'cnpg-cluster-pg s3-backing-mlflow registry build-images\n' ;;
+        # Portail (layer autonome ADR 0091/0092) : image MAISON (code + contrat embarqués)
+        # poussée dans le registry interne → registry + build-images requis AVANT portal
+        # (push/pull registry:80/portal:dev), comme dagster/marquez/mlflow. PAS de CNPG/S3
+        # (le portail n'a ni base ni stockage) ; il observe les Services des autres couches
+        # à la demande — aucune arête de données vers elles (SKIP neutre si absentes).
+        portal)           printf 'registry build-images\n' ;;
         gitea)            printf 'cert-manager gateway-api %s\n' "$SC" ;;
         argocd)           printf 'cert-manager gateway-api gitea\n' ;;
         gitops-seed)      printf 'argocd gitea build-images\n' ;;
@@ -427,7 +434,7 @@ component_known() {
             | ceph | sc | datalake | seaweedfs | storage-simple | registry \
             | s3-backing-loki | prometheus-stack | loki | cnpg-operator \
             | barman-plugin | cnpg-secrets | s3-backing-cnpg | cnpg-cluster-pg \
-            | dagster | marquez | mlflow | s3-backing-mlflow \
+            | dagster | marquez | mlflow | s3-backing-mlflow | portal \
             | gitea | argocd | gitops-seed)
             return 0 ;;
         *) return 1 ;;
@@ -442,7 +449,7 @@ component_all() {
         ceph sc datalake seaweedfs storage-simple registry s3-backing-loki \
         prometheus-stack loki cnpg-operator barman-plugin cnpg-secrets \
         s3-backing-cnpg cnpg-cluster-pg dagster marquez \
-        mlflow s3-backing-mlflow gitea argocd gitops-seed
+        mlflow s3-backing-mlflow portal gitea argocd gitops-seed
 }
 
 # component_expand_alias ALIAS
@@ -472,6 +479,10 @@ component_expand_alias() {
         # (mlflow ne le POSSÈDE pas — il vient en dépendance transitive via
         # s3-backing-mlflow → $S3). En Ceph l'alias est byte-identique.
         mlflow)       printf '%s\n' mlflow s3-backing-mlflow ;;
+        # Portail (layer AUTONOME ADR 0091/0092) : alias = le seul composant `portal`
+        # (pas de backing/stockage). Le ns portal est GC par la suppression du ns qu'il
+        # POSSÈDE (component_namespace) → aucun targeted à émettre.
+        portal)       printf '%s\n' portal ;;
         gitops)       printf '%s\n' gitea argocd ;;
         gitops-seed)  printf '%s\n' gitops-seed ;;
         # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
@@ -508,6 +519,10 @@ component_alias_weight() {
         # MLflow (layer autonome) : APRÈS dataops/gitops (dépend de cnpg-cluster-pg,
         # poids 6) — poids 8 le place en queue, avant le repli générique (9).
         mlflow | s3-backing-mlflow)                                              printf '8\n' ;;
+        # Portail (layer autonome) : EN DERNIER (il observe les UI des autres couches,
+        # placé après dataops/gitops/mlflow dans les chemins) — poids 9, juste avant le
+        # repli générique. Ne dépend que de registry/build-images (montés au poids 6).
+        portal)                                                                  printf '9\n' ;;
         *)                                                                       printf '9\n' ;;
     esac
 }
@@ -589,7 +604,7 @@ topo_sort() {
 # vérité (_DEPENDENTS/_MOUNT_ORDER en dur dans roundtrip.py — ADR 0066 §invariant 3).
 
 # Les phases (alias) que roundtrip éprouve. metrics-server inclus (couche à part).
-_ROUNDTRIP_PHASES="ceph sc datalake metrics-server monitoring dataops mlflow gitops gitops-seed"
+_ROUNDTRIP_PHASES="ceph sc datalake metrics-server monitoring dataops mlflow gitops gitops-seed portal"
 
 # phase_of_component COMP — la phase (alias) qui contient COMP, ou vide si COMP est
 # un composant SOCLE (bootstrap/cert-manager/gateway-api/build-images) qu'aucune

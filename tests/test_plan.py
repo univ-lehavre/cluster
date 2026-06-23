@@ -61,6 +61,7 @@ class ExpectedSequence(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "portal",
             ],
         )
 
@@ -82,6 +83,7 @@ class ExpectedSequence(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "portal",
             ],
         )
 
@@ -190,6 +192,7 @@ class TargetValidation(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "portal",
             ],
         )
 
@@ -439,7 +442,9 @@ class InstallableNow(unittest.TestCase):
         got = installable_now(
             topo, "atlas", {"up", "bootstrap", "metrics-server"}, "frais", deps_fn=self._deps_fn()
         )
-        self.assertEqual(got, ["storage-simple"])  # metrics fait, storage débloque la suite
+        # storage-simple débloque la suite ; portal est sans dépendance dure (ADR 0091/0092 :
+        # il observe les Services, marche dès le socle) → installable dès bootstrap aussi.
+        self.assertIn("storage-simple", got)
 
     def test_storage_done_unlocks_monitoring_and_gitops(self):
         topo = _topo(backend="local-path")

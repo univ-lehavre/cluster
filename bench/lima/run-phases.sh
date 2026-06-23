@@ -1175,6 +1175,25 @@ phase_mlflow() {
     ok "🎉 MLflow déployé — suivi de modèles (S3/${STORAGE_BACKING}) Ready"
 }
 
+# phase_portal — portail d'accès aux UI (ADR 0091/0092), layer AUTONOME. Build de
+# l'image maison (code + contrat embarqués) puis apply k8s (RBAC lecture seule + Deploy
+# durci + Service NodePort + NetworkPolicies). Modèle phase_mlflow MAIS plus simple :
+# le portail n'a NI stockage NI S3 → PAS de detect_storage_profile. Il observe les
+# Services des autres couches à la demande (SKIP neutre si rien d'exposé) → marche dès
+# le socle ; placé tard dans les chemins (après les couches qu'il liste).
+phase_portal() {
+    preflight
+    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
+    [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
+    log "Phase portal — portail d'accès aux UI (build image maison + apply k8s, via Ansible)"
+
+    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
+        "${REPO}/bootstrap/portal.yaml" \
+        -e dataops_k8s_host=localhost \
+        || die "portal.yaml : échec du déploiement du portail"
+    ok "🎉 Portail déployé — accès aux UI (NodePort) Ready"
+}
+
 # Prédicats CNPG réutilisés par la phase (purs côté décision via dataops-assert.sh).
 cnpg_operator_ready() { [ "$("${KUBECTL[@]}" -n cnpg-system get deploy cnpg-controller-manager -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = "1" ]; }
 cnpg_cluster_healthy() {
@@ -1697,6 +1716,7 @@ case "${1:-}" in
     gitops-seed) time_phase gitops-seed phase_gitops_seed ;;
     monitoring) time_phase monitoring phase_monitoring ;;
     mlflow) time_phase mlflow phase_mlflow ;;
+    portal) time_phase portal phase_portal ;;
     access) phase_access "${@:2}" ;;
     ceph) time_phase ceph phase_ceph ;;
     sc) time_phase sc phase_sc ;;
@@ -1780,9 +1800,13 @@ case "${1:-}" in
         # l'image émetteur (buildée par dataops) et cible le ns dagster (monté
         # par dataops). Argo CD réconcilie ensuite le workflow depuis Gitea.
         time_phase gitops-seed phase_gitops_seed
-        log "🎉 Chemin 'atlas' : storage-simple → metrics-server → monitoring → gitops → dataops → gitops-seed."
+        # portail EN DERNIER : il observe les Services NodePort des couches montées
+        # ci-dessus (ADR 0091/0092) — placé tard pour avoir des UI à lister (il marche
+        # dès le socle, SKIP neutre par endpoint absent).
+        time_phase portal phase_portal
+        log "🎉 Chemin 'atlas' : storage-simple → metrics-server → monitoring → gitops → dataops → gitops-seed → portal."
         log "ℹ️  Preuve e2e des workflows atlas par GitOps : scénario 27 (#231)."
-        log "👉 Accès dev (URLs *.cluster.lan + secrets + .env atlas) : bench/lima/access.sh (ADR 0048)."
+        log "👉 Accès dev (UI en NodePort L4 + secrets + .env atlas) : bench/lima/access.sh (ADR 0048/0092)."
         record_if_fresh "${run_start}"
         ;;
     # ── storage-real : socle Ceph → datalake → smoke S3 + WordPress (ADR 0045). ─
@@ -1837,7 +1861,8 @@ case "${1:-}" in
         time_phase gitops phase_gitops
         time_phase dataops phase_dataops
         time_phase gitops-seed phase_gitops_seed
-        log "🎉 Chemin 'atlas-ceph' : Ceph → datalake → monitoring → gitops → dataops → gitops-seed."
+        time_phase portal phase_portal
+        log "🎉 Chemin 'atlas-ceph' : Ceph → datalake → monitoring → gitops → dataops → gitops-seed → portal."
         log "ℹ️  UI exposées : vérifier via le scénario 28 (URLs via Gateway, #232)."
         record_if_fresh "${run_start}"
         ;;

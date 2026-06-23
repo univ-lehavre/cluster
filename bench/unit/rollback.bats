@@ -314,9 +314,9 @@ setup() {
 @test "atom/acyclicité : topo_sort sur TOUS les composants réussit (pas de cycle)" {
     run topo_sort $(component_all)
     [ "$status" -eq 0 ]
-    # 26 composants (catalogue complet : 24 + mlflow + s3-backing-mlflow, ADR 0082),
-    # tous émis (pas de cycle).
-    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 26 ]
+    # 27 composants (catalogue complet : 24 + mlflow + s3-backing-mlflow, ADR 0082 ;
+    # + portal, ADR 0091), tous émis (pas de cycle).
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 27 ]
 }
 
 @test "atom/acyclicité : un cycle injecté est DÉTECTÉ (échec, code ≠0)" {
@@ -440,15 +440,16 @@ setup() {
 # « → sc » (PVC bloc) sont load-bearing pour gitops/gitops-seed (workflow consigné
 # 2026-06-13, 2ᵉ trace).
 
-@test "phase/closure : ceph dérive TOUTE la pile (== ancien _DEPENDENTS + mlflow)" {
-    # mlflow (layer autonome ADR 0082) sort en QUEUE : dépend de dataops (base CNPG).
+@test "phase/closure : ceph dérive TOUTE la pile (== ancien _DEPENDENTS + mlflow + portal)" {
+    # mlflow (layer autonome ADR 0082) + portail (ADR 0091) sortent en QUEUE : mlflow
+    # dépend de dataops (base CNPG), portail du registry/build-images (image maison).
     run phase_closure ceph
-    [ "$(printf '%s' "$output" | tr '\n' ' ')" = "ceph sc datalake monitoring gitops dataops gitops-seed mlflow" ]
+    [ "$(printf '%s' "$output" | tr '\n' ' ')" = "ceph sc datalake monitoring gitops dataops gitops-seed mlflow portal" ]
 }
 
 @test "phase/closure : sc tire gitops/gitops-seed (arête gitea→sc load-bearing)" {
     local cl; cl=$(phase_closure sc | tr '\n' ' ')
-    [ "$cl" = "sc datalake monitoring gitops dataops gitops-seed mlflow " ]
+    [ "$cl" = "sc datalake monitoring gitops dataops gitops-seed mlflow portal " ]
     # Sans l'arête gitea→sc, gitops serait absent — c'est le cœur du fix Lot 1.
     [[ "$cl" == *"gitops"* ]]
 }
@@ -470,13 +471,19 @@ setup() {
     # mlflow est la VRAIE feuille (rien ne dépend d'elle) ; dataops la tire désormais.
     run phase_closure mlflow
     [ "$output" = "mlflow" ]
+    # portail (ADR 0091) est AUSSI une feuille : rien ne dépend de lui (il OBSERVE les
+    # UI des autres couches sans arête de données) ; dataops le tire (registry maison).
+    run phase_closure portal
+    [ "$output" = "portal" ]
     run phase_closure metrics-server
     [ "$output" = "metrics-server" ]
 }
 
-@test "phase/closure : dataops tire mlflow (base CNPG mlflow, ADR 0082)" {
+@test "phase/closure : dataops tire mlflow + portail (registry/build-images maison)" {
+    # mlflow dépend de la base CNPG (ADR 0082) ; portail du registry/build-images
+    # (image maison registry:80/portal:dev, ADR 0091). Tous deux en queue.
     run phase_closure dataops
-    [ "$(printf '%s' "$output" | tr '\n' ' ')" = "dataops mlflow" ]
+    [ "$(printf '%s' "$output" | tr '\n' ' ')" = "dataops mlflow portal" ]
 }
 
 @test "phase/closure : ordre de MONTAGE (amont→aval, première occurrence)" {
