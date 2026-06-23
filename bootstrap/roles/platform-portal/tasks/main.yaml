@@ -1,0 +1,79 @@
+# code: language=ansible
+# Rôle platform-portal (ADR 0091/0092) — portail d'accès aux UI. Serveur HTTP mince
+# qui lit l'API k8s en LECTURE SEULE (RBAC SANS secrets) et rend une sidebar des UI
+# exposées (liens NodePort L4 + commandes de récupération des credentials, jamais la
+# valeur). Appliqué depuis le control-plane. Prérequis : l'image registry:80/portal:dev
+# poussée (play nœuds de bootstrap/portal.yaml) ; la résolution NodePort/IP est faite
+# à la demande par le portail, aucune autre couche n'est requise pour qu'il démarre.
+#
+# Calqué sur platform-mlflow (ns + netpols default-deny → apply → gate Ready → rescue
+# diagnostique → always), MAIS plus simple : pas de Secret dérivé, pas de backing S3,
+# pas de substitution de placeholder. portal.yaml est UN fichier multi-docs (ns + SA +
+# ClusterRole + binding + Deployment + Service NodePort) → apply tel quel en src= (k8s
+# garantit l'ordre intra-fichier). portal-netpol.yaml est UN seul fichier (4 docs,
+# default-deny en tête) → UNE tâche apply, PAS une loop (contrairement à mlflow).
+
+- name: Deploy the access portal
+  run_once: true
+  block:
+    # portal.yaml (ns + SA + ClusterRole + binding + Deployment + Service NodePort) en
+    # PREMIER : il crée le ns `portal`, requis par les NetworkPolicies namespacées
+    # appliquées juste après. k8s garantit l'ordre intra-fichier (le ns avant le reste).
+    - name: Apply the portal manifests (ns + RBAC + Deployment + Service)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/portal/portal.yaml'
+
+    # NetworkPolicies (ADR 0019) : UN seul fichier multi-docs, default-deny-all en
+    # tête, puis DNS + egress apiserver + ingress HTTP — d'où UNE tâche apply (pas de
+    # loop : le default-deny ouvre le fichier, k8s applique les docs dans l'ordre).
+    - name: Apply the portal network policies (default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ portal_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/network-policies/portal/portal-netpol.yaml'
+
+    - name: Wait for the portal to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: portal
+        namespace: '{{ portal_namespace }}'
+      register: portal_deploy
+      until: >-
+        portal_deploy.resources | default([]) | length > 0
+        and (portal_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ portal_ready_retries }}'
+      delay: '{{ portal_ready_delay }}'
+
+  # Rescue DIAGNOSTIQUE (ADR 0050) — calqué sur mlflow/marquez. Aucun delete.
+  rescue:
+    - name: Collect portal pods state (diagnostic)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: '{{ portal_namespace }}'
+      register: portal_pods_diag
+      run_once: true
+    - name: Report portal convergence failure
+      ansible.builtin.debug:
+        msg: >-
+          Portail non convergé. Pods non Running :
+          {{ portal_pods_diag.resources
+             | rejectattr('status.phase', 'equalto', 'Running')
+             | map(attribute='metadata.name') | list }}.
+          Cause fréquente : image registry:80/portal:dev non poussée (ImagePullBackOff)
+          — rejouer le play nœuds de bootstrap/portal.yaml (build/push). Diagnostic :
+          kubectl -n {{ portal_namespace }} get pods,events --sort-by=.lastTimestamp.
+      run_once: true
+    - name: Fail with an actionable message
+      ansible.builtin.fail:
+        msg: >-
+          Déploiement du portail échoué (voir diagnostic ci-dessus). Le re-run du rôle
+          est idempotent et reprend — corriger d'abord la cause signalée.
+
+  always:
+    - name: Portal deployment outcome
+      ansible.builtin.debug:
+        msg: >-
+          platform-portal terminé. Vérifier :
+          kubectl -n {{ portal_namespace }} get deploy portal.
+      run_once: true

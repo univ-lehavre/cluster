@@ -1,0 +1,148 @@
+# code: language=ansible
+# Layer PORTAIL (ADR 0091/0092) — portail d'accès aux UI, layer AUTONOME (nestor
+# `up --layers portal` / arm générique `layers`), DÉCOUPLÉE des autres couches.
+#
+# Le portail est une image MAISON (FROM python:3.12-slim + client k8s/pyyaml + le code
+# nestor/portal*.py + le contrat embarqué) → comme dataops/mlflow, DEUX plays :
+#   1. étape NŒUDS (`hosts: cloud`) : prépare le contexte de build node-side puis build
+#      l'image MAISON (les 2 arches, build_all_arch) vers le registry interne ;
+#   2. étape k8s (`localhost`) : applique le manifeste figé (ns + RBAC + Deployment +
+#      Service NodePort) qui tire registry:80/portal:dev + ses NetworkPolicies.
+#
+# CONTEXTE DE BUILD MULTI-DOSSIER (cas unique du dépôt) : le Dockerfile du portail fait
+# `COPY nestor/portal*.py` ET `COPY contract/endpoints.example.yaml` → son contexte est
+# la RACINE du dépôt (deux dossiers), pas un sous-dossier auto-suffisant. Le mécanisme
+# générique `src_context` de platform-build-images copie UN dossier → il ne couvre pas
+# ce cas. On RÉPLIQUE donc ici, node-side, l'arborescence minimale attendue par le
+# Dockerfile (build_workdir/portal/{nestor/portal*.py, contract/endpoints.example.yaml,
+# Dockerfile}) AVANT d'importer le rôle ; portal_build_images (defaults) pointe son
+# build_context/dockerfile dessus. platform-build-images reste générique (inchangé).
+#
+# Le portail ne dépend PAS de CNPG ni de S3 (contrairement à mlflow) — plus simple.
+# HÔTE D'EXÉCUTION k8s (`dataops_k8s_host`, défaut localhost) : pilote l'API via le
+# KUBECONFIG de l'exécuteur, comme dataops/mlflow (pré-tâches identiques).
+
+- name: Layer Portail — étape nœuds (containerd registry + build image maison)
+  hosts: cloud
+  # Sources du dépôt (sur l'HÔTE) et contexte de build (sur le NŒUD). Le contexte
+  # portail (build_workdir/portal) DOIT matcher portal_build_images.build_context
+  # (defaults platform-build-images) : c'est ce dossier que `nerdctl build` consomme.
+  vars:
+    portal_repo_dir: '{{ playbook_dir }}/..'
+    portal_build_workdir: /tmp/dataops-build/portal
+  # GARDE D'ISOLATION (ADR 0053) : ce play SSH sur les nœuds (`cloud`) et build/pousse
+  # dans le registry → il DOIT vérifier EXPECTED_TARGET_KIND via audit-log AVANT toute
+  # tâche distante (comme mlflow/dataops). gather_facts requis : platform-build-images
+  # teste ansible_architecture. force_handlers : même filet que mlflow/dataops (incident
+  # 2026-06-16) — garantit le restart containerd même si un build échoue en aval.
+  force_handlers: true
+  pre_tasks:
+    - name: Audit-log — record playbook execution (+ garde target_kind)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: portal.yaml
+  tasks:
+    # Config containerd pour le registry interne AVANT le build (push vers registry:80).
+    - name: Configuration containerd pour le registry interne
+      ansible.builtin.import_role:
+        name: platform-registry
+        tasks_from: node
+      tags: registry-node
+
+    # FLUSH (ADR 0051) : containerd doit avoir RELU sa config avant le build/push
+    # (push vers registry:80 en HTTP). Cf. mlflow/dataops.
+    - name: Recharger containerd si sa config a changé (avant build/push)
+      ansible.builtin.meta: flush_handlers
+      tags: registry-node
+
+    # ── Contexte de build préparé node-side (cas multi-dossier, cf. en-tête) ──────
+    # On reconstruit l'arborescence minimale que le Dockerfile attend (chemins relatifs
+    # nestor/… et contract/…), à la racine du build_context portail. build_all_arch=true
+    # impose que ces copies tournent AUSSI en x86 (pas de garde `when arch==aarch64`,
+    # contrairement au src_context générique de platform-build-images) : sinon le build
+    # x86 (prod dirqual) échouerait sur « Dockerfile/COPY no such file ».
+    - name: Ensure the portal build context tree exists
+      ansible.builtin.file:
+        path: '{{ portal_build_workdir }}/{{ item }}'
+        state: directory
+        mode: '0755'
+      loop:
+        - nestor
+        - contract
+      become: true
+
+    - name: Copy the portal Dockerfile to the build context root
+      ansible.builtin.copy:
+        src: '{{ portal_repo_dir }}/platform/portal/image/Dockerfile'
+        dest: '{{ portal_build_workdir }}/Dockerfile'
+        mode: '0644'
+      become: true
+
+    - name: Copy the portal Python sources into the build context
+      ansible.builtin.copy:
+        src: '{{ portal_repo_dir }}/nestor/{{ item }}'
+        dest: '{{ portal_build_workdir }}/nestor/{{ item }}'
+        mode: '0644'
+      loop:
+        - portal.py
+        - portal_server.py
+      become: true
+
+    - name: Copy the embedded contract into the build context
+      ansible.builtin.copy:
+        src: '{{ portal_repo_dir }}/contract/endpoints.example.yaml'
+        dest: '{{ portal_build_workdir }}/contract/endpoints.example.yaml'
+        mode: '0644'
+      become: true
+
+    # Build (les 2 arches, build_all_arch) de l'image maison portail → registry:80.
+    # build_images RESTREINTE à portal (override) — ne touche pas la liste dataops.
+    - name: Build de l'image maison Portail (code + contrat embarqués)
+      ansible.builtin.import_role:
+        name: platform-build-images
+      vars:
+        build_images: '{{ portal_build_images }}'
+      tags: build-images
+
+- name: Layer Portail — accès aux UI (RBAC lecture seule + Deployment durci)
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
+  gather_facts: false
+  # PAS d'audit-log : ce play pilote l'API k8s depuis le poste de contrôle (localhost),
+  # il ne `become` pas sur un nœud (cf. mlflow/dataops Play k8s). SSL_CERT_FILE : le
+  # Python d'Ansible n'utilise pas toujours le CA système → on pointe le bundle certifi
+  # de CE python (résolu en pré-tâche), comme mlflow.
+  environment:
+    SSL_CERT_FILE: '{{ dataops_ca_bundle | default(omit) }}'
+  pre_tasks:
+    # kubernetes.core exige la lib Python `kubernetes` ; certifi fournit le CA.
+    - name: 'Garde : client Python kubernetes+certifi présent (sinon : uv sync)'
+      block:
+        - name: Probe import kubernetes + certifi
+          ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import kubernetes, certifi'"
+          changed_when: false
+          check_mode: false
+      rescue:
+        - name: Manque le client Python — guider vers uv sync
+          ansible.builtin.fail:
+            msg: >-
+              Le client Python `kubernetes` (ou `certifi`) est introuvable dans
+              l'interpréteur {{ ansible_python_interpreter | default('python3') }}.
+              Provisionner le .venv du poste de contrôle avant de jouer ce play :
+              `uv sync` à la racine du dépôt (ADR 0006/0023). Si le .venv vit ailleurs,
+              surcharger `ansible_python_interpreter` sur l'hôte localhost de l'inventaire.
+    # Résout le bundle CA avec le MÊME interpréteur que les modules Ansible.
+    - name: Resolve the certifi CA bundle path
+      ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import certifi; print(certifi.where())'"
+      register: portal_certifi
+      changed_when: false
+    - name: Set the CA bundle for HTTPS requests
+      ansible.builtin.set_fact:
+        dataops_ca_bundle: '{{ portal_certifi.stdout | trim }}'
+  tasks:
+    # Portail d'accès aux UI (ADR 0091/0092) : image maison registry:80/portal:dev
+    # (buildée au play nœuds), RBAC lecture seule SANS secrets, Service NodePort.
+    - name: Portail d'accès aux UI (RBAC lecture seule + Deployment durci)
+      ansible.builtin.import_role:
+        name: platform-portal
+      tags: portal

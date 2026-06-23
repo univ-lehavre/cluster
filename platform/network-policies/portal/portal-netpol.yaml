@@ -52,9 +52,10 @@ spec:
         - protocol: TCP
           port: 6443
 ---
-# Ingress HTTP (8080) : le Gateway Cilium hostNetwork (Envoy sur l'IP du nœud) atteint
-# le pod portail. Le Gateway tourne en hostNetwork (pas un pod sélectionnable par ns)
-# → on autorise l'ingress sur le port, sans restreindre la source (ADR 0071).
+# Ingress HTTP (8080) : le portail est exposé en L4 NodePort (ADR 0092) — le trafic
+# entre par l'IP du nœud (NodeIP:nodePort → containerPort 8080 en eBPF), pas depuis un
+# pod sélectionnable par namespace → on autorise l'ingress sur le port, sans restreindre
+# la source (la source est le nœud, hors réseau pods).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

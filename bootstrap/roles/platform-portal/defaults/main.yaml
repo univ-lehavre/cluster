@@ -1,0 +1,15 @@
+---
+# code: language=ansible
+# Défauts du rôle platform-portal (ADR 0091/0092) — portail d'accès aux UI.
+# Valeurs génériques (ADR 0023). Le portail est un serveur HTTP mince qui lit l'API
+# k8s en LECTURE SEULE (RBAC sans secrets) et rend une sidebar des UI exposées.
+# Plus SIMPLE que platform-mlflow : pas de Secret dérivé, pas de backing S3, pas de
+# substitution de placeholder — apply déclaratif direct des manifestes figés.
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+portal_namespace: portal
+
+# Gate Ready du Deployment portal (= `kubectl -n portal rollout status deploy/portal`).
+# Calqué sur mlflow_ready_retries/delay : ~5 min au pire (pull de l'image registry:80).
+portal_ready_retries: 30
+portal_ready_delay: 10
