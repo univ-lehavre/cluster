@@ -101,8 +101,14 @@ d'[ADR 0071](../decisions/0071-exposition-gateway-hostnetwork.md).
 - [x] Étape 3 — UI vendored en NodePort (7 Services séparés + câblage rôles)
 - [x] Étape 4 — drift `state.sh` allowlist contrat + `check_contract` ancrage
       NodePort
-- [~] Étape 5 — bascule Cilium L4 pur CODÉE (cni.sh sans Gateway/LB-IPAM +
-  retrait CR résiduels ; 7 gateway.yaml + cilium-expo supprimés ;
-  access.sh/scénarios 28-32/docs refondus en L4) ; reste la **preuve banc** (cni
-  L4 + UI NodePort + state.sh 0 drift)
-- [ ] Étape 6 — bascule prod dirqual + preuve e2e
+- [x] Étape 5 — bascule Cilium L4 pur (cni.sh sans Gateway/LB-IPAM + retrait CR
+      résiduels ; 7 gateway.yaml + cilium-expo supprimés ; access.sh/scénarios
+      28-32/docs refondus). **PROUVÉE au banc** (banc.yaml from-scratch,
+      2026-06-23) : cni L4 pur (0 GatewayClass/Gateway/HTTPRoute/pool LB-IPAM,
+      `gatewayAPI` off, `kubeProxyReplacement=true`) ; 3 NodePort auto posés
+      (argocd 31358, gitea 31296, grafana 31088) ; **data path L4 OK** (curl
+      `NodeIP:nodePort` → 200/200/302 en eBPF). dataops/mlflow/portail non
+      montés = limite RAM banc (8 → 12 Go, fix `VM_MEMORY_DEFAULT`), PAS un bug
+      L4.
+- [ ] Étape 6 — PROD dirqual : **Phase 1 NodePort additive seule** (cohabitation
+      LB-IPAM, ne PAS rejouer cni.sh) ; rebuild from-scratch ≈ sept. 2026.

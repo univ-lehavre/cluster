@@ -94,9 +94,13 @@ API_PORT=6443
 #   - mode Ceph (WITH_CEPH=1) : 12 GiB RAM — un nœud porte OSD/mon Ceph + k8s +
 #     CNPG + Dagster/Marquez + monitoring (chemin atlas-ceph). Pic mesuré ~9 GiB ;
 #     Ceph sensible à la pression mémoire (OSD lents → boot/HEALTH qui traînent).
-#   - mode léger (local-path) : 8 GiB RAM — suffit (drift L28 : pic de build
-#     marquez-web arm64) sans gaspiller (banc atlas léger).
-# 3×12 = 36 GiB sur un hôte 48 GiB : marge OK pour macOS. Surchargeable via VM_MEMORY.
+#   - mode léger (local-path) : 12 GiB RAM. Un banc atlas/banc.yaml MONO-NŒUD porte
+#     la chaîne MLOps complète (monitoring Prometheus/Grafana/Loki + Argo CD + Gitea
+#     + CNPG + registry + Dagster webserver+daemon + MLflow). 8 GiB ne suffit PAS :
+#     dagster-daemon reste Pending/ProgressDeadlineExceeded (limits memory > 88 %,
+#     mesuré le 2026-06-23). 12 GiB requis, comme le mode Ceph — c'est la CHARGE
+#     applicative qui dimensionne, pas le backend de stockage.
+# 12 GiB sur un hôte 48 GiB : marge OK pour macOS. Surchargeable via VM_MEMORY.
 #
 # DISQUE : 40 GiB par défaut (les DEUX backends). 20 GiB ne tenait que pour un banc
 # LÉGER (socle/metrics) ; dès qu'on empile la chaîne applicative — Ceph+dataops, OU
@@ -114,7 +118,9 @@ VM_CPUS=${VM_CPUS:-4}
 # Mémorise si VM_MEMORY a été FOURNI par l'opérateur (vs défaut dérivé) : un chemin
 # peut alors imposer son propre plancher SANS écraser un choix explicite (ha-3cp).
 VM_MEMORY_SET=${VM_MEMORY:+1}
-VM_MEMORY_DEFAULT=$([ "${WITH_CEPH:-0}" = 1 ] && echo 12GiB || echo 8GiB)
+# 12 GiB pour les DEUX backends : la chaîne MLOps complète (dataops/mlflow) sature
+# 8 GiB sur un nœud, indépendamment de Ceph vs local-path (mesuré le 2026-06-23).
+VM_MEMORY_DEFAULT=12GiB
 VM_MEMORY=${VM_MEMORY:-${VM_MEMORY_DEFAULT}}
 VM_DISK=${VM_DISK:-40GiB}
 
