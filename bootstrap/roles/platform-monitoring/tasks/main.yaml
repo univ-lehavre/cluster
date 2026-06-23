@@ -84,3 +84,13 @@
       loop: "{{ monitoring_defs | select | selectattr('kind', 'eq', 'PrometheusRule') | list }}"
       loop_control:
         label: "{{ item.metadata.name | default('?') }}"
+
+    # Exposition L4 de l'UI Grafana (ADR 0092 : http://<IP-nœud>:<nodePort>).
+    # Service NodePort SÉPARÉ posé après le déploiement de l'UI ; ne touche ni le
+    # pod ni le bundle vendored (même selector que le ClusterIP grafana). Objet
+    # déclaratif → apply idempotent. Le nodePort est attribué par k8s (non figé).
+    - name: Apply the Grafana NodePort Service (UI L4 exposure)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ monitoring_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/kube-prometheus-stack/nodeport.yaml'

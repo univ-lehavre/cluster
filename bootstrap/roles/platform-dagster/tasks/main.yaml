@@ -128,6 +128,15 @@
         - dagster-dagster-webserver
         - dagster-daemon
 
+    # Exposition L4 NodePort de l'UI (ADR 0092) — Service séparé, mêmes labels
+    # que le ClusterIP "dagster-dagster-webserver" ; ne touche pas le bundle
+    # vendored. Appliqué après le webserver pour cibler des endpoints prêts.
+    - name: Apply Dagster webserver NodePort Service
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ dagster_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/dagster/nodeport.yaml'
+
   # Rescue DIAGNOSTIQUE (ADR 0050, #236) — calqué sur argocd/cnpg. Aucun delete.
   rescue:
     - name: Collect dagster pods state (diagnostic)

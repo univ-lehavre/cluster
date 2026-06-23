@@ -99,6 +99,15 @@
       loop_control:
         label: "{{ item.kind | default('?') }}/{{ item.metadata.name | default('?') }}"
 
+    # Exposition L4 de l'UI : Service NodePort SÉPARÉ (ADR 0092), même selector que
+    # le ClusterIP `mlflow`. Fichier figé appliqué tel quel (pas d'overlay S3) — il
+    # ne touche pas le bundle vendored. Le `nodePort` est auto-attribué par k8s.
+    - name: Apply MLflow NodePort Service (L4 exposition)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ mlflow_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/mlflow/nodeport.yaml'
+
     - name: Wait for MLflow to be Ready
       kubernetes.core.k8s_info:
         kind: Deployment
