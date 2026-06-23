@@ -24,6 +24,14 @@ l'**orchestrateur Dagster « vide »** : webserver + daemon + run workers
 (assets, IO managers) vit dans un dépôt applicatif séparé — ici on pose
 l'**orchestrateur seul**.
 
+> **Note (ADR [0092](../decisions/0092-exposition-hostport-l4.md),
+> 2026-06-23).** Plan **achevé** : les mentions ci-dessous de l'exposition par
+> **Gateway Cilium + TLS** (webserver Dagster) décrivent l'état au moment de la
+> réalisation. L'exposition des UI a depuis basculé en **L4** (`NodePort`,
+> `http://<IP-nœud>:<port>`, sans DNS ni TLS de bordure) : le `gateway.yaml` de
+> l'addon est retiré au profit d'un Service `NodePort`. Conservé tel quel comme
+> historique.
+
 Méthode identique à 1.5/1.6 : addon `platform/dagster/` (helm template figé +
 values), déployé par **`kubectl apply`** (patron addon,
 [ADR 0022](../decisions/0022-argocd-gitops-applicatif.md) — pas Argo CD), validé

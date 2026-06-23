@@ -199,9 +199,7 @@ def build_view(
                 service=ex.get("service", "?"),
                 namespace=ex.get("namespace", ""),
                 verdict=EXTRA,
-                ui_url=_ui_url(
-                    Observed(node_port=ex.get("node_port"), node_ip=ex.get("node_ip"))
-                ),
+                ui_url=_ui_url(Observed(node_port=ex.get("node_port"), node_ip=ex.get("node_ip"))),
                 secret_cmd=None,
                 note="exposé/observé mais absent du contrat",
             )

@@ -14,15 +14,21 @@ Addon **autonome** (namespace `mail`) — transverse : sert le monitoring K8s
 | Fichier        | Rôle                                                                                                                         |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `mailpit.yaml` | Deployment (SMTP `1025` en `hostPort` pour le relais hôte #131, UI `8025`) + Service ClusterIP (SMTP `1025`, UI `80`→`8025`) |
-| `gateway.yaml` | exposition de l'UI (Gateway Cilium + TLS interne)                                                                            |
 
 ## Déploiement
 
 ```bash
 kubectl apply -f platform/mailpit/mailpit.yaml
-kubectl apply -f platform/mailpit/gateway.yaml   # UI sur mailpit.cluster.lan
 kubectl -n mail rollout status deploy/mailpit
 ```
+
+**Pas d'exposition L4 dédiée** : depuis la bascule en L4 (`NodePort`/`hostPort`,
+[ADR 0092](/cluster/docs/decisions/0092-exposition-hostport-l4/)), les UI de
+plateforme s'atteignent par `http://<IP-nœud>:<port>`. Mailpit reste une brique
+**banc uniquement** (puits SMTP de test, jamais déployée en prod) : son UI n'a
+**pas** de Service NodePort câblé — on la consulte par **port-forward**
+(ci-après) ou via son API ClusterIP. Seul son SMTP `1025` est exposé sur le nœud
+(`hostPort`, pour le relais postfix hôte, cf. plus bas).
 
 Vérifier les mails capturés :
 

@@ -57,7 +57,11 @@ de votre déploiement.
 
 Vous ne devez pas **opérer le cluster** pour travailler. Après le banc monté,
 une commande rend tout consommable depuis votre poste
-([ADR 0048](decisions/0048-acces-local-developpeur.md)) :
+([ADR 0048](decisions/0048-acces-local-developpeur.md)). L'exposition des UI est
+en **L4 NodePort** ([ADR 0092](decisions/0092-exposition-hostport-l4.md)) : un
+Service `type: NodePort` (`<service>-nodeport`) sert chaque UI en **HTTP clair**
+sur `http://<IP-nœud>:<nodePort>`. Plus aucun Gateway, plus aucun DNS, plus
+aucun TLS de bordure dans le chemin.
 
 ```bash
 bench/lima/access.sh
@@ -65,29 +69,28 @@ bench/lima/access.sh
 
 Elle fait, en une fois :
 
-- **expose les UIs** : pose les Gateways manquants et ouvre un tunnel par UI,
-  puis écrit dans votre `/etc/hosts` (sudo demandé) un bloc
-  `*.cluster.lan → 127.0.0.1`. Les URLs deviennent **cliquables** (TLS par la CA
-  interne — à accepter une fois) : `https://argocd.cluster.lan:8443`,
-  `https://gitea.cluster.lan:8445`, `https://grafana.cluster.lan:8446`,
-  `https://dagster.cluster.lan:8444`, `https://marquez.cluster.lan:8447` (les
-  ports exacts sont affichés à la fin).
+- **expose les UIs** : lit du contrat les endpoints `exposed: true`, et pour
+  chacun ouvre un `kubectl port-forward svc/<service>-nodeport` vers
+  `127.0.0.1:<port-local>` (ports locaux non privilégiés, **aucun sudo**). Les
+  URLs deviennent **cliquables** : `http://127.0.0.1:<port-local>` (Argo CD,
+  Gitea, Grafana, Dagster, MLflow… — les ports exacts sont affichés à la fin).
+  Aucun Gateway, aucun forward SSH, aucun bloc `/etc/hosts`.
 - **affiche les secrets** d'un coup (Argo CD, Gitea, Grafana, rôles Postgres).
 - **génère `../atlas/.env.cluster.local`** (gitignoré) : un `.env` prêt à
-  consommer côté applicatif (Postgres, OpenLineage, registry, URL de push
-  Gitea). Patron versionné :
+  consommer côté applicatif (Postgres, OpenLineage, registry). Patron versionné
+  :
   [`contract/atlas.env.cluster.example`](../contract/atlas.env.cluster.example).
 
-Pour tout arrêter (tunnels + bloc `/etc/hosts`) : `bench/lima/access.sh --stop`.
-Pour ne pas toucher `/etc/hosts` : `bench/lima/access.sh --no-hosts` (les URLs
-s'ouvrent via `curl --resolve <host>:<port>:127.0.0.1`).
+Pour tout arrêter (les `kubectl port-forward`) : `bench/lima/access.sh --stop`.
 
-> **Pourquoi des tunnels ?** Le réseau de la VM n'est pas routable depuis l'hôte
-> et `*.cluster.lan` n'y résout pas (placeholders,
-> [ADR 0020](decisions/0020-exposition-reseau-tout-cilium.md)). `access.sh` fait
-> le pont, sans rien installer ni rebooter. **En déploiement réel**
-> (bare-metal), rien de tout ça : l'admin réseau pose le DNS et les URLs
-> marchent nativement.
+> **Pourquoi un `port-forward` au banc ?** Le réseau de la VM Lima est **isolé
+> du Mac** : le poste n'atteint pas l'IP interne du nœud. `access.sh` ouvre donc
+> un `kubectl port-forward` par UI (rien à installer, rien à rebooter), et
+> affiche `http://127.0.0.1:<port-local>`. **En déploiement réel**, rien de tout
+> ça : le poste atteint directement le réseau des nœuds, et l'accès se fait en
+> `http://<IP-nœud>:<nodePort>` **sans aucun forward** (le script rappelle l'URL
+> prod en complément). C'est le verrou que lève l'exposition L4 : zéro DNS, zéro
+> LB-IPAM ([ADR 0092](decisions/0092-exposition-hostport-l4.md)).
 
 ## 3. Pousser sur Gitea
 
@@ -96,24 +99,27 @@ C'est l'acte central de la
 vos manifestes dans le dépôt Gitea du banc**, Argo CD les réconcilie — vous ne
 faites **jamais** de `kubectl apply` de vos workflows (frontière
 [ADR 0022](decisions/0022-argocd-gitops-applicatif.md)). `access.sh` a déjà
-écrit l'URL de push (creds inclus) dans le `.env` généré (`GITEA_PUSH_URL`) :
+ouvert un `port-forward` vers Gitea et affiché son URL
+(`http://127.0.0.1:<port-gitea>`) ainsi que les identifiants admin. Composez
+l'URL de push à partir de ce port et de ces creds :
 
 ```bash
-# Charger le .env généré par access.sh (depuis le dépôt applicatif) :
-set -a; . .env.cluster.local; set +a
-
-git clone "${GITEA_PUSH_URL}" workflows && cd workflows
+# <port-gitea> : le port local affiché par access.sh pour l'UI Gitea.
+# <user>/<password> : les identifiants Gitea affichés par access.sh.
+git clone "http://<user>:<password>@127.0.0.1:<port-gitea>/atlas/workflows.git" workflows
+cd workflows
 # Modifier/ajouter un manifeste (Application, patch de workspace…), puis :
 git add . && git commit -m "feat: nouveau workflow"
 git push origin main          # → le webhook déclenche Argo CD
 ```
 
-> **Authentification.** `GITEA_PUSH_URL` embarque le mot de passe (commode pour
-> un banc jetable) ; pour un usage répété, préférez un **token d'accès
-> personnel** (UI Gitea → _Settings → Applications_). Le webhook `push` → Argo
-> CD est posé par `gitops-seed` : un `push` réussi déclenche la réconciliation
-> (visible dans l'UI Argo CD, `Synced/Healthy`) ; à défaut, Argo CD repolle
-> périodiquement.
+> **Authentification.** Glisser le mot de passe dans l'URL est commode pour un
+> banc jetable ; pour un usage répété, préférez un **token d'accès personnel**
+> (UI Gitea → _Settings → Applications_). Le push passe par le `port-forward`
+> ouvert par `access.sh` : s'il a été arrêté (`--stop`), relancez `access.sh`
+> avant de pousser. Le webhook `push` → Argo CD est posé par `gitops-seed` : un
+> `push` réussi déclenche la réconciliation (visible dans l'UI Argo CD,
+> `Synced/Healthy`) ; à défaut, Argo CD repolle périodiquement.
 
 **Vérifier le résultat** : l'`Application` passe `Synced/Healthy` (UI Argo CD),
 le run s'exécute ([`K8sRunLauncher`](glossaire.md#k8srunlauncher) → Job K8s) et

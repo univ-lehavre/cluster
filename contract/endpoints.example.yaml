@@ -185,7 +185,7 @@ endpoints:
     auth: secret-admin # Secret kube-prometheus-stack-grafana (clé admin-password)
     layer: monitoring
     exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
-    source: platform/kube-prometheus-stack/gateway.yaml
+    source: platform/kube-prometheus-stack/nodeport.yaml
     note: Tableaux de bord métriques (Prometheus datasource).
 
   # ── Observabilité INTERROGEABLE (API, pas UI) — un consommateur peut requêter ──
@@ -235,18 +235,19 @@ endpoints:
 
   - id: mailpit-ui
     service: mailpit
-    namespace: mailpit
-    fqdn: mailpit.mailpit.svc.cluster.local
+    namespace: mail
+    fqdn: mailpit.mail.svc.cluster.local
     port: 8025
     protocol: http
     auth: none # intra-cluster / réseau privé
     layer: monitoring
     profil: local-path # BANC only (comme seaweedfs) — SMTP de test, absent en prod
-    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
-    source: platform/mailpit/gateway.yaml
+    # PAS de NodePort : mailpit est banc-only, son UI s'ouvre via `kubectl
+    # port-forward` (access.sh), pas exposée sur un port du nœud (ADR 0092).
+    source: platform/mailpit/mailpit.yaml
     note: >-
       Boîte mail de test (capture les alertes/notifications du banc). N'existe PAS
-      en prod (ns mailpit absent de dirqual) — outil de banc.
+      en prod (ns mail absent de dirqual) — outil de banc.
 
   - id: argocd-ui
     service: argocd-server
@@ -257,7 +258,7 @@ endpoints:
     auth: secret-admin # Secret argocd-initial-admin-secret (clé password)
     layer: gitops
     exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
-    source: platform/argocd/gateway.yaml
+    source: platform/argocd/nodeport.yaml
     note: >-
       UI GitOps (état des Application, sync/health). CLI gRPC via Gateway non
       fonctionnel en l'état (finding #26) ; UI/REST OK.

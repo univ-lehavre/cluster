@@ -24,16 +24,26 @@ kubectl get clusterissuer selfsigned-bootstrap internal-ca   # READY=True
 kubectl -n cert-manager get certificate root-ca              # READY=True
 ```
 
-> **Pré-requis Gateway API** : les CRDs `gateway.networking.k8s.io` v1.4.1 sont
-> posées par l'addon [`cilium-expo`](/cluster/platform/cilium-expo/) (ADR 0020).
-> Le contrôleur cert-manager doit démarrer **après** elles ; sinon
-> `kubectl -n cert-manager rollout restart deploy/cert-manager`.
+> **Pré-requis Gateway API** : depuis
+> l'[ADR 0092](/cluster/docs/decisions/0092-exposition-hostport-l4/) les UI sont
+> exposées en **L4** (`NodePort`/`hostPort`, `http://<IP-nœud>:<port>`) — le
+> Gateway L7 n'est **plus** dans le chemin d'exposition et l'addon
+> `platform/cilium-expo/` a été retiré. cert-manager n'a donc plus besoin des
+> CRDs `gateway.networking.k8s.io` pour ce chemin. Le gateway-shim ci-dessous
+> reste utilisable si un `Gateway` est posé hors de ce dépôt (chemin de prod
+> optionnel) : les CRDs doivent alors préexister, et le contrôleur cert-manager
+> démarrer **après** elles (sinon
+> `kubectl -n cert-manager rollout restart deploy/cert-manager`).
 >
 > **Images sans Internet** : le cluster n'étant pas exposé, les images
 > `quay.io/jetstack/cert-manager-*` doivent être joignables en egress **ou**
 > mirrorées dans le registry interne (ADR 0011), sinon `ImagePullBackOff`.
 
-## Câbler un Gateway (gateway-shim)
+## Câbler un Gateway (gateway-shim) — optionnel, hors chemin d'exposition des UI
+
+> Les UI de la plateforme sont exposées en L4 (ADR 0092) et ne passent **plus**
+> par un Gateway. Ce gateway-shim ne sert donc qu'à un éventuel `Gateway` posé
+> hors de ce dépôt (chemin de prod optionnel).
 
 cert-manager émet le certificat d'un `Gateway` quand celui-ci est **annoté** et
 porte un listener HTTPS `Terminate` avec un **hostname non vide** :

@@ -24,7 +24,7 @@ par Cilium 1.19 et Rook 1.19, tous deux testés jusqu'à K8s 1.34).
 | containerd.io   | **2.2.4**                  | dépôt Docker (cf. [ADR 0005](0005-cri-containerd-via-depot-docker.md))                                                                                                    |
 | Dashboard chart | **7.10.0**                 | [`platform/k8s-dashboard/manage.sh`](../../platform/k8s-dashboard/manage.sh) (`CHART_VERSION`)                                                                            |
 | Registry image  | **3.1.1**                  | [`platform/container-registry/deployment.yaml`](../../platform/container-registry/deployment.yaml)                                                                        |
-| Gateway API CRD | **1.4.1**                  | [`platform/cilium-expo/README.md`](../../platform/cilium-expo/) (pré-install, cf. ADR 0020)                                                                               |
+| Gateway API CRD | **1.4.1**                  | feature Cilium ([`bootstrap/cni.sh`](../../bootstrap/cni.sh)) ; UI en L4 hors Gateway (cf. ADR 0092)                                                                      |
 | cert-manager    | **1.20.2**                 | [`platform/cert-manager/cert-manager.yaml`](../../platform/cert-manager/cert-manager.yaml) (images par digest)                                                            |
 | Argo CD         | **3.4.3**                  | [`platform/argocd/argocd.yaml`](../../platform/argocd/argocd.yaml) (+ dex 2.45.0, redis 8.2.3 ; images par digest)                                                        |
 

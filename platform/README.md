@@ -6,7 +6,6 @@ Services transverses du cluster (au-delà du bootstrap K8s et du stockage Ceph).
 | -------------------------------------------------------------------- | --------------------------------------------------------------- |
 | [`argocd/`](/cluster/platform/argocd/)                               | GitOps applicatif (Argo CD v3.4.3, cf. ADR 0022)                |
 | [`cert-manager/`](/cluster/platform/cert-manager/)                   | TLS de bordure via CA interne (cf. ADR 0021)                    |
-| [`cilium-expo/`](/cluster/platform/cilium-expo/)                     | Exposition tout-Cilium : LB-IPAM + L2 + Gateway API (ADR 0020)  |
 | [`cloudnative-pg/`](/cluster/platform/cloudnative-pg/)               | PostgreSQL managé (socle DataOps — cf. ADR 0024)                |
 | [`container-registry/`](/cluster/platform/container-registry/)       | Registry d'images interne (distribution v3, RBD ×3)             |
 | [`dagster/`](/cluster/platform/dagster/)                             | Orchestrateur DataOps (cf. ADR 0026)                            |
@@ -19,6 +18,13 @@ Services transverses du cluster (au-delà du bootstrap K8s et du stockage Ceph).
 | [`metrics-server/`](/cluster/platform/metrics-server/)               | Métriques CPU/mémoire (`kubectl top`, HPA — cf. ADR 0016)       |
 | [`network-policies/`](/cluster/platform/network-policies/)           | NetworkPolicies default-deny par namespace (audit P6 #22)       |
 | [`hardware.md`](/cluster/platform/hardware/)                         | Inventaire matériel des nœuds (serveurs lames)                  |
+
+**Exposition des UI** : depuis
+l'[ADR 0092](/cluster/docs/decisions/0092-exposition-hostport-l4/), les UI sont
+servies en **L4** (`NodePort`/`hostPort` sur l'IP du nœud,
+`http://<IP-nœud>:<port>`) — plus de Gateway L7 ni de dossier
+`platform/cilium-expo/` (retiré). Les features Cilium LB-IPAM/Gateway restent
+armées par `bootstrap/cni.sh` (chemin de prod optionnel).
 
 Chaque composant a son propre README avec installation et décisions assumées
 (`mlflow/`, `redcap/`, `seaweedfs/` inclus — cf. la pile complète dans

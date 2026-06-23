@@ -61,7 +61,7 @@ La matrice cible (mai 2026) fixe chaque version à un fichier qui la pilote :
 | containerd.io   | 2.2.4           | dépôt Docker (cf. ADR 0005)                   |
 | Dashboard chart | 7.10.0          | `platform/k8s-dashboard/manage.sh`            |
 | Registry image  | 3.1.1           | `platform/container-registry/deployment.yaml` |
-| Gateway API CRD | 1.4.1           | `platform/cilium-expo/`                       |
+| Gateway API CRD | 1.4.1           | feature Cilium `bootstrap/cni.sh` (ADR 0092)  |
 | cert-manager    | 1.20.2          | `cert-manager.yaml` (images par digest)       |
 | Argo CD         | 3.4.3           | `platform/argocd/argocd.yaml` (par digest)    |
 

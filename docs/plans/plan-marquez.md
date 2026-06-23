@@ -28,6 +28,14 @@ persistance dans une **base CNPG dédiée `marquez`** du cluster HA **unique
 **`kubectl apply`** ([ADR 0022](../decisions/0022-argocd-gitops-applicatif.md)),
 validé sur le banc léger Lima (K8s v1.34, arm64).
 
+> **Note (ADR [0092](../decisions/0092-exposition-hostport-l4.md),
+> 2026-06-23).** Plan **achevé** : les mentions ci-dessous de l'**UI web exposée
+> par Gateway + TLS** (Marquez web) décrivent l'état au moment de la
+> réalisation. L'exposition des UI a depuis basculé en **L4** (`NodePort`,
+> `http://<IP-nœud>:<port>`, sans DNS ni TLS de bordure) : le `gateway.yaml` de
+> l'addon est retiré au profit d'un Service `NodePort` ; l'API Marquez reste
+> interne (ClusterIP). Conservé tel quel comme historique.
+
 Ce plan **clôt aussi l'épopée #148** (dette de validation systémique) en livrant
 un **harnais E2E reproductible** qui déploie et vérifie la chaîne
 `monitoring → CNPG → Dagster → Marquez` assemblée, et prouve la **vraie chaîne**

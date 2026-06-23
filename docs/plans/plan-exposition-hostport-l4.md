@@ -101,6 +101,8 @@ d'[ADR 0071](../decisions/0071-exposition-gateway-hostnetwork.md).
 - [x] Étape 3 — UI vendored en NodePort (7 Services séparés + câblage rôles)
 - [x] Étape 4 — drift `state.sh` allowlist contrat + `check_contract` ancrage
       NodePort
-- [ ] Étape 5 — bascule Cilium (retrait LB-IPAM/Gateway par défaut) — preuve
-      banc
+- [~] Étape 5 — bascule Cilium L4 pur CODÉE (cni.sh sans Gateway/LB-IPAM +
+  retrait CR résiduels ; 7 gateway.yaml + cilium-expo supprimés ;
+  access.sh/scénarios 28-32/docs refondus en L4) ; reste la **preuve banc** (cni
+  L4 + UI NodePort + state.sh 0 drift)
 - [ ] Étape 6 — bascule prod dirqual + preuve e2e

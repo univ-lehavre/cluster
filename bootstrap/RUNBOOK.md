@@ -437,9 +437,14 @@ arme désormais, à l'install **et** à l'upgrade :
 - **`gatewayAPI.enabled=true`** : bordure L7 (Envoy intégré), remplace
   ingress-nginx.
 
-Les pools/policies/GatewayClass sont des CRs versionnés sous
-[`platform/cilium-expo/`](/cluster/platform/cilium-expo/) ; les **CRDs Gateway
-API v1.4.1 doivent être pré-installées** (voir le README de cet addon).
+Ces features restent disponibles côté Cilium, mais **les UI ne sont plus
+exposées par le Gateway L7** : depuis
+l'[ADR 0092](/cluster/docs/decisions/0092-exposition-hostport-l4/), l'accès aux
+UI passe en **L4** (`NodePort`/`hostPort` sur l'IP du nœud,
+`http://<IP-nœud>:<port>` — zéro DNS, zéro LB-IPAM). Le dossier de CRs
+`platform/cilium-expo/` (GatewayClass/pools/policies) et les `gateway.yaml` de
+brique ont été **retirés** avec cette bascule ; le `GatewayClass` cilium et les
+CRD éventuelles restent inoffensifs.
 
 Retrait de `kube-proxy` : sur un cluster **neuf**, `kubeadm init` ne le déploie
 plus (`skipPhases: [addon/kube-proxy]` dans la config kubeadm). Sur un cluster

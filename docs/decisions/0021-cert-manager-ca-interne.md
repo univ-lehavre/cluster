@@ -104,6 +104,16 @@ Sa distribution aux clients internes est traitée explicitement, deux voies :
 
 Accepted (2026-06-02).
 
+> **Note (ADR [0092](0092-exposition-hostport-l4.md), 2026-06-23).** Depuis le
+> renversement vers une exposition **L4** (`NodePort`/`hostPort`,
+> `http://<IP-nœud>:<port>`), le **TLS de bordure du Gateway n'expose plus les
+> UI** : celles-ci sont servies en HTTP clair sur un port du nœud, hors du
+> chemin cert-manager. cert-manager **garde son rôle de CA interne**
+> (émission/rotation de certificats internes, chaîne de confiance), mais **plus
+> pour la bordure UI** — le gateway-shim et le listener HTTPS décrits ci-dessous
+> ne sont plus dans le datapath d'exposition. Le texte qui suit décrit le
+> mécanisme de bordure tel qu'acté à l'origine (contexte historique).
+
 ## Conséquences
 
 **Bénéfices.**
