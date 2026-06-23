@@ -1,12 +1,14 @@
 # Bases logiques du Cluster CNPG (étape 1.6, ADR 0024).
 #
-# Trois bases sur le même Cluster HA, une par usage — isolation (sauvegardes,
+# Cinq bases sur le même Cluster HA, une par usage — isolation (sauvegardes,
 # rétentions, contention) sans doubler l'infrastructure stateful. Un seul cluster
 # PostgreSQL HA (`pg`) porte toutes les bases applicatives (pas un cluster par appli).
 #   - dagster  : event log de l'orchestrateur Dagster (1.7)
 #   - pgvector : index de recherche sémantique (extension vector, chargé par atlas)
 #   - marquez  : store de lineage OpenLineage de Marquez (1.8) — migrations Flyway
 #                (d'où une base dédiée, pas un schéma partagé). ADR 0028.
+#   - mlflow   : store de suivi de modèles MLflow.
+#   - cache    : backing service du cache partagé des flux atlas (ADR 0093).
 #
 # L'operator exécute CREATE DATABASE puis, pour pgvector, CREATE EXTENSION vector.
 # ⚠️ Le nom SQL de l'extension est `vector` (PAS `pgvector`).
@@ -56,5 +58,19 @@ metadata:
 spec:
   name: mlflow
   owner: mlflow
+  cluster:
+    name: pg
+---
+# cache : backing service du cache partagé des flux atlas (ADR 0093) — table
+# clé-valeur horodatée + UPSERT atomique + pg_advisory_lock (verrou distribué).
+# Base dédiée (une par usage, ADR 0024) ; le SQL vit dans l'adaptateur atlas.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: cache
+  namespace: postgres
+spec:
+  name: cache
+  owner: cache
   cluster:
     name: pg

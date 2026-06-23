@@ -381,6 +381,23 @@ EPREUVES: list[Epreuve] = [
         "base",
         None,
     ),
+    # Cache CNPG (ADR 0093) : prouve les PRIMITIVES Postgres du cache partagé des
+    # flux atlas (connexion rôle/base cache + UPSERT atomique + pg_advisory_lock),
+    # depuis un pod éphémère via psql vers pg-rw.postgres. L'adaptateur (SQL) vit
+    # côté atlas (frontière §5 ADR). dataops (exige le Cluster CNPG du profil
+    # dataops) ; terrain api (sonde la base in-cluster) ; topo-agnostique.
+    # backend_req=None : preuve e2e sur local-path mono-nœud (ADR 0085). SKIP
+    # neutre si la base cache / le Secret pg-role-cache est absent. #150.
+    Epreuve(
+        "33",
+        "Cache CNPG : connexion + UPSERT atomique + advisory lock",
+        "intég",
+        "dataops",
+        TOPO_AGNOSTIQUE,
+        TERRAIN_API,
+        "dataops",
+        None,
+    ),
 ]
 
 

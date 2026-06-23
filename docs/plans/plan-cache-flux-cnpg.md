@@ -77,7 +77,14 @@ code derrière l'interface `readCache`/`writeCache` reste **côté atlas**
 
 ## Suivi
 
-- [ ] Étape 1 — base/rôle `cache` (CNPG)
-- [ ] Étape 2 — contrat (endpoint + DSN + secret)
-- [ ] Étape 3 — preuve e2e banc local-path
-- [ ] Étape 4 — issue atlas (adaptateur Postgres) tracée
+- [x] Étape 1 — base/rôle `cache` (CNPG) : rôle managé + `Database cache` +
+      Secret `pg-role-cache` (cluster.yaml / database.yaml /
+      role-secrets.example.yaml)
+- [x] Étape 2 — contrat : endpoint `postgres-cache` + secret `pg-role-cache` +
+      bloc `POSTGRES_CACHE_*` (atlas.env) ; `check_contract` vert
+- [x] Étape 3 — scénario banc `33-cache-cnpg.sh` (connexion rôle `cache` +
+      UPSERT atomique + `pg_advisory_lock`) + catalogue épreuves ; reste à
+      **jouer au banc**
+- [x] Étape 4 — issue atlas (adaptateur Postgres derrière
+      `readCache`/`writeCache`) :
+      [atlas#443](https://github.com/univ-lehavre/atlas/issues/443)

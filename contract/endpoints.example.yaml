@@ -51,6 +51,20 @@ endpoints:
     source: platform/cloudnative-pg/cluster.yaml
     note: Load-balance les lectures sur les réplicas (analytics/OLAP).
 
+  - id: postgres-cache
+    service: pg-rw # même Service que postgres-rw — base logique `cache` (pas un Service de plus)
+    namespace: postgres
+    fqdn: pg-rw.postgres.svc.cluster.local
+    port: 5432
+    protocol: tcp
+    auth: secret-role # Secret `pg-role-cache`
+    role: cache
+    source: platform/cloudnative-pg/cluster.yaml
+    note: >-
+      Backing service du cache partagé des flux atlas (ADR 0093) : base logique
+      `cache` sur le Cluster `pg`. L'adaptateur (table clé-valeur + UPSERT +
+      pg_advisory_lock) vit côté atlas. DSN via POSTGRES_CACHE_* (atlas.env).
+
   # ── Lineage (Marquez / OpenLineage, ns marquez) ───────────────────────────
   - id: marquez-api
     service: marquez
