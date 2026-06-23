@@ -1,8 +1,15 @@
 # 0071 — Exposition `gateway` en hostNetwork (80/443 sur l'IP du nœud)
 
+> **Superseded by [ADR 0092](0092-exposition-hostport-l4.md)** (2026-06-23) pour
+> le MÉCANISME d'exposition : les UI passent du Gateway L7 (hostNetwork, SNI,
+> TLS de bordure) au L4 `hostPort`/`NodePort` (`http://<IP-nœud>:<port>`, zéro
+> DNS). La prémisse réseau privé / mono-NIC d'ADR 0071 reste valable ; c'est le
+> choix Gateway-L7 qui est remplacé (cf. ADR 0092 §Contexte).
+
 ## Statut
 
-Accepted (2026-06-15)
+Superseded by [ADR 0092](0092-exposition-hostport-l4.md) (2026-06-23).
+Initialement Accepted (2026-06-15).
 
 **Amende l'[ADR 0020](0020-exposition-reseau-tout-cilium.md)** : fait du Gateway
 exposé en **hostNetwork** le mode d'exposition **unique** câblé, et rétrograde

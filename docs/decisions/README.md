@@ -90,7 +90,7 @@ Format léger inspiré de Michael Nygard :
 | 0068 | [Profil `metrics` : palier fin entre `base` et `store`](0068-profil-metrics-palier-fin.md)                                           | Accepted           |
 | 0069 | [`topology.layers` : déclaration explicite des couches (DAG, grain phase)](0069-topology-layers-dag-grain-phase.md)                  | Accepted           |
 | 0070 | [Renommer `test/` en `bench/` ; garder `bootstrap/` à plat](0070-renommer-test-en-bench-bootstrap-plat.md)                           | Accepted           |
-| 0071 | [Exposition `gateway` en hostNetwork (80/443 sur l'IP du nœud)](0071-exposition-gateway-hostnetwork.md)                              | Accepted           |
+| 0071 | [Exposition `gateway` en hostNetwork (80/443 sur l'IP du nœud)](0071-exposition-gateway-hostnetwork.md)                              | Superseded         |
 | 0072 | [`cluster scale` : ajuster les replicas au nombre de nœuds](0072-cluster-scale-replicas-noeuds.md)                                   | Accepted           |
 | 0073 | [Hubble UI : activer l'observabilité réseau (opt-in)](0073-hubble-ui-observabilite-reseau.md)                                        | Proposed           |
 | 0074 | [`cluster discover` : reconstruire un `topology.yaml` depuis un cluster réel](0074-cluster-discover-reconstruire-topologie.md)       | Accepted           |
@@ -111,3 +111,4 @@ Format léger inspiré de Michael Nygard :
 | 0089 | [Migration de la documentation : VitePress → Astro Starlight](0089-migration-doc-vitepress-astro-starlight.md)                       | Proposed           |
 | 0090 | [`nestor` lit l'état réel d'un cluster prod (état = K8s, pas VMs)](0090-nestor-pilote-la-prod.md)                                    | Proposed           |
 | 0091 | [Portail d'accès aux UI de la plateforme](0091-portail-acces-ui.md)                                                                  | Accepted           |
+| 0092 | [Exposition des UI par `hostPort`/`NodePort` L4 (zéro DNS)](0092-exposition-hostport-l4.md)                                          | Accepted           |

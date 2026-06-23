@@ -113,8 +113,8 @@ consolidée, pour juger en 5 min : [docs/preuves.md](docs/preuves.md).
 
 <!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
 
-- **91 ADR** (82 Accepted, 7 Proposed, 2 Superseded)
-- **11 plans** vivants (4 Achevé, 5 Actif, 2 Brouillon)
+- **92 ADR** (82 Accepted, 7 Proposed, 3 Superseded)
+- **12 plans** vivants (4 Achevé, 5 Actif, 3 Brouillon)
 - **59 drifts** indexés (3 caduc, 53 corrige, 1 en-cours, 2 ouvert)
 - **32 scénarios** E2E reproductibles
 
