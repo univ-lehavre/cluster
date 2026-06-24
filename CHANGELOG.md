@@ -11,6 +11,49 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.43.0](https://github.com/univ-lehavre/cluster/compare/v2.42.0...v2.43.0) (2026-06-24)
+
+
+### Features
+
+* **ceph:** exposer le dashboard mgr en nodeport l4 (adr 0092) ([288e640](https://github.com/univ-lehavre/cluster/commit/288e640c15f958c0fad0f83195ff624172b35a30))
+* **cni:** bascule cilium en l4 pur (retrait gateway/lb-ipam, adr 0092) ([ec6926b](https://github.com/univ-lehavre/cluster/commit/ec6926b6221005c8d3ecfcd0e73685c0d8eb34de))
+* **cnpg:** base/rôle cache pour le backing service des flux atlas (adr 0093) ([d9273ce](https://github.com/univ-lehavre/cluster/commit/d9273cecbe7210093fd0d5f676dcbe55872cc678))
+* **contract:** exposer les UI par exposed:true (nodeport l4, adr 0092) ([7d4773f](https://github.com/univ-lehavre/cluster/commit/7d4773f677d7ef2f49b96779112259727ccf2c6f))
+* **drift:** allowlist nodeport du contrat + ancrage check_contract (adr 0092) ([4a9e6e0](https://github.com/univ-lehavre/cluster/commit/4a9e6e061d3e03010d3ccd93ca77251a88a5d154))
+* exposition L4 NodePort des UI + portail (ADR 0092, supersede 0071) ([29f611b](https://github.com/univ-lehavre/cluster/commit/29f611b37fdd0407fcc59e3cc84b8226020bad77))
+* implémentation cache CNPG (base/rôle + contrat + scénario 33) — plan ADR 0093 ([d845059](https://github.com/univ-lehavre/cluster/commit/d845059a033312c563cb0155bf06433955cf774c))
+* **platform:** retirer le l7 (7 gateway.yaml + cilium-expo + tâche argocd, adr 0092) ([a9fa387](https://github.com/univ-lehavre/cluster/commit/a9fa38784822e91f00f0fe977e4dbab5570b147a))
+* **platform:** services nodeport l4 pour les 7 ui vendored (adr 0092) ([4944dad](https://github.com/univ-lehavre/cluster/commit/4944dad7624ca952d6781110ca6e8f34ee4d1c6c))
+* **portal:** câbler portal dans le chemin (phase, graphe atomique, layers, banc.yaml) ([3006c45](https://github.com/univ-lehavre/cluster/commit/3006c45ec6d50f30e31c8fb1130eaf81e65ee1eb))
+* **portal:** observer le nodeport l4 au lieu du hostname gateway (adr 0092) ([e2f7bfd](https://github.com/univ-lehavre/cluster/commit/e2f7bfd5baa0a0f362ba8a8a45a277e3781b7ffa))
+* **portal:** rôle ansible platform-portal (build image + déploiement nodeport) ([6b639db](https://github.com/univ-lehavre/cluster/commit/6b639db95ac84acb3fb888ecbc7646775d1d100e))
+
+
+### Bug Fixes
+
+* **bench:** vm_memory_default à 12 gio (chaîne mlops mono-nœud sature 8 gio) ([ad08529](https://github.com/univ-lehavre/cluster/commit/ad085294a5103596b81c6c890a0614c21a243721))
+* **docs:** retirer le h1 dupliqué des pages astro générées (starlight rend le title) ([10e51cb](https://github.com/univ-lehavre/cluster/commit/10e51cb8782c221c99f5b9754aa4a040e13e7879))
+* **portal:** imagepullpolicy always pour le tag mutable :dev (adr 0092) ([cb50fd1](https://github.com/univ-lehavre/cluster/commit/cb50fd1ed9232efbd84c2aa738acf507a3ea8d04))
+* **portal:** observer le service nodeport séparé + afficher le login (adr 0092) ([ab7f47f](https://github.com/univ-lehavre/cluster/commit/ab7f47fef8c6c88d89ced7000737190b3d547124))
+* titres dupliqués Astro + imagePullPolicy portail + test scheme https ([378c9b9](https://github.com/univ-lehavre/cluster/commit/378c9b9f6ba941c31a4a7d62562768f50488af2a))
+
+
+### Documentation
+
+* **adr:** 0092 exposition UI en hostPort/NodePort L4 (supersede 0071) + plan ([7aa094b](https://github.com/univ-lehavre/cluster/commit/7aa094be852d42d74a45d1eae309efe2e877f07a))
+* **adr:** 0092 exposition UI en hostPort/NodePort L4 (supersede 0071) + plan ([da08afa](https://github.com/univ-lehavre/cluster/commit/da08afae918e5b75c2587a4d084c5b11a07ec068))
+* **adr:** 0093 cache des flux atlas via cloudnative-pg (pas de redis) + plan ([404ed9f](https://github.com/univ-lehavre/cluster/commit/404ed9faebf7d130ea49d2da538db30b8658bf9d))
+* **adr:** 0093 cache des flux atlas via CloudNativePG (pas de Redis) + plan ([a79541c](https://github.com/univ-lehavre/cluster/commit/a79541c27fe424584e51567ca450a89c825ca9ad))
+* **adr:** aligner contrat + adr 0092 + doc sur l4 nodeport observé (adr 0092) ([9cf20a9](https://github.com/univ-lehavre/cluster/commit/9cf20a96e08c5f4631fe4d16a7957319fc1cbe7e))
+* **adr:** lier le plan dans 0092 (plan-exposition orphelin → atteignable, adr 0029) ([2f6a490](https://github.com/univ-lehavre/cluster/commit/2f6a490d11da0e6a39bc70760fc502f0e324e329))
+* bloc « le dépôt en chiffres » à 32 scénarios (ajout du 32-portal) ([6c9cb49](https://github.com/univ-lehavre/cluster/commit/6c9cb4992c6bde78cbb025e3321d27c26c25557a))
+* **contract:** aligner l'accès UI sur l4 nodeport (adr 0092) ([c489139](https://github.com/univ-lehavre/cluster/commit/c4891398e731958b674e595aaa0454c82d6cb9b6))
+* **contract:** dimensionnement des volumes (atlas décide, sc extensibles) ([9627f3e](https://github.com/univ-lehavre/cluster/commit/9627f3eb110dd162576f7580a645429ad0fbe587))
+* **netpol:** acter l'egress large GDELT/Zenodo (mediawatch, [#471](https://github.com/univ-lehavre/cluster/issues/471)) ([35b648a](https://github.com/univ-lehavre/cluster/commit/35b648a78df67e0686433f2067923fd75fd09715))
+* **netpol:** acter l'egress large pour la collecte gdelt/zenodo ([#471](https://github.com/univ-lehavre/cluster/issues/471)) ([a7a15b9](https://github.com/univ-lehavre/cluster/commit/a7a15b922edabc48016fde703005d41c0c6999ac))
+* **plan:** exposition l4 — étapes 1-4 livrées, plan actif (adr 0092) ([f5914d5](https://github.com/univ-lehavre/cluster/commit/f5914d5c8de4ecca5681178e5c66b5a803987ae3))
+
 ## [2.42.0](https://github.com/univ-lehavre/cluster/compare/v2.41.1...v2.42.0) (2026-06-23)
 
 
