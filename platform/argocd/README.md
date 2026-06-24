@@ -11,7 +11,7 @@ Marquez). Décision et frontière :
 | [`appproject-atlas.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argocd/appproject-atlas.yaml)                       | `AppProject atlas` cadrant citation-\*/dagster/marquez ; `sourceRepos` surchargeable (ADR 0044) |
 | [`gateway.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argocd/gateway.yaml)                                         | `Gateway` + `HTTPRoute` d'exposition UI (TLS bordure cert-manager)                              |
 | [`_test/application-guestbook.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argocd/_test/application-guestbook.yaml) | `Application` guestbook de **test** (validation banc — jetable)                                 |
-| [`app-of-apps/`](app-of-apps/)                                                                                                           | **App-of-Apps** (ADR 0094) : instanciation déclarative des `Application` applicatives           |
+| [`app-of-apps/`](https://github.com/univ-lehavre/cluster/blob/main/platform/argocd/app-of-apps/README.md)                                | **App-of-Apps** (ADR 0094) : instanciation déclarative des `Application` applicatives           |
 
 NetworkPolicies sous `platform/network-policies/argocd/`
 ([`00-default-deny.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/network-policies/argocd/00-default-deny.yaml) +
