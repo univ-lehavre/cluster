@@ -26,7 +26,7 @@ set -euo pipefail
 umask 077
 
 BACKUP_DIR=/var/lib/etcd-backups
-# shellcheck disable=SC1083  # {{ … }} = substitution Jinja (rendu par Ansible), pas du bash
+# shellcheck disable=SC1083  # la valeur ci-dessous est une substitution Jinja (rendue par Ansible), pas du bash
 KEEP={{ etcd_backup_keep }}
 STAMP=$(date +%Y%m%d-%H%M%S)
 DEST="${BACKUP_DIR}/etcd-${STAMP}.db"
