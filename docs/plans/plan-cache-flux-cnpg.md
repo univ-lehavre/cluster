@@ -2,9 +2,12 @@
 
 ## État
 
-> **État : Actif** (2026-06-23) · **Fonde :**
-> [ADR 0093](../decisions/0093-cache-flux-cnpg.md) (Accepted). Plan validé ;
-> implémentation à dérouler (étapes 1-4, banc d'abord).
+> **État : Achevé** (2026-06-24) · **Fonde :**
+> [ADR 0093](../decisions/0093-cache-flux-cnpg.md) (Accepted). Brique cluster
+> livrée ET prouvée au banc (scénario 33 PASS). La part atlas (adaptateur
+> Postgres derrière l'interface) est hors périmètre cluster → [atlas#443].
+>
+> [atlas#443]: https://github.com/univ-lehavre/atlas/issues/443
 
 Matérialise la brique cluster du cache partagé atlas (#150, épopée DataOps #223)
 : une base logique `cache` sur le CNPG existant + le contrat/DSN. L'adaptateur
@@ -83,8 +86,8 @@ code derrière l'interface `readCache`/`writeCache` reste **côté atlas**
 - [x] Étape 2 — contrat : endpoint `postgres-cache` + secret `pg-role-cache` +
       bloc `POSTGRES_CACHE_*` (atlas.env) ; `check_contract` vert
 - [x] Étape 3 — scénario banc `33-cache-cnpg.sh` (connexion rôle `cache` +
-      UPSERT atomique + `pg_advisory_lock`) + catalogue épreuves ; reste à
-      **jouer au banc**
+      UPSERT atomique + `pg_advisory_lock`) + catalogue épreuves ; **joué au
+      banc le 2026-06-24 — PASS** (STRICT_CACHE=1, exit 0)
 - [x] Étape 4 — issue atlas (adaptateur Postgres derrière
       `readCache`/`writeCache`) :
       [atlas#443](https://github.com/univ-lehavre/atlas/issues/443)
