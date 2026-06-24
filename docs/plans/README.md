@@ -55,13 +55,14 @@ Ce dépôt est un **catalogue de topologies d'infrastructure** générique. Donc
 
 ## Index
 
-| Fichier                                                                                        | Type        | Sujet                                                                            |
-| ---------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------- |
-| [plan-modele-declaratif.md](plan-modele-declaratif.md)                                         | Plan vivant | Modèle déclaratif des topologies — paliers P0-P8 + suivi (met en œuvre ADR 0056) |
-| [plan-dagster.md](plan-dagster.md)                                                             | Plan        | Étape 1.7 — orchestrateur Dagster (event log dans CNPG)                          |
-| [plan-marquez.md](plan-marquez.md)                                                             | Plan        | Étape 1.8 — Marquez (lineage OpenLineage) + harnais E2E                          |
-| [2026-06-04-audit-realignement-main-dagster.md](2026-06-04-audit-realignement-main-dagster.md) | Audit       | Réalignement `feat/dagster` ↔ `main` (renumérotation ADR)                        |
-| [plan-rollback-par-phase.md](plan-rollback-par-phase.md)                                       | Plan        | Rollback par phase sur le banc (mise en œuvre ADR 0054)                          |
-| [plan-refonte-doc.md](plan-refonte-doc.md)                                                     | Plan        | Refonte documentaire — hero, manifeste, câblage Diátaxis (met en œuvre ADR 0059) |
-| [plan-stockage-longhorn.md](plan-stockage-longhorn.md)                                         | Plan        | Longhorn, 3ᵉ profil de stockage (met en œuvre ADR 0064 — `Brouillon`)            |
-| [plan-renommer-test-bench.md](plan-renommer-test-bench.md)                                     | Plan vivant | Renommer `test/` → `bench/` + ré-indexer `bootstrap/` (met en œuvre ADR 0070)    |
+| Fichier                                                                                        | Type        | Sujet                                                                                                                      |
+| ---------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
+| [plan-modele-declaratif.md](plan-modele-declaratif.md)                                         | Plan vivant | Modèle déclaratif des topologies — paliers P0-P8 + suivi (met en œuvre ADR 0056)                                           |
+| [plan-dagster.md](plan-dagster.md)                                                             | Plan        | Étape 1.7 — orchestrateur Dagster (event log dans CNPG)                                                                    |
+| [plan-marquez.md](plan-marquez.md)                                                             | Plan        | Étape 1.8 — Marquez (lineage OpenLineage) + harnais E2E                                                                    |
+| [2026-06-04-audit-realignement-main-dagster.md](2026-06-04-audit-realignement-main-dagster.md) | Audit       | Réalignement `feat/dagster` ↔ `main` (renumérotation ADR)                                                                  |
+| [plan-rollback-par-phase.md](plan-rollback-par-phase.md)                                       | Plan        | Rollback par phase sur le banc (mise en œuvre ADR 0054)                                                                    |
+| [plan-refonte-doc.md](plan-refonte-doc.md)                                                     | Plan        | Refonte documentaire — hero, manifeste, câblage Diátaxis (met en œuvre ADR 0059)                                           |
+| [plan-stockage-longhorn.md](plan-stockage-longhorn.md)                                         | Plan        | Longhorn, 3ᵉ profil de stockage (met en œuvre ADR 0064 — `Brouillon`)                                                      |
+| [plan-renommer-test-bench.md](plan-renommer-test-bench.md)                                     | Plan vivant | Renommer `test/` → `bench/` + ré-indexer `bootstrap/` (met en œuvre ADR 0070)                                              |
+| [plan-ha-3cp-control-plane.md](plan-ha-3cp-control-plane.md)                                   | Plan        | HA control-plane 3 nœuds (promotion in-place, kube-vip) — met en œuvre ADR 0055/0047, absorbe #486/#490/#487 (`Brouillon`) |
