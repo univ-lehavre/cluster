@@ -235,6 +235,18 @@ pousse), via un **CronJob** `gitea-mirror-sync` (horaire) lançant
 **temporaire**. **Argo CD ne réconcilie JAMAIS depuis GitHub** — uniquement
 depuis Gitea local (air-gap déploiement préservé).
 
+**Pourquoi PULL (Cron) et PAS un webhook entrant GitHub → cluster.** Un webhook
+de la CI GitHub vers un endpoint Argo Events serait plus **réactif** (déclencher
+le miroir/build dès la CI verte, sans latence horaire), mais il **casse
+l'air-gap dans le sens entrant** : il faut exposer un **port entrant** du
+cluster à Internet, ce qui crée une **surface d'attaque entrante** et une
+**dépendance à GitHub pour déployer** — l'exact inverse de la posture
+([ADR 0003](0003-pas-de-chiffrement-ceph-tailscale.md)) où **le cluster TIRE,
+Internet ne POUSSE jamais**. On **écarte** donc le webhook entrant : la latence
+horaire du Cron est le **prix assumé** de l'air-gap. (Alternative sans port
+entrant si la réactivité devient nécessaire : un **runner GitHub self-hosted**
+qui POUSSE vers Gitea après CI verte — à instruire séparément, hors périmètre.)
+
 **CI de VALIDATION sur GitHub, CI de BUILD + CD in-cluster — trois rôles
 distincts.** On sépare nettement **trois** étapes sur **deux** infrastructures :
 
