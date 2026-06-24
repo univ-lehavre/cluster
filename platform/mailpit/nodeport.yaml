@@ -1,0 +1,28 @@
+# Exposition L4 de l'UI Mailpit par un Service NodePort (ADR 0092 :
+# http://<IP-nœud>:<nodePort>, zéro DNS, zéro LB-IPAM). Service SÉPARÉ qui ne
+# touche pas le pod ni le Service ClusterIP "mailpit". Même selector → Cilium-eBPF
+# route NodeIP:<nodePort> vers les mêmes endpoints. Le nodePort n'est PAS figé :
+# Kubernetes l'attribue dans la plage 30000-32767 (ADR 0092), observé par le portail.
+#
+# Pourquoi exposer Mailpit en prod : c'est le puits SMTP où Alertmanager envoie les
+# notifications (audit dirqual 2026-06-24, #489) — l'UI doit être consultable
+# hors-cluster pour LIRE les alertes, comme les autres UI du portail. Seul le port
+# HTTP (UI) est exposé ; le port SMTP 1025 reste interne (hostPort pour le relais
+# hôte, cf. mailpit.yaml).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit-nodeport
+  namespace: mail
+  labels:
+    app: mailpit
+spec:
+  type: NodePort
+  selector:
+    app: mailpit
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8025
+      protocol: TCP
