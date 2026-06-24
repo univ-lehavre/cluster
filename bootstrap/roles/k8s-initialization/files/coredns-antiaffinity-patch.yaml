@@ -1,0 +1,24 @@
+# Patch stratégique du Deployment CoreDNS (addon kubeadm, kube-system) :
+# anti-affinité HARD (requiredDuringScheduling) pour garantir que les 2 répliques
+# tournent sur des nœuds DISTINCTS. Par défaut kubeadm pose une anti-affinité
+# `preferred` (soft) que le scheduler peut ignorer → les 2 répliques se sont
+# retrouvées sur le seul control-plane dirqual1 (audit dirqual 2026-06-24, finding
+# M5/#487), faisant reposer tout le DNS interne sur le SPOF. Avec ≥ 2 nœuds
+# schedulables (CoreDNS tolère les taints control-plane), `required` est sûr.
+# CoreDNS étant un addon kubeadm (pas de manifeste source versionné), ce patch est
+# appliqué post-init par le rôle k8s-initialization (idempotent : kubectl patch
+# n'écrit que si l'état diffère). Au prochain rebuild, l'addon repart soft → le
+# rôle réapplique ce patch (corriger le code, pas l'état — ADR 0046).
+spec:
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: k8s-app
+                    operator: In
+                    values:
+                      - kube-dns
+              topologyKey: kubernetes.io/hostname
