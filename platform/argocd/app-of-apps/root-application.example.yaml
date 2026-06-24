@@ -1,0 +1,60 @@
+# Application RACINE « app-of-apps » (ADR 0094 §2).
+#
+# RÔLE : surveiller le repo Gitea de PROD dédié `cluster/apps` et y réconcilier
+# les déclarations d'Application applicatives (apps/citation.yaml, apps/…). Ajouter
+# une app = pousser un fichier dans ce repo → la racine le voit → Argo CD crée
+# l'Application correspondante → celle-ci réconcilie le repo atlas (le code).
+#
+# Patron `*.example` (ADR 0023) : le `repoURL` réel est une VALEUR DE DÉPLOIEMENT
+# (URL Gitea intra-cluster `<gitea>/cluster/apps.git`), JAMAIS gravée ici. Le seed
+# (généralisation de bench/lima/gitea-init.sh, cf. README) l'injecte à l'apply,
+# exactement comme l'Application atlas-workflows aujourd'hui. Ce fichier documente
+# la forme attendue ; le seed pose l'Application effective.
+#
+# Rattachée à l'AppProject `cluster-apps` (PAS `atlas`) : voir
+# appproject-cluster-apps.example.yaml — la racine fabrique des Application dans
+# argocd, privilège isolé du métier (moindre privilège).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-apps
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: cluster-apps
+spec:
+  project: cluster-apps
+  source:
+    # EXEMPLE générique — surchargé au seed par l'URL Gitea réelle du repo
+    # `cluster/apps` de l'instance. C'est le repo Gitea de PROD dédié, distinct du
+    # repo atlas (le code) : ici ne vivent QUE les déclarations d'Application.
+    repoURL: http://gitea-http.gitea.svc.cluster.local/cluster/apps.git
+    targetRevision: main
+    # `path: apps` : la racine ne réconcilie QUE le dossier apps/ (les déclarations
+    # d'Application). Garde la racine du repo libre pour un README / des notes sans
+    # qu'Argo CD tente de les appliquer.
+    path: apps
+    directory:
+      # Récursif désactivé : apps/ est plat (un fichier = une Application). Activer
+      # `recurse: true` seulement si l'on veut sous-dossiers par domaine.
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    # Les Application filles SONT des objets argoproj.io qui vivent dans `argocd`.
+    namespace: argocd
+  syncPolicy:
+    automated:
+      # selfHeal : si quelqu'un édite/supprime une Application fille à la main,
+      # la racine la reconverge depuis le repo (git = source de vérité).
+      selfHeal: true
+      # prune ACTIVÉ (différent des apps filles) : retirer un fichier de
+      # `cluster/apps` DOIT supprimer l'Application correspondante. C'est la
+      # symétrie « ajouter une app = pousser un fichier » → « retirer une app =
+      # supprimer le fichier ». Sûr ICI parce que la racine ne gère QUE des
+      # Application (pas de workload du socle à risque) ; le finalizer Argo CD de
+      # l'Application fille (ajouté par défaut) cascade alors la suppression de ses
+      # ressources. NB : c'est l'inverse du choix des apps filles (prune: false),
+      # car elles déploient dans des namespaces socle partagés.
+      prune: true
+    syncOptions:
+      # Le namespace argocd préexiste (posé par Ansible) — ne pas le (re)créer.
+      - CreateNamespace=false
