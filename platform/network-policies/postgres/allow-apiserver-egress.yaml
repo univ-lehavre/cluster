@@ -1,0 +1,19 @@
+# Egress vers l'API server Kubernetes (port 6443) : l'instance-manager CNPG de
+# chaque pod pg appelle l'API pour lire le Cluster CR, l'élection du primaire et la
+# reconfiguration (failover/switchover). Sous default-deny, cet egress est
+# indispensable (sinon les instances ne peuvent pas se coordonner). L'API server
+# est hors-cluster (IP du/des control-plane) → on autorise par port, sans
+# restreindre le namespace cible. Calqué sur dagster/allow-apiserver-egress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-egress
+  namespace: postgres
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 6443
