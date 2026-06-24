@@ -1,0 +1,49 @@
+# Déclaration d'Application APPLICATIVE « citation » (ADR 0094 §2) — patron.
+#
+# C'EST LE FICHIER QUE CLUSTER POUSSE DANS LE REPO GITEA `cluster/apps`
+# (sous apps/citation.yaml), où la racine app-of-apps le réconcilie pour CRÉER
+# cette Application. Il dérive de l'Application FOURNIE par atlas
+# (../../../../  → dataops/citation-dagster/deploy/application.example.yaml côté
+# atlas), mais l'INSTANCIATION appartient à cluster (frontière ADR 0094 §1 :
+# atlas DÉCLARE/FOURNIT, cluster VALIDE/INSTANCIE).
+#
+# Patron `*.example` (ADR 0023) : `repoURL`/`targetRevision` sont des VALEURS
+# D'INSTANCE (le repo atlas réel + le SHA de `code-location.manifest.yaml`),
+# injectées au seed — JAMAIS gravées. Le `targetRevision` réel se DÉRIVE du champ
+# `revision` du manifeste de déclaration montant atlas (le SHA = signal canonique
+# d'évolution, ADR 0094 §3) : cluster le lit, le valide, l'injecte ici.
+#
+# Rattachée à l'AppProject `atlas` (PAS `cluster-apps`) : c'est une app MÉTIER qui
+# déploie dans `dagster`. Seule la racine vit dans le projet `cluster-apps`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: citation-dagster
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: atlas
+spec:
+  project: atlas
+  source:
+    # EXEMPLE générique — surchargé au seed par le repo atlas réel de l'instance.
+    repoURL: http://gitea-http.gitea.svc.cluster.local/atlas/atlas.git
+    # `main` par défaut ; un déploiement épingle le SHA `revision` du manifeste de
+    # déclaration montant (ADR 0094 §3) pour réconcilier une révision précise.
+    targetRevision: main
+    # Overlay PROD (Ceph/OBC). Le banc léger pointerait l'overlay `bench`.
+    path: dataops/citation-dagster/deploy/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dagster
+  syncPolicy:
+    automated:
+      # selfHeal : reconverge si le live est édité à la main.
+      selfHeal: true
+      # prune DÉSACTIVÉ : `dagster` est un namespace SOCLE partagé (orchestrateur
+      # livré par cluster). La code-location est ADDITIVE ; on ne laisse pas Argo
+      # CD supprimer des ressources du socle absentes de cette source. (À l'inverse
+      # de la racine app-of-apps, prune: true — voir root-application.example.yaml.)
+      prune: false
+    syncOptions:
+      # Le ns `dagster` préexiste (addon socle) — ne pas le (re)créer.
+      - CreateNamespace=false
