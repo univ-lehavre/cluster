@@ -44,10 +44,12 @@
 #   UPSERTS          (défaut 5) — nombre d'upserts concourants de la même clé
 set -euo pipefail
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
+# Chemin ABSOLU du dossier du scénario (résout quel que soit le cwd de lancement —
+# le `cd` + dirname relatif d'avant doublait le préfixe et ne trouvait pas lib.sh).
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # shellcheck source=bench/scenarios/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+. "${HERE}/lib.sh"
 
 STRICT_CACHE=${STRICT_CACHE:-0}
 PG_NS=${PG_NS:-postgres}
