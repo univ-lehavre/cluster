@@ -134,6 +134,24 @@
         state: present
         src: '{{ platform_repo_dir }}/platform/cloudnative-pg/backup.yaml'
 
+    # NetworkPolicies du namespace postgres : default-deny d'abord, puis les flux
+    # légitimes (DNS, intra-ns, ingress 5432 depuis les SEULS consommateurs
+    # déclarés, egress S3 pour Barman). Sans ce bloc, pg-rw:5432 est joignable
+    # depuis tout pod du cluster (audit dirqual 2026-06-24, finding M3/#485) — les
+    # consommateurs ont leur allow-postgres-egress mais rien ne protégeait l'entrée.
+    - name: Apply postgres network policies (default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ cnpg_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/network-policies/postgres/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-intra-namespace.yaml
+        - allow-postgres-ingress.yaml
+        - allow-apiserver-egress.yaml
+        - allow-s3-egress.yaml
+
   # Rescue DIAGNOSTIQUE (ADR 0050, issue #236) — calqué sur platform-argocd. CNPG
   # est un OPÉRATEUR réconciliateur : un apply k8s est déclaratif/idempotent, un
   # « rollback » qui supprimerait le Cluster/les PVC/le bucket serait destructeur
