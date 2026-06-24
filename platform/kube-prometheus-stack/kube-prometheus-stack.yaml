@@ -965,7 +965,10 @@ metadata:
   name: kube-prometheus-stack-grafana-clusterrole
 rules:
   - apiGroups: [""] # "" indicates the core API group
-    resources: ["configmaps", "secrets"]
+    # secrets retiré : sidecar.{dashboards,datasources}.resource=configmap dans
+    # values.bench.yaml (audit dirqual 2026-06-24, finding M2/#484). Grafana ne
+    # consomme aucun Secret pour ses dashboards/datasources (que des ConfigMaps).
+    resources: ["configmaps"]
     verbs: ["get", "watch", "list"]
 
 ---
@@ -1928,7 +1931,7 @@ spec:
             - name: FOLDER
               value: "/tmp/dashboards"
             - name: RESOURCE
-              value: "both"
+              value: "configmap"
             - name: NAMESPACE
               value: "ALL"
             - name: REQ_USERNAME
@@ -1968,7 +1971,7 @@ spec:
             - name: FOLDER
               value: "/etc/grafana/provisioning/datasources"
             - name: RESOURCE
-              value: "both"
+              value: "configmap"
             - name: REQ_USERNAME
               valueFrom:
                 secretKeyRef:
