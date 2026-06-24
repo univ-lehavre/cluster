@@ -166,6 +166,25 @@
         chdir: '{{ ansible_facts.env.HOME }}'
         creates: lb-setup.log
 
+    # CoreDNS (addon kubeadm) : durcir l'anti-affinité en `required` pour disperser
+    # les 2 répliques sur des nœuds distincts (le défaut `preferred` les a laissées
+    # sur le seul control-plane — audit dirqual 2026-06-24, #487). Patch stratégique
+    # idempotent (n'écrit que si l'état diffère). CoreDNS n'a pas de manifeste source
+    # versionné → ce patch post-init EST le code (ADR 0046) ; réappliqué à chaque
+    # bootstrap car l'addon kubeadm repart en `preferred`.
+    - name: Harden CoreDNS pod anti-affinity (required, spread across nodes)
+      kubernetes.core.k8s:
+        state: patched
+        kind: Deployment
+        name: coredns
+        namespace: kube-system
+        definition: "{{ lookup('file', 'coredns-antiaffinity-patch.yaml') | from_yaml }}"
+      register: coredns_patch
+      # Sûr seulement s'il existe ≥ 2 nœuds schedulables éligibles (CoreDNS tolère
+      # les taints control-plane) ; en mono-nœud (banc 1 VM) `required` laisserait
+      # une réplique Pending → on saute alors le durcissement.
+      when: groups['all'] | length > 1
+
   # ── Reprise après incident (ADR 0050 cas (b)) ──────────────────────────────
   rescue:
     # 1. DIAGNOSTIC actionnable (ne défait rien) : dernières lignes du kubelet.
