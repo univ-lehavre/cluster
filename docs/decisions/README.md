@@ -113,3 +113,4 @@ Format léger inspiré de Michael Nygard :
 | 0091 | [Portail d'accès aux UI de la plateforme](0091-portail-acces-ui.md)                                                                  | Accepted           |
 | 0092 | [Exposition des UI par `hostPort`/`NodePort` L4 (zéro DNS)](0092-exposition-hostport-l4.md)                                          | Accepted           |
 | 0093 | [Cache partagé des flux atlas servi par CloudNativePG (pas de Redis)](0093-cache-flux-cnpg.md)                                       | Accepted           |
+| 0094 | [Frontière de déploiement applicatif : qui orchestre, qui fournit (cluster ↔ atlas)](0094-frontiere-deploiement-applicatif.md)       | Proposed           |
