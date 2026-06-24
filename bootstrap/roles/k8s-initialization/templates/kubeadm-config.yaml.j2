@@ -99,6 +99,27 @@ apiServer:
   certSANs:
     - {{ control_plane_vip }}
 {% endif %}
+# Métriques du plan de contrôle exposées sur 0.0.0.0 (au lieu du défaut kubeadm
+# 127.0.0.1) pour que Prometheus (kube-prometheus-stack : kubeScheduler /
+# kubeControllerManager / kubeEtcd) puisse les scraper via l'IP du nœud — sinon
+# les 3 cibles sont DOWN « connection refused » et déclenchent de fausses alertes
+# (audit dirqual 2026-06-24). Le bind reste interne au réseau du/des nœud(s)
+# control-plane (pare-feu UFW, ADR sécurité) ; pas d'auth ajoutée ici (métriques).
+controllerManager:
+  extraArgs:
+    - name: bind-address
+      value: 0.0.0.0
+scheduler:
+  extraArgs:
+    - name: bind-address
+      value: 0.0.0.0
+etcd:
+  local:
+    extraArgs:
+      # etcd sert ses métriques sur un port dédié (2381) ; l'exposer sur 0.0.0.0
+      # permet le scrape, le port client (2379) restant en TLS mutuel inchangé.
+      - name: listen-metrics-urls
+        value: http://0.0.0.0:2381
 ---
 # Le kubelet doit AUSSI activer ImageVolume pour monter les volumes d'image
 # (le feature gate apiServer seul ne suffit pas — c'est le kubelet qui monte).
