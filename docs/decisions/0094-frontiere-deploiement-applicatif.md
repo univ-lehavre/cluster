@@ -136,6 +136,11 @@ resources: # besoins déclarés → cluster valide la capacité AVANT de déploy
   memory: 1Gi
   disk: 20Gi # volume BLOC (PVC RBD) attaché au pod, si la code-location en a besoin
 dependsOn:
+  # Autres code-locations atlas requises (ex. citation consomme les marts de
+  # mediawatch). cluster ORDONNE le déploiement (sync-waves Argo CD : la dépendance
+  # déployée et ready AVANT) et REFUSE de créer l'app si une code-location requise
+  # est absente ou non-`ready`.
+  codeLocations: [mediawatch]
   database: [pgvector] # bases logiques requises
   secrets: [pgvector-pg-auth] # secrets (dérivés inclus) requis
   # OBC = stockage OBJET (S3 RGW Ceph), distinct du `disk` bloc ci-dessus :
@@ -156,6 +161,15 @@ confrontés à la capacité réelle du cluster ; un besoin qui dépasse la marge
 **échoue bruyamment** plutôt que de saturer Ceph en silence. Le manifeste
 distingue donc **deux stockages** que cluster provisionne différemment : le
 **bloc** (PVC `disk`, RBD) et l'**objet** (OBC `buckets`, RGW).
+
+Les **`dependsOn.codeLocations`** déclarent les dépendances
+**inter-applicatives** (une code-location qui en consomme une autre — ex.
+`citation` lit les marts de `mediawatch`). cluster **ordonne** alors le
+déploiement via les **sync-waves Argo CD** (la dépendance déployée et `ready`
+**avant** le dépendant) et **refuse** de créer l'`Application` si une
+code-location requise est **absente ou non-`ready`**. C'est le pendant inter-app
+de la validation des dépendances infra : un graphe de déploiement cohérent, pas
+un ordre au hasard de la réconciliation.
 
 La **`revision`** (SHA git) est le **signal d'évolution** : une code-location
 qui change pousse un nouveau SHA → nouvelle `revision` ici **et** nouveau tag
