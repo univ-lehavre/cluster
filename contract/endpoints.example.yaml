@@ -273,13 +273,13 @@ endpoints:
     protocol: http
     auth: none # intra-cluster / réseau privé
     layer: monitoring
-    profil: local-path # BANC only (comme seaweedfs) — SMTP de test, absent en prod
-    # PAS de NodePort : mailpit est banc-only, son UI s'ouvre via `kubectl
-    # port-forward` (access.sh), pas exposée sur un port du nœud (ADR 0092).
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
     source: platform/mailpit/mailpit.yaml
     note: >-
-      Boîte mail de test (capture les alertes/notifications du banc). N'existe PAS
-      en prod (ns mail absent de dirqual) — outil de banc.
+      Puits SMTP : capture les notifications d'Alertmanager (smtp_smarthost
+      mailpit.mail:1025, #489). Son UI est exposée en NodePort pour LIRE les alertes
+      hors-cluster via le portail. Pas un vrai relais mail (boîte de test, pas
+      d'envoi sortant) — consulter les alertes dans l'UI.
 
   - id: argocd-ui
     service: argocd-server
