@@ -2,7 +2,7 @@
 
 ## Statut
 
-Proposed (2026-06-24)
+Accepted (2026-06-25 ; proposé le 2026-06-24)
 
 Précise et complète les ADR [0022](0022-argocd-gitops-applicatif.md) (Argo CD
 déploie l'applicatif), [0033](0033-orchestration-ansible-platform-dataops.md)

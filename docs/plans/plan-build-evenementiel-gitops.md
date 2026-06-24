@@ -2,18 +2,18 @@
 
 ## État
 
-> **État : Brouillon** (2026-06-24) · **Fonde :**
+> **État : Actif** (2026-06-25) · **Fonde :**
 > [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md)
-> (Proposed) +
+> (Accepted) +
 > [ADR 0094](../decisions/0094-frontiere-deploiement-applicatif.md). · **Issues
 > :** atlas #499/#501 (déblocage citation). · **Preuve :** bench/lima + scénario
 > 34 à écrire.
 >
-> **`Proposed` ⇒ pas d'implémentation mergeable** : ce plan cadre le PREMIER PAS
-> (§1.a de l'ADR) prêt à coder dès l'`Accepted`
+> ADR `Accepted` ⇒ implémentation mergeable
 > ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6).
-> Il **livre le premier pas** (étapes 1-4) ; la **cible événementielle** (§1.b,
-> étapes 5-8) est **cadrée mais différée** à des itérations ultérieures.
+> Ce plan **livre le premier pas** (§1.a de l'ADR, étapes 1-4) ; la **cible
+> événementielle** (§1.b, étapes 5-8) est **cadrée mais différée** à des
+> itérations ultérieures.
 
 Met en œuvre
 [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md) :

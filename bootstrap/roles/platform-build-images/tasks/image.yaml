@@ -67,3 +67,30 @@
       ansible.builtin.command: >-
         nerdctl push {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
       changed_when: true
+
+# Digest de l'image poussée (référence IMMUABLE, ADR 0006/0095 §2). Lu APRÈS le
+# bloc de build (et aussi quand l'image était déjà présente, donc hors du `when`
+# de build) : le déploiement GitOps référence `registry:80/<img>@sha256:<digest>`,
+# pas le tag mutable. Le write-back de ce digest dans le repo Gitea `cluster/apps`
+# est porté par le SEED (qui parle à l'API Gitea), pas par ce rôle node-side
+# (séparation : ce rôle BUILD + connaît le digest ; le seed PUBLIE — ADR 0095).
+# Activé seulement pour les images applicatives (`img.gitops_writeback: true`) ;
+# les images de plateforme gardent leur épinglage par digest d'index via Ansible.
+- name: 'Read the pushed image digest — {{ img.name }}'
+  ansible.builtin.command: >-
+    nerdctl image inspect
+    --format '{{ "{{" }} index .RepoDigests 0 {{ "}}" }}'
+    {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
+  register: img_digest
+  changed_when: false
+  check_mode: false
+  when: img.gitops_writeback | default(false) | bool
+
+- name: 'Expose the digest for GitOps write-back — {{ img.name }}'
+  ansible.builtin.set_fact:
+    build_image_digests: >-
+      {{ build_image_digests | default({})
+         | combine({img.name: (img_digest.stdout | trim)}) }}
+  when:
+    - img.gitops_writeback | default(false) | bool
+    - img_digest.stdout | default('') | length > 0
