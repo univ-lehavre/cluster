@@ -115,5 +115,5 @@ Format léger inspiré de Michael Nygard :
 | 0093 | [Cache partagé des flux atlas servi par CloudNativePG (pas de Redis)](0093-cache-flux-cnpg.md)                                                    | Accepted           |
 | 0094 | [Frontière de déploiement applicatif : qui orchestre, qui fournit (cluster ↔ atlas)](0094-frontiere-deploiement-applicatif.md)                    | Proposed           |
 | 0095 | [Build applicatif événementiel in-cluster : fabrique d'images et déploiement GitOps zéro-touch](0095-build-applicatif-evenementiel-in-cluster.md) | Proposed           |
-| 0096 | [Graphe de topologie Python figé, vérifié contre Ansible](0096-graphe-topologie-python-verifie-ansible.md)                                        | Proposed           |
-| 0097 | [Moteur de chemin Python ; bash réduit aux artefacts node-side](0097-moteur-chemin-python-bash-artefacts.md)                                      | Proposed           |
+| 0096 | [Graphe de topologie Python figé, vérifié contre Ansible](0096-graphe-topologie-python-verifie-ansible.md)                                        | Accepted           |
+| 0097 | [Moteur de chemin Python ; bash réduit aux artefacts node-side](0097-moteur-chemin-python-bash-artefacts.md)                                      | Accepted           |
