@@ -833,21 +833,22 @@ def _observed_layers(phases: list[str]) -> set[str]:
     return done
 
 
-def _probe_observed_layers(seq: list[str], nodes_ready: list[str]) -> tuple[set[str], set[str]]:
+def _probe_observed_layers(seq: list[str], nodes_ready: list[str]) -> set[str]:
     """Sonde RÉELLE des couches applicatives, partagée par preview/next/up (ADR 0090).
 
-    Renvoie `(observed_layers, signal_phases)` que `compute_plan_state` consomme :
-    - `observed_layers` : couches de `seq` à signal connu OBSERVÉES saines (kubectl) ;
-    - `signal_phases` : l'ENSEMBLE des phases de `seq` qui ONT un signal connu — pour
-      que le calcul ré-ajoute celles à signal NON confirmées par le réel (2e sens).
+    Renvoie `observed_layers` que `compute_plan_state` consomme : les couches de `seq`
+    à signal connu OBSERVÉES saines (kubectl). C'est la moitié du RÉEL (avec le socle)
+    dont `done` dérive ENTIÈREMENT depuis la refonte lot 6 (`done` = réel seul) : une
+    couche à signal NON confirmée par le réel n'y figure PAS → elle est « à appliquer »
+    naturellement (plus de ré-injection ad hoc d'un set `signal_phases`).
 
     Sonde UNIQUEMENT si le cluster ciblé répond (`nodes_ready`) : sinon `_observed_layers`
     (kubeconfig banc) lirait le banc Lima pour une stack prod sans cible (ADR 0084) — on
-    rend alors `(∅, ∅)` (le RÉEL n'a honnêtement rien à dire, donc aucune ré-injection)."""
+    rend alors ∅ (le RÉEL n'a honnêtement rien à dire : tout l'aval est « à appliquer »)."""
     if not nodes_ready:
-        return set(), set()
+        return set()
     signal_phases = {p for p in seq if p in _LAYER_SIGNAL}
-    return _observed_layers(list(signal_phases)), signal_phases
+    return _observed_layers(list(signal_phases))
 
 
 # ── Sondes de `discover` (ADR 0074) : I/O kubectl irréductible (ADR 0049). Lisent
@@ -2143,23 +2144,17 @@ def cmd_preview(args: argparse.Namespace) -> int:
     run = last_run_for_topology(runs, stack_name)
     freshness, _ = verdict_for_run(run, resolved_target, now)
     observed_socle = observed_done_phases(declared, vms_present, nodes_ready)
-    # Couches applicatives observées (signaux kubectl) + leur set de phases-à-signal :
-    # ne sonder QUE si le cluster ciblé répond (nœuds Ready) — sinon `_observed_layers`
-    # (kubeconfig banc) lirait les couches du banc Lima pour une stack prod sans cible
-    # (ADR 0084). nodes_ready vide en prod sans KUBECONFIG → on ne sonde rien et on ne
-    # ré-ajoute rien (`signal_phases=∅` : le RÉEL n'a rien à dire, RÉEL honnêtement vide).
-    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
-    # LE calcul partagé (preview == next == up) — le RÉEL prime DANS LES DEUX SENS, garde
-    # `if "up" not in done` inclus (ADR 0052/0056 §7). Fonction PURE : tout l'état réel
-    # ci-dessus est passé en paramètre (aucun kubectl dans compute_plan_state).
-    state = compute_plan_state(
-        seq,
-        run.phases if run is not None else None,
-        observed_socle,
-        observed_layers,
-        freshness,
-        signal_phases=signal_phases,
-    )
+    # Couches applicatives observées saines (signaux kubectl) : ne sonder QUE si le
+    # cluster ciblé répond (nœuds Ready) — sinon `_observed_layers` (kubeconfig banc)
+    # lirait les couches du banc Lima pour une stack prod sans cible (ADR 0084).
+    # nodes_ready vide en prod sans KUBECONFIG → on ne sonde rien (RÉEL honnêtement vide).
+    observed_layers = _probe_observed_layers(seq, nodes_ready)
+    # LE calcul partagé (preview == next == up) — `done` dérive du RÉEL SEUL (refonte
+    # lot 6) : observed_socle ∪ observed_layers, PLUS de l'historique. Si Kubernetes est
+    # mort, observed_layers est vide → toutes les couches aval sont « à appliquer » (la
+    # cohérence de dépendance est naturelle). La fraîcheur (ci-dessus) reste calculée à
+    # part (verdict_for_run) et n'influence QUE l'affichage rejeu/inédit, pas `done`.
+    state = compute_plan_state(seq, observed_socle, observed_layers)
     a_appliquer = set(state.a_appliquer)
     # jamais monté ≠ rejeu : `jamais` (aucun run de la stack) → « à installer » (inédit) ;
     # `perime` (run existant mais plus frais) → « à rejouer ».
@@ -2496,22 +2491,14 @@ def cmd_up(args: argparse.Namespace) -> int:
     # que les trois rendent le même verdict (fin de la divergence preview≠next≠up). `up`
     # monte TOUTE la séquence (idempotence run-phases.sh) ; l'annotation ✓/+ informe juste
     # l'opérateur de ce qui est DÉJÀ en place. Sonde RÉELLE identique à preview (ADR 0090).
-    runs = load_runs(args.history or _RUNS_HISTORY)
-    now = int(dt.datetime.now(tz=dt.UTC).timestamp())
-    run = last_run_for_topology(runs, stack_name)
-    freshness, _ = verdict_for_run(run, target, now)
     declared = topo.control_nodes + topo.worker_nodes
     nodes_ready = _ready_nodes(topo.target_kind)
     observed_socle = observed_done_phases(declared, _real_vms(topo.target_kind), nodes_ready)
-    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
-    state = compute_plan_state(
-        seq,
-        run.phases if run is not None else None,
-        observed_socle,
-        observed_layers,
-        freshness,
-        signal_phases=signal_phases,
-    )
+    observed_layers = _probe_observed_layers(seq, nodes_ready)
+    # `done` = RÉEL SEUL (refonte lot 6) — même calcul que preview/next. `cmd_up` monte
+    # TOUTE la séquence et n'affiche pas de verdict de fraîcheur (juste +/✓ à-jour) : il
+    # ne lit donc PLUS l'historique ici (la fraîcheur, #216, reste lue par preview/next).
+    state = compute_plan_state(seq, observed_socle, observed_layers)
     a_appliquer = set(state.a_appliquer)
 
     # Affiche le PLAN (les couches à monter) avant de confirmer — comme `preview`.
@@ -2746,19 +2733,13 @@ def cmd_next(args: argparse.Namespace) -> int:
         seq = expected_phase_sequence(topo, target)
     except (PlanError, TopologyError) as exc:
         raise _UsageError(str(exc)) from exc
-    # Couches observées saines + phases-à-signal (gating ADR 0084) — MÊME sonde que preview.
-    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
-    # LE calcul partagé : `a_appliquer`/`done` dérivés EXACTEMENT comme `cmd_preview`
-    # (garde `if "up" not in done` + RÉEL prime dans LES DEUX SENS). `installable_now`
-    # ne fait plus que TRIER `a_appliquer` par satisfaction des dépendances → next == preview.
-    state = compute_plan_state(
-        seq,
-        run.phases if run is not None else None,
-        observed_socle,
-        observed_layers,
-        etat_frais,
-        signal_phases=signal_phases,
-    )
+    # Couches observées saines (gating ADR 0084) — MÊME sonde que preview.
+    observed_layers = _probe_observed_layers(seq, nodes_ready)
+    # LE calcul partagé : `done`/`a_appliquer` dérivés EXACTEMENT comme `cmd_preview` —
+    # du RÉEL SEUL (refonte lot 6), PLUS de l'historique. `installable_now` ne fait plus
+    # que TRIER `a_appliquer` par satisfaction des dépendances → next == preview. La
+    # fraîcheur (etat_frais) reste séparée : elle ne décide pas `done`, juste l'affichage.
+    state = compute_plan_state(seq, observed_socle, observed_layers)
     done = set(state.done)
     observed = observed_socle | observed_layers
     try:
