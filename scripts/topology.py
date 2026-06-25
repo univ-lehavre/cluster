@@ -2089,7 +2089,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
     )
     # exposition : le mode EFFECTIF (dérivé), pas la déclaration brute — un bloc
     # `exposition` absent ne veut pas dire « pas d'exposition » : le défaut global est
-    # `gateway` (ADR 0071). On annote « (défaut) » quand rien n'est déclaré.
+    # `nodeport` (L4 sur le port du nœud, ADR 0092 qui supersede 0071). On annote
+    # « (défaut) » quand rien n'est déclaré.
     expo_declare = isinstance(topo.exposition, dict) and topo.exposition.get("mode")
     expo_label = topo.exposition_mode + ("" if expo_declare else " (défaut)")
     print(f"  couches        : {couches_label}{storage_part}  ·  exposition : {expo_label}")
@@ -2236,9 +2237,10 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
         **os.environ,
         "NODES_OVERRIDE": _nodes_override(topo),
         "STACK_NAME": stack_name,
-        # exposition.mode CONSÉQUENT (ADR 0020/0071) : Gateway en hostNetwork (80/443
-        # sur l'IP du nœud) en mode `gateway` (défaut) ; `none` n'arme rien. Alias
-        # lb-ipam/hostport déjà résolus par exposition_mode.
+        # exposition.mode CONSÉQUENT (ADR 0092, supersede 0071) : `nodeport` (L4 sur le
+        # port du nœud) est le défaut ; `gateway` n'arme l'ancienne bordure L7 hostNetwork
+        # que s'il est déclaré ; `none` n'arme rien. Alias hostport→nodeport, lb-ipam→
+        # gateway déjà résolus par exposition_mode.
         "EXPOSITION_MODE": topo.exposition_mode,
     }
 

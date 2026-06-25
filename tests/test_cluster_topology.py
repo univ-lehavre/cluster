@@ -166,27 +166,43 @@ class Kubeconfig(unittest.TestCase):
 
 
 class Exposition(unittest.TestCase):
-    """exposition.mode (ADR 0020/0071 réécrit) : mode UNIQUE `gateway` (en hostNetwork),
-    `none` conservé, alias `lb-ipam`/`hostport` → `gateway`, défaut GLOBAL gateway."""
+    """exposition.mode (ADR 0092, supersede 0071) : défaut CANONIQUE `nodeport` (L4 sur le
+    port du nœud, zéro DNS/LB-IPAM), `gateway` (ancien monde L7 hostNetwork) gardé DÉCLARABLE
+    pour rétrocompat mais plus le défaut, `none` conservé, alias `hostport` → `nodeport` et
+    `lb-ipam` → `gateway`."""
 
-    def test_default_lima_is_gateway(self):
-        # Renversement (ADR 0071) : gateway-hostNetwork reproductible partout, donc
-        # le banc Lima n'a plus de défaut `hostport` propre — gateway par défaut.
+    def test_default_lima_is_nodeport(self):
+        # ADR 0092 : le L4 sur le port du nœud est reproductible partout (banc Lima comme
+        # VM publique), donc défaut GLOBAL `nodeport` — plus de défaut gateway par terrain.
         t = topology_from_dict(_base(target_kind="lima"))
+        self.assertEqual(t.exposition_mode, "nodeport")
+
+    def test_default_prod_is_nodeport(self):
+        t = topology_from_dict(_base(target_kind="prod"))
+        self.assertEqual(t.exposition_mode, "nodeport")
+
+    def test_no_exposition_block_defaults_to_nodeport(self):
+        # Une topo SANS bloc `exposition` retombe sur le défaut ADR 0092 (`nodeport`),
+        # pas sur l'ancien `gateway` (le renversement doit valoir aussi pour l'implicite).
+        topo = topology_from_dict(_base())
+        self.assertNotIn("mode", topo.exposition)
+        self.assertEqual(topo.exposition_mode, "nodeport")
+
+    def test_gateway_still_declarable_legacy(self):
+        # Rétrocompat : `gateway` (ancien monde L7 en hostNetwork, ADR 0071) reste un mode
+        # DÉCLARABLE explicitement — il n'est pas supprimé, seulement déchu du rang de défaut.
+        t = topology_from_dict(_base(exposition={"mode": "gateway"}))
         self.assertEqual(t.exposition_mode, "gateway")
 
-    def test_default_prod_is_gateway(self):
-        t = topology_from_dict(_base(target_kind="prod"))
-        self.assertEqual(t.exposition_mode, "gateway")
+    def test_hostport_alias_resolves_to_nodeport(self):
+        # `hostport` (« le hostPort L4 sur l'IP du nœud ») EST le mécanisme de l'ADR 0092 :
+        # alias canonique vers `nodeport` (renversement de l'ancien alias → gateway).
+        t = topology_from_dict(_base(exposition={"mode": "hostport"}))
+        self.assertEqual(t.exposition_mode, "nodeport")
 
     def test_lb_ipam_alias_resolves_to_gateway(self):
+        # `lb-ipam` reste l'ANCIEN monde L7 (Gateway/LB-IPAM) : alias inchangé → `gateway`.
         t = topology_from_dict(_base(exposition={"mode": "lb-ipam"}))
-        self.assertEqual(t.exposition_mode, "gateway")
-
-    def test_hostport_alias_resolves_to_gateway(self):
-        # `hostport` (« 80/443 sur l'IP de l'hôte ») est ABSORBÉ par gateway-hostNetwork :
-        # alias déprécié-doux, pour ne pas casser les topology.yaml existants (ADR 0071).
-        t = topology_from_dict(_base(exposition={"mode": "hostport"}))
         self.assertEqual(t.exposition_mode, "gateway")
 
     def test_none_accepted(self):
