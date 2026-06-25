@@ -2,7 +2,7 @@
 
 ## Statut
 
-Proposed (2026-06-25)
+Accepted (2026-06-25)
 
 Précise et étend les ADR [0066](0066-rollback-atomique-graphe-composants.md)
 (rollback atomique : le graphe de composants devient **du Python figé**, plus du

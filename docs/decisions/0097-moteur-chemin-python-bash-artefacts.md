@@ -2,7 +2,7 @@
 
 ## Statut
 
-Proposed (2026-06-25)
+Accepted (2026-06-25)
 
 S'appuie sur [0096](0096-graphe-topologie-python-verifie-ansible.md) (graphe de
 topologie Python figé) — **prérequis** : le moteur de chemin de cet ADR projette

@@ -2,18 +2,18 @@
 
 ## État
 
-> **État : Brouillon** (2026-06-25) · **Fonde :**
+> **État : Actif** (2026-06-25) · **Fonde :**
 > [ADR 0096](../decisions/0096-graphe-topologie-python-verifie-ansible.md)
-> (Proposed) +
+> (Accepted) +
 > [ADR 0097](../decisions/0097-moteur-chemin-python-bash-artefacts.md)
-> (Proposed). · **Preuve :**
+> (Accepted). · **Preuve :**
 > [`bench/lima/RESULTS.md`](../../bench/lima/RESULTS.md).
 >
-> ADR `Proposed` ⇒ **pas d'implémentation de fond** avant `Accepted`
-> ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6),
-> **SAUF l'étape 1** (factorisation pure, fix de bug sans ADR : elle ne décide
-> rien de structurant, elle corrige une classe de bug existante). Les lots 2-9
-> sont **gelés** jusqu'à ce que 0096/0097 passent `Accepted`.
+> ADR fondateurs `Accepted` (2026-06-25) ⇒ **implémentation des lots autorisée**
+> ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6).
+> L'**étape 1** (factorisation pure, fix de bug sans ADR : elle ne décide rien
+> de structurant, elle corrige une classe de bug existante) est le premier pas ;
+> les lots 2-9 suivent, chacun prouvé au banc puis en prod.
 
 Met en œuvre la refonte de `nestor` décidée par
 [ADR 0096](../decisions/0096-graphe-topologie-python-verifie-ansible.md) (graphe
