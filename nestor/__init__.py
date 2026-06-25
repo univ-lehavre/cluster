@@ -31,9 +31,11 @@ from nestor.facts import parse_facts
 from nestor.gates import (
     GateError,
     GateResult,
+    gate_etcd,
     gate_nodes_ready,
     gate_osds_up,
     gate_pvc_bound,
+    gate_vip,
 )
 from nestor.generator import render_lima_inventory, render_prod_inventory
 from nestor.history import Run, load_runs, verdict_for_run
@@ -131,6 +133,8 @@ __all__ = [
     "gate_pvc_bound",
     "gate_nodes_ready",
     "gate_osds_up",
+    "gate_vip",
+    "gate_etcd",
     "Run",
     "load_runs",
     "verdict_for_run",

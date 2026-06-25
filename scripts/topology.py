@@ -114,9 +114,9 @@ from nestor import (  # noqa: E402
 from nestor import bootstrap as _bootstrap  # noqa: E402
 from nestor import discover as _discover  # noqa: E402
 from nestor import graph as _graph  # noqa: E402
-from nestor import ha as _ha  # noqa: E402
 from nestor import isolation as _isolation  # noqa: E402
 from nestor import kube_context as _kube_context  # noqa: E402
+from nestor import path as _path  # noqa: E402
 from nestor import prod_target as _prod_target  # noqa: E402
 from nestor import refresh_fuse as _refresh_fuse  # noqa: E402
 from nestor import refresh_plan as _refresh_plan  # noqa: E402
@@ -150,7 +150,7 @@ _BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
 # banc SSH sur la prod (faille ADR 0053). Choisi par `_inventory_for(topo)`.
 _BENCH_INVENTORY = os.path.join(_ROOT, "bench", "lima", ".work", "inventory.yaml")
 # Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
-# un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha._vm_exec).
+# un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha_probes._vm_exec).
 _REFRESH_TIMEOUT_S = 8
 
 
@@ -2270,7 +2270,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     # atomique). `cmd_up` choisit seulement par quel ARM bash l'exécuter :
     #   - HA (topo.is_ha_control_plane) : socle d'amorçage non réductible à des layers
     #     (kube-vip + join etcd) → arm `ha-3cp` (run-phases.sh inchangé, orchestré par
-    #     nestor/ha.py). La queue applicative éventuelle suit l'arm `layers`.
+    #     nestor/path.py:run_ha_3cp). La queue applicative éventuelle suit l'arm `layers`.
     #   - `--target <preset>` explicite : arm nommé (rétrocompat CLI/scénarios).
     #   - sinon (défaut `layers`) : arm GÉNÉRIQUE `layers <seq>` (Python décide l'ordre,
     #     bash exécute — fini le preset dérivé, plus de 2e source de vérité).
@@ -2601,10 +2601,10 @@ def cmd_ha_3cp(args: argparse.Namespace) -> int:
 
     Les VM (limactl) et la CNI restent à run-phases.sh (orchestration de CLI, bash,
     ADR 0049) ; cette commande reçoit `--cp-ip/--vip/--vip-iface` déjà dérivés du
-    banc, câble `ha.run_ha_3cp` au RÉEL : `launch` → runner.launch_phase (le MÊME
+    banc, câble `path.run_ha_3cp` au RÉEL : `launch` → runner.launch_phase (le MÊME
     montage que `next --apply`), gates → limactl/kubectl, `run_cni` → un rappel vers
     run-phases.sh. La logique (séquence, super-admin→admin, gates etcd) est testée
-    sans banc (tests/test_ha.py) ; ce câblage est la seule I/O réelle.
+    sans banc (tests/test_path.py) ; ce câblage est la seule I/O réelle.
     """
     _assert_bench_target("ha-3cp")
     import time
@@ -2652,7 +2652,7 @@ def cmd_ha_3cp(args: argparse.Namespace) -> int:
         # On réécrit l'inventaire avec les CP membres (primaire en tête) avant un join.
         rc = _runphases("ha-inventory", ",".join(control_hosts))
         if rc != 0:
-            raise _ha.HaError(f"réécriture de l'inventaire (control={control_hosts}) en échec")
+            raise _path.HaError(f"réécriture de l'inventaire (control={control_hosts}) en échec")
 
     # run_cni : la CNI reste portée par run-phases.sh (bash). On la rappelle via la
     # sous-commande dédiée `ha-cni <vip-iface>` (cf. dispatch). Le Gateway s'expose en
@@ -2660,7 +2660,7 @@ def cmd_ha_3cp(args: argparse.Namespace) -> int:
     def run_cni():
         rc = _runphases("ha-cni", args.vip_iface)
         if rc != 0:
-            raise _ha.HaError(f"CNI (run-phases.sh ha-cni) en échec (rc={rc})")
+            raise _path.HaError(f"CNI (run-phases.sh ha-cni) en échec (rc={rc})")
 
     def ready_count() -> int:
         out = subprocess.run(  # noqa: S603 — kubectl, pas d'entrée shell
@@ -2675,7 +2675,7 @@ def cmd_ha_3cp(args: argparse.Namespace) -> int:
     nodes = args.nodes.split(",")
     print(f"→ ha-3cp : {len(nodes)} CP derrière la VIP {args.vip} (Ansible via Python/runner)")
     try:
-        result = _ha.run_ha_3cp(
+        result = _path.run_ha_3cp(
             nodes,
             args.cp_ip,
             args.vip,
