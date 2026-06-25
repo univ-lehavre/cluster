@@ -4,13 +4,14 @@
 par tri topologique du DAG de dépendances RÉELLES — pas par une chaîne totale
 (ADR 0039) qui imposait de fausses dépendances (déclarer `store` forçait `metrics`).
 
-**Source UNIQUE de l'ordre** : le graphe atomique de `rollback-lib.sh` (ADR 0066,
-`topo_sort`/`component_expand_alias`/`phase_of_component`). On NE code PAS un second
-graphe phase→phase en Python (ce serait recréer le double-graphe que 0066 a tué) :
-`resolve_layers` APPELLE le bash (même pont que `roundtrip.py`) et PROJETTE le
-résultat au grain phase. Le graphe est CONDITIONNEL au backend (ADR 0069) : on lui
-passe `STORAGE_BACKEND` et il émet déjà la bonne variante de stockage (storage-simple
-+ seaweedfs en local-path, ceph+sc+datalake en ceph) — aucun filtrage côté Python.
+**Source UNIQUE de l'ordre** : le graphe atomique FIGÉ `nestor/graph.py` (ADR 0096 §1,
+porté byte-identique de `rollback-lib.sh`, ADR 0066 ; `topo_sort`/`component_expand_alias`/
+`phase_of_component`). On NE code PAS un second graphe phase→phase en Python (ce serait
+recréer le double-graphe que 0066 a tué) : `resolve_layers` APPELLE `graph.py` et PROJETTE
+le résultat au grain phase. Le graphe est CONDITIONNEL au backend (ADR 0069) : on lui passe
+le `backend` et il émet déjà la bonne variante de stockage (storage-simple + seaweedfs en
+local-path, ceph+sc+datalake en ceph) — aucun filtrage côté Python. Plus aucun sous-process
+bash ici (lot 3 du plan de refonte : le pont `rollback-lib.sh` est remplacé par `graph.py`).
 
 Deux vocabulaires acceptés dans `layers`, normalisés ici :
   - des **alias de profil** (`metrics`/`store`/`obs`/`dataops`/`base`) → projetés
@@ -26,13 +27,8 @@ pas par `resolve_layers`. Ici on ordonne la QUEUE applicative.
 
 from __future__ import annotations
 
-import os
-import subprocess
-
+from nestor import graph
 from nestor.model import TopologyError
-
-_REPO = os.path.join(os.path.dirname(__file__), "..")
-_ROLLBACK_LIB = os.path.join(_REPO, "bench", "lima", "rollback-lib.sh")
 
 # Alias de profil → phases qu'il apporte (projection de PROFILE_BRICKS, ADR 0039/0068).
 # `store` se projette en `storage`, jeton ABSTRAIT que le graphe atomique résout par
@@ -82,30 +78,6 @@ VALID_LAYERS = frozenset(LAYER_PHASES) | _QUEUE_PHASES | {"storage"}
 _CEPH_ONLY = frozenset({"datalake", "ceph", "sc"})
 
 
-def _backend_env(backend: str) -> dict[str, str]:
-    """Env du sous-shell bash : pose STORAGE_BACKEND pour que le graphe atomique
-    (rollback-lib.sh) résolve ses arêtes de stockage par backend (ADR 0069)."""
-    return {**os.environ, "STORAGE_BACKEND": backend}
-
-
-def _rb(call: str, backend: str) -> str:
-    """Appelle une fonction de rollback-lib.sh sous le backend voulu, renvoie stdout.
-
-    Même pont que roundtrip.py (`bash -c '. lib && <call>'`), mais avec STORAGE_BACKEND
-    posé → le graphe est ceph-shaped ou local-path-shaped selon `backend`."""
-    try:
-        out = subprocess.run(  # noqa: S603 — chemin codé, call/backend contrôlés
-            ["bash", "-c", f'. "{_ROLLBACK_LIB}" && {call}'],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=_backend_env(backend),
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise TopologyError(f"graphe atomique injoignable ({call}) : {exc}") from exc
-    return out.stdout
-
-
 def _expand_to_phases(declared: list[str], _seen: frozenset[str] = frozenset()) -> list[str]:
     """Normalise les jetons `layers` en phases/jetons (alias de profil → ses phases).
 
@@ -141,7 +113,7 @@ def _expand_alias(phase: str, backend: str) -> list[str]:
     topologique (resolve_layers) ordonne ceph→sc→datalake."""
     if phase == "storage":
         return ["storage-simple"] if backend != "ceph" else ["ceph", "sc", "datalake"]
-    comps = _rb(f"component_expand_alias {phase!r}", backend).split()
+    comps = graph.component_expand_alias(phase, backend)
     return comps or [phase]
 
 
@@ -150,7 +122,7 @@ def resolve_layers(declared: list[str], backend: str = "local-path") -> list[str
 
     Étapes : (1) défaut `base` si vide ; (2) normaliser alias→phases ; (3) refuser une
     phase ceph-only en local-path ; (4) fermer en composants + trier via le graphe
-    atomique backend-conditionnel (rollback-lib.sh) ; (5) projeter au grain phase,
+    atomique backend-conditionnel (graph.py) ; (5) projeter au grain phase,
     dédupliquer en préservant l'ordre. NE préfixe PAS le socle (up/bootstrap[,ceph,
     sc]) — c'est l'affaire de run_socle / l'arm appelant. Renvoie la queue
     applicative ordonnée (vide pour `base`)."""
@@ -169,13 +141,13 @@ def resolve_layers(declared: list[str], backend: str = "local-path") -> list[str
     components: list[str] = []
     for ph in phases:
         components.extend(_expand_alias(ph, backend))
-    ordered = _rb(f"topo_sort {' '.join(repr(c) for c in components)}", backend).split()
+    ordered = graph.topo_sort(components, backend)
     result: list[str] = []
     for comp in ordered:
         # Projeter le composant sur sa phase de queue. `phase_of_component` couvre les
         # phases du roundtrip (monitoring/dataops/…) ; `storage-simple`/`metrics-server`
         # SONT eux-mêmes des phases de queue (hors _ROUNDTRIP_PHASES) → repli sur le nom.
-        ph = _rb(f"phase_of_component {comp!r}", backend).strip()
+        ph = graph.phase_of_component(comp, backend)
         if not ph and comp in _QUEUE_PHASES:
             ph = comp
         if ph and ph in _QUEUE_PHASES and ph not in result:
@@ -208,7 +180,7 @@ def _phase_of(comp: str, backend: str) -> str:
     elles-mêmes leur phase → même repli que `resolve_layers` (ligne 155). Sans ce
     repli, l'arête `gitea → storage-simple` serait perdue (storage-simple hors
     _ROUNDTRIP_PHASES) et `gitops` paraîtrait à tort sans dépendance de stockage."""
-    ph = _rb(f"phase_of_component {comp!r}", backend).strip()
+    ph = graph.phase_of_component(comp, backend)
     if not ph and comp in _QUEUE_PHASES:
         ph = comp
     return ph
@@ -235,7 +207,7 @@ def phase_deps(backend: str = "local-path") -> dict[str, set[str]]:
             continue
         direct: set[str] = set()
         for comp in _expand_alias(phase, backend):
-            for dep in _rb(f"component_deps {comp!r}", backend).split():
+            for dep in graph.component_deps(comp, backend):
                 pd = _phase_of(dep, backend)
                 if pd and pd != phase and pd in _QUEUE_PHASES:
                     direct.add(pd)
