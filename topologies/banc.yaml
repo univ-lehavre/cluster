@@ -1,0 +1,36 @@
+# topologies/banc.yaml — topologie RÉELLE (gitignorée, ADR 0023).
+# Générée par `topology.py stack new` (assistant). Ajuste nœuds/rôles/ressources ;
+# `topology.py stack validate` revérifie le schéma. `status: cible` tant qu'aucun
+# run ne l'a montée (honnêteté ADR 0052).
+catalog:
+  topology: banc
+  terrain: local
+  status: cible # cible | buildé | spike — `buildé` seulement après un run réel
+# `atlas` = alias de la chaîne MLOps complète (ADR 0083) : metrics + monitoring +
+# gitops + gitops-seed + dataops + mlflow. C'est un alias de LAYERS (top-level),
+# PAS un profil (profile reste le préfixe cumulatif base⊂…⊂dataops, ADR 0039).
+layers:
+  - metrics-server
+  - monitoring
+  - gitops
+  - gitops-seed
+  - dataops
+  - mlflow
+  - portal
+nodes:
+  - name: node1
+    roles: [control, worker]
+storage:
+  backend: local-path
+target_kind: lima
+# Ressources de la VM Lima (LOT 8, ADR 0097 §3 — remplace les env VM_CPUS/VM_MEMORY/
+# VM_DISK). Bloc GLOBAL (défaut tous nœuds) ; un node peut surcharger via
+# `nodes[].resources`. Ces valeurs ne pilotent réellement la VM qu'avec le moteur
+# Python (`nestor up --engine=python`) ; le défaut bash lit encore les env.
+resources:
+  cpus: 6
+  memory: 16GiB
+  disk: 128GiB
+# Kubeconfig du banc Lima (rapatrié par le provisioning ; KUBECONFIG_LOCAL bash).
+# Explicite la cible LECTURE (preview/état réel) sans dépendre du contexte courant.
+kubeconfig: bench/lima/.work/kubeconfig

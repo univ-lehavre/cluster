@@ -37,6 +37,11 @@ bootstrap/hosts.yaml
 /topologies/*
 !/topologies/*.example.yaml
 !/topologies/*.example.*
+# EXCEPTION (ADR 0023) : le banc Lima `banc.yaml` est un EXEMPLE FONCTIONNEL PUBLIC
+# (node1, local-path, ressources génériques) — même statut que le banc Vagrant
+# `192.168.67.0/24` que l'ADR garde explicitement. Versionné. `dirqual.yaml` (vraie
+# prod) reste ignoré (couvert par /topologies/* ci-dessus).
+!/topologies/banc.yaml
 
 # topology.yaml (racine) = symlink d'activation vers une topo du catalogue —
 # repointé pour activer (`ln -sf topologies/<x>.example.yaml topology.yaml`),
