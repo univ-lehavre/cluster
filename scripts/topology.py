@@ -116,6 +116,7 @@ from nestor import discover as _discover  # noqa: E402
 from nestor import graph as _graph  # noqa: E402
 from nestor import ha as _ha  # noqa: E402
 from nestor import isolation as _isolation  # noqa: E402
+from nestor import kube_context as _kube_context  # noqa: E402
 from nestor import prod_target as _prod_target  # noqa: E402
 from nestor import refresh_fuse as _refresh_fuse  # noqa: E402
 from nestor import refresh_plan as _refresh_plan  # noqa: E402
@@ -254,20 +255,6 @@ def _active_stack_name(file_arg: str | None) -> str | None:
         return None
     try:
         return load_topology(path).catalog.get("topology")
-    except (TopologyError, FileNotFoundError, OSError):
-        return None
-
-
-def _active_topology_safe() -> Topology | None:
-    """La topologie de la stack ACTIVE (`topology.yaml`), ou None si absente/illisible.
-
-    Sert aux gardes d'isolation (ADR 0084) qui doivent connaître `target_kind` sans `-f`
-    (ex. `env`, appelé par le wrapper sans argument). Robuste : toute erreur → None
-    (l'appelant retombe sur le comportement banc par défaut)."""
-    if not os.path.exists(_DEFAULT_TOPOLOGY):
-        return None
-    try:
-        return load_topology(_DEFAULT_TOPOLOGY)
     except (TopologyError, FileNotFoundError, OSError):
         return None
 
@@ -560,8 +547,9 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     """`stack select` : active une topologie EXISTANTE et POSE le KUBECONFIG de la cible.
 
     Calque `pulumi stack select` : choisit la stack courante parmi le catalogue,
-    repointe le symlink `topology.yaml`, et — comme `nestor env` — imprime sur
-    STDOUT une ligne `export KUBECONFIG=…` à `eval` dans le shell :
+    repointe le symlink `topology.yaml`, POSE un CONTEXTE kubectl nommé `<stack>`
+    dans le kubeconfig de la cible (LOT 8, ADR 0097 §3 — remplace `nestor env`), et
+    imprime sur STDOUT une ligne `export KUBECONFIG=…` à `eval` dans le shell :
 
         eval "$(nestor stack select banc)"
 
@@ -569,8 +557,10 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     s'il est monté (`bench/lima/.work/kubeconfig`), sinon **`/dev/null`** (vide) —
     JAMAIS `~/.kube/config` (la prod). Un `kubectl`/`cilium` direct dans le shell
     vise alors la bonne cible, ou échoue proprement (« pas de banc »), au lieu de
-    taper la prod par accident. Un process NE PEUT PAS exporter dans le shell PARENT
-    (invariant Unix) → le patron `eval`, comme `ssh-agent`/`nestor env`.
+    taper la prod par accident. Le contexte nommé permet AUSSI `kubectl --context
+    <stack> …` sans aucune variable d'env (mécanisme standard k8s). Un process NE
+    PEUT PAS exporter dans le shell PARENT (invariant Unix) → le patron `eval`,
+    comme `ssh-agent`.
 
     TOUS les messages humains vont sur STDERR (inertes pour `eval`) ; seule la ligne
     `export` va sur STDOUT. Sans `eval` (appel nu `nestor stack select`), la stack
@@ -604,6 +594,11 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         f"✓ activée : topology.yaml → {target_rel} (chemin dérivé : {default_target(topo)})",
         file=sys.stderr,
     )
+
+    # CONTEXTE kubectl nommé (LOT 8, ADR 0097 §3) : remplace `nestor env`. On pose un
+    # contexte `<stack>` dans le kubeconfig de la cible (best-effort, non bloquant) — le
+    # mécanisme STANDARD k8s (`kubectl --context <stack>`) supplante l'export de KUBECONFIG.
+    _pose_named_context(topo, args.name)
 
     # PROD (ADR 0090) : la cible n'est pas le banc Lima mais le cluster déclaré. Si la
     # topo ne déclare pas encore son `kubeconfig:`, c'est ICI (à l'activation — déjà une
@@ -1214,8 +1209,8 @@ def _run_scenarios(jouables, pretes_fn, *, full: bool, topo) -> int:
     `nestor` calcule donc le `ONLY=` au lieu d'un SKIP composé à la main. Garde banc imposée."""
     if pretes_fn is None:
         raise _UsageError(
-            "`--run` exige un banc joignable (état réel) — exporter KUBECONFIG / `nestor env`, "
-            "ou monter le banc (`nestor up`)."
+            "`--run` exige un banc joignable (état réel) — `nestor stack select <banc>` "
+            "(pose le contexte), ou monter le banc (`nestor up`)."
         )
     _assert_bench_target("nestor test scenarios --run")
     pretes = [e for e in jouables if pretes_fn(e)]
@@ -1301,56 +1296,34 @@ def _run_for_target(runs, target: str | None):
     return run if run is not None else latest_run(runs)
 
 
-def cmd_env(args: argparse.Namespace) -> int:
-    """`env` : imprime la ligne `export KUBECONFIG=<banc>` à `eval` dans le shell.
+def _pose_named_context(topo: Topology, stack: str) -> None:
+    """Pose/met à jour le CONTEXTE kubectl nommé `stack` dans son kubeconfig (LOT 8).
 
-    Un process NE PEUT PAS exporter une variable dans le shell PARENT (invariant
-    Unix) — d'où le patron `eval "$(topology.py env)"` (comme `ssh-agent`/`docker-env`).
-    Cela PERSISTE le kubeconfig du banc dans LE shell courant, pour que `kubectl`/
-    `cilium` directs (hors topology.py) visent le banc eux aussi. topology.py lui-même
-    n'en a pas besoin (main() pose déjà le défaut par process) — c'est un confort shell.
+    REMPLACE `nestor env` (ADR 0097 §3) : au lieu d'imprimer `export KUBECONFIG=<banc>`
+    (paramétrage-par-env aboli), `nestor` maintient un contexte nommé par topologie (banc,
+    dirqual…) dérivé du champ `kubeconfig:` du YAML (prod) / du kubeconfig du banc (lima).
+    L'opérateur branche `kubectl --context <stack>` SANS variable d'env (mécanisme standard
+    k8s, cohérent ADR 0090).
 
-    Sans `--force`, on respecte un KUBECONFIG déjà exporté (intention explicite) : on
-    n'imprime rien d'écrasant, juste un rappel commenté sur stderr. Si le banc n'a pas
-    de kubeconfig (pas encore monté), erreur d'usage."""
-    # Garde d'isolation (ADR 0084) : `env` pose le kubeconfig du BANC — sans objet pour
-    # une stack active `target_kind: prod`. L'exporter polluerait le shell prod avec le
-    # banc (et DÉSARMERAIT `_assert_bench_target` qui voit alors un KUBECONFIG « explicite »
-    # → `up`/`next` croiraient pouvoir muter, créant des VMs Lima sur une cible prod).
-    # Le wrapper `nestor` appelle `env --force` après up/next : on refuse en prod.
-    active = _active_topology_safe()
-    if active is not None and active.target_kind != "lima":
-        print(
-            f"# stack active `{active.catalog.get('topology', '?')}` est "
-            f"target_kind={active.target_kind} — `nestor env` ne pose PAS le kubeconfig "
-            "du banc (ADR 0084). Pour la prod, exporter le KUBECONFIG prod explicitement "
-            "ou `nestor discover --cp <nœud>`."
+    Best-effort, NON BLOQUANT (appelé depuis `stack select`, qui doit rester rapide) :
+    une topo prod sans `kubeconfig:`, un banc non monté, ou un kubectl en échec → on
+    SIGNALE sur stderr et on continue (le contexte n'est pas vital à l'activation)."""
+    try:
+        plan = _kube_context.context_plan(
+            stack,
+            kubeconfig=topo.kubeconfig,
+            target_kind=topo.target_kind,
+            bench_kubeconfig=_BENCH_KUBECONFIG,
         )
-        return 0
-    if not os.path.exists(_BENCH_KUBECONFIG):
-        raise _UsageError(
-            f"kubeconfig du banc absent ({_BENCH_KUBECONFIG}) — monter le socle d'abord "
-            "(`topology.py up`)"
-        )
-    bench = os.path.abspath(_BENCH_KUBECONFIG)
-    current = os.environ.get("KUBECONFIG")
-    # `/dev/null` (placeholder posé par `stack select` quand le banc n'existait pas
-    # encore) ou un chemin VIDE/INEXISTANT ne sont PAS une intention explicite de
-    # l'utilisateur : on les remplace par le banc sans exiger --force (sinon on reste
-    # bloqué sur /dev/null après le montage). Seul un VRAI kubeconfig tiers est respecté.
-    placeholder = (
-        not current
-        or os.path.abspath(current) == os.path.abspath(os.devnull)
-        or not os.path.exists(current)
+        _kube_context.apply_context(plan)
+    except _kube_context.ContextError as exc:
+        _warn(f"contexte kubectl « {stack} » non posé : {exc}")
+        return
+    print(
+        f"  contexte kubectl « {stack} » à jour — `kubectl --context {stack} …` "
+        "(plus de `nestor env`, ADR 0097 §3).",
+        file=sys.stderr,
     )
-    if current and not args.force and not placeholder and os.path.abspath(current) != bench:
-        # KUBECONFIG tiers RÉEL déjà posé : on NE l'écrase PAS (sauf --force). Rappel
-        # commenté (sur stdout pour rester `eval`-safe : un commentaire shell est inerte).
-        print(f"# KUBECONFIG déjà défini ({current}) — `env --force` pour viser le banc")
-        return 0
-    # Ligne eval-able. `eval "$(topology.py env)"` exporte dans le shell courant.
-    print(f"export KUBECONFIG={shlex.quote(bench)}")
-    return 0
 
 
 def cmd_access(args: argparse.Namespace) -> int:
@@ -1477,7 +1450,7 @@ def _assert_bench_target(action: str) -> None:
         "la PRODUCTION par erreur (ADR 0053).\n"
         "  • Monter le banc d'abord : `bench/lima/run-phases.sh up`\n"
         "  • Ou, si l'intention est délibérée hors-banc, exporter KUBECONFIG "
-        'explicitement : `eval "$(bench/lima/env.sh export)"`'
+        "explicitement (ex. `export KUBECONFIG=~/.kube/<topo>.config`, ADR 0097 §3)"
     )
 
 
@@ -1723,8 +1696,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
         os.environ["KUBECONFIG"] = out_path  # les sondes suivantes l'utilisent
     if not _ready_nodes():
         raise _UsageError(
-            "banc injoignable (aucun nœud Ready) — exporter KUBECONFIG ou `nestor env`, "
-            "ou monter le cluster (`nestor up`)"
+            "banc injoignable (aucun nœud Ready) — `nestor stack select <banc>` (pose "
+            "le contexte) ou monter le cluster (`nestor up`)"
         )
     result = _discover.assemble(
         nodes=_discover_node_roles(),
@@ -1837,8 +1810,8 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     real_layers, real_backend = _real_layers_backend()
     if real_backend is None and not real_layers:
         raise _UsageError(
-            "cluster injoignable (aucun nœud Ready / aucune couche lue) — exporter "
-            "KUBECONFIG ou `nestor env`, ou monter le cluster (`nestor up`)"
+            "cluster injoignable (aucun nœud Ready / aucune couche lue) — "
+            "`nestor stack select <topo>` (pose le contexte) ou monter le cluster (`nestor up`)"
         )
     # Le DÉCLARÉ, AU MÊME GRAIN que le réel : `discover` émet des PHASES (storage-simple,
     # monitoring, gitops, dataops…), tandis que `declared_layers` peut être des ALIAS de
@@ -2038,8 +2011,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
     _resolve_prod_kubeconfig_into_env(topo, path, no_input=getattr(args, "no_input", False))
     # Avertissements d'ALIGNEMENT SHELL — propres au BANC (ADR 0053). Une stack
     # `target_kind: prod` ne lit PAS le banc (gating ADR 0084) : ces messages, pensés
-    # pour le banc, seraient TROMPEURS en prod (ils invitent à `nestor env` qui, en prod,
-    # ne pose rien). On ne les émet donc que pour une stack lima.
+    # pour le banc, seraient TROMPEURS en prod (ils invitent à aligner le shell sur le
+    # banc, sans objet en prod). On ne les émet donc que pour une stack lima.
     if topo.target_kind == "lima":
         # Lecture seule : on ne BLOQUE pas. Quand aucun banc n'est monté, la sonde vise
         # /dev/null (jamais la prod, ADR 0053) → la section RÉEL est VIDE. On le DIT
@@ -2058,7 +2031,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
             _warn(
                 "preview lit le BANC, mais ton shell n'a pas KUBECONFIG exporté — un "
                 "`kubectl` direct vise ~/.kube/config (souvent la PROD). Aligne le shell : "
-                'eval "$(nestor env)".'
+                "`nestor stack select <banc>` (pose le contexte) ou "
+                "`kubectl --context <banc> …`."
             )
     runs = load_runs(args.history or _RUNS_HISTORY)
     now = int(dt.datetime.now(tz=dt.UTC).timestamp())
@@ -3235,7 +3209,8 @@ _DISPATCH = {
     # refresh) ; `next` = appliquer LA prochaine couche (le vrai `up` complet — VMs +
     # orchestration de TOUTE la séquence — reste à coder).
     "preview": cmd_preview,  # calque `pulumi preview`
-    "env": cmd_env,  # imprime `export KUBECONFIG=<banc>` à eval dans le shell
+    # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) : `nestor` maintient des contextes kubectl
+    # nommés (posés par `stack select`), plus de `export KUBECONFIG` paramétré-par-env.
     "access": cmd_access,  # accès dev (URLs + secrets) — délègue à access.sh (ADR 0048)
     "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
     "discover": cmd_discover,  # reconstruit un topology.yaml depuis le réel (ADR 0074, inverse de generate)  # noqa: E501
@@ -3302,7 +3277,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "  destroy     supprimer les machines (VMs) de la stack active\n"
             "\n"
             "Commandes annexes :\n"
-            '  env         brancher kubectl sur le banc : eval "$(nestor env)"\n'
             "  access      ouvrir l'accès dev (URLs des services + identifiants)\n"
             "  scale       ajuster les replicas au nombre de nœuds\n"
             "  discover    reconstruire un topology.yaml depuis un cluster réel\n"
@@ -3459,13 +3433,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
     )
 
-    p_env = sub.add_parser(
-        "env",
-        help='brancher kubectl sur le cluster du banc : eval "$(nestor env)" dans ton shell',
-    )
-    p_env.add_argument(
-        "--force", action="store_true", help="imprime le banc même si KUBECONFIG est déjà défini"
-    )
+    # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) — plus de sous-parser. Le branchement de
+    # kubectl passe désormais par le contexte nommé que `stack select` pose dans le
+    # kubeconfig de la cible (`kubectl --context <topo> …`), sans variable d'env.
 
     p_access = sub.add_parser(
         "access",

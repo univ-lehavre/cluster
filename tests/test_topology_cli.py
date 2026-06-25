@@ -765,9 +765,10 @@ runs:
     def test_warns_when_bench_up_but_shell_kubeconfig_unset(self):
         # Piège vécu : le banc est monté+joignable (preview le lit via le défaut auto),
         # MAIS le shell n'a pas KUBECONFIG exporté → un `kubectl` nu vise ~/.kube/config
-        # (prod). preview doit AVERTIR de lancer `nestor env` (ADR 0053). On stube : banc
-        # présent (os.path.exists), joignable (_kubeconfig_reaches_api), KUBECONFIG absent
-        # → main() pose le défaut auto et arme _KUBECONFIG_AUTO_BENCH.
+        # (prod). preview doit AVERTIR d'aligner le shell (LOT 8 : `stack select` pose le
+        # contexte, plus `nestor env`). On stube : banc présent (os.path.exists), joignable
+        # (_kubeconfig_reaches_api), KUBECONFIG absent → main() pose le défaut auto et arme
+        # _KUBECONFIG_AUTO_BENCH.
         orig_exists = cli.os.path.exists
         cli.os.path.exists = lambda p: p == cli._BENCH_KUBECONFIG or orig_exists(p)
         self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
@@ -780,7 +781,7 @@ runs:
         # Warning d'alignement shell = comportement BANC (ADR 0084) → topo lima.
         code, _, err = _capture(["preview", "-f", _example_as_lima(self)])
         self.assertEqual(code, 0)
-        self.assertIn("nestor env", err)  # avertit d'aligner le shell
+        self.assertIn("stack select", err)  # avertit d'aligner le shell (contexte nommé)
         self.assertIn("PROD", err)
 
     def test_warns_on_backend_drift_ceph_residual(self):
@@ -2348,42 +2349,31 @@ class BenchTargetGuard(unittest.TestCase):
             cli._assert_bench_target("nestor up")
 
 
-class EnvCommand(unittest.TestCase):
-    """`env` : pose le kubeconfig du banc — mais PAS pour une stack active prod (ADR 0084)."""
+class EnvCommandRemoved(unittest.TestCase):
+    """`env` est SUPPRIMÉE (LOT 8, ADR 0097 §3) — plus dans le parseur ni le dispatch.
 
-    def _stub_active(self, target_kind):
-        # Topo active factice avec le target_kind voulu (sans toucher au symlink réel).
-        backend = "ceph" if target_kind == "prod" else "local-path"
-        topo_yaml = (
-            "catalog: {topology: fake-active, profile: base}\n"
-            "nodes:\n  - {name: n1, roles: [control, worker]}\n"
-            f"storage: {{backend: {backend}}}\ntarget_kind: {target_kind}\n"
+    Le branchement de kubectl passe désormais par le contexte nommé que `stack select`
+    pose dans le kubeconfig de la cible (`kubectl --context <topo> …`), sans variable
+    d'env. On PROUVE l'absence par construction, pas seulement par comportement."""
+
+    def test_env_absent_from_dispatch(self):
+        # La table de routage ne connaît plus `env` (cmd_env retiré du module).
+        self.assertNotIn("env", cli._DISPATCH)
+        self.assertFalse(hasattr(cli, "cmd_env"))
+
+    def test_env_absent_from_parser(self):
+        # `nestor env` → argparse refuse une sous-commande inconnue (SystemExit code 2).
+        parser = cli._build_parser()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+            parser.parse_args(["env"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_help_does_not_mention_env(self):
+        # Le menu d'aide ne propose plus `env` (retiré de l'epilog).
+        parser = cli._build_parser()
+        self.assertNotIn(
+            "env         brancher", parser.epilog or "", "le menu mentionne encore `env`"
         )
-        path = _tmp(topo_yaml)
-        self.addCleanup(os.unlink, path)
-        topo = load_topology(path)
-        orig = cli._active_topology_safe
-        cli._active_topology_safe = lambda: topo
-        self.addCleanup(setattr, cli, "_active_topology_safe", orig)
-
-    def test_prod_active_does_not_export_bench(self):
-        # Stack active prod → `env` ne pose PAS le banc (commentaire eval-safe, pas d'export).
-        self._stub_active("prod")
-        code, out, _ = _capture(["env"])
-        self.assertEqual(code, 0)
-        self.assertNotIn("export KUBECONFIG", out)
-        self.assertIn("target_kind=prod", out)
-
-    def test_lima_active_still_exports_bench(self):
-        # Stack active lima → comportement inchangé : `env` pose le banc (si présent).
-        self._stub_active("lima")
-        orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else orig_exists(p)
-        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
-        os.environ.pop("KUBECONFIG", None)
-        code, out, _ = _capture(["env"])
-        self.assertEqual(code, 0)
-        self.assertIn("export KUBECONFIG", out)
 
 
 class ModuleGuard(unittest.TestCase):

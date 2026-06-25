@@ -424,5 +424,109 @@ class OsdDerivation(unittest.TestCase):
         self.assertIsNone(derive_osd_expected(topo))
 
 
+class VmResources(unittest.TestCase):
+    """LOT 8 (ADR 0097 §3) : ressources VM lues du YAML — plus de VM_CPUS/VM_MEMORY/VM_DISK
+    en env. Bloc `resources:` global au niveau topo + surcharge optionnelle par node."""
+
+    def test_defaults_when_absent(self):
+        # Sans bloc `resources:`, les défauts du bash (4 vCPU / 12 GiB / 40 GiB).
+        topo = topology_from_dict(_base())
+        r = topo.default_resources
+        self.assertEqual((r.cpus, r.memory, r.disk), (4, "12GiB", "40GiB"))
+
+    def test_global_resources_read_from_yaml(self):
+        # Le bloc global remonte les ex-VM_* (lu du YAML, pas de l'env).
+        topo = topology_from_dict(_base(resources={"cpus": 8, "memory": "16GiB", "disk": "60GiB"}))
+        r = topo.default_resources
+        self.assertEqual((r.cpus, r.memory, r.disk), (8, "16GiB", "60GiB"))
+
+    def test_partial_global_resources_fill_defaults(self):
+        # Un champ seul surchargé → les autres gardent le défaut.
+        topo = topology_from_dict(_base(resources={"cpus": 2}))
+        r = topo.default_resources
+        self.assertEqual((r.cpus, r.memory, r.disk), (2, "12GiB", "40GiB"))
+
+    def test_node_inherits_global(self):
+        # Un node sans `resources:` hérite intégralement du global.
+        topo = topology_from_dict(
+            _base(
+                nodes=[{"name": "cp1", "roles": ["control"]}],
+                resources={"cpus": 6, "memory": "24GiB", "disk": "80GiB"},
+            )
+        )
+        r = topo.node_resources("cp1")
+        self.assertEqual((r.cpus, r.memory, r.disk), (6, "24GiB", "80GiB"))
+
+    def test_node_override_wins_field_by_field(self):
+        # La surcharge per-node prime CHAMP PAR CHAMP sur le global.
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {"name": "cp1", "roles": ["control"], "resources": {"cpus": 12}},
+                    {"name": "n1", "roles": ["worker"]},
+                ],
+                resources={"cpus": 4, "memory": "12GiB", "disk": "40GiB"},
+            )
+        )
+        cp1 = topo.node_resources("cp1")
+        self.assertEqual((cp1.cpus, cp1.memory, cp1.disk), (12, "12GiB", "40GiB"))
+        # Le worker sans surcharge garde le global.
+        n1 = topo.node_resources("n1")
+        self.assertEqual(n1.cpus, 4)
+
+    def test_unknown_node_rejected(self):
+        topo = topology_from_dict(_base())
+        with self.assertRaises(TopologyError):
+            topo.node_resources("ghost")
+
+    def test_non_integer_cpus_rejected(self):
+        # La coercion (et donc le rejet) se fait à la LECTURE des ressources (pure).
+        topo = topology_from_dict(_base(resources={"cpus": "huit"}))
+        with self.assertRaises(TopologyError):
+            _ = topo.default_resources
+
+    def test_cpus_string_coerced(self):
+        # Le YAML peut porter cpus en chaîne ("8") → coercé en int.
+        topo = topology_from_dict(_base(resources={"cpus": "8"}))
+        self.assertEqual(topo.default_resources.cpus, 8)
+
+
+class ConfigBlocks(unittest.TestCase):
+    """LOT 8 (ADR 0097 §3) : blocs de config remontés de l'env vers le YAML (un bloc par
+    domaine). nestor LIT ces blocs du YAML ; absents → `{}` (l'accesseur/seed porte le défaut)."""
+
+    def test_blocks_default_to_empty(self):
+        topo = topology_from_dict(_base())
+        for block in (topo.ceph, topo.ha, topo.gitea, topo.cilium, topo.atlas, topo.portal):
+            self.assertEqual(block, {})
+
+    def test_ceph_block_read(self):
+        topo = topology_from_dict(
+            _base(ceph={"block_device": "vde", "hdd_glob": "/sys/block/vd[b-d]", "min_hdd": 3})
+        )
+        self.assertEqual(topo.ceph["block_device"], "vde")
+        self.assertEqual(topo.ceph["min_hdd"], 3)
+
+    def test_ha_block_read(self):
+        topo = topology_from_dict(_base(ha={"vip": "10.0.0.40", "iface": "eth0"}))
+        self.assertEqual(topo.ha["vip"], "10.0.0.40")
+        self.assertEqual(topo.ha["iface"], "eth0")
+
+    def test_gitea_block_read(self):
+        topo = topology_from_dict(_base(gitea={"org": "atlas", "ns": "gitea", "repo": "workflows"}))
+        self.assertEqual(topo.gitea["org"], "atlas")
+        self.assertEqual(topo.gitea["ns"], "gitea")
+
+    def test_atlas_and_portal_blocks_read(self):
+        topo = topology_from_dict(
+            _base(
+                atlas={"repo_dir": "../atlas", "citation_revision": "c98feea9"},
+                portal={"seuil_jours": 30, "listen_port": 8080},
+            )
+        )
+        self.assertEqual(topo.atlas["citation_revision"], "c98feea9")
+        self.assertEqual(topo.portal["seuil_jours"], 30)
+
+
 if __name__ == "__main__":
     unittest.main()

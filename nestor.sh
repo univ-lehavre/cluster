@@ -5,17 +5,22 @@
 # Pourquoi une fonction et non un exécutable ? Un programme NE PEUT PAS modifier
 # l'environnement de son shell parent (invariant Unix) : seule une fonction sourcée
 # peut poser `KUBECONFIG` dans TON shell. La fonction délègue à l'implémentation
-# `scripts/nestor-exec` (le vrai outil, `uv run … topology.py`) et, pour les
-# sous-commandes qui désignent une cible (`stack select`, `env`), applique le
-# `export KUBECONFIG=…` qu'elles impriment — comme `direnv`/`zoxide`/`ssh-agent`.
+# `scripts/nestor-exec` (le vrai outil, `uv run … topology.py`) et, pour `stack
+# select` (qui désigne une cible), applique le `export KUBECONFIG=…` qu'elle imprime
+# — comme `direnv`/`zoxide`/`ssh-agent`.
+#
+# `nestor env` est SUPPRIMÉE (LOT 8, ADR 0097 §3) : `nestor` maintient désormais des
+# CONTEXTES kubectl nommés (`stack select` pose `<topo>` dans le kubeconfig de la
+# cible), et l'on branche kubectl par le mécanisme STANDARD k8s — `kubectl --context
+# <topo> …` — sans aucune variable d'environnement.
 #
 # Installation : sourcer ce fichier dans ton profil, puis ouvrir un nouveau shell :
 #
 #   echo 'source /chemin/vers/nestor/nestor.sh' >> ~/.zshrc   # ou ~/.bashrc
 #
 # Ensuite : `nestor up`, `nestor preview`, … fonctionnent ; `nestor stack select
-# banc` et `nestor env` posent en plus KUBECONFIG dans le shell (banc de la stack,
-# ou /dev/null si pas de banc — jamais la prod, ADR 0053).
+# banc` pose en plus KUBECONFIG dans le shell (banc de la stack, ou /dev/null si pas
+# de banc — jamais la prod, ADR 0053) ET le contexte kubectl nommé.
 
 # Racine du dépôt, résolue UNE FOIS au source (pas à chaque appel) — évite la syntaxe
 # zsh `${(%):-%x}` (non portable bash). bash expose le chemin sourcé dans
@@ -29,11 +34,13 @@ export _NESTOR_ROOT
 
 nestor() {
     local _bin="${_NESTOR_ROOT}/scripts/nestor-exec"
-    # Sous-commandes qui IMPRIMENT un `export KUBECONFIG=…` (stdout) à appliquer au
-    # shell : `env` et `stack select`. On capture STDOUT (l'export) et on l'eval ;
-    # STDERR (messages humains) reste affiché. Le binaire n'imprime l'export que si
-    # stdout est capturé (non-TTY) — ici il l'est toujours (substitution de commande).
-    if [ "$1" = "env" ] || { [ "$1" = "stack" ] && [ "$2" = "select" ]; }; then
+    # `stack select` IMPRIME un `export KUBECONFIG=…` (stdout) à appliquer au shell.
+    # On capture STDOUT (l'export) et on l'eval ; STDERR (messages humains) reste
+    # affiché. Le binaire n'imprime l'export que si stdout est capturé (non-TTY) — ici
+    # il l'est toujours (substitution de commande). `nestor env` a disparu (ADR 0097
+    # §3) : le branchement kubectl passe par le contexte nommé que `stack select` pose
+    # dans le kubeconfig (`kubectl --context <topo> …`), plus de variable d'env.
+    if [ "$1" = "stack" ] && [ "$2" = "select" ]; then
         local _out
         _out=$("${_bin}" "$@") || return $?
         [ -n "${_out}" ] && eval "${_out}"
@@ -41,16 +48,4 @@ nestor() {
     fi
     # Toute autre commande (up/next/preview/…) : délégation normale.
     "${_bin}" "$@"
-    local _rc=$?
-    # AUTO-ENV : un `up`/`next` réussi peut RENDRE le banc joignable (1er control-plane
-    # installé → l'API répond). On (re)pose alors KUBECONFIG=banc dans le shell, pour
-    # que `kubectl` direct marche sans `nestor env` manuel — et pour écraser le
-    # placeholder /dev/null posé par un `stack select` fait AVANT le montage. `env`
-    # ne pose que si le kubeconfig banc EXISTE (sinon erreur d'usage avalée) ; --force
-    # parce que le shell porte peut-être /dev/null (cf. ADR 0053).
-    if [ "${_rc}" -eq 0 ] && { [ "$1" = "up" ] || [ "$1" = "next" ]; }; then
-        local _env
-        _env=$("${_bin}" env --force 2> /dev/null) && [ -n "${_env}" ] && eval "${_env}"
-    fi
-    return "${_rc}"
 }

@@ -16,11 +16,18 @@ Ansible ne peut pas faire (poule/œuf, sans dépôt, destructif conscient).
 
 `nestor` (l'outil déclaratif : `nestor up`/`preview`/`stack select`…) est une
 **fonction shell à sourcer**, pas un exécutable. Pourquoi ? Pour que
-`nestor stack select` et `nestor env` puissent **poser `KUBECONFIG` dans ton
-shell** — ce qu'un programme lancé ne peut pas faire (un enfant ne modifie pas
-l'environnement de son parent ; patron `nvm`/`pyenv`/`direnv`). La fonction
-délègue à l'implémentation `scripts/nestor-exec` et applique le
-`export KUBECONFIG=…` que ces sous-commandes impriment.
+`nestor stack select` puisse **poser `KUBECONFIG` dans ton shell** — ce qu'un
+programme lancé ne peut pas faire (un enfant ne modifie pas l'environnement de
+son parent ; patron `nvm`/`pyenv`/`direnv`). La fonction délègue à
+l'implémentation `scripts/nestor-exec` et applique le `export KUBECONFIG=…` que
+`stack select` imprime.
+
+> `nestor env` a été **supprimée**
+> ([ADR 0097](decisions/0097-moteur-chemin-python-bash-artefacts.md) §3) — elle
+> incarnait le paramétrage-par-variable-d'environnement aboli. À la place,
+> `nestor stack select <topo>` **pose un contexte kubectl nommé** dans le
+> kubeconfig de la cible : on branche `kubectl` par le mécanisme standard
+> `kubectl --context <topo> …`, **sans aucune variable d'environnement**.
 
 **Installation** — sourcer le fichier `nestor.sh` (racine du dépôt) dans ton
 profil :
@@ -58,13 +65,17 @@ contient pas** tes vrais hôtes : ils vivent en config locale **gitignorée**.
 | `kubeconfig` du **banc** | `bench/lima/.work/kubeconfig` (généré par `run-phases.sh`)                   |
 
 **Le plus simple — laisse `env.sh` dériver ton contexte et t'imprimer les
-commandes exactes à copier** (hôtes courants + invocation `state.sh` par nœud +
-export du kubeconfig), sans rien deviner :
+commandes exactes à copier** (hôtes courants + invocation `state.sh` par nœud),
+sans rien deviner :
 
 ```bash
 bench/lima/env.sh                    # auto-détecte (banc Lima ou prod)
-eval "$(bench/lima/env.sh export)"   # exporte KUBECONFIG du banc dans ton shell
 ```
+
+> Pour **brancher `kubectl`**, plus de `eval "$(env.sh export)"` :
+> `nestor stack select <topo>` pose un **contexte kubectl nommé**, puis
+> `kubectl --context <topo> …` (mécanisme standard k8s, sans variable d'env —
+> ADR 0097 §3).
 
 Exemple de ce qu'il imprime sur un banc Lima à 3 nœuds :
 l'`USER_REMOTE=lima SSH_OPTS='-F ~/.lima/cp1/ssh.config' bootstrap/state.sh cp1`

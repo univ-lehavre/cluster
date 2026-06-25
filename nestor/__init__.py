@@ -37,9 +37,15 @@ from nestor.gates import (
 )
 from nestor.generator import render_lima_inventory, render_prod_inventory
 from nestor.history import Run, load_runs, verdict_for_run
+from nestor.kube_context import (
+    ContextError,
+    ContextPlan,
+    apply_context,
+    context_plan,
+)
 from nestor.layers import layers_from_profile, phase_deps, resolve_layers
 from nestor.metrics import RunMetrics, format_metrics, metrics_of
-from nestor.model import Topology, TopologyError, load_topology
+from nestor.model import NodeResources, Topology, TopologyError, load_topology
 from nestor.plan import (
     KNOWN_TARGETS,
     PlanError,
@@ -89,11 +95,21 @@ from nestor.scaffold import (
     plan_init,
     validate_name,
 )
+from nestor.seed import (
+    SeedConfig,
+    SeedError,
+    SeedGuardRefused,
+    SeedResult,
+    citation_image_ref,
+    run_seed,
+    seed_steps,
+)
 
 __all__ = [
     "Topology",
     "TopologyError",
     "load_topology",
+    "NodeResources",
     "render_prod_inventory",
     "render_lima_inventory",
     "derive_run_params",
@@ -165,4 +181,17 @@ __all__ = [
     "Entry",
     "Observed",
     "View",
+    # kube_context (LOT 8, ADR 0097 §3) : contextes kubectl nommés (remplace `nestor env`)
+    "ContextError",
+    "ContextPlan",
+    "apply_context",
+    "context_plan",
+    # seed (LOT 8, ADR 0097 §2/§3) : seed des données post-bootstrap (gardes banc/prod)
+    "SeedConfig",
+    "SeedError",
+    "SeedGuardRefused",
+    "SeedResult",
+    "citation_image_ref",
+    "run_seed",
+    "seed_steps",
 ]
