@@ -9,11 +9,14 @@ détruire `sc` orphelinerait monitoring/dataops/gitea (leurs PVC sont sur la
 StorageClass) ; détruire `ceph` reconstruit tout le socle de stockage.
 
 La clôture et l'ordre de montage NE SONT PLUS codés ici : ils sont DÉRIVÉS du
-**graphe atomique unique** de `rollback-lib.sh` (`phase_closure` / `topo_sort`,
-ADR 0066) — fin de la 2ᵉ source de vérité (l'ancien `_DEPENDENTS`/`_MOUNT_ORDER`
-en dur, « validé à la main », divergeait du graphe de rollback). Les arêtes de
-stockage BLOC (`gitea`/`registry`/`prometheus-stack`/`cnpg`/`loki` → `sc`, PVC sur
-la StorageClass) sont désormais dans le graphe (workflow consigné 2026-06-13).
+**graphe atomique unique** FIGÉ `nestor/graph.py` (ADR 0096 §1, porté byte-identique
+de `rollback-lib.sh`, ADR 0066 ; `phase_closure` / `topo_sort`) — fin de la 2ᵉ source
+de vérité (l'ancien `_DEPENDENTS`/`_MOUNT_ORDER` en dur, « validé à la main »,
+divergeait du graphe de rollback). Les arêtes de stockage BLOC (`gitea`/`registry`/
+`prometheus-stack`/`cnpg`/`loki` → `sc`, PVC sur la StorageClass) sont dans le graphe
+(workflow consigné 2026-06-13). Plus de sous-process bash pour le périmètre/la clôture
+(lot 3 du plan de refonte : le pont `rollback-lib.sh` est remplacé par `graph.py`) ;
+`run-phases.sh` reste shellé pour l'exécution réelle (rollback/montage d'une phase).
 
 Cycle, pour la clôture `[X, …descendants]` :
   1. détruire : `run-phases.sh rollback <p>` pour chaque p, en ordre INVERSE de
@@ -41,9 +44,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
+from nestor import graph
+
 _REPO = os.path.join(os.path.dirname(__file__), "..")
 _RUN_PHASES = os.path.join(_REPO, "bench", "lima", "run-phases.sh")
-_ROLLBACK_LIB = os.path.join(_REPO, "bench", "lima", "rollback-lib.sh")
 
 # Phases qui ont un rollback défini (rollback_known_phase, rollback-lib.sh).
 KNOWN_PHASES = (
@@ -64,66 +68,44 @@ class RoundtripError(RuntimeError):
     """Phase inconnue, opt-in manquant, confirmation refusée, ou banc indisponible."""
 
 
-# ── Périmètre & clôture : DÉRIVÉS du graphe atomique de rollback-lib.sh ──────
-# Source UNIQUE (ADR 0066) : ni _DEPENDENTS ni _MOUNT_ORDER ne sont codés ici.
-
-
-def _rollback_lib_call(func: str, phase: str = "") -> str:
-    """Appelle une fonction de rollback-lib.sh et renvoie sa stdout (source unique).
-
-    `phase` est passé en argument seulement s'il est non vide (certaines fonctions,
-    comme `phase_closure`, prennent un argument ; d'autres pas).
-    """
-    call = f"{func} {phase!r}" if phase else func
-    try:
-        out = subprocess.run(  # noqa: S603 — chemin codé, func/phase contrôlés
-            ["bash", "-c", f'. "{_ROLLBACK_LIB}" && {call}'],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise RoundtripError(f"lecture du périmètre de `{phase}` impossible : {exc}") from exc
-    return out.stdout
+# ── Périmètre & clôture : DÉRIVÉS du graphe atomique FIGÉ `nestor/graph.py` ──
+# Source UNIQUE (ADR 0066/0096 §1) : ni _DEPENDENTS ni _MOUNT_ORDER ne sont codés ici.
+# Plus de pont subprocess vers rollback-lib.sh (lot 3) : `graph.py` porte le graphe
+# byte-identique (prouvé par tests/test_graph.py contre le VRAI bash, les 2 backends).
 
 
 def closure(phase: str) -> list[str]:
     """Clôture descendante de `phase`, en ordre de MONTAGE (amont→aval).
 
     = `phase` + tout ce qui en dépend (transitivement). DÉRIVÉE du graphe atomique
-    (`phase_closure`, rollback-lib.sh) — plus de graphe en dur ici (ADR 0066).
+    figé (`graph.phase_closure`, ADR 0066/0096) — plus de graphe en dur ici.
     """
     if phase not in KNOWN_PHASES:
         raise RoundtripError(f"phase `{phase}` inconnue (connues : {list(KNOWN_PHASES)})")
-    return _rollback_lib_call("phase_closure", phase).split()
+    return graph.phase_closure(phase)
 
 
 def involves_storage(phase: str) -> bool:
     """La clôture de `phase` touche-t-elle une couche de stockage (→ opt-in `full`) ?
 
-    Délègue à `phase_involves_storage` (rollback-lib.sh) : code de retour 0 = oui.
+    Délègue à `graph.phase_involves_storage` : True = oui (clôture ceph/sc/datalake).
     """
     if phase not in KNOWN_PHASES:
         raise RoundtripError(f"phase `{phase}` inconnue (connues : {list(KNOWN_PHASES)})")
-    completed = subprocess.run(  # noqa: S603 — chemin codé, phase contrôlée
-        ["bash", "-c", f'. "{_ROLLBACK_LIB}" && phase_involves_storage {phase!r}'],
-        check=False,
-    )
-    return completed.returncode == 0
+    return graph.phase_involves_storage(phase)
 
 
 def phase_namespaces(phase: str) -> list[str]:
-    """Namespaces dédiés d'une phase (rollback_phase_namespaces)."""
-    return _rollback_lib_call("rollback_phase_namespaces", phase).split()
+    """Namespaces dédiés d'une phase (= graph.rollback_phase_namespaces, table ADR 0054)."""
+    return graph.rollback_phase_namespaces(phase)
 
 
 def phase_targeted_resources(phase: str) -> list[str]:
-    """Ressources ciblées d'une phase (une par ligne, format kubectl)."""
-    return [
-        ln
-        for ln in _rollback_lib_call("rollback_phase_targeted_resources", phase).splitlines()
-        if ln.strip()
-    ]
+    """Ressources ciblées d'une phase (une par ligne, format kubectl ; table ADR 0054).
+
+    = `graph.rollback_phase_targeted_resources` au backend ceph par défaut (l'historique
+    du pont bash sans STORAGE_BACKEND posé : `_rb_backend` retombe sur ceph)."""
+    return graph.rollback_phase_targeted_resources(phase)
 
 
 def phase_signal(phase: str) -> list[str]:
@@ -133,8 +115,8 @@ def phase_signal(phase: str) -> list[str]:
 
 def phase_has_nodeside(phase: str) -> bool:
     """`phase` laisse-t-elle un état NODE-SIDE (disques Ceph, /var/lib/rook) que le delete
-    Kubernetes ne couvre pas ? (rollback_phase_has_nodeside → 'yes')."""
-    return _rollback_lib_call("rollback_phase_has_nodeside", phase).strip() == "yes"
+    Kubernetes ne couvre pas ? (= graph.rollback_phase_has_nodeside)."""
+    return graph.rollback_phase_has_nodeside(phase)
 
 
 def closure_has_nodeside(phase: str) -> bool:
