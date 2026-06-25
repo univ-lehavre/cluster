@@ -16,6 +16,8 @@ from nestor.model import topology_from_dict  # noqa: E402
 from nestor.plan import (  # noqa: E402
     PHASE_PLAYBOOK,
     PlanError,
+    PlanState,
+    compute_plan_state,
     default_target,
     diff_phases,
     expected_phase_sequence,
@@ -518,6 +520,190 @@ class InstallableNow(unittest.TestCase):
         self.assertNotIn("storage-simple", got)  # observé → pas re-proposé
         self.assertIn("monitoring", got)  # débloqué par le storage observé
         self.assertIn("gitops", got)
+
+
+class ComputePlanState(unittest.TestCase):
+    """`compute_plan_state` : LE calcul partagé preview/next/up (PUR, sans cluster).
+
+    Encapsule la logique jadis copiée-collée entre cmd_preview et cmd_next. Prouve les
+    DEUX correctifs de l'étape 1 : (1) le RÉEL prime DANS LES DEUX SENS pour les couches
+    à signal (retrait ET ré-ajout) ; (2) le garde `if "up" not in done` (que cmd_next
+    n'avait pas — VRAI bug, classe de bug pas instance).
+    """
+
+    SEQ = ["up", "bootstrap", "storage-simple", "metrics-server", "monitoring", "dataops"]
+    SIGNAL = {"storage-simple", "metrics-server", "monitoring", "dataops"}
+
+    def test_observed_layer_not_in_a_appliquer(self):
+        # Une couche observée SAINE non tracée par l'historique n'est PAS « à monter ».
+        state = compute_plan_state(
+            self.SEQ,
+            run_phases=["up", "bootstrap"],  # historique : socle seul
+            observed_socle={"up", "bootstrap"},
+            observed_layers={"storage-simple"},  # le réel la confirme saine
+            freshness="frais",
+            signal_phases=self.SIGNAL,
+        )
+        self.assertNotIn("storage-simple", state.a_appliquer)
+        self.assertIn("metrics-server", state.a_appliquer)  # pas observée → à monter
+
+    def test_historically_done_but_not_observed_is_reproposed(self):
+        # LE BUG mlflow/marquez : l'historique dit une couche à signal FAITE, mais le
+        # réel ne la confirme PAS (détruite / posée à moitié) → elle RESTE « à monter ».
+        # C'est le 2e sens du réel-prime que `next` (installable_now seul) n'avait PAS.
+        state = compute_plan_state(
+            self.SEQ,
+            run_phases=self.SEQ,  # historique : TOUT fait
+            observed_socle={"up", "bootstrap"},
+            observed_layers={"storage-simple", "metrics-server", "monitoring"},  # dataops ABSENT
+            freshness="frais",
+            signal_phases=self.SIGNAL,
+        )
+        self.assertIn("dataops", state.a_appliquer)  # à signal, non confirmé → re-proposé
+
+    def test_up_not_done_voids_downstream(self):
+        # LE GARDE manquant à `next` : si `up` n'est pas fait (VMs à créer), AUCUNE couche
+        # aval ne peut être « faite », même si l'historique frais la consigne — sinon « VMs
+        # à créer MAIS ceph à-jour ». `done` est vidée de tout sauf le socle OBSERVÉ.
+        state = compute_plan_state(
+            self.SEQ,
+            run_phases=self.SEQ,  # historique frais consigne tout fait…
+            observed_socle=set(),  # …mais le réel ne confirme RIEN (VMs détruites)
+            observed_layers=set(),
+            freshness="frais",
+            signal_phases=set(),  # pas de sonde (cluster down) → pas de ré-ajout
+        )
+        self.assertEqual(state.done, frozenset())  # done vidée : socle absent
+        # toute la séquence est à monter (rien n'est tenu fait)
+        self.assertEqual(state.a_appliquer, frozenset(self.SEQ))
+
+    def test_real_socle_primes_over_history(self):
+        # Le socle réel prime : l'historique dit up/bootstrap faits, mais les VMs ont été
+        # détruites (observed_socle vide) → up/bootstrap RETIRÉS de done, re-proposés.
+        state = compute_plan_state(
+            self.SEQ,
+            run_phases=["up", "bootstrap"],
+            observed_socle=set(),  # réel : aucune VM / nœud
+            observed_layers=set(),
+            freshness="frais",
+            signal_phases=set(),
+        )
+        self.assertIn("up", state.a_appliquer)
+        self.assertIn("bootstrap", state.a_appliquer)
+
+    def test_no_probe_does_not_readd_signal_phases(self):
+        # Quand on NE sonde PAS (cluster injoignable : signal_phases=∅), le 2e sens NE
+        # ré-ajoute RIEN — on ne présume pas qu'une couche tracée faite est absente.
+        state = compute_plan_state(
+            self.SEQ,
+            run_phases=self.SEQ,
+            observed_socle={"up", "bootstrap"},
+            observed_layers=set(),  # pas de sonde
+            freshness="frais",
+            signal_phases=set(),  # pas de sonde → pas de ré-ajout
+        )
+        self.assertEqual(state.a_appliquer, frozenset())  # tout tenu fait (historique)
+
+    def test_returns_plan_state(self):
+        state = compute_plan_state(
+            self.SEQ, None, {"up", "bootstrap"}, set(), "jamais", signal_phases=set()
+        )
+        self.assertIsInstance(state, PlanState)
+
+
+class PreviewNextParity(unittest.TestCase):
+    """Parité preview == next (CŒUR de l'étape 1) : pour un MÊME état réel, les deux
+    dérivent du MÊME `compute_plan_state` → même verdict, plus de divergence.
+
+    On simule les DEUX façades : `cmd_preview` consomme `a_appliquer` ; `cmd_next`
+    le passe à `installable_now` (qui ne fait plus que TRIER par deps). Le menu de next
+    est donc TOUJOURS ⊆ du plan de preview (mêmes couches, ordre/deps en plus)."""
+
+    SEQ = ["up", "bootstrap", "storage-simple", "metrics-server", "monitoring", "dataops"]
+    SIGNAL = {"storage-simple", "metrics-server", "monitoring", "dataops"}
+    DEPS = {
+        "storage-simple": set(),
+        "metrics-server": set(),
+        "monitoring": {"storage-simple"},
+        "dataops": {"monitoring"},
+    }
+
+    def _preview_a_appliquer(self, run_phases, observed_socle, observed_layers, freshness):
+        """Reproduit le calcul de cmd_preview (compute_plan_state → a_appliquer)."""
+        signal = self.SIGNAL if observed_socle else set()
+        return set(
+            compute_plan_state(
+                self.SEQ,
+                run_phases,
+                observed_socle,
+                observed_layers,
+                freshness,
+                signal_phases=signal,
+            ).a_appliquer
+        )
+
+    def _next_montables(self, topo, run_phases, observed_socle, observed_layers, freshness):
+        """Reproduit le calcul de cmd_next (même state, puis installable_now trie)."""
+        signal = self.SIGNAL if observed_socle else set()
+        state = compute_plan_state(
+            self.SEQ, run_phases, observed_socle, observed_layers, freshness, signal_phases=signal
+        )
+        observed = observed_socle | observed_layers
+        return installable_now(
+            topo,
+            "atlas",
+            set(state.done),
+            freshness,
+            deps_fn=lambda: dict(self.DEPS),
+            observed_done=observed,
+            a_appliquer=set(state.a_appliquer),
+        ), set(state.a_appliquer)
+
+    def _assert_parity(self, run_phases, observed_socle, observed_layers, freshness):
+        topo = _topo(backend="local-path")
+        prev = self._preview_a_appliquer(run_phases, observed_socle, observed_layers, freshness)
+        montables, next_a_appliquer = self._next_montables(
+            topo, run_phases, observed_socle, observed_layers, freshness
+        )
+        # MÊME verdict « à monter » : preview et next partent du MÊME a_appliquer.
+        self.assertEqual(prev, next_a_appliquer)
+        # next ne propose QUE des couches du plan de preview (deps-filtrées) — jamais
+        # une couche que preview tient pour à-jour (la divergence d'avant).
+        self.assertTrue(set(montables).issubset(prev))
+
+    def test_parity_socle_done_layers_observed(self):
+        # Socle fait + storage-simple observé sain : preview et next conviennent.
+        self._assert_parity(
+            ["up", "bootstrap", "storage-simple"],
+            {"up", "bootstrap"},
+            {"storage-simple"},
+            "frais",
+        )
+
+    def test_parity_history_lies_layer_absent(self):
+        # L'historique dit dataops fait, mais le réel ne le confirme pas → preview ET
+        # next le re-proposent (avant le fix : next disait « à jour », preview « à monter »).
+        self._assert_parity(
+            self.SEQ,
+            {"up", "bootstrap"},
+            {"storage-simple", "metrics-server", "monitoring"},  # dataops absent
+            "frais",
+        )
+
+    def test_parity_vms_destroyed_fresh_history(self):
+        # Historique frais, VMs détruites (rien observé) → garde `if up not in done` :
+        # preview ET next re-proposent TOUTE la séquence (jadis next sautait `up`).
+        self._assert_parity(self.SEQ, set(), set(), "frais")
+
+    def test_parity_never_run_clean_cluster(self):
+        # freshness=jamais (aucun run) mais cluster sain (socle + couches observées) :
+        # le réel prime → ni preview ni next ne re-proposent l'observé.
+        self._assert_parity(
+            None,
+            {"up", "bootstrap"},
+            {"storage-simple", "metrics-server"},
+            "jamais",
+        )
 
 
 if __name__ == "__main__":

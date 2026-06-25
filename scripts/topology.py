@@ -89,10 +89,10 @@ from nestor import (  # noqa: E402
     build_topology_dict,
     catalog_entry,
     classify_refresh,
+    compute_plan_state,
     consumes_storage,
     default_target,
     derive_run_params,
-    diff_phases,
     expected_phase_sequence,
     filter_epreuves,
     format_metrics,
@@ -748,7 +748,12 @@ _LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool | str]] = {
     "datalake": ("cephobjectstore.ceph.rook.io", "datalake", "rook-ceph", "phase"),
     "monitoring": ("statefulset", "loki", "monitoring", True),
     "gitops": ("deployment", "argocd-server", "argocd", True),
-    "dataops": ("deployment", "dagster-dagster-webserver", "dagster", True),
+    # dataops déploie registry + CNPG + Dagster PUIS Marquez (DERNIER maillon, comme Loki
+    # pour monitoring ; cf. bootstrap/dataops.yaml étape applicative). Le signal doit donc
+    # sonder Marquez (`marquez`/ns marquez) : avec Dagster seul, la couche passait « ✓ à-jour »
+    # alors que Marquez était absent → « DataOps complet » mensonger (le label promet pourtant
+    # « registry + CNPG + Dagster + Marquez »). Marquez Ready ⇒ tout l'amont l'est aussi.
+    "dataops": ("deployment", "marquez", "marquez", True),
     # MLflow (layer autonome ADR 0082) : le serveur est un Deployment `mlflow`
     # (nom posé par platform/mlflow/mlflow.yaml) dans le ns `mlflow`. Sa présence
     # Ready prouve la couche montée (sinon next/preview la croiraient à monter).
@@ -853,6 +858,23 @@ def _observed_layers(phases: list[str]) -> set[str]:
         if sig and _resource_healthy(*sig):
             done.add(ph)
     return done
+
+
+def _probe_observed_layers(seq: list[str], nodes_ready: list[str]) -> tuple[set[str], set[str]]:
+    """Sonde RÉELLE des couches applicatives, partagée par preview/next/up (ADR 0090).
+
+    Renvoie `(observed_layers, signal_phases)` que `compute_plan_state` consomme :
+    - `observed_layers` : couches de `seq` à signal connu OBSERVÉES saines (kubectl) ;
+    - `signal_phases` : l'ENSEMBLE des phases de `seq` qui ONT un signal connu — pour
+      que le calcul ré-ajoute celles à signal NON confirmées par le réel (2e sens).
+
+    Sonde UNIQUEMENT si le cluster ciblé répond (`nodes_ready`) : sinon `_observed_layers`
+    (kubeconfig banc) lirait le banc Lima pour une stack prod sans cible (ADR 0084) — on
+    rend alors `(∅, ∅)` (le RÉEL n'a honnêtement rien à dire, donc aucune ré-injection)."""
+    if not nodes_ready:
+        return set(), set()
+    signal_phases = {p for p in seq if p in _LAYER_SIGNAL}
+    return _observed_layers(list(signal_phases)), signal_phases
 
 
 # ── Sondes de `discover` (ADR 0074) : I/O kubectl irréductible (ADR 0049). Lisent
@@ -2167,32 +2189,25 @@ def cmd_preview(args: argparse.Namespace) -> int:
     # ── PLAN : la séquence de couches à monter ───────────────────────────────────
     run = last_run_for_topology(runs, stack_name)
     freshness, _ = verdict_for_run(run, resolved_target, now)
-    done = set(run.phases) if run is not None else set()
     observed_socle = observed_done_phases(declared, vms_present, nodes_ready)
-    # Le RÉEL PRIME (ADR 0052/0056 §7) — dans LES DEUX SENS, comme `cmd_next` (sinon preview
-    # CONTREDIT next). Un vieux run consigne `up`/`bootstrap` et peut être « frais », mais si
-    # les VMs ont été DÉTRUITES (limactl vide), ces phases ne sont PLUS faites : on RESTREINT
-    # `done` au socle que le réel CONFIRME, AVANT diff_phases — sinon le plan affiche « ✓ créer
-    # les VMs (à-jour) » alors que `VMs présentes : —` (bug vécu : banc Ceph jamais monté).
-    done -= {"up", "bootstrap"} - observed_socle
-    # COHÉRENCE DE DÉPENDANCE : rien ne tient au-dessus d'un socle absent. Si `up` n'est pas
-    # fait (VMs à créer), AUCUNE couche aval ne peut l'être (pas de cluster) — l'historique
-    # frais ment alors sur ceph/sc/… On vide `done` de tout sauf le socle réellement observé,
-    # sinon le plan affiche l'absurde « VMs à créer MAIS ceph à-jour ».
-    if "up" not in done:
-        done &= observed_socle
-    a_appliquer = set(diff_phases(seq, done, freshness))
-    # ET pour les couches applicatives : on retire celles PROUVÉES SAINES sur le banc (dernier
-    # maillon Ready : Loki pour monitoring, argocd-server pour gitops…). « Sain », pas
-    # « namespace présent » : une couche posée à MOITIÉ (ns créé mais Loki absent) RESTE « à
-    # installer » — sinon un montage échoué à mi-chemin s'afficherait « ✓ ».
-    a_appliquer -= observed_socle
-    # Couches applicatives observées (signaux kubectl) : ne sonder QUE si le cluster
-    # ciblé répond (nœuds Ready) — sinon `_observed_layers` (kubeconfig banc) lirait les
-    # couches du banc Lima pour une stack prod sans cible (ADR 0084). nodes_ready vide en
-    # prod sans KUBECONFIG → on ne soustrait rien (RÉEL honnêtement « rien d'observé »).
-    if nodes_ready:
-        a_appliquer -= _observed_layers([p for p in seq if p in a_appliquer])
+    # Couches applicatives observées (signaux kubectl) + leur set de phases-à-signal :
+    # ne sonder QUE si le cluster ciblé répond (nœuds Ready) — sinon `_observed_layers`
+    # (kubeconfig banc) lirait les couches du banc Lima pour une stack prod sans cible
+    # (ADR 0084). nodes_ready vide en prod sans KUBECONFIG → on ne sonde rien et on ne
+    # ré-ajoute rien (`signal_phases=∅` : le RÉEL n'a rien à dire, RÉEL honnêtement vide).
+    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
+    # LE calcul partagé (preview == next == up) — le RÉEL prime DANS LES DEUX SENS, garde
+    # `if "up" not in done` inclus (ADR 0052/0056 §7). Fonction PURE : tout l'état réel
+    # ci-dessus est passé en paramètre (aucun kubectl dans compute_plan_state).
+    state = compute_plan_state(
+        seq,
+        run.phases if run is not None else None,
+        observed_socle,
+        observed_layers,
+        freshness,
+        signal_phases=signal_phases,
+    )
+    a_appliquer = set(state.a_appliquer)
     # jamais monté ≠ rejeu : `jamais` (aucun run de la stack) → « à installer » (inédit) ;
     # `perime` (run existant mais plus frais) → « à rejouer ».
     rejeu = freshness == "perime"
@@ -2314,11 +2329,34 @@ def cmd_up(args: argparse.Namespace) -> int:
     # propre (amorçage VIP/etcd non réductible à des layers — refactor différé).
     layers_seq = list(seq) if target == "layers" else None
 
+    # PLAN annoté — DÉRIVÉ du MÊME calcul que `preview`/`next` (compute_plan_state) pour
+    # que les trois rendent le même verdict (fin de la divergence preview≠next≠up). `up`
+    # monte TOUTE la séquence (idempotence run-phases.sh) ; l'annotation ✓/+ informe juste
+    # l'opérateur de ce qui est DÉJÀ en place. Sonde RÉELLE identique à preview (ADR 0090).
+    runs = load_runs(args.history or _RUNS_HISTORY)
+    now = int(dt.datetime.now(tz=dt.UTC).timestamp())
+    run = last_run_for_topology(runs, stack_name)
+    freshness, _ = verdict_for_run(run, target, now)
+    declared = topo.control_nodes + topo.worker_nodes
+    nodes_ready = _ready_nodes(topo.target_kind)
+    observed_socle = observed_done_phases(declared, _real_vms(topo.target_kind), nodes_ready)
+    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
+    state = compute_plan_state(
+        seq,
+        run.phases if run is not None else None,
+        observed_socle,
+        observed_layers,
+        freshness,
+        signal_phases=signal_phases,
+    )
+    a_appliquer = set(state.a_appliquer)
+
     # Affiche le PLAN (les couches à monter) avant de confirmer — comme `preview`.
     print(f"stack : {stack_name}  →  chemin : {target}")
     print("Couches à monter (séquence complète) :")
     for phase in seq:
-        print(f"  + {phase_label(phase)}")
+        mark = "+" if phase in a_appliquer else "✓"
+        print(f"  {mark} {phase_label(phase)}")
 
     if not _confirm_apply(target, assume_yes=args.yes):
         print("montage annulé.", file=sys.stderr)
@@ -2512,18 +2550,13 @@ def cmd_next(args: argparse.Namespace) -> int:
     stack_name = topo.catalog.get("topology", "—")
     run = last_run_for_topology(runs, stack_name)
     etat_frais, _ = verdict_for_run(run, target, now)
-    done = set(run.phases) if run is not None else set()
-    # Le RÉEL prime sur l'historique (même logique que `preview`, ADR 0052/0056 §7) :
-    # un vieux run consigne `up`/`bootstrap`, mais si les VMs ont été détruites, ces
-    # phases ne sont PLUS faites. On RESTREINT `done` aux phases socle réellement
-    # observées (VMs présentes / nœud Ready) — sans ça, `next` saute la création des
-    # VMs et propose `storage-simple` sur un banc inexistant. `next` respecte ainsi le
-    # PLAN de `preview` (qui fait ce même calcul).
+    # Sonde du RÉEL — IDENTIQUE à `cmd_preview` (ADR 0052/0056 §7, ADR 0090). Le socle
+    # observé (VMs présentes / nœud Ready) et les couches applicatives observées saines
+    # alimentent LE calcul partagé `compute_plan_state` ci-dessous : `next` dérive ainsi
+    # le MÊME `a_appliquer`/`done` que `preview` (fin de la divergence preview≠next).
     declared = topo.control_nodes + topo.worker_nodes
-    observed_socle = observed_done_phases(
-        declared, _real_vms(topo.target_kind), _ready_nodes(topo.target_kind)
-    )
-    done -= {"up", "bootstrap"} - observed_socle  # retire le socle que le réel CONTREDIT
+    nodes_ready = _ready_nodes(topo.target_kind)
+    observed_socle = observed_done_phases(declared, _real_vms(topo.target_kind), nodes_ready)
     run_params = derive_run_params(topo)
     # Les couches MONTABLES maintenant (deps réelles satisfaites). La carte de
     # dépendances vient du graphe atomique (bash, `phase_deps`) — fournie en PARESSEUX :
@@ -2536,21 +2569,20 @@ def cmd_next(args: argparse.Namespace) -> int:
         seq = expected_phase_sequence(topo, target)
     except (PlanError, TopologyError) as exc:
         raise _UsageError(str(exc)) from exc
-    # Le RÉEL prime AUSSI pour les couches APPLICATIVES (même calcul que `preview`,
-    # ADR 0052/0056 §7) : une couche dont le signal d'infra est présent sur le banc
-    # (metrics-server déployé, ns monitoring/argocd…) est FAITE, même sans trace
-    # d'historique (run non consigné / cache socle) ET même si le run n'est pas frais.
-    # Sans ça, `next` re-propose une couche déjà installée. `observed` = socle observé
-    # + couches applicatives observées : `installable_now` les retire TOUJOURS (prime
-    # sur la fraîcheur — sinon un run `jamais`/`perime` rejouerait toute la séquence).
-    # Ne sonder les couches applicatives (kubectl) QUE si le socle réel répond (ADR 0084) :
-    # sinon `_observed_layers` (kubeconfig banc) lirait le banc pour une stack prod sans
-    # cible. `observed_socle` vide en prod sans KUBECONFIG → on ne sonde pas les couches.
-    observed_layers = (
-        _observed_layers([p for p in seq if p not in ("up", "bootstrap")])
-        if observed_socle
-        else set()
+    # Couches observées saines + phases-à-signal (gating ADR 0084) — MÊME sonde que preview.
+    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
+    # LE calcul partagé : `a_appliquer`/`done` dérivés EXACTEMENT comme `cmd_preview`
+    # (garde `if "up" not in done` + RÉEL prime dans LES DEUX SENS). `installable_now`
+    # ne fait plus que TRIER `a_appliquer` par satisfaction des dépendances → next == preview.
+    state = compute_plan_state(
+        seq,
+        run.phases if run is not None else None,
+        observed_socle,
+        observed_layers,
+        etat_frais,
+        signal_phases=signal_phases,
     )
+    done = set(state.done)
     observed = observed_socle | observed_layers
     try:
         montables = installable_now(
@@ -2560,6 +2592,7 @@ def cmd_next(args: argparse.Namespace) -> int:
             etat_frais,
             deps_fn=lambda: phase_deps(backend),
             observed_done=observed,
+            a_appliquer=set(state.a_appliquer),
         )
     except (PlanError, TopologyError) as exc:
         raise _UsageError(str(exc)) from exc
@@ -3546,6 +3579,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_file(p_up)
     p_up.add_argument(
         "--target", default=None, help="chemin nommé visé (défaut : dérivé de la stack active)"
+    )
+    p_up.add_argument(
+        "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
     )
     p_up.add_argument("--yes", action="store_true", help="sauter la confirmation (requis hors TTY)")
 
