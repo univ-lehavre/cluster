@@ -340,19 +340,27 @@ recalculent `done`/`observed`/`a_appliquer` :
 
 ## Suivi
 
-- [ ] **Étape 1** — `compute_plan_state` extraite dans `nestor/plan.py`, appelée
+> **Avancement (2026-06-25)** : Étape 1 + lots 2-5 **mergés** (PR #508, #509).
+> Le graphe figé Python vérifié contre Ansible — le cœur de la refonte — est en
+> place et `check_topology` garde la cohérence en CI. **Restent les lots 6-9**
+> (moteur `path.py`, portage, env→YAML, HA), qui touchent le **montage réel** et
+> exigent donc un **run banc**
+> ([ADR 0034](../decisions/0034-validation-e2e-from-scratch.md)) — une PR par
+> lot, en session banc dédiée.
+
+- [x] **Étape 1** — `compute_plan_state` extraite dans `nestor/plan.py`, appelée
       par `cmd_preview`/`cmd_next`/`cmd_up` + garde `if "up" not in done`
       restauré dans `next` ; `tests/test_plan.py` prouve `preview == next == up`
       ; WIP `fix/preview-fidelite-reel` intégré (incluant `dataops → marquez`).
       `ruff` verts. **(déblocable sans ADR)**
-- [ ] **Lot 2** — `nestor/graph.py` à côté du bash ; byte-identité prouvée
+- [x] **Lot 2** — `nestor/graph.py` à côté du bash ; byte-identité prouvée
       (`rollback.bats` → pytest). _(gelé jusqu'à 0096 Accepted)_
-- [ ] **Lot 3** — ponts `layers._rb` + `roundtrip._rollback_lib_call` basculés
+- [x] **Lot 3** — ponts `layers._rb` + `roundtrip._rollback_lib_call` basculés
       sur `graph.py` ; plus aucun `subprocess(rollback-lib.sh)` dans `nestor/` ;
       banc + prod. _(gelé)_
-- [ ] **Lot 4** — `phase.signal_component` + `dataops → marquez` corrigé
+- [x] **Lot 4** — `phase.signal_component` + `dataops → marquez` corrigé
       (`topology.py:751`) ; banc + prod. _(gelé)_
-- [ ] **Lot 5** — `check_topology.py` (4 familles, scan `import_role`
+- [x] **Lot 5** — `check_topology.py` (4 familles, scan `import_role`
       rôle→rôle) + `pnpm lint:topology` CI + hook lefthook `bootstrap/roles/`.
       _(gelé)_
 - [ ] **Lot 6** — moteur `nestor/path.py` ; `cmd_up`/`cmd_next` n'appellent plus
