@@ -11,6 +11,52 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.44.0](https://github.com/univ-lehavre/cluster/compare/v2.43.0...v2.44.0) (2026-06-25)
+
+
+### Features
+
+* **argocd:** app-of-apps + ADR 0095 build événementiel in-cluster + seed prod ([e82c087](https://github.com/univ-lehavre/cluster/commit/e82c087fc1b07f389a6ec81ffd1e8fd07d7065f7))
+* **argocd:** app-of-apps pour instancier les applications applicatives (ADR 0094) ([92573c0](https://github.com/univ-lehavre/cluster/commit/92573c04ef616f96a88417e7998e0689f7580228))
+* **bootstrap:** seed prod app-of-apps + déploiement citation (ADR 0094/0095) ([21f986d](https://github.com/univ-lehavre/cluster/commit/21f986d2db51199395d527251bd3b5ea48c1065f))
+* **mailpit:** expose l'UI en nodeport (puits alertmanager prod) ([9923fc3](https://github.com/univ-lehavre/cluster/commit/9923fc3c7919e73f8f65116b50ac30cd0e7db43d))
+* **mailpit:** expose l'UI en nodeport + reflète l'usage prod (puits alertmanager) ([77e2da0](https://github.com/univ-lehavre/cluster/commit/77e2da008dd25c510c59429e622def399c9ad9fd))
+
+
+### Bug Fixes
+
+* **bench:** scénario 33 source lib.sh en chemin absolu (cwd-indépendant) ([175a784](https://github.com/univ-lehavre/cluster/commit/175a7848a41ccb77276fadc9a7e8003ea7331c23))
+* **bench:** scénario 33 source lib.sh en chemin absolu (cwd-indépendant) ([ae51075](https://github.com/univ-lehavre/cluster/commit/ae5107554cbc251b6c87a2b15ec41f52bdbc7a6a))
+* **cnpg:** applique les networkpolicies du ns postgres ([#485](https://github.com/univ-lehavre/cluster/issues/485)) ([bdd58c8](https://github.com/univ-lehavre/cluster/commit/bdd58c855cd04623b509493861d04198a07c29be))
+* **cnpg:** applique les networkpolicies du ns postgres ([#485](https://github.com/univ-lehavre/cluster/issues/485)) ([4d0bc56](https://github.com/univ-lehavre/cluster/commit/4d0bc5672f1aa54a3ad105ecb8d7b270862cb4d4))
+* **docs:** lien app-of-apps en URL site /cluster/ (passe orphans ET starlight) ([1055beb](https://github.com/univ-lehavre/cluster/commit/1055beb2a27cdf61c8594d24af71bbc7f76616c2))
+* **etcd-backup:** retire le {{ … }} d'un commentaire qui cassait le rendu jinja ([1f376ec](https://github.com/univ-lehavre/cluster/commit/1f376eccb0be3a3ede526deaa98b07d07c13d931))
+* **etcd-backup:** retire le {{ … }} d'un commentaire qui cassait le rendu jinja ([23f6aed](https://github.com/univ-lehavre/cluster/commit/23f6aed237bab515e25f0f8be511207a1c246fac))
+* **k8s-init:** durcit l'anti-affinité coredns en required ([#487](https://github.com/univ-lehavre/cluster/issues/487)) ([38ba539](https://github.com/univ-lehavre/cluster/commit/38ba539909a1365c87f40fb6ee3fdbad619dcf71))
+* **k8s-init:** durcit l'anti-affinité coredns en required ([#487](https://github.com/univ-lehavre/cluster/issues/487)) ([4d8487d](https://github.com/univ-lehavre/cluster/commit/4d8487d33e39e7980e3ce469f4671db273f7e31e))
+* **kubeadm:** expose les métriques control-plane sur 0.0.0.0 ([#490](https://github.com/univ-lehavre/cluster/issues/490)) ([4e9468c](https://github.com/univ-lehavre/cluster/commit/4e9468cac10a5803e4efc436cf2c057d699491db))
+* **monitoring:** restreint le clusterrole grafana aux configmaps ([#484](https://github.com/univ-lehavre/cluster/issues/484)) ([6c70fce](https://github.com/univ-lehavre/cluster/commit/6c70fce864325f81308f6f980d8835f02b0be0bd))
+* **monitoring:** restreint le clusterrole grafana aux configmaps ([#484](https://github.com/univ-lehavre/cluster/issues/484)) ([ee7976c](https://github.com/univ-lehavre/cluster/commit/ee7976cbf119f81c4c44d4001df3ef030b84b74e))
+
+
+### Documentation
+
+* **adr:** 0094 dependsOn.codeLocations (dépendances inter-applicatives) ([9f7077f](https://github.com/univ-lehavre/cluster/commit/9f7077f02fa8f15defc388adea196bedc63b0adc))
+* **adr:** 0094 frontière de déploiement applicatif cluster↔atlas (Proposed) ([4318abc](https://github.com/univ-lehavre/cluster/commit/4318abc52fedd0640160a552879b6d88923ef552))
+* **adr:** 0094 frontière de déploiement applicatif cluster↔atlas (Proposed) ([d278198](https://github.com/univ-lehavre/cluster/commit/d278198b4363f82182a043c28cb3591c464b4982))
+* **adr:** 0095 build applicatif événementiel in-cluster (Proposed) ([7df8c05](https://github.com/univ-lehavre/cluster/commit/7df8c05e06e75045f26921e56c7d2b06ffe6d85f))
+* **adr:** 0095 écarte explicitement le webhook entrant (pull/Cron assumé) ([91a77d3](https://github.com/univ-lehavre/cluster/commit/91a77d396f775dc84f75b8756c17af5433d706a8))
+* **audit:** vérification poussée non destructive de la prod dirqual (2026-06-24) ([88079e8](https://github.com/univ-lehavre/cluster/commit/88079e8b76ba7f7370b0fb7497e1378c19062873))
+* **audit:** vérification poussée non destructive de la prod dirqual (2026-06-24) ([33c006f](https://github.com/univ-lehavre/cluster/commit/33c006fcf9baf6ca671a53c2f0b4090a87a36170))
+* **plan:** cache cnpg achevé — scénario 33 joué au banc (pass) ([337acdc](https://github.com/univ-lehavre/cluster/commit/337acdc77025700d87b77e8a23e602a581e47e5c))
+* **plan:** cache CNPG achevé — scénario 33 joué au banc (PASS) ([585c56e](https://github.com/univ-lehavre/cluster/commit/585c56e518d1ad936102847a86a02ad803b0948e))
+* **plan:** cadrage HA control-plane 3 nœuds (ha-3cp, promotion in-place) ([bdd32fe](https://github.com/univ-lehavre/cluster/commit/bdd32fe96d52c2c842a71517b95f8bdde467c492))
+* **plan:** cadrage HA control-plane 3 nœuds + fix scrape kubeadm ([#486](https://github.com/univ-lehavre/cluster/issues/486)/[#490](https://github.com/univ-lehavre/cluster/issues/490)) ([23be8bc](https://github.com/univ-lehavre/cluster/commit/23be8bcce7c15d6c693ed02f7e7078a172f2aee9))
+* **plan:** mise en œuvre du build événementiel GitOps (ADR 0095, Brouillon) ([cef9917](https://github.com/univ-lehavre/cluster/commit/cef99177e4d34c8e9c2467fa455af5087d397f00))
+* **plan:** mise en œuvre du build événementiel GitOps (ADR 0095) ([d6ee2ac](https://github.com/univ-lehavre/cluster/commit/d6ee2accef537ef5fefb90364ee4f646db24e654))
+* **readme:** régénère le bloc « le dépôt en chiffres » (14 plans, ADR 0060) ([edcc1ff](https://github.com/univ-lehavre/cluster/commit/edcc1ff2706f723935e39cbd44a39812b9b3bde1))
+* **readme:** régénère le bloc « le dépôt en chiffres » (94 ADR, ADR 0060) ([971f072](https://github.com/univ-lehavre/cluster/commit/971f072876e18bc4487ce3a3fbd479438fa17702))
+
 ## [2.43.0](https://github.com/univ-lehavre/cluster/compare/v2.42.0...v2.43.0) (2026-06-24)
 
 
