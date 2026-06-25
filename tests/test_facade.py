@@ -380,6 +380,177 @@ class CallbacksWireRealBricks(unittest.TestCase):
         self.assertEqual(code, 1)
 
 
+class BootstrapCallbackWiring(unittest.TestCase):
+    """Le callback `bootstrap` câble le socle k8s+CNI (ADR 0097 §5.b) — I/O STUBÉE.
+
+    On NE prouve PAS le montage réel (pas de banc ici, ADR 0034) : on prouve le CÂBLAGE
+    (quelles briques sont appelées, dans quel ordre, avec quels arguments dérivés). Le
+    runner (Ansible) et run-phases.sh (inventaire/facts/CNI) sont espionnés ; cp_ip est
+    dérivé du contrat machine `emit_facts` (stub `CP_IP=…`)."""
+
+    def setUp(self):
+        # Gardes neutralisées (testées à part), gates → saines (pas de cluster en test).
+        self._patch(cli, "_assert_bench_target", lambda *_a, **_k: None)
+        self._patch(cli, "_assert_inventory_safe", lambda *_a, **_k: None)
+        self._patch(cli, "_wait_layer_healthy", lambda *_a, **_k: True)
+
+    def _patch(self, obj, name, value):
+        orig = getattr(obj, name)
+        setattr(obj, name, value)
+        self.addCleanup(setattr, obj, name, orig)
+
+    def _spy(
+        self,
+        *,
+        facts_rc=0,
+        facts_out="CP_IP=10.0.0.11\nL2_IFACE=lima0\n",
+        inv_rc=0,
+        cni_rc=0,
+        launch_rc=0,
+    ):
+        """Espionne run-phases.sh (inventory/facts/ha-cni) ET runner.launch_phase. Renvoie un
+        dict de listes d'appels pour les assertions. Le GRAPHE (rollback-lib, déterministe)
+        passe au vrai subprocess pour que `expected_phase_sequence` dérive la séquence."""
+        rp_calls = []
+        launch_calls = []
+        real = _REAL_SUBPROCESS_RUN
+
+        def _spy_run(cmd, *a, **k):
+            argv = cmd if isinstance(cmd, (list, tuple)) else [cmd]
+            if any("run-phases.sh" in str(c) for c in argv):
+                arm = argv[2] if len(argv) > 2 else ""
+                rp_calls.append(list(argv))
+                if arm == "facts":
+                    return subprocess.CompletedProcess(argv, facts_rc, stdout=facts_out, stderr="")
+                if arm == "inventory":
+                    return subprocess.CompletedProcess(argv, inv_rc, stdout="", stderr="")
+                if arm == "ha-cni":
+                    return subprocess.CompletedProcess(argv, cni_rc, stdout="", stderr="")
+                return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+            return real(cmd, *a, **k)
+
+        def _spy_launch(playbook, extravars, *a, **k):
+            launch_calls.append({"playbook": playbook, "extravars": extravars})
+            return _runner.RunResult(rc=launch_rc, status="successful", changed=0)
+
+        orig_run, orig_launch = cli.subprocess.run, cli._runner.launch_phase
+        cli.subprocess.run = _spy_run
+        cli._runner.launch_phase = _spy_launch
+        self.addCleanup(setattr, cli.subprocess, "run", orig_run)
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig_launch)
+        return {"rp": rp_calls, "launch": launch_calls}
+
+    def _arms(self, rp_calls):
+        return [c[2] for c in rp_calls if len(c) > 2]
+
+    def test_bootstrap_wires_inventory_facts_socle_cni(self):
+        # Le câblage complet : inventaire écrit (bash) → faits dérivés (facts) → 6 playbooks
+        # du socle (runner) avec `-e control_plane_ip=<cp_ip dérivé>` → CNI (ha-cni). Topo DUO
+        # (un worker pur) → has_workers=True → join-workers.yaml présent (6 playbooks).
+        spy = self._spy()
+        code = _engine(_topo(_LIMA_CP_SECOND), "layers", ["bootstrap"], "duo")
+        self.assertEqual(code, 0)
+        arms = self._arms(spy["rp"])
+        # Inventaire écrit AVANT les faits, CNI en dernier (ha-cni = CNI + kubeconfig).
+        self.assertEqual(arms, ["inventory", "facts", "ha-cni"])
+        # inventory <control_csv> <workers_csv> : cp-b control, node-a worker (dérivés de la topo).
+        inv = next(c for c in spy["rp"] if c[2] == "inventory")
+        self.assertEqual(inv[3], "cp-b")
+        self.assertEqual(inv[4], "node-a")
+        # ha-cni reçoit l'iface dérivée du contrat machine emit_facts (L2_IFACE).
+        cni = next(c for c in spy["rp"] if c[2] == "ha-cni")
+        self.assertEqual(cni[3], "lima0")
+        # 6 playbooks du socle (has_workers=True), dans l'ordre, avec le cp_ip DÉRIVÉ (pas codé).
+        self.assertEqual(
+            [c["playbook"] for c in spy["launch"]],
+            cli._bootstrap.bootstrap_playbooks(has_workers=True),
+        )
+        for c in spy["launch"]:
+            self.assertEqual(c["extravars"], {"control_plane_ip": "10.0.0.11"})
+
+    def test_bootstrap_solo_omits_join_workers(self):
+        # Topo SOLO (cp1 control+worker, aucun worker PUR) → has_workers=False → join-workers
+        # OMIS (5 playbooks). La DÉCISION est en Python (connaît la topo), ADR 0097.
+        spy = self._spy()
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap"], "solo")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [c["playbook"] for c in spy["launch"]],
+            cli._bootstrap.bootstrap_playbooks(has_workers=False),
+        )
+        self.assertNotIn("join-workers.yaml", [c["playbook"] for c in spy["launch"]])
+        # Solo : inventory sans CSV worker (un seul control+worker → workers vides côté bash).
+        inv = next(c for c in spy["rp"] if c[2] == "inventory")
+        self.assertEqual(inv[3], "cp1")
+        self.assertEqual(len(inv), 4)  # pas d'argument workers (worker_nodes vide)
+
+    def test_bootstrap_socle_failure_stops_net(self):
+        # Un playbook du socle ÉCHOUE (launch_rc=2) → BootstrapError → PathError fail-fast →
+        # code 1. AUCUNE couche applicative montée après (sentinelle launch_phase_idempotent).
+        def _boom_layer(*_a, **_k):
+            raise AssertionError("couche applicative montée malgré l'échec du socle")
+
+        self._patch(cli._runner, "launch_phase_idempotent", _boom_layer)
+        spy = self._spy(launch_rc=2)
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap", "storage-simple"], "solo")
+        self.assertEqual(code, 1)
+        # Le 1er playbook échoue → fail-fast : un seul launch, pas de CNI (ha-cni absent).
+        self.assertEqual(len(spy["launch"]), 1)
+        self.assertNotIn("ha-cni", self._arms(spy["rp"]))
+
+    def test_bootstrap_facts_failure_stops_net(self):
+        # `run-phases.sh facts` échoue (banc non provisionné) → PathError → code 1, AVANT tout
+        # playbook (on ne monte pas le socle sans cp_ip).
+        spy = self._spy(facts_rc=3, facts_out="")
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap"], "solo")
+        self.assertEqual(code, 1)
+        self.assertEqual(spy["launch"], [])
+
+    def test_bootstrap_empty_cp_ip_stops_net(self):
+        # facts rend rc=0 mais CP_IP vide (IP user-v2 pas encore posée) → PathError honnête
+        # (on n'invente pas un advertiseAddress vide), pas de playbook lancé.
+        spy = self._spy(facts_out="L2_IFACE=lima0\n")
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap"], "solo")
+        self.assertEqual(code, 1)
+        self.assertEqual(spy["launch"], [])
+
+    def test_cni_failure_stops_net(self):
+        # Les 6 playbooks passent mais la CNI (ha-cni) échoue → BootstrapError → PathError →
+        # code 1 (le socle n'est pas « monté » sans CNI).
+        spy = self._spy(cni_rc=5)
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap"], "solo")
+        self.assertEqual(code, 1)
+        self.assertIn("ha-cni", self._arms(spy["rp"]))
+
+    def test_up_then_bootstrap_then_layer_chains(self):
+        # Le chemin up→bootstrap→couche enchaîne : provision (run-phases.sh up, stub) →
+        # bootstrap (socle+CNI, stub) → 1re couche applicative (storage-simple, idempotent).
+        spy = self._spy()
+
+        # provision : run-phases.sh up renvoyé 0 par le spy ci-dessus (arm "up" → défaut 0).
+        # couche applicative : launch_phase_idempotent stubé ok.
+        layer_calls = []
+
+        def _fake_idem(playbook, extravars, *a, **k):
+            layer_calls.append(playbook)
+            return _runner.IdempotenceResult(
+                deployed=_runner.RunResult(rc=0, status="successful", changed=0),
+                replayed=_runner.RunResult(rc=0, status="successful", changed=0),
+                verdict="ok",
+                message="ok",
+            )
+
+        self._patch(cli._runner, "launch_phase_idempotent", _fake_idem)
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["up", "bootstrap", "storage-simple"], "solo")
+        self.assertEqual(code, 0)
+        # provision (up) puis bootstrap (inventory/facts/ha-cni) ont bien été appelés.
+        arms = self._arms(spy["rp"])
+        self.assertIn("up", arms)
+        self.assertEqual(arms[arms.index("up") + 1 :], ["inventory", "facts", "ha-cni"])
+        # La couche applicative storage-simple a été montée APRÈS le socle.
+        self.assertEqual(len(layer_calls), 1)
+
+
 class AssertSafeIsolation(unittest.TestCase):
     """assert_safe REFUSE une cible non-banc (garde d'isolation, ADR 0053, à CHAQUE phase).
 

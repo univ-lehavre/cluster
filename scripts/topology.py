@@ -2422,14 +2422,115 @@ def _run_path_engine(
     def provision(_phase: str) -> int:
         return _provision_via_bash(topo, stack_name)
 
-    def bootstrap(_phase: str) -> int:
-        # STUB §5.b : le socle k8s+CNI est porté par `_bootstrap.run_bootstrap` (déjà testé),
-        # mais son câblage TRANSPORT au banc (cp_ip/iface dérivés du Lima vivant, rappel
-        # ha-cni pour la CNI) reste à prouver. On lève plutôt que d'inventer un montage faux.
-        raise _path.PathError(
-            "phase amont `bootstrap` (--engine=python) : câblage transport NON prouvé au banc "
-            "(cp_ip/iface du Lima vivant + CNI) — _BANC : à câbler+prouver (ADR 0097 §5.b)"
+    def _runphases(*cmd: str) -> subprocess.CompletedProcess:
+        # Rappel d'une sous-commande run-phases.sh (bash garde VM/CNI/inventaire/facts,
+        # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) —
+        # le bash en dérive le MÊME CP/NODES/WORKDIR que `provision` (un seul WORKDIR
+        # `.work` ⇒ inventaire/kubeconfig partagés avec PathContext).
+        return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
+            ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
+            check=False,
+            env=_runphases_env(topo, stack_name),
+            capture_output=True,
+            text=True,
         )
+
+    def bootstrap(_phase: str) -> int:
+        # CÂBLAGE TRANSPORT du socle k8s+CNI (LOT 6, ADR 0097 §5.b). Même MOULE que
+        # `cmd_bootstrap_seq` (déjà éprouvé) : Python orchestre la séquence Ansible via
+        # `_bootstrap.run_bootstrap` (logique PURE testée), la façade branche l'I/O réelle
+        # sur les briques bash IRRÉDUCTIBLES (limactl/CNI/kubeconfig, ADR 0049). À la
+        # différence de `cmd_bootstrap_seq` qui RECEVAIT cp_ip/iface/inventaire déjà dérivés
+        # par `phase_bootstrap` (bash), ICI la façade les dérive elle-même du Lima vivant.
+
+        # 1. INVENTAIRE : `phase_up` (provision) NE l'écrit PAS (write_inventory vit dans
+        # `phase_bootstrap`). On le pose donc via l'arm bash `inventory <control> [workers]`
+        # (write_inventory byte-stable, ADR 0049) — control = nœuds `control`, workers = le
+        # reste. La DÉCISION (qui est control/worker) vient de la TOPO ; bash REND le format.
+        control_csv = ",".join(topo.control_nodes)
+        workers_csv = ",".join(topo.worker_nodes)
+        inv = _runphases("inventory", control_csv, *([workers_csv] if workers_csv else []))
+        if inv.returncode != 0:
+            raise _path.PathError(
+                f"socle (bootstrap) : écriture de l'inventaire (run-phases.sh inventory) "
+                f"en échec (rc={inv.returncode}) — {inv.stderr.strip()}"
+            )
+
+        # 2. cp_ip / iface DÉRIVÉS DU LIMA VIVANT via le contrat machine `emit_facts`
+        # (run-phases.sh facts ⇒ `CP_IP=…\nL2_IFACE=…`, byte-stable, ADR 0049/0056). Le bash
+        # garde la dérivation (vm_uservv2_ip/iface = limactl shell, artefact node-side) ;
+        # Python CONSOMME les faits, ne pilote pas limactl. cp_ip = advertiseAddress du CP.
+        facts = _runphases("facts")
+        if facts.returncode != 0:
+            raise _path.PathError(
+                f"socle (bootstrap) : dérivation des faits du banc (run-phases.sh facts) "
+                f"en échec (rc={facts.returncode}) — {facts.stderr.strip()}"
+            )
+        parsed = dict(
+            ln.split("=", 1)
+            for ln in facts.stdout.splitlines()
+            if "=" in ln and not ln.startswith("#")
+        )
+        cp_ip = parsed.get("CP_IP", "")
+        l2_iface = parsed.get("L2_IFACE", "")
+        if not cp_ip:
+            raise _path.PathError(
+                "socle (bootstrap) : `CP_IP` absent des faits du banc (banc provisionné ? "
+                f"sortie={facts.stdout.strip()!r})"
+            )
+
+        # 3. CALLBACK launch : montage d'UN playbook du socle (checks→…→join-workers) via
+        # runner.launch_phase (le MÊME montage qu'`ha-3cp`/`cmd_bootstrap_seq`). Les 6
+        # playbooks du socle sont à la racine de `private_data_dir` (bootstrap/), résolus
+        # par leur nom (checks.yaml…). `-e control_plane_ip=<cp_ip>` (bootstrap_extravars).
+        def launch_socle(playbook: str, extravars: dict):
+            return _runner.launch_phase(
+                playbook,
+                extravars,
+                private_data_dir,
+                ctx.inventory,
+                ansible_config=ansible_cfg,
+                kubeconfig=os.environ.get("KUBECONFIG"),
+                target_kind=topo.target_kind,
+            )
+
+        # 4. CALLBACK run_cni : la CNI (Cilium dans la VM) reste un artefact bash (ADR 0049).
+        # On POUSSE l'arm `ha-cni <iface>` — qui pose Cilium ET fetch le kubeconfig du CP
+        # (admin.conf sed-rewrite vers KUBECONFIG_LOCAL == ctx.kubeconfig_local). Python
+        # pousse, consomme un rc, ne lit pas la logique CNI/kubeconfig. Le fetch_kubeconfig
+        # est donc COUVERT par ce même geste (pas de 2e rappel séparé).
+        def run_cni() -> int:
+            return _runphases("ha-cni", l2_iface).returncode
+
+        # 5. has_workers : DÉRIVÉ DE LA TOPO (le moteur connaît la topologie) — un control
+        # unique sans worker OMET join-workers.yaml (cf. _bootstrap.bootstrap_playbooks).
+        has_workers = bool(topo.worker_nodes)
+        n_pb = len(_bootstrap.bootstrap_playbooks(has_workers=has_workers))
+        print(f"→ bootstrap : socle k8s ({n_pb} playbooks via runner, CP {ctx.cp} {cp_ip})…")
+        try:
+            result = _bootstrap.run_bootstrap(
+                cp_ip,
+                launch=launch_socle,
+                run_cni=run_cni,
+                has_workers=has_workers,
+            )
+        except _runner.RunnerUnavailable as exc:
+            raise _UsageError(str(exc)) from exc
+        except _bootstrap.BootstrapError as exc:
+            # FAIL-FAST (ADR 0046) : un échec du socle remonte en PathError → arrêt net,
+            # AUCUN fallback bash, AUCUNE couche applicative montée après.
+            raise _path.PathError(f"socle (bootstrap) : {exc}") from exc
+        for step in result.steps:
+            mark = "✓" if step.ok else "✗"
+            print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
+        return 0 if result.built else 1
+        # _BANC (ADR 0097 §5.b) : la façade TENTE désormais le vrai montage (inventaire +
+        # facts + 6 playbooks + ha-cni). Restent à VALIDER au banc mono-nœud (le mainteneur,
+        # corriger-le-code-pas-l-état) : (a) que `run-phases.sh facts` rend bien CP_IP non
+        # vide APRÈS `provision` (VM démarrée, IP user-v2 posée) ; (b) que l'arm `ha-cni`
+        # écrit le kubeconfig à l'emplacement EXACT attendu par les couches suivantes
+        # (KUBECONFIG_LOCAL == ctx.kubeconfig_local) et que le forward API 127.0.0.1:6443
+        # est joignable. Le format byte-stable de l'inventaire est déjà couvert (bats).
 
     def ha(_phase: str) -> int:
         # STUB §2.b (LOT 9) : `_path.run_ha_3cp` est porté+testé, mais le câblage du 2e geste
