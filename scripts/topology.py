@@ -2243,6 +2243,215 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CÂBLAGE FAÇADE du moteur de chemin Python (`nestor.path.run_path`) — LOT 6 (ADR 0097).
+#
+# POURQUOI ICI et non dans un module `nestor/facade.py` séparé : les callbacks RÉELS sont
+# des closures sur des fonctions PRIVÉES de CETTE façade (`_wait_layer_healthy`,
+# `_assert_bench_target`, `_assert_inventory_safe`, `_runner`, `_kubectl`, `_inventory_for`).
+# Un module `nestor/facade.py` devrait les ré-importer depuis `scripts/topology.py` — qui
+# n'est PAS un module de paquet (dossier `scripts/` sans `__init__`, chargé par chemin) →
+# import bancal/circulaire. Les deux PRÉCÉDENTS du dépôt (`cmd_ha_3cp`, `cmd_bootstrap_seq`)
+# construisent DÉJÀ leurs callbacks réels en closures ICI, à côté de l'I/O qu'ils enveloppent.
+# On suit ce moule : `nestor.path` reste PUR (logique d'orchestration testée stubée), la
+# façade ICI branche les callbacks sur le réel (runner/kubectl/limactl). La construction de
+# `PathContext` (PURE, dérivée de la topo) est isolée dans `_path_context` → testable sans I/O.
+#
+# ⚠️ COEXISTENCE (plan invariant 4 + ADR 0034) : ce câblage n'est ATTEINT que derrière le
+# FLAG opt-in `--engine=python` (cf. cmd_up). SANS le flag, cmd_up délègue à run-phases.sh
+# EXACTEMENT comme avant — zéro régression. AUCUN fallback bash dans la branche python : un
+# échec du moteur Python s'ARRÊTE NET (corriger-le-code-pas-l-état, ADR 0046), il n'est
+# JAMAIS masqué par un repli silencieux sur run-phases.sh.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _path_context(topo: Topology) -> _path.PathContext:
+    """Construit `PathContext` depuis la TOPOLOGIE (PUR — aucune I/O, ADR 0097 §5.a).
+
+    Remplace les globales bash de run-phases.sh (CP:83 / API_PORT:90 / KUBECONFIG_LOCAL:148
+    / REPO / INVENTORY) par un dataclass IMMUABLE dérivé de la topo, plus de globale ambiante :
+    - `cp` : 1er nœud `control` (run-phases.sh:83-87 : 1er `:control` de NODES, sinon 1er
+      nœud). DÉRIVÉ, jamais codé en dur (`cp1`).
+    - `api_port` : 6443 (= run-phases.sh:90 `API_PORT`).
+    - `kubeconfig_local` / `inventory` : chemins du BANC Lima, IDENTIQUES à
+      run-phases.sh (`KUBECONFIG_LOCAL`/`INVENTORY` = `<WORKDIR>/kubeconfig` /
+      `<WORKDIR>/inventory.yaml`). Réutilise `_BENCH_KUBECONFIG`/`_inventory_for`.
+    - `repo` : racine du dépôt (= `REPO` de lib.sh) — pour résoudre les playbooks.
+    - `nodes` : tuple des nœuds attendus Ready (compte du gate socle `nodes_ready_all`)."""
+    controls = topo.control_nodes
+    cp = controls[0] if controls else (topo.nodes[0].name if topo.nodes else "")
+    return _path.PathContext(
+        cp=cp,
+        api_port=6443,
+        kubeconfig_local=_BENCH_KUBECONFIG,
+        repo=os.path.abspath(_ROOT),
+        inventory=_inventory_for(topo),
+        nodes=tuple(n.name for n in topo.nodes),
+    )
+
+
+def _provision_via_bash(topo: Topology, stack_name: str) -> int:
+    """STUB DOCUMENTÉ du provisioning amont `up` (ADR 0097 §5.b) : délègue à `run-phases.sh up`.
+
+    Le provisioning VM (limactl render/start, disques Ceph conditionnels, gate disques,
+    dérivation cp_ip/iface) ET `write_inventory` byte-stable sont l'artefact node-side
+    IRRÉDUCTIBLE (ADR 0049 — Lima/limactl reste bash). On NE le réécrit PAS en Python ici :
+    on POUSSE `run-phases.sh up` comme on applique un manifeste (Python pousse, consomme un
+    `rc`, ne lit pas la logique bash, ADR 0097 §2.a). `phase_up` lit les RESSOURCES VM via
+    VM_CPUS/VM_MEMORY/VM_DISK ; LOT 8 veut qu'elles viennent du YAML (`topo.node_resources`).
+    Pendant la TRANSITION, on les passe en env DEPUIS le YAML (Python décide les VALEURS, bash
+    garde le RENDU `lima_render_node`). Mono-nœud banc : un seul jeu de ressources (le CP).
+
+    RESTE BANC (§5.b) : portage RÉEL du callback (limactl render/start + write_inventory) — non
+    inventé ici (un faux provisioning serait pire que rien). Voir `_path.banc_todo`."""
+    env = _runphases_env(topo, stack_name)
+    # LOT 8 (ADR 0097 §3) : ressources VM du YAML, plus de l'env. Le banc mono-nœud n'a qu'un
+    # CP → on passe SES ressources. `run-phases.sh:117/124/125` lit VM_CPUS/VM_MEMORY/VM_DISK
+    # (n'écrase PAS un défaut si déjà posé) ; on les pose DEPUIS la topo le temps de la
+    # transition (le câblage direct `lima_render_node(<valeurs>)` reste à faire+prouver au banc).
+    ctx = _path_context(topo)
+    if ctx.cp:
+        res = topo.node_resources(ctx.cp)
+        env = {
+            **env,
+            "VM_CPUS": str(res.cpus),
+            "VM_MEMORY": res.memory,
+            "VM_DISK": res.disk,
+        }
+    runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
+    print("→ up : provisioning des VMs via run-phases.sh (limactl, ADR 0049)…")
+    return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
+        ["bash", runphases, "up"],
+        check=False,
+        env=env,
+    ).returncode
+
+
+def _run_path_engine(topo: Topology, target: str, seq: list[str], stack_name: str) -> int:
+    """Monte le chemin `target` via le moteur Python `nestor.path.run_path` (FLAG opt-in).
+
+    Câble les callbacks ABSTRAITS du moteur sur le RÉEL (runner/kubectl/limactl), sur le
+    moule de `cmd_ha_3cp`/`cmd_bootstrap_seq` (closures à côté de l'I/O). FAIL-FAST : toute
+    PathError/IsolationRefused remonte (mappée en code 1) — AUCUN fallback bash (ADR 0046).
+
+    Callbacks (cf. `nestor.path.run_path`) :
+    - `sequence` : la séquence DÉJÀ calculée (`expected_phase_sequence`), injectée telle quelle.
+    - `assert_safe(phase)` : la GARDE d'isolation banc (`_assert_bench_target`) à CHAQUE phase
+      (invariant de boucle, ADR 0097 §5.c) ; l'échappatoire KUBECONFIG (ADR 0065) est gérée
+      DANS la garde. Pour une phase à play unitaire, on ajoute `_assert_inventory_safe`.
+    - `launch(phase)` : montage idempotent via `runner.launch_phase_idempotent` (double-passage
+      PROUVE changed=0, ADR 0052), `-e` restreints par `phases.extravars_for`.
+    - `gate(phase)` : santé post-montage routée par `phases.gate_kind_for` (→ _wait_layer_healthy).
+    - `provision('up')` : STUB → `run-phases.sh up` (artefact node-side irréductible, §5.b).
+    - `bootstrap`/`ha` : réutilisent `_bootstrap.run_bootstrap`/`_path.run_ha_3cp` (déjà portés
+      ailleurs) — STUBÉS ici tant que le câblage transport n'est pas prouvé au banc (§5.b/§2.b)."""
+    from nestor import phases as _phases
+
+    ctx = _path_context(topo)
+    private_data_dir = os.path.join(_ROOT, "bootstrap")
+    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
+    derived = derive_run_params(topo)
+
+    def assert_safe(phase: str) -> None:
+        # INVARIANT DE BOUCLE (ADR 0097 §5.c) : garde d'isolation AVANT CHAQUE phase. La
+        # garde gère l'échappatoire KUBECONFIG (ADR 0065 — elle rend tôt si exporté). Pour
+        # une phase à play unitaire (Ansible SSH/exec), on valide AUSSI l'inventaire.
+        _assert_bench_target(f"nestor up --engine=python ({phase})")
+        if _phases.has_phase_plan(phase) and _phases.phase_plan(phase).playbook is not None:
+            _assert_inventory_safe(f"nestor up --engine=python ({phase})", ctx.inventory, topo)
+
+    def launch(phase: str):
+        # Montage IDEMPOTENT (double-passage, ADR 0052). Le playbook est résolu relatif au
+        # private_data_dir/project (comme `_monter_phase`). Les `-e` sont RESTREINTS aux clés
+        # de la phase (parité run-phases.sh : chaque play ne reçoit que ses `-e`). APRÈS la
+        # gate, le moteur appelle bien la gate ; les hooks e2e (dataops) sont joués ICI, après
+        # succès du play — ils LÈVENT E2EHookStubbed (attendu, voir _BANC_TODO).
+        plan = _phases.phase_plan(phase)
+        playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
+        extravars = _phases.extravars_for(phase, derived)
+        print(f"→ {phase} : montage idempotent via ansible-runner ({plan.playbook})…")
+        result = _runner.launch_phase_idempotent(
+            playbook,
+            extravars,
+            private_data_dir,
+            inventory=ctx.inventory,
+            ansible_config=ansible_cfg,
+            kubeconfig=os.environ.get("KUBECONFIG"),
+            target_kind=topo.target_kind,
+        )
+        # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy) : ils LÈVENT
+        # E2EHookStubbed tant qu'ils ne sont pas câblés+prouvés au banc (honnêteté ADR 0034).
+        # On ne les joue QUE si le montage a réussi (un hook après un play KO n'a pas de sens).
+        if result.ok:
+            for hook in _phases.e2e_hooks_for(phase):
+                hook()  # lève E2EHookStubbed — message clair « _BANC : hook e2e à câbler »
+        return result
+
+    def gate(phase: str) -> bool:
+        # Santé post-montage routée par la NATURE de la gate (phases.gate_kind_for) :
+        # ready-replicas / cr-phase (CR Rook Ceph) / presence → _wait_layer_healthy (qui lit
+        # graph.LAYER_SIGNAL, source unique, et applique le bon critère readyReplicas/phase/
+        # présence). `none` (phase sans maillon discriminant) → _wait_layer_healthy rend True.
+        return _wait_layer_healthy(phase)
+
+    def provision(_phase: str) -> int:
+        return _provision_via_bash(topo, stack_name)
+
+    def bootstrap(_phase: str) -> int:
+        # STUB §5.b : le socle k8s+CNI est porté par `_bootstrap.run_bootstrap` (déjà testé),
+        # mais son câblage TRANSPORT au banc (cp_ip/iface dérivés du Lima vivant, rappel
+        # ha-cni pour la CNI) reste à prouver. On lève plutôt que d'inventer un montage faux.
+        raise _path.PathError(
+            "phase amont `bootstrap` (--engine=python) : câblage transport NON prouvé au banc "
+            "(cp_ip/iface du Lima vivant + CNI) — _BANC : à câbler+prouver (ADR 0097 §5.b)"
+        )
+
+    def ha(_phase: str) -> int:
+        # STUB §2.b (LOT 9) : `_path.run_ha_3cp` est porté+testé, mais le câblage du 2e geste
+        # `fetch_kubeconfig` (transport) reste à couvrir au banc avant de retirer le pont ha-cni.
+        raise _path.PathError(
+            "phase amont `ha` (--engine=python) : câblage transport NON prouvé au banc "
+            "(run_ha_3cp + fetch_kubeconfig) — _BANC : à câbler+prouver (ADR 0097 §2.b)"
+        )
+
+    print(f"→ moteur Python (run_path) : chemin `{target}` ({len(seq)} phase(s)), CP {ctx.cp}.")
+    try:
+        result = _path.run_path(
+            topo,
+            target,
+            sequence=lambda _t, _g: list(seq),
+            launch=launch,
+            gate=gate,
+            assert_safe=assert_safe,
+            provision=provision,
+            bootstrap=bootstrap,
+            ha=ha,
+            # record : la consignation runs-history (#216) reste l'apanage de
+            # `metro_record_run` (bash, en fin de run-phases.sh) — elle agrège les durées
+            # ET les métriques échantillonnées par metrology.sh PENDANT le run, qu'un append
+            # Python ne reproduit pas byte-stable (history.py:20 — l'append est bash). STUB
+            # documenté (None) : le moteur Python ne consigne pas encore (à câbler au banc, §5.b).
+            record=None,
+        )
+    except _runner.RunnerUnavailable as exc:
+        raise _UsageError(str(exc)) from exc
+    except _path.IsolationRefused as exc:
+        # REFUS d'isolation = garde de sécurité, pas un échec de montage → code usage (2).
+        raise _UsageError(str(exc)) from exc
+    except _phases.E2EHookStubbed as exc:
+        # Hook e2e non câblé : honnêteté (ne pas verdir à tort) → on ARRÊTE NET (ADR 0034).
+        print(f"  ✗ _BANC : hook e2e à câbler — {exc}", file=sys.stderr)
+        return 1
+    except _path.PathError as exc:
+        # FAIL-FAST : montage KO → on relève le verdict (jamais de fallback bash, ADR 0046).
+        print(f"  ✗ {exc}", file=sys.stderr)
+        return 1
+    for step in result.steps:
+        mark = "✓" if step.ok else "✗"
+        print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
+    return 0 if result.built else 1
+
+
 def cmd_up(args: argparse.Namespace) -> int:
     """`up` : monte la stack active de bout en bout (calque `pulumi up`).
 
@@ -2313,6 +2522,20 @@ def cmd_up(args: argparse.Namespace) -> int:
     if not _confirm_apply(target, assume_yes=args.yes):
         print("montage annulé.", file=sys.stderr)
         return 2
+
+    # ── FLAG OPT-IN `--engine=python` (LOT 6, ADR 0097) ────────────────────────────
+    # Le DÉFAUT reste `bash` (run-phases.sh) — invariant 4 du plan : sans le flag, cmd_up
+    # se comporte EXACTEMENT comme avant (même délégation, mêmes sorties). Le flag permet
+    # au mainteneur de TESTER le moteur Python au banc mono-nœud (`run_path`). Repli env
+    # `NESTOR_ENGINE` (le flag CLI prime). La garde d'isolation banc s'applique aux DEUX
+    # chemins : ICI (`_assert_bench_target` en tête de cmd_up) ET, pour le chemin python,
+    # à CHAQUE phase via le callback `assert_safe` (invariant de boucle, ADR 0097 §5.c).
+    engine = getattr(args, "engine", None) or os.environ.get("NESTOR_ENGINE", "bash")
+    if engine == "python":
+        # Le moteur Python ne porte PAS l'arm HA propre (amorçage VIP/etcd) : un chemin
+        # `ha-3cp` derrière `--engine=python` lèvera proprement (callback `ha` stubé) plutôt
+        # que de monter à moitié. On laisse le moteur trancher (fail-fast), pas un garde ad hoc.
+        return _run_path_engine(topo, target, list(seq), stack_name)
 
     # NODES_OVERRIDE : la TOPOLOGIE pilote les nœuds du banc (inversion de frontière,
     # ADR 0056 — la stack active décide, le harnais exécute). ha-3cp garde son
@@ -3532,6 +3755,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
     )
     p_up.add_argument("--yes", action="store_true", help="sauter la confirmation (requis hors TTY)")
+    # FLAG OPT-IN (LOT 6, ADR 0097) : moteur de montage. `bash` (DÉFAUT) = run-phases.sh
+    # INTACT (zéro régression, invariant 4) ; `python` = moteur `nestor.path.run_path` (à
+    # TESTER au banc mono-nœud). Repli env NESTOR_ENGINE (le flag CLI prime).
+    p_up.add_argument(
+        "--engine",
+        choices=("bash", "python"),
+        default=None,
+        help="moteur de montage : bash (défaut, run-phases.sh) | python (run_path, banc, opt-in)",
+    )
 
     p_next = sub.add_parser(
         "next", help="monter UNE seule couche : la prochaine qui manque (avancée pas à pas)"

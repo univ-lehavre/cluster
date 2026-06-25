@@ -323,29 +323,38 @@ def _run_amont(phase: str, *, provision, bootstrap, ha, steps: list[PathStep]) -
 # Lima non réconcilié ici — preuve IMPOSSIBLE dans cette session, NE PAS prétendre
 # l'avoir faite) :
 _BANC_TODO = (
-    # 1. CÂBLER la façade : construire `PathContext` depuis la topologie (cp=1er
-    #    control, kubeconfig_local=<workdir>/kubeconfig, inventory=_inventory_for(topo),
-    #    nodes) et brancher les callbacks sur le réel :
-    #      launch  → runner.launch_phase_idempotent (private_data_dir/inventory/cfg) ;
-    #      gate    → topology._wait_layer_healthy (signal _LAYER_SIGNAL/graph) ;
-    #      assert_safe → topology._assert_bench_target + _assert_inventory_safe ;
-    #      bootstrap   → nestor.bootstrap.run_bootstrap (déjà porté) ;
-    #      record  → metro_record_run / historique (parité record_full_run).
-    "câblage façade run_path (PathContext + callbacks réels) — à écrire + prouver au banc",
-    # 2. PROVISIONING RÉEL (§5.b) : écrire le callback `provision('up')` portant
-    #    phase_up (limactl render/start, disques Ceph conditionnels, gate disques,
-    #    dérivation cp_ip/iface) + write_inventory byte-stable. Non inventé ici.
-    #    LOT 8 : les RESSOURCES VM (cpus/memory/disk) viennent désormais du YAML
-    #    (`topo.node_resources(<node>)`, model.py) — PLUS de VM_CPUS/VM_MEMORY/VM_DISK
-    #    lus de l'env. Le callback `provision` les passera à `lima_render_node` (bash
-    #    garde le RENDU du template, Python décide les VALEURS) — à câbler+prouver.
-    "provisioning Python (phase_up + write_inventory + resources YAML) — à prouver au banc",
-    # 3. BASCULE cmd_up/cmd_next : remplacer subprocess(run-phases.sh) par run_path.
-    #    COEXISTENCE d'abord (run_path à côté, non branché — état actuel), bascule
-    #    ensuite AVEC la preuve banc (plan invariant 4). Le grep sens-unique
+    # 1. CÂBLAGE FAÇADE — FAIT (derrière le FLAG opt-in `nestor up --engine=python`,
+    #    `topology._run_path_engine` ; le DÉFAUT reste run-phases.sh, invariant 4) :
+    #      PathContext → `topology._path_context` (cp=1er control, kubeconfig_local/inventory
+    #                    = chemins banc, repo=racine, nodes) — PUR, testé ;
+    #      launch   → runner.launch_phase_idempotent + extravars_for + e2e_hooks_for (LÈVENT) ;
+    #      gate     → topology._wait_layer_healthy (signal _LAYER_SIGNAL/graph) ;
+    #      assert_safe → topology._assert_bench_target (+ _assert_inventory_safe par-play) ;
+    #      provision('up') → STUB `run-phases.sh up` (artefact node-side, §5.b) ;
+    #    RESTE : la PREUVE banc du chemin python (run mono-nœud `--engine=python`).
+    "preuve banc du moteur python (nestor up --engine=python, mono-nœud) — reste à faire",
+    # 2. PROVISIONING RÉEL (§5.b) : le callback `provision('up')` POUSSE aujourd'hui
+    #    `run-phases.sh up` (STUB documenté, `topology._provision_via_bash` — limactl reste
+    #    bash, ADR 0049). LOT 8 : les RESSOURCES VM (cpus/memory/disk) viennent du YAML
+    #    (`topo.node_resources(<node>)`) — passées en env VM_CPUS/VM_MEMORY/VM_DISK le temps
+    #    de la transition. RESTE : câbler `lima_render_node(<valeurs>)` directement (bash
+    #    garde le RENDU, Python décide les VALEURS) + write_inventory — à prouver au banc.
+    "provisioning Python direct (lima_render_node + write_inventory) — à prouver au banc",
+    # 2.b BOOTSTRAP/HA en --engine=python : les callbacks `bootstrap`/`ha` LÈVENT
+    #    aujourd'hui (transport cp_ip/iface + CNI/fetch_kubeconfig non prouvés au banc). Les
+    #    moteurs `bootstrap.run_bootstrap`/`path.run_ha_3cp` sont portés+testés ; RESTE le
+    #    câblage transport (rappel ha-cni, dérivation Lima vivant) — à câbler+prouver au banc.
+    "câblage transport bootstrap/ha en --engine=python (cp_ip/iface, CNI) — à prouver au banc",
+    # 3. BASCULE DU DÉFAUT cmd_up/cmd_next sur run_path (retrait subprocess run-phases.sh).
+    #    Le flag `--engine=python` est COEXISTENCE (run_path à côté, opt-in) ; basculer le
+    #    DÉFAUT vient APRÈS la preuve banc (plan invariant 4). Le grep sens-unique
     #    `grep -rn 'uv run python\|topology.py' bench/lima/` doit alors rendre 0 :
     #    retirer le rappel `bootstrap-seq` (:508) ET, LOT 9, le rappel `ha-3cp` (:1650).
-    "bascule cmd_up/cmd_next sur run_path (retrait subprocess run-phases.sh) — après preuve banc",
+    "bascule du DÉFAUT cmd_up/cmd_next sur run_path (retrait run-phases.sh) — après preuve banc",
+    # 3.c CONSIGNATION runs-history (#216) en --engine=python : le callback `record` est None
+    #    (STUB) — `metro_record_run` (bash) agrège durées + métriques metrology.sh PENDANT le
+    #    run, qu'un append Python ne reproduit pas byte-stable (history.py:20). À câbler+prouver.
+    "consignation runs-history (record) en --engine=python — à câbler+prouver au banc",
     # 3.b LOT 9 — CÂBLER le callback `ha` réel dans la façade (= path.run_ha_3cp,
     #    déjà porté) + COUVRIR le 2ᵉ geste `fetch_kubeconfig` en Python (ou via l'arm bash
     #    `kubeconfig`, transport pur), pour que le pont `ha-cni` ne soit plus appelé POUR
