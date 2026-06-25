@@ -398,6 +398,16 @@ EPREUVES: list[Epreuve] = [
         "dataops",
         None,
     ),
+    Epreuve(
+        "34",
+        "Build → digest → GitOps : déploiement par @sha256 immuable",
+        "intég",
+        "gitops",
+        TOPO_AGNOSTIQUE,
+        TERRAIN_API,
+        "dataops",
+        None,
+    ),
 ]
 
 

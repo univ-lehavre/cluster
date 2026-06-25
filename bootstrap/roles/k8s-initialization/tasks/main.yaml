@@ -172,14 +172,31 @@
     # idempotent (n'écrit que si l'état diffère). CoreDNS n'a pas de manifeste source
     # versionné → ce patch post-init EST le code (ADR 0046) ; réappliqué à chaque
     # bootstrap car l'addon kubeadm repart en `preferred`.
+    # Via `kubectl patch` (et NON le module kubernetes.core.k8s) : ce rôle tourne
+    # SUR le control-plane (kubeadm init y exige become/sudo), or le module
+    # kubernetes.core exige la lib Python `kubernetes` côté nœud — absente (elle
+    # n'est provisionnée que dans le .venv du CONTRÔLEUR, cf. metrics-server.yaml).
+    # Toutes les autres opérations k8s du rôle (taint, label) passent déjà par
+    # `kubectl` + le kubeconfig local du nœud ; on s'aligne.
+    - name: Stage the CoreDNS anti-affinity patch on the node
+      ansible.builtin.copy:
+        src: coredns-antiaffinity-patch.yaml
+        dest: '{{ ansible_facts.env.HOME }}/coredns-antiaffinity-patch.yaml'
+        mode: '0644'
+      # Mono-nœud (banc 1 VM) : `required` laisserait une réplique Pending → on
+      # saute le durcissement (et son staging).
+      when: groups['all'] | length > 1
+
+    # `kubectl patch --type=strategic` est idempotent : no-op (« no change ») si
+    # l'anti-affinité `required` est déjà en place — d'où le changed_when ciblé.
     - name: Harden CoreDNS pod anti-affinity (required, spread across nodes)
-      kubernetes.core.k8s:
-        state: patched
-        kind: Deployment
-        name: coredns
-        namespace: kube-system
-        definition: "{{ lookup('file', 'coredns-antiaffinity-patch.yaml') | from_yaml }}"
+      ansible.builtin.command: >-
+        kubectl patch deployment coredns -n kube-system --type=strategic
+        --patch-file {{ ansible_facts.env.HOME }}/coredns-antiaffinity-patch.yaml
+      args:
+        chdir: '{{ ansible_facts.env.HOME }}'
       register: coredns_patch
+      changed_when: "'no change' not in coredns_patch.stdout"
       # Sûr seulement s'il existe ≥ 2 nœuds schedulables éligibles (CoreDNS tolère
       # les taints control-plane) ; en mono-nœud (banc 1 VM) `required` laisserait
       # une réplique Pending → on saute alors le durcissement.

@@ -91,6 +91,60 @@ die() {
 }
 need() { command -v "$1" > /dev/null 2>&1 || die "outil requis absent : $1"; }
 
+# substitute_image_digest <clone_dir> <digest> — remplace, DANS le clone atlas, les
+# PLACEHOLDERS d'image que l'overlay prod citation expose, par la forme par DIGEST
+# (immuable), conforme ADR 0095 §2.
+#
+# FRONTIÈRE (ADR 0094) — point CLÉ : cluster ne connaît PAS la structure interne de
+# l'overlay atlas. Il se contente de substituer des JETONS qu'atlas a DÉLIBÉRÉMENT
+# exposés comme points d'injection — atlas FOURNIT les trous, cluster les REMPLIT.
+# C'est le contrat : cluster n'édite aucun champ qu'atlas n'a pas prévu d'offrir.
+#
+# DEUX placeholders (sémantiques différentes, factorisation atlas) :
+#   __CITATION_IMAGE_DIGEST__ → le DIGEST SEUL `sha256:…` ; pour `images[].digest`
+#       de la kustomization (transform Kustomize natif, pas une réécriture brute).
+#   __CITATION_IMAGE__        → la RÉFÉRENCE COMPLÈTE `registry:80/…@sha256:…` ; pour
+#       la valeur d'env `DAGSTER_CURRENT_IMAGE` (les pods de RUN du K8sRunLauncher).
+# Cette double exposition résout AUSSI le double-couplage relevé par l'audit #499 :
+# atlas factorise une fois pour toutes ses deux références en deux jetons nommés.
+#
+# La substitution opère sur la COPIE clonée, jamais sur le dépôt atlas source. Échoue
+# BRUYAMMENT si UN placeholder attendu est absent : tant qu'atlas n'a pas factorisé,
+# cluster NE DEVINE PAS la structure interne — il exige le contrat (pas de déploiement
+# par tag mutable en douce).
+substitute_image_digest() {
+    local clone="$1" digest="$2"
+    local overlay="${clone}/dataops/citation-dagster/deploy/overlays/prod"
+    local ref="${CITATION_IMAGE_NAME}@${digest}" # registry:80/citation-dagster@sha256:…
+
+    [ -d "${overlay}" ] || die "overlay prod introuvable dans le clone : ${overlay}"
+
+    # Au moins un des deux placeholders doit être présent (sinon atlas n'a pas
+    # factorisé → on refuse de deviner la structure interne, frontière ADR 0094).
+    grep -rqlE '__CITATION_IMAGE(_DIGEST)?__' "${overlay}" 2> /dev/null || die "\
+placeholders d'image absents de l'overlay atlas (${overlay}).
+cluster n'injecte le digest QUE via les points d'injection qu'atlas expose (frontière
+ADR 0094) — il ne réécrit pas la structure interne de l'overlay. atlas doit factoriser
+ses deux références image en __CITATION_IMAGE_DIGEST__ (images[].digest, le sha256 seul)
+et __CITATION_IMAGE__ (DAGSTER_CURRENT_IMAGE, la ref complète) — cf. issue de
+factorisation (résout aussi le double-couplage de l'audit #499)."
+
+    # __CITATION_IMAGE_DIGEST__ → le sha256 seul (Kustomize images[].digest).
+    grep -rlF '__CITATION_IMAGE_DIGEST__' "${overlay}" 2> /dev/null \
+        | while IFS= read -r f; do
+            sed -i.bak "s|__CITATION_IMAGE_DIGEST__|${digest}|g" "${f}" \
+                && rm -f "${f}.bak"
+        done
+    # __CITATION_IMAGE__ → la référence complète registry/nom@sha256 (env DAGSTER).
+    # NB : l'ordre importe — le motif _DIGEST_ est traité d'abord pour qu'il ne soit
+    # pas amputé par la substitution du préfixe __CITATION_IMAGE__ (grep -F exact).
+    grep -rlF '__CITATION_IMAGE__' "${overlay}" 2> /dev/null \
+        | while IFS= read -r f; do
+            sed -i.bak "s|__CITATION_IMAGE__|${ref}|g" "${f}" && rm -f "${f}.bak"
+        done
+    ok "digest injecté → images[].digest=${digest} ; DAGSTER_CURRENT_IMAGE=${ref}"
+}
+
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "${HERE}/.." && pwd)
 
@@ -127,6 +181,14 @@ ATLAS_REPO_DIR="${ATLAS_REPO_DIR:-${REPO}/../atlas}"
 # Révision figée du code citation à déployer (SHA `revision` du manifeste de
 # déclaration montant atlas, ADR 0094 §3 — signal canonique d'évolution).
 CITATION_REVISION="${CITATION_REVISION:-c98feea9}"
+# Digest de l'image citation (référence IMMUABLE, ADR 0095 §2). Valeur de
+# déploiement fournie par le build (rôle platform-build-images → build_image_digests,
+# ADR 0095 §1.a) : la chaîne `sha256:<hex>` SEULE (sans le préfixe registry/nom).
+# Vide = transition (overlay poussé avec le tag, déploiement non immuable — pour
+# preuve banc seulement, averti à l'exécution).
+CITATION_IMAGE_DIGEST="${CITATION_IMAGE_DIGEST:-}"
+# Nom d'image attendu dans l'overlay (cible des substitutions). Générique (ADR 0023).
+CITATION_IMAGE_NAME="${CITATION_IMAGE_NAME:-registry:80/citation-dagster}"
 
 # Patrons versionnés *.example (ADR 0023) — source des manifestes rendus.
 AOA_DIR="${REPO}/platform/argocd/app-of-apps"
@@ -358,6 +420,19 @@ push_atlas_tree() {
     git -C "${clone}" branch -f main "${CITATION_REVISION}" \
         || die "impossible de placer main sur ${CITATION_REVISION}"
     git -C "${clone}" checkout --quiet main
+
+    # ── Substitution du DIGEST dans l'overlay (ADR 0095 §2, déploiement par digest)
+    # Le déploiement référence registry:80/<app>@sha256:<digest> (immuable), pas le
+    # tag d'exemple `0.0.0`. cluster INJECTE le digest sans toucher au dépôt atlas
+    # source (frontière ADR 0094) : la substitution se fait DANS LE CLONE, juste
+    # avant le push vers Gitea. Le digest est fourni par le build (ADR 0095 §1.a,
+    # build_image_digests) via CITATION_IMAGE_DIGEST.
+    if [ -n "${CITATION_IMAGE_DIGEST:-}" ]; then
+        substitute_image_digest "${clone}" "${CITATION_IMAGE_DIGEST}"
+    else
+        warn "CITATION_IMAGE_DIGEST non fourni — overlay poussé avec le tag d'exemple"
+        warn "  (déploiement par tag mutable, NON conforme ADR 0095 §2 — pour preuve seulement)"
+    fi
 
     # Port-forward vers le Service ClusterIP gitea-http (tunnel k8s, PAS de DNS
     # cluster côté hôte → contourne le piège FQDN). Port local éphémère choisi
