@@ -24,12 +24,15 @@ from nestor.model import load_topology  # noqa: E402
 from nestor.plan import expected_phase_sequence, phase_playbook  # noqa: E402
 from nestor.profile import derive_run_params  # noqa: E402
 
-# Les DEUX topologies du dépôt (invariant 2 du plan : un lot vaut sur banc local-path ET
-# prod Ceph). On dérive leurs séquences RÉELLES pour prouver la complétude du mapping.
+# Les DEUX cas de stockage du dépôt (invariant 2 du plan : un lot vaut sur local-path ET
+# Ceph). On dérive leurs séquences RÉELLES pour prouver la complétude du mapping. On vise
+# les topologies *.example.yaml VERSIONNÉES (les banc.yaml/dirqual.yaml réels sont une
+# config locale gitignorée, ADR 0023 — absente en CI) : socle.example (Ceph + profil
+# dataops, séquence la plus large) et layers.example (local-path).
 _REPO = os.path.join(os.path.dirname(__file__), "..")
 _TOPO_FILES = (
-    os.path.join(_REPO, "topologies", "banc.yaml"),
-    os.path.join(_REPO, "topologies", "dirqual.yaml"),
+    os.path.join(_REPO, "topologies", "layers.example.yaml"),  # local-path (≈ banc)
+    os.path.join(_REPO, "topologies", "socle.example.yaml"),  # Ceph + dataops (≈ dirqual)
 )
 # Phases AMONT portées par path._run_amont (provisioning/socle), HORS table phases.py.
 _AMONT = {"up", "bootstrap", "bootstrap-ha", "join-cp"}
