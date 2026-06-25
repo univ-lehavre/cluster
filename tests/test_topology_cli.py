@@ -1104,6 +1104,117 @@ runs:
         self.assertEqual(calls, [])  # aucun montage lancé
 
 
+class PreviewNextParityCLI(unittest.TestCase):
+    """Parité preview == next AU NIVEAU CLI (cœur de l'étape 1) : pour un MÊME état réel,
+    les deux commandes dérivent du MÊME `compute_plan_state` → même verdict. Avant le fix,
+    `next` ne faisait que RETIRER l'observé (jamais ré-ajouter une couche que le réel
+    contredit) et n'avait pas le garde `if up not in done` → divergence."""
+
+    _ATLAS_LOCAL = """\
+catalog:
+  topology: atlas-local
+  profile: dataops
+nodes:
+  - {name: cp1, roles: [control]}
+  - {name: node1, roles: [worker]}
+  - {name: node2, roles: [worker]}
+storage:
+  backend: local-path
+target_kind: lima
+"""
+
+    def setUp(self):
+        # Socle réellement présent (VMs + nœud Ready) → up/bootstrap faits.
+        orig_vms, orig_ready = cli._real_vms, cli._ready_nodes
+        cli._real_vms = lambda *_a: ["cp1", "node1", "node2"]
+        cli._ready_nodes = lambda *_a: ["cp1"]
+        self.addCleanup(setattr, cli, "_real_vms", orig_vms)
+        self.addCleanup(setattr, cli, "_ready_nodes", orig_ready)
+        _install_graph_passthrough(self)
+        # Carte de deps DÉTERMINISTE (== ce que phase_deps dérive du graphe).
+        orig_deps = cli.phase_deps
+        cli.phase_deps = lambda _backend: {
+            "storage-simple": set(),
+            "metrics-server": set(),
+            "monitoring": {"storage-simple"},
+            "gitops": {"storage-simple"},
+            "dataops": {"monitoring", "storage-simple"},
+            "gitops-seed": {"gitops"},
+            "mlflow": {"dataops", "monitoring"},
+        }
+        self.addCleanup(setattr, cli, "phase_deps", orig_deps)
+        # Garde inventaire neutralisée (on teste la logique du plan, pas la garde).
+        orig_safe = cli._assert_inventory_safe
+        cli._assert_inventory_safe = lambda *a, **k: None
+        self.addCleanup(setattr, cli, "_assert_inventory_safe", orig_safe)
+
+    def _stub_observed(self, layers):
+        orig = cli._observed_layers
+        cli._observed_layers = lambda _phases: set(layers)
+        self.addCleanup(setattr, cli, "_observed_layers", orig)
+
+    # Historique frais consignant TOUT fait (jusqu'à dataops/mlflow inclus) — mais le réel
+    # ne confirmera pas tout (cf. _stub_observed dans chaque test) : c'est le bug à couvrir.
+    _ALL_DONE_HIST = f"""\
+runs:
+  - id: r1
+    date: {dt_today()}
+    profil: dataops
+    topologie: atlas-local
+    phases: {{up: 1, bootstrap: 1, storage-simple: 1, metrics-server: 1,
+      monitoring: 1, gitops: 1, dataops: 1, mlflow: 1}}
+"""
+
+    def _run_both(self, observed, hist_content):
+        """Lance preview ET next sur la MÊME fixture/état réel ; renvoie (out_prev, out_next,
+        code_next, err_next). `observed` = couches que le cluster confirme saines."""
+        self._stub_observed(observed)
+        topo = _tmp(self._ATLAS_LOCAL)
+        hist = _tmp(hist_content)
+        self.addCleanup(os.unlink, topo)
+        self.addCleanup(os.unlink, hist)
+        code_p, out_p, _ = _capture(["preview", "-f", topo, "--target", "atlas", "--history", hist])
+        # next hors TTY sans --yes : s'il VEUT monter une couche → code 2 « refusé hors TTY »
+        # (preuve qu'il a VU une couche à monter) ; s'il est à jour → code 0 + « à jour ».
+        code_n, out_n, err_n = _capture(
+            ["next", "-f", topo, "--target", "atlas", "--history", hist]
+        )
+        self.assertEqual(code_p, 0)
+        return out_p, out_n, code_n, err_n
+
+    def test_history_lies_layer_absent_both_want_to_mount(self):
+        # LE BUG (mlflow/marquez) : l'historique dit mlflow fait, mais le cluster ne le
+        # confirme PAS (couche à signal absente). preview l'affiche « à installer » ET next
+        # veut le monter (n'est PAS « à jour »). Avant le fix : next disait « à jour ».
+        observed = {"storage-simple", "metrics-server", "monitoring", "gitops", "dataops"}
+        out_p, out_n, code_n, err_n = self._run_both(observed, self._ALL_DONE_HIST)
+        # preview : la ligne mlflow doit être marquée « à installer » (pas ✓ à-jour).
+        mlflow_line = next(ln for ln in out_p.splitlines() if "MLflow" in ln)
+        self.assertIn("à installer", mlflow_line)
+        # next : il a VU une couche à monter (mlflow) → refus hors TTY (code 2), PAS « à jour ».
+        self.assertNotIn("à jour", out_n)
+        self.assertEqual(code_n, 2)
+        self.assertIn("hors TTY", err_n)
+
+    def test_all_observed_both_up_to_date(self):
+        # Tout est consigné ET le réel confirme TOUT (signal sain) → preview « à-jour »
+        # partout (aucun « à installer ») et next dit « à jour » (code 0). Parité positive.
+        observed = {
+            "storage-simple",
+            "metrics-server",
+            "monitoring",
+            "gitops",
+            "dataops",
+            "mlflow",
+            "gitops-seed",
+            "portal",
+        }
+        out_p, out_n, code_n, _ = self._run_both(observed, self._ALL_DONE_HIST)
+        self.assertNotIn("à installer", out_p)  # preview : rien à monter
+        self.assertEqual(code_n, 0)
+        self.assertIn("à jour", out_n)  # next : à jour
+
+
 class NextInventoryGuard(unittest.TestCase):
     """Garde de CIBLE ANSIBLE (ADR 0053) : `next` visant le banc REFUSE un inventaire
     prod AVANT de lancer ansible-runner. Régression de la faille `next dataops` → prod."""
@@ -1372,7 +1483,10 @@ runs:
 
     def test_single_installable_no_menu(self):
         # storage-simple déjà fait : seul metrics-server reste montable → PAS de menu
-        # (une seule couche), montage direct sous --yes.
+        # (une seule couche), montage direct sous --yes. Le RÉEL doit CONFIRMER
+        # storage-simple sain (sinon, parité preview≠next : une couche à signal que le
+        # cluster NE confirme PAS est RE-proposée — cf. compute_plan_state, 2e sens).
+        self._stub_observed({"storage-simple"})  # le cluster confirme storage-simple sain
         mounted = self._spy_launch()
         topo = _tmp(self._ATLAS_LOCAL)
         hist = _tmp(

@@ -300,6 +300,69 @@ def observed_done_phases(
     return done
 
 
+@dataclass(frozen=True)
+class PlanState:
+    """État du plan dérivé : phases tenues pour FAITES et phases À APPLIQUER.
+
+    Résultat PUR (aucune I/O) de `compute_plan_state` — la source UNIQUE consommée
+    par `cmd_preview`/`cmd_next`/`cmd_up` (fin de la divergence preview≠next : les
+    trois dérivent du MÊME calcul). `done` = socle/couches tenus faits après que le
+    RÉEL a primé sur l'historique ; `a_appliquer` = ce qui reste à monter (ordonner
+    via `seq` à l'affichage)."""
+
+    done: frozenset[str]
+    a_appliquer: frozenset[str]
+
+
+def compute_plan_state(
+    seq: list[str],
+    run_phases: list[str] | None,
+    observed_socle: set[str],
+    observed_layers: set[str],
+    freshness: str,
+    signal_phases: set[str] | None = None,
+) -> PlanState:
+    """Calcule `done`/`a_appliquer` d'un chemin — LE calcul partagé (ADR 0052/0056 §7).
+
+    Fonction PURE : tout l'état RÉEL arrive en PARAMÈTRES (aucun kubectl ici). La
+    façade (qui sonde le cluster) fournit :
+    - `seq` : la séquence ORDONNÉE attendue (`expected_phase_sequence`) ;
+    - `run_phases` : les phases du dernier run de la stack (historique), ou None ;
+    - `observed_socle` : socle PROUVÉ par le réel (`observed_done_phases` : VMs/nœuds) ;
+    - `observed_layers` : couches applicatives observées SAINES (`_observed_layers`),
+      ∅ quand on NE sonde PAS le cluster (pas de nœud Ready / cible prod sans cible) ;
+    - `freshness` : verdict `history.verdict_for_run` (`frais`/`perime`/`jamais`) ;
+    - `signal_phases` : phases de `seq` ayant un signal connu (`_LAYER_SIGNAL`) — ∅
+      quand on ne sonde PAS (sinon on ré-ajouterait à tort des couches non vérifiées).
+
+    Le RÉEL PRIME sur l'historique, DANS LES DEUX SENS pour les couches à signal :
+    une couche observée saine sort de `a_appliquer` ; une couche à signal connu que
+    le réel NE confirme PAS y RENTRE même si l'historique la dit faite (le garde
+    `if "up" not in done` que `cmd_next` n'avait PAS — VRAI bug corrigé ici).
+    """
+    done = set(run_phases) if run_phases is not None else set()
+    # Le RÉEL prime sur l'historique : un vieux run consigne up/bootstrap, mais si les
+    # VMs ont été détruites (limactl vide), ces phases ne sont PLUS faites — on RESTREINT
+    # `done` au socle que le réel CONFIRME, AVANT diff_phases.
+    done -= {"up", "bootstrap"} - observed_socle
+    # COHÉRENCE DE DÉPENDANCE : rien ne tient au-dessus d'un socle absent. Si `up` n'est
+    # pas fait (VMs à créer), AUCUNE couche aval ne peut l'être → on vide `done` de tout
+    # sauf le socle réellement observé (sinon « VMs à créer MAIS ceph à-jour »). C'est LE
+    # garde que `cmd_next` n'avait pas (classe de bug, pas instance).
+    if "up" not in done:
+        done &= observed_socle
+    a_appliquer = set(diff_phases(seq, done, freshness))
+    a_appliquer -= observed_socle
+    # Le RÉEL fait AUTORITÉ pour les couches à signal connu, DANS LES DEUX SENS :
+    #  - une couche observée SAINE n'est plus « à installer » (run non consigné) → retirée ;
+    #  - une couche à signal connu que le réel NE confirme PAS (détruite, ou posée à moitié)
+    #    est « à installer » même si l'historique la dit faite (sinon MLflow absent ✓ à-jour).
+    a_appliquer -= observed_layers
+    if signal_phases:
+        a_appliquer |= {p for p in seq if p in signal_phases and p not in observed_layers}
+    return PlanState(done=frozenset(done), a_appliquer=frozenset(a_appliquer))
+
+
 @dataclass
 class Suggestion:
     """Verdict « que faire ensuite ». `phase` None = rien à lancer (à jour)."""
@@ -371,6 +434,7 @@ def installable_now(
     freshness: str,
     deps_fn: Callable[[], dict[str, set[str]]] | None = None,
     observed_done: set[str] | None = None,
+    a_appliquer: set[str] | None = None,
 ) -> list[str]:
     """Phases du chemin `target` MONTABLES MAINTENANT, dans l'ordre du chemin.
 
@@ -384,6 +448,15 @@ def installable_now(
     Garde-fou amont : si une phase de `_AMONT_PHASES` manque, elle est un prérequis
     DUR (pas de cluster sans VMs ni socle) → on renvoie CETTE seule phase, jamais un
     menu (on ne « choisit » pas de créer les VMs vs monter une couche applicative).
+
+    `a_appliquer` : ensemble des phases manquantes DÉJÀ calculé par `compute_plan_state`
+    (le calcul PARTAGÉ preview/next/up). Quand il est fourni, `installable_now` ne
+    RECALCULE PAS « ce qui reste » (il hérite ainsi du garde `if "up" not in done` ET
+    du 2e sens du RÉEL — une couche à signal que le réel contredit RESTE à monter) ; il
+    ne fait plus que TRIER ces manquantes par satisfaction des dépendances. C'est ce
+    qui garantit `next == preview`. `observed_done`/`freshness` ne servent alors qu'à
+    déterminer `done` (deps satisfaites). `a_appliquer` None → repli legacy (recalcul
+    interne via `diff_phases`, conservé pour les appelants/tests existants).
 
     `observed_done` : phases PROUVÉES présentes par l'ÉTAT RÉEL (signal d'infra observé
     — la façade le calcule via `_observed_layers`/`observed_done_phases`). Elles sont
@@ -407,7 +480,12 @@ def installable_now(
     # manquantes — pour les DEUX décisions (ce qui reste à monter, et la satisfaction
     # des dépendances d'une couche aval).
     done = done | observed_done
-    manquantes = [p for p in diff_phases(seq, done, freshness) if p not in observed_done]
+    if a_appliquer is not None:
+        # Source PARTAGÉE (compute_plan_state) : on hérite du garde + du 2e sens du réel,
+        # on ne recalcule PAS « ce qui reste » → next == preview. Ordre = celui de `seq`.
+        manquantes = [p for p in seq if p in a_appliquer]
+    else:
+        manquantes = [p for p in diff_phases(seq, done, freshness) if p not in observed_done]
     if not manquantes:
         return []
     # Prérequis dur : la première phase amont manquante est la seule offre possible.
