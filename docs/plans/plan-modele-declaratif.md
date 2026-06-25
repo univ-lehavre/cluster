@@ -32,6 +32,7 @@ pas le socle**. Réalisation incrémentale, chaque palier prouvé par un run
 | **P6** | Métriques exposées + smoke-test réversibilité                                                                                                            | 7-8               |
 | **P7** | Étendre aux topologies cibles (`multi-node-4`, `ha-3cp` + VIP/LB + kube-vip — #250)                                                                      | 4                 |
 | **P8** | Optimiseur (propose des ajustements depuis les métriques)                                                                                                | 9                 |
+| **P9** | Démantèlement de `run-phases.sh` : moteur de chemin Python (voir [`plan-refonte-nestor-python.md`](plan-refonte-nestor-python.md), ADR 0096/0097)        | (boucle)          |
 
 P0-P3 = **socle** (générateur de config) ; P4-P6 = **plateforme
 d'épreuve/mesure** ; P7 débloque la HA (#250) ; P8 (optimiseur) est le plus
@@ -64,6 +65,7 @@ casse le lint.
 | P6     | ✅ fait    | —                                | **métriques + smoke réversibilité** : `metrics.py` (expose durées/cpu/ram consignés, ne mesure rien de neuf) + `smoke.py` (créer→vérifier→détruire→vérifier, couche kubernetes isolée/stubable) ; commandes `metrics`/`smoke` ; 27 tests |
 | P7     | ⬜ à faire | **#250** (banc Lima HA `ha-3cp`) | —                                                                                                                                                                                                                                        |
 | P8     | ⬜ à faire | —                                | —                                                                                                                                                                                                                                        |
+| P9     | ⬜ à faire | —                                | **Démantèlement `run-phases.sh`** : moteur de chemin Python ([`plan-refonte-nestor-python.md`](plan-refonte-nestor-python.md), ADR 0096/0097)                                                                                            |
 
 **Issues créées depuis ce plan** : _(aucune encore — à lier au fil de
 l'implémentation)_.
