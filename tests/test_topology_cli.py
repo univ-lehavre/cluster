@@ -1473,14 +1473,17 @@ runs:
         self.assertTrue(mounted[0].endswith("metrics-server.yaml"))  # metrics, pas storage
         self.assertIn("installables", err)  # le menu a bien été affiché
 
-    def test_interactive_empty_picks_default(self):
-        # TTY + Entrée (saisie vide) au menu : défaut = storage-simple, monté direct.
+    def test_interactive_empty_cancels_mounts_nothing(self):
+        # TTY + Entrée (saisie vide) au menu : « par défaut, nestor ne fait rien » →
+        # _choisir_couche renvoie None → montage ANNULÉ (code 2), AUCUNE couche montée.
+        # Plus de « défaut 1 » : l'opérateur doit choisir un numéro EXPLICITEMENT.
         mounted = self._spy_launch()
         topo, hist = self._fixtures()
-        self._stub_input([""])  # menu défaut ; pas de confirmation supplémentaire
-        code, _, _ = _capture(["next", "-f", topo, "--target", "atlas", "--history", hist])
-        self.assertEqual(code, 0)
-        self.assertTrue(mounted[0].endswith("local-path.yaml"))  # storage-simple (défaut)
+        self._stub_input([""])  # Entrée vide au menu = annuler
+        code, _, err = _capture(["next", "-f", topo, "--target", "atlas", "--history", hist])
+        self.assertEqual(code, 2)
+        self.assertEqual(mounted, [])  # rien monté
+        self.assertIn("annulé", err)
 
     def test_single_installable_no_menu(self):
         # storage-simple déjà fait : seul metrics-server reste montable → PAS de menu
@@ -3197,6 +3200,97 @@ class Dispatch(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             cli.main([])
         self.assertEqual(ctx.exception.code, 2)
+
+
+class PromptUX(unittest.TestCase):
+    """Standardisation UX des prompts interactifs (« par défaut, nestor ne fait rien »).
+
+    Règle 1 — confirmation binaire : hint « oui/NON » (NON majuscule = défaut False),
+    Entrée vide = ne PAS faire ; `--yes`/`--no-input` force le défaut (CI). Règle 2 —
+    menu de sélection : Entrée vide → None (annuler), PLUS de « défaut 1 »."""
+
+    def _stub_input(self, reponses):
+        """Stube `builtins.input` : capte le PROMPT vu + sert `reponses` en file."""
+        import builtins
+
+        seen = []
+        it = iter(reponses)
+
+        def _fake(prompt=""):
+            seen.append(prompt)
+            return next(it)
+
+        orig = builtins.input
+        builtins.input = _fake
+        self.addCleanup(setattr, builtins, "input", orig)
+        return seen
+
+    # ── _confirm : hint + défaut ──────────────────────────────────────────────
+    def test_confirm_hint_default_false_is_oui_NON(self):
+        seen = self._stub_input([""])  # Entrée vide
+        self.assertIs(cli._confirm("Agir ?", default=False, no_input=False), False)
+        self.assertIn("[oui/NON]", seen[0])  # NON majuscule = défaut
+
+    def test_confirm_hint_default_true_is_OUI_non(self):
+        seen = self._stub_input([""])
+        self.assertIs(cli._confirm("Agir ?", default=True, no_input=False), True)
+        self.assertIn("[OUI/non]", seen[0])  # OUI majuscule = défaut
+
+    def test_confirm_empty_does_not_act(self):
+        # Entrée vide avec défaut False = NE PAS faire l'action (sécurité).
+        self._stub_input([""])
+        self.assertIs(cli._confirm("Détruire ?", default=False, no_input=False), False)
+
+    def test_confirm_accepts_oui_and_non_variants(self):
+        for rep in ("o", "oui", "y", "yes", "OUI", "Yes"):
+            self._stub_input([rep])
+            self.assertIs(cli._confirm("Agir ?", default=False, no_input=False), True, rep)
+        for rep in ("n", "non", "no", "NON"):
+            self._stub_input([rep])
+            self.assertIs(cli._confirm("Agir ?", default=True, no_input=False), False, rep)
+
+    def test_confirm_no_input_returns_default_without_prompt(self):
+        # --no-input (CI) : renvoie le défaut SANS prompter (input() jamais appelé).
+        def _boom(prompt=""):
+            raise AssertionError("input() ne doit pas être appelé sous no_input")
+
+        import builtins
+
+        orig = builtins.input
+        builtins.input = _boom
+        self.addCleanup(setattr, builtins, "input", orig)
+        self.assertIs(cli._confirm("Agir ?", default=False, no_input=True), False)
+        self.assertIs(cli._confirm("Agir ?", default=True, no_input=True), True)
+
+    # ── _choisir_couche : Entrée vide → None (rien monté) ─────────────────────
+    def test_choisir_empty_returns_none(self):
+        seen = self._stub_input([""])  # Entrée vide au menu
+        out = cli._choisir_couche(["a", "b", "c"], lambda p: p, no_input=False)
+        self.assertIsNone(out)  # annulé : rien à monter
+        self.assertIn("annuler", seen[0])  # invite annonce l'annulation
+        self.assertNotIn("défaut", seen[0])  # PLUS de « défaut 1 »
+
+    def test_choisir_explicit_number_picks_it(self):
+        self._stub_input(["2"])
+        self.assertEqual(cli._choisir_couche(["a", "b", "c"], lambda p: p, no_input=False), "b")
+
+    def test_choisir_reprompts_on_invalid_then_accepts(self):
+        seen = self._stub_input(["9", "0", "1"])  # hors borne, hors borne, puis valide
+        self.assertEqual(cli._choisir_couche(["a", "b"], lambda p: p, no_input=False), "a")
+        self.assertGreaterEqual(len(seen), 3)  # a bien re-demandé
+
+    def test_choisir_no_input_keeps_conventional_order(self):
+        # no_input (n'est activé QUE pour --yes par cmd_next) = demande explicite d'agir
+        # → ordre conventionnel (choix[0]), déterministe en CI. SANS prompter.
+        def _boom(prompt=""):
+            raise AssertionError("input() ne doit pas être appelé sous no_input")
+
+        import builtins
+
+        orig = builtins.input
+        builtins.input = _boom
+        self.addCleanup(setattr, builtins, "input", orig)
+        self.assertEqual(cli._choisir_couche(["a", "b"], lambda p: p, no_input=True), "a")
 
 
 if __name__ == "__main__":

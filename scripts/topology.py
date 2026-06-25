@@ -351,7 +351,7 @@ def _confirm(prompt: str, *, default: bool, no_input: bool) -> bool:
     à la casse ; toute autre saisie re-demande."""
     if no_input:
         return default
-    hint = "O/n" if default else "o/N"
+    hint = "OUI/non" if default else "oui/NON"
     while True:
         answer = input(f"{prompt} [{hint}] : ").strip().lower()
         if not answer:
@@ -368,24 +368,31 @@ def _choisir_couche(
 ) -> str | None:
     """Menu numéroté quand PLUSIEURS couches sont montables (choix d'ordre, ADR 0066).
 
-    `choix` est ordonné selon le chemin (le 1er = ordre conventionnel = DÉFAUT).
-    `libelle(phase)` rend le texte humain affiché. Renvoie la phase choisie, ou None
-    si l'opérateur annule (saisie vide hors défaut interdite : Entrée = défaut). Sous
-    `no_input` (CI/non-TTY/--yes) : renvoie le défaut sans prompter — pas de menu
-    interactif à l'aveugle."""
+    `choix` est ordonné selon le chemin (le 1er = ordre conventionnel). `libelle(phase)`
+    rend le texte humain affiché. Renvoie la phase choisie, ou None si l'opérateur annule.
+
+    Principe « par défaut, nestor ne fait rien » : en interactif (TTY), une Entrée vide
+    ANNULE (renvoie None) — PLUS de « défaut 1 ». L'opérateur DOIT choisir un numéro.
+
+    Sous `no_input`, le seul appelant (`cmd_next`) ne l'active QUE pour `--yes` (hors TTY
+    SANS --yes, il refuse AVANT d'atteindre le menu) : `--yes` est une demande EXPLICITE
+    d'agir → on retient l'ordre conventionnel (`choix[0]`), déterministe pour la CI. Le
+    « rien par défaut » vaut pour l'interactif ; `--yes` a dit oui."""
     if no_input:
         return choix[0]
     print("Plusieurs couches sont installables maintenant — laquelle monter ?", file=sys.stderr)
     for i, phase in enumerate(choix, 1):
-        marque = "  (défaut)" if i == 1 else ""
-        print(f"  {i}) {libelle(phase)}{marque}", file=sys.stderr)
+        print(f"  {i}) {libelle(phase)}", file=sys.stderr)
     while True:
-        rep = input(f"Numéro [1-{len(choix)}, défaut 1] : ").strip()
+        rep = input(f"Numéro [1-{len(choix)}] (Entrée = annuler) : ").strip()
         if not rep:
-            return choix[0]
+            return None
         if rep.isdigit() and 1 <= int(rep) <= len(choix):
             return choix[int(rep) - 1]
-        print(f"    réponds un numéro entre 1 et {len(choix)} (ou Entrée pour 1)", file=sys.stderr)
+        print(
+            f"    réponds un numéro entre 1 et {len(choix)} (ou Entrée pour annuler)",
+            file=sys.stderr,
+        )
 
 
 def _activate_symlink(target_rel: str) -> None:
@@ -476,9 +483,11 @@ def cmd_stack_new(args: argparse.Namespace) -> int:
         f"({len(topo.control_nodes)} control / {len(topo.worker_nodes)} worker)."
     )
 
-    # Activation : on la PROPOSE une fois la topo créée (oui par défaut) plutôt que
-    # de l'exiger en flag. `--activate` force le oui sans demander ; `--no-input`
-    # retient le défaut (oui que si --activate, pour rester déterministe en CI).
+    # Activation : on la PROPOSE une fois la topo créée plutôt que de l'exiger en flag.
+    # `--activate` force le oui sans demander ; `--no-input` ne touche RIEN (défaut False,
+    # déterministe en CI). Principe « par défaut, nestor ne fait rien » : Entrée vide =
+    # NE PAS activer (le symlink d'activation pointe la PROD ; ne jamais le repointer à
+    # l'aveugle). L'opérateur active explicitement (« oui ») ou via `stack select`.
     if args.activate:
         activate = True
     elif args.no_input:
@@ -486,7 +495,7 @@ def cmd_stack_new(args: argparse.Namespace) -> int:
     else:
         activate = _confirm(
             f"Activer `{plan.name}` maintenant (topology.yaml → {plan.target}) ?",
-            default=True,
+            default=False,
             no_input=False,
         )
 
@@ -972,8 +981,9 @@ def _discover_gateways_present() -> bool:
 def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
     """Confirme la DESTRUCTION des VMs `vms`. --yes saute ; hors TTY sans --yes : refus.
 
-    Garde-fou anti-destruction silencieuse : sur un TTY, on invite l'opérateur
-    (liste les VMs) ; sans TTY (CI/script), on EXIGE --yes (sinon on ne détruit RIEN)."""
+    Garde-fou anti-destruction silencieuse : sur un TTY, on invite l'opérateur (liste
+    les VMs) via `_confirm` (hint « oui/NON », défaut False = Entrée vide ne détruit
+    RIEN) ; sans TTY (CI/script), on EXIGE --yes (sinon on ne détruit RIEN)."""
     if assume_yes:
         return True
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -982,8 +992,11 @@ def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
             file=sys.stderr,
         )
         return False
-    rep = input(f"⚠️  DÉTRUIRE définitivement les VMs {vms} (+ disques) ? [oui/non] ")
-    return rep.strip().lower() in ("oui", "o", "yes", "y")
+    return _confirm(
+        f"⚠️  DÉTRUIRE définitivement les VMs {vms} (+ disques) ?",
+        default=assume_yes,
+        no_input=assume_yes,
+    )
 
 
 def cmd_destroy(args: argparse.Namespace) -> int:
@@ -2190,14 +2203,18 @@ def _confirm_apply(target: str, *, assume_yes: bool) -> bool:
     """Confirme le montage COMPLET du chemin `target` avant de déléguer à run-phases.sh.
 
     --yes saute ; hors TTY sans --yes : refus (un montage complet n'est jamais
-    silencieux). Sur TTY : invite explicite (le chemin nommé monte toute la séquence)."""
+    silencieux). Sur TTY : invite explicite via `_confirm` (hint « oui/NON », défaut
+    False = Entrée vide ne monte RIEN ; --yes force le défaut à True et saute)."""
     if assume_yes:
         return True
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("montage refusé hors TTY sans --yes (pas de montage silencieux).", file=sys.stderr)
         return False
-    rep = input(f"Monter TOUTE la séquence du chemin `{target}` ? [oui/non] ")
-    return rep.strip().lower() in ("oui", "o", "yes", "y")
+    return _confirm(
+        f"Monter TOUTE la séquence du chemin `{target}` ?",
+        default=assume_yes,
+        no_input=assume_yes,
+    )
 
 
 def _nodes_override(topo) -> str:
@@ -2324,15 +2341,26 @@ def _provision_via_bash(topo: Topology, stack_name: str) -> int:
     ).returncode
 
 
-def _run_path_engine(topo: Topology, target: str, seq: list[str], stack_name: str) -> int:
+def _run_path_engine(
+    topo: Topology,
+    target: str,
+    seq: list[str],
+    stack_name: str,
+    a_appliquer: set[str] | None = None,
+) -> int:
     """Monte le chemin `target` via le moteur Python `nestor.path.run_path` (FLAG opt-in).
 
     Câble les callbacks ABSTRAITS du moteur sur le RÉEL (runner/kubectl/limactl), sur le
     moule de `cmd_ha_3cp`/`cmd_bootstrap_seq` (closures à côté de l'I/O). FAIL-FAST : toute
     PathError/IsolationRefused remonte (mappée en code 1) — AUCUN fallback bash (ADR 0046).
 
+    `a_appliquer` (issu de `compute_plan_state` = le RÉEL) RESTREINT la séquence montée aux
+    phases MANQUANTES : le moteur SAUTE ce qui est déjà `done` (cohérence avec le plan ✓/+ ;
+    plus de rejeu inutile d'une phase montée). None → monte toute `seq` (rétrocompat/tests).
+
     Callbacks (cf. `nestor.path.run_path`) :
-    - `sequence` : la séquence DÉJÀ calculée (`expected_phase_sequence`), injectée telle quelle.
+    - `sequence` : la séquence calculée (`expected_phase_sequence`), FILTRÉE sur `a_appliquer`
+      (ordre de `seq` préservé), injectée au moteur.
     - `assert_safe(phase)` : la GARDE d'isolation banc (`_assert_bench_target`) à CHAQUE phase
       (invariant de boucle, ADR 0097 §5.c) ; l'échappatoire KUBECONFIG (ADR 0065) est gérée
       DANS la garde. Pour une phase à play unitaire, on ajoute `_assert_inventory_safe`.
@@ -2411,12 +2439,19 @@ def _run_path_engine(topo: Topology, target: str, seq: list[str], stack_name: st
             "(run_ha_3cp + fetch_kubeconfig) — _BANC : à câbler+prouver (ADR 0097 §2.b)"
         )
 
-    print(f"→ moteur Python (run_path) : chemin `{target}` ({len(seq)} phase(s)), CP {ctx.cp}.")
+    # Le moteur SAUTE les phases déjà `done` : on monte uniquement `a_appliquer` (le RÉEL,
+    # compute_plan_state), dans l'ORDRE de `seq`. None → toute la séquence (rétrocompat/tests).
+    monter = [p for p in seq if p in a_appliquer] if a_appliquer is not None else list(seq)
+    if a_appliquer is not None and not monter:
+        print("→ moteur Python : rien à monter (tout est déjà à-jour, état réel).")
+        return 0
+
+    print(f"→ moteur Python (run_path) : chemin `{target}` ({len(monter)} phase(s)), CP {ctx.cp}.")
     try:
         result = _path.run_path(
             topo,
             target,
-            sequence=lambda _t, _g: list(seq),
+            sequence=lambda _t, _g: list(monter),
             launch=launch,
             gate=gate,
             assert_safe=assert_safe,
@@ -2524,7 +2559,8 @@ def cmd_up(args: argparse.Namespace) -> int:
         # Le moteur Python ne porte PAS l'arm HA propre (amorçage VIP/etcd) : un chemin
         # `ha-3cp` derrière `--engine=python` lèvera proprement (callback `ha` stubé) plutôt
         # que de monter à moitié. On laisse le moteur trancher (fail-fast), pas un garde ad hoc.
-        return _run_path_engine(topo, target, list(seq), stack_name)
+        # `a_appliquer` (le RÉEL, compute_plan_state) : le moteur SAUTE les phases déjà `done`.
+        return _run_path_engine(topo, target, list(seq), stack_name, a_appliquer)
 
     # NODES_OVERRIDE : la TOPOLOGIE pilote les nœuds du banc (inversion de frontière,
     # ADR 0056 — la stack active décide, le harnais exécute). ha-3cp garde son
@@ -2778,7 +2814,7 @@ def cmd_next(args: argparse.Namespace) -> int:
     no_input = args.yes  # à ce stade : soit TTY (on prompte), soit --yes (on saute)
     # Menu si PLUSIEURS couches montables ; sinon la seule. Choisir un numéro dans le
     # menu EST déjà la décision explicite → on NE redemande PAS de confirmation ensuite
-    # (un seul geste, pas de double [o/N] redondant).
+    # (un seul geste, pas de double [oui/NON] redondant).
     a_choisi_au_menu = len(montables) > 1
     if a_choisi_au_menu:
         phase = _choisir_couche(montables, _quoi_couche_label, no_input=no_input)

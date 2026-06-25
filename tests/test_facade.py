@@ -193,8 +193,8 @@ class FlagRouting(unittest.TestCase):
         """Espionne `_run_path_engine` (la branche python) : renvoie les appels."""
         calls = []
 
-        def _spy(topo, target, seq, stack_name):
-            calls.append((target, list(seq), stack_name))
+        def _spy(topo, target, seq, stack_name, a_appliquer=None):
+            calls.append((target, list(seq), stack_name, a_appliquer))
             return 0
 
         orig = cli._run_path_engine
@@ -237,7 +237,7 @@ class FlagRouting(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(rp_calls, [])  # run-phases.sh JAMAIS appelé par la branche python
         self.assertEqual(len(eng_calls), 1)
-        target, seq, _stack = eng_calls[0]
+        target, seq, _stack, _a_appliquer = eng_calls[0]
         self.assertEqual(target, "layers")
         self.assertEqual(seq[0], "up")  # topo lima → la séquence commence par `up`
         self.assertIn("storage-simple", seq)  # layer déclarée → couche storage-simple
