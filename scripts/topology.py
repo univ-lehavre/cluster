@@ -113,6 +113,7 @@ from nestor import (  # noqa: E402
 )
 from nestor import bootstrap as _bootstrap  # noqa: E402
 from nestor import discover as _discover  # noqa: E402
+from nestor import graph as _graph  # noqa: E402
 from nestor import ha as _ha  # noqa: E402
 from nestor import isolation as _isolation  # noqa: E402
 from nestor import prod_target as _prod_target  # noqa: E402
@@ -724,9 +725,8 @@ def _ready_nodes(target_kind: str = "lima", declared: str | None = None) -> list
 # — on vise la ressource DISCRIMINANTE que le rôle lui-même éprouve (sa gate Ready) :
 #   monitoring → StatefulSet loki Ready (platform-loki) — absent si SeaweedFS manque ;
 #   gitops     → Deployment argocd-server Ready (platform-argocd) ;
-#   dataops    → Deployment dagster-dagster-webserver Ready (le chart Dagster nomme ses
-#                Deployments `dagster-daemon` + `dagster-dagster-webserver`, JAMAIS `dagster` ;
-#                le webserver est l'UI/API — la preuve que la couche RÉPOND) ;
+#   dataops    → Deployment marquez Ready (DERNIER maillon : registry + CNPG + Dagster PUIS
+#                Marquez ; avec Dagster seul la couche passait « ✓ » alors que Marquez manquait) ;
 #   metrics-server / storage-simple → leur Deployment Ready.
 # Format : phase → (kind, name, namespace|None, ready). `ready=True` (workloads) exige
 # readyReplicas≥1 ; `ready=False` (Application Argo : CRD sans replicas) = présence.
@@ -736,38 +736,16 @@ def _ready_nodes(target_kind: str = "lima", declared: str | None = None) -> list
 # 4e champ = critère de SANTÉ : True → readyReplicas≥1 (workload répliqué) ; False →
 # présence seule (CRD type Application, ou StorageClass cluster-scoped) ; "phase" →
 # status.phase == "Ready" (CR opérateur sans replicas : CephCluster, CephObjectStore Rook).
-_LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool | str]] = {
-    "metrics-server": ("deployment", "metrics-server", "kube-system", True),
-    "storage-simple": ("deployment", "local-path-provisioner", "local-path-storage", True),
-    # Couches CEPH (banc Ceph) : leurs CR Rook portent la santé dans `status.phase`, PAS
-    # dans readyReplicas (ce ne sont pas des workloads répliqués). Sans ces signaux,
-    # `_observed_layers` ne voyait JAMAIS ceph/sc/datalake montés → preview/next/scenarios
-    # les croyaient « à monter » sur un banc Ceph pourtant up (bug vécu #227).
-    "ceph": ("cephcluster.ceph.rook.io", "rook-ceph", "rook-ceph", "phase"),
-    "sc": ("storageclass", "rook-ceph-block-replicated", None, False),  # cluster-scoped, présence
-    "datalake": ("cephobjectstore.ceph.rook.io", "datalake", "rook-ceph", "phase"),
-    "monitoring": ("statefulset", "loki", "monitoring", True),
-    "gitops": ("deployment", "argocd-server", "argocd", True),
-    # dataops déploie registry + CNPG + Dagster PUIS Marquez (DERNIER maillon, comme Loki
-    # pour monitoring ; cf. bootstrap/dataops.yaml étape applicative). Le signal doit donc
-    # sonder Marquez (`marquez`/ns marquez) : avec Dagster seul, la couche passait « ✓ à-jour »
-    # alors que Marquez était absent → « DataOps complet » mensonger (le label promet pourtant
-    # « registry + CNPG + Dagster + Marquez »). Marquez Ready ⇒ tout l'amont l'est aussi.
-    "dataops": ("deployment", "marquez", "marquez", True),
-    # MLflow (layer autonome ADR 0082) : le serveur est un Deployment `mlflow`
-    # (nom posé par platform/mlflow/mlflow.yaml) dans le ns `mlflow`. Sa présence
-    # Ready prouve la couche montée (sinon next/preview la croiraient à monter).
-    "mlflow": ("deployment", "mlflow", "mlflow", True),
-    # gitops-seed pose l'Application Argo CD `atlas-workflows` (PAS `atlas` : cf. le
-    # manifeste atlas-workflow-sample/application.example.yaml + le scénario 27). Avec le
-    # mauvais nom, `_observed_layers` ne la voyait jamais faite → `next` la re-proposait en
-    # boucle même après un montage réussi.
-    "gitops-seed": ("application", "atlas-workflows", "argocd", False),
-    # Portail (layer autonome ADR 0091/0092) : le portail est un Deployment `portal`
-    # (nom posé par platform/portal/portal.yaml) dans le ns `portal`. Sa présence Ready
-    # prouve la couche montée (sinon next/preview la croiraient toujours à monter).
-    "portal": ("deployment", "portal", "portal", True),
-}
+#
+# PROJECTION du GRAPHE (lot 4 refonte nestor) : cette table n'est PLUS définie ici en dur,
+# elle DÉRIVE de `nestor.graph` — le signal est porté par le composant qui EST le dernier
+# maillon (champ `Component.signal`), et `graph.LAYER_SIGNAL` le projette par phase. UNE
+# seule source de vérité, plus DEUX tables à tenir cohérentes (tests/test_graph.py prouve
+# l'égalité graph.LAYER_SIGNAL ↔ Component.signal de chaque dernier maillon). Le détail
+# humain (POURQUOI tel maillon : Loki absent si SeaweedFS manque, Marquez = dernier de
+# dataops, #227 pour ceph/sc/datalake, atlas-workflows ≠ atlas…) vit désormais en commentaire
+# sur chaque `signal=` du catalogue `nestor/graph.py`.
+_LAYER_SIGNAL: dict[str, tuple[str, str, str | None, bool | str]] = dict(_graph.LAYER_SIGNAL)
 
 # Kinds dont la SANTÉ se lit via `status.readyReplicas` (workloads répliqués).
 _READY_REPLICAS_KINDS = frozenset({"deployment", "statefulset", "daemonset", "replicaset"})
