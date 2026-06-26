@@ -442,6 +442,83 @@ runs:
         self.assertIn("erreur", err)
 
 
+class Kubectl(unittest.TestCase):
+    """`nestor kubectl …` : kubectl sur la cible de la stack active (ex-`nestor env`)."""
+
+    _BANC_TOPO = (
+        "catalog: {topology: banc}\n"
+        "layers: [storage-simple]\n"
+        "nodes:\n  - {name: node1, roles: [control, worker]}\n"
+        "storage: {backend: local-path}\ntarget_kind: lima\n"
+    )
+
+    def _topo_file(self) -> str:
+        fd, path = tempfile.mkstemp(suffix=".yaml")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(self._BANC_TOPO)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_passes_args_to_kubectl_with_safe_kubeconfig(self):
+        # `nestor kubectl get pods -A` → exécute `kubectl get pods -A` avec un KUBECONFIG
+        # forcé vers la cible SÛRE (_bench_kubeconfig), JAMAIS ~/.kube/config (la prod).
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            seen["kubeconfig"] = (k.get("env") or {}).get("KUBECONFIG")
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["kubectl", "-f", self._topo_file(), "get", "pods", "-A"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["argv"], ["kubectl", "get", "pods", "-A"])
+        # KUBECONFIG forcé (jamais None / ~/.kube/config implicite).
+        self.assertIsNotNone(seen["kubeconfig"])
+        self.assertNotIn(".kube/config", seen["kubeconfig"] or "")
+
+    def test_returns_kubectl_exit_code(self):
+        def _fake_run(argv, *a, **k):
+            return subprocess.CompletedProcess(args=argv, returncode=7)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["kubectl", "-f", self._topo_file(), "get", "nodes"])
+        self.assertEqual(code, 7)
+
+    def test_prod_stack_targets_declared_kubeconfig_not_bench(self):
+        # Stack PROD active : `nestor kubectl` doit viser le kubeconfig DÉCLARÉ (ADR 0090),
+        # PAS le banc — même si main() pose un défaut banc auto (_KUBECONFIG_AUTO_BENCH).
+        # Régression : sinon `nestor kubectl` taperait le banc avec la prod sélectionnée.
+        prod = (
+            "catalog: {topology: dirqual}\n"
+            "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+            "storage: {backend: ceph}\ntarget_kind: prod\n"
+            "kubeconfig: ~/.kube/dirqual.config\n"
+        )
+        fd, path = tempfile.mkstemp(suffix=".yaml")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(prod)
+        self.addCleanup(os.unlink, path)
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["kc"] = (k.get("env") or {}).get("KUBECONFIG")
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        # Simule le défaut auto-banc posé par main() (le piège que le fix neutralise).
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            mock.patch.object(cli, "_KUBECONFIG_AUTO_BENCH", True),
+            mock.patch.object(cli.subprocess, "run", _fake_run),
+        ):
+            os.environ["KUBECONFIG"] = cli._BENCH_KUBECONFIG  # défaut auto-banc en place
+            cli.cmd_kubectl(
+                __import__("argparse").Namespace(file=path, kubectl_args=["get", "nodes"])
+            )
+        self.assertIn("dirqual.config", seen["kc"])  # vise la PROD, pas le banc
+        self.assertNotIn(".work/kubeconfig", seen["kc"])
+
+
 class Preview(unittest.TestCase):
     """`preview` : LA vue complète VOULU + RÉEL + PLAN (absorbe status + refresh)."""
 

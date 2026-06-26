@@ -24,10 +24,18 @@ l'implémentation `scripts/nestor-exec` et applique le `export KUBECONFIG=…` q
 
 > `nestor env` a été **supprimée**
 > ([ADR 0097](decisions/0097-moteur-chemin-python-bash-artefacts.md) §3) — elle
-> incarnait le paramétrage-par-variable-d'environnement aboli. À la place,
-> `nestor stack select <topo>` **pose un contexte kubectl nommé** dans le
-> kubeconfig de la cible : on branche `kubectl` par le mécanisme standard
-> `kubectl --context <topo> …`, **sans aucune variable d'environnement**.
+> incarnait le paramétrage-par-variable-d'environnement aboli. À la place, deux
+> mécanismes :
+>
+> - **`nestor kubectl <args…>`** — lance `kubectl` sur la cible de la **stack
+>   active**, kubeconfig résolu automatiquement (banc Lima ou `kubeconfig:` de
+>   la topo prod, jamais `~/.kube/config` par accident). C'est le remplaçant
+>   direct : `nestor kubectl get pods -A` au lieu de
+>   `eval "$(nestor env)" ; kubectl …`. Si la stack **prod** est active, il vise
+>   la prod ; si c'est le banc, il vise le banc — **sans manipuler
+>   l'environnement du shell**.
+> - `nestor stack select <topo>` **pose aussi un contexte kubectl nommé** dans
+>   le kubeconfig de la cible (mécanisme standard `kubectl --context <topo> …`).
 
 **Installation** — sourcer le fichier `nestor.sh` (racine du dépôt) dans ton
 profil :

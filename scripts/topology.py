@@ -194,6 +194,38 @@ def _kubectl_env(declared: str | None = None) -> dict[str, str]:
     return {**os.environ, "KUBECONFIG": _bench_kubeconfig(declared)}
 
 
+def cmd_kubectl(args: argparse.Namespace) -> int:
+    """`nestor kubectl <args…>` : lance kubectl sur la cible de la STACK ACTIVE.
+
+    Remplaçant ergonomique de l'ancien `nestor env` (supprimé LOT 8) : au lieu d'imprimer
+    `export KUBECONFIG=<banc>` à `eval`, `nestor` EXÉCUTE kubectl avec le bon kubeconfig —
+    résolu par `_bench_kubeconfig` (ADR 0053/0090 : KUBECONFIG explicite → `kubeconfig:` de
+    la topo → banc Lima → `/dev/null`, JAMAIS `~/.kube/config` = la prod par accident). Donc
+    `nestor kubectl get pods -A` vise TOUJOURS la cible déclarée, sans manipuler l'env du
+    shell. Les arguments résiduels sont passés tels quels à kubectl (passthrough).
+
+    Code = celui de kubectl. Pas de cible sûre (banc absent, prod sans `kubeconfig:`) →
+    `_bench_kubeconfig` rend `/dev/null` et kubectl échoue proprement (honnête, ADR 0053).
+
+    NB : `main()` pose un KUBECONFIG=banc par DÉFAUT (`_default_kubeconfig_to_bench`) pour
+    les sondes « état réel ». Ce défaut AUTO (≠ intention opérateur, `_KUBECONFIG_AUTO_BENCH`)
+    NE doit PAS écraser la cible DÉCLARÉE de la stack : si la stack prod est active, `nestor
+    kubectl` doit viser la PROD (sinon il taperait le banc même prod sélectionnée). On
+    neutralise donc le défaut auto avant de résoudre depuis la topo (un KUBECONFIG posé
+    EXPLICITEMENT par l'opérateur, lui, reste prioritaire — intention respectée, ADR 0090)."""
+    topo = load_topology(_resolve(args.file))
+    if _KUBECONFIG_AUTO_BENCH:
+        # défaut posé par nestor lui-même → on le retire pour que _bench_kubeconfig résolve
+        # la cible DÉCLARÉE (prod via topo.kubeconfig), pas le banc auto.
+        os.environ.pop("KUBECONFIG", None)
+    env = _kubectl_env(topo.kubeconfig)
+    passthrough = list(getattr(args, "kubectl_args", []) or [])
+    proc = subprocess.run(  # noqa: S603 — kubectl + args opérateur, cible sûre (env)
+        ["kubectl", *passthrough], env=env, check=False
+    )
+    return proc.returncode
+
+
 def _kubeconfig_reaches_api(kubeconfig: str) -> bool:
     """`True` si ce kubeconfig joint RÉELLEMENT l'API (pas juste un fichier présent).
 
@@ -3553,7 +3585,8 @@ _DISPATCH = {
     # orchestration de TOUTE la séquence — reste à coder).
     "preview": cmd_preview,  # calque `pulumi preview`
     # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) : `nestor` maintient des contextes kubectl
-    # nommés (posés par `stack select`), plus de `export KUBECONFIG` paramétré-par-env.
+    # nommés (posés par `stack select`). Remplaçant ergonomique = `nestor kubectl …` :
+    "kubectl": cmd_kubectl,  # kubectl sur la cible de la stack active (ex-`nestor env`)
     "access": cmd_access,  # accès dev (URLs + secrets) — délègue à access.sh (ADR 0048)
     "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
     "discover": cmd_discover,  # reconstruit un topology.yaml depuis le réel (ADR 0074, inverse de generate)  # noqa: E501
@@ -3776,9 +3809,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
     )
 
-    # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) — plus de sous-parser. Le branchement de
-    # kubectl passe désormais par le contexte nommé que `stack select` pose dans le
-    # kubeconfig de la cible (`kubectl --context <topo> …`), sans variable d'env.
+    # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) — plus de sous-parser. Remplaçant ergonomique :
+    # `nestor kubectl …` exécute kubectl avec le kubeconfig de la cible (stack active),
+    # résolu par _bench_kubeconfig (jamais la prod par accident). Plus de `export` à eval.
+    p_kubectl = sub.add_parser(
+        "kubectl",
+        help="lancer kubectl sur la cible de la stack active (remplace `nestor env`)",
+    )
+    p_kubectl.add_argument(
+        "-f", "--file", default=None, help="topology.yaml à viser (défaut : stack active)"
+    )
+    # REMAINDER : tout ce qui suit `kubectl` est passé tel quel à la vraie commande kubectl
+    # (`nestor kubectl get pods -A`, `nestor kubectl -n monitoring logs …`).
+    p_kubectl.add_argument(
+        "kubectl_args", nargs=argparse.REMAINDER, help="arguments passés à kubectl"
+    )
 
     p_access = sub.add_parser(
         "access",
