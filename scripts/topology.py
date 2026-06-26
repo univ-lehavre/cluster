@@ -1405,8 +1405,13 @@ def _kubectl(*args: str, timeout: int = _REFRESH_TIMEOUT_S):
     CompletedProcess (rc/stdout) ou None si injoignable — l'appelant décide. Le
     kubeconfig vise le banc, sinon un kubeconfig VIDE — jamais la prod (ADR 0053)."""
     try:
+        # `--request-timeout` est un flag GLOBAL kubectl : il DOIT précéder la commande et
+        # surtout le `--` d'un `exec` (sinon il est passé à la commande du conteneur — un
+        # `kubectl exec pod -- gitea …` voyait `gitea … --request-timeout=5s` → « flag not
+        # defined », tout geste seed cassé). On l'insère juste après `kubectl`, où kubectl le
+        # consomme toujours, quelle que soit la sous-commande (get/exec/apply/rollout).
         return subprocess.run(  # noqa: S603 — argv contrôlé (table de workloads)
-            ["kubectl", *args, "--request-timeout=5s"],
+            ["kubectl", "--request-timeout=5s", *args],
             check=False,
             capture_output=True,
             text=True,

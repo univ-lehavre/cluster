@@ -485,6 +485,25 @@ class Kubectl(unittest.TestCase):
             code = cli.main(["kubectl", "-f", self._topo_file(), "get", "nodes"])
         self.assertEqual(code, 7)
 
+    def test_request_timeout_flag_precedes_args_not_after_exec_dashdash(self):
+        # Régression (constaté au banc) : `_kubectl` ajoutait `--request-timeout` EN FIN
+        # d'argv → pour un `exec pod -- gitea …`, le flag atterrissait APRÈS le `--`, donc
+        # passé à `gitea` (« flag not defined ») → tout geste seed cassé. Le flag GLOBAL doit
+        # précéder la sous-commande.
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            cli._kubectl("-n", "gitea", "exec", "pod", "--", "gitea", "admin", "user", "list")
+        argv = seen["argv"]
+        # --request-timeout est juste après `kubectl`, AVANT le `--` de l'exec.
+        self.assertEqual(argv[0], "kubectl")
+        self.assertTrue(argv[1].startswith("--request-timeout"))
+        self.assertLess(argv.index("--request-timeout=5s"), argv.index("--"))
+
     def test_prod_stack_targets_declared_kubeconfig_not_bench(self):
         # Stack PROD active : `nestor kubectl` doit viser le kubeconfig DÉCLARÉ (ADR 0090),
         # PAS le banc — même si main() pose un défaut banc auto (_KUBECONFIG_AUTO_BENCH).
