@@ -11,6 +11,40 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.45.0](https://github.com/univ-lehavre/cluster/compare/v2.44.0...v2.45.0) (2026-06-26)
+
+
+### Features
+
+* **build:** premier pas GitOps build — digest exposé, déploiement par [@sha256](https://github.com/sha256) (ADR 0095 §1.a) ([3dd359c](https://github.com/univ-lehavre/cluster/commit/3dd359c982e9e310350c6ed60c24bf5e75d2ecc5))
+* **ci:** garde-fou parité graphe↔ansible (adr 0096, détecteur « marquez oublié ») ([3961d51](https://github.com/univ-lehavre/cluster/commit/3961d51a977b1930b2d1cefc67c5d0e0e1138341))
+* **nestor:** graphe de dépendances Python figé + check de parité Ansible (refonte lots 2-5) ([742699c](https://github.com/univ-lehavre/cluster/commit/742699c03fc4c662eae4456801c85811ad613fe8))
+* **nestor:** porte le graphe de dépendances en python (parité bash) ([3a4d282](https://github.com/univ-lehavre/cluster/commit/3a4d2827da3b72fffb6de276a9f4b7b80f94e05f))
+
+
+### Bug Fixes
+
+* **bootstrap:** durcir l'anti-affinité CoreDNS via kubectl patch (lib python absente du nœud) ([fa17a5c](https://github.com/univ-lehavre/cluster/commit/fa17a5c83384b87b03137936e279b1f75b1650e5))
+* **nestor:** compute_plan_state partagée preview/next/up — fin de la divergence (étape 1) ([9f60891](https://github.com/univ-lehavre/cluster/commit/9f6089131e595df5c17c5dbb0567824b660739dc))
+* **nestor:** compute_plan_state partagée preview/next/up — fin de la divergence (refonte étape 1) ([4384fda](https://github.com/univ-lehavre/cluster/commit/4384fdae1ed0ea95707e482bfc140cdb6986a80b))
+
+
+### Refactor
+
+* **nestor:** dérive le signal de santé du graphe (source unique) ([f9d1fac](https://github.com/univ-lehavre/cluster/commit/f9d1fac5f1ff55d89f649bb65b12bb353a54a63d))
+* **nestor:** remplace les ponts subprocess rollback-lib par le graphe python ([85da6da](https://github.com/univ-lehavre/cluster/commit/85da6da0edecb99ecfd36803f7e8ebb44970a1f3))
+
+
+### Documentation
+
+* **adr:** 0096 et 0097 Accepted ; plan refonte nestor Actif ([5d088a5](https://github.com/univ-lehavre/cluster/commit/5d088a515f2de1a034c24911181a3d00bc4a5829))
+* **adr:** 0096 et 0097 Accepted ; plan refonte nestor Actif ([4c68ab8](https://github.com/univ-lehavre/cluster/commit/4c68ab88249636c4a9ef398cc53694c823674b02))
+* **adr:** refonte nestor — graphe Python figé (0096) + moteur de chemin (0097) + plan ([7377753](https://github.com/univ-lehavre/cluster/commit/737775385cc255dd567b98ee123f3ecd6242383a))
+* **adr:** refonte nestor — graphe Python figé (0096) + moteur de chemin (0097) + plan ([b22bf41](https://github.com/univ-lehavre/cluster/commit/b22bf415ac955016c86caaf83c98e9014c4c074d))
+* **plan:** refonte nestor — coche étape 1 + lots 2-5 (mergés [#508](https://github.com/univ-lehavre/cluster/issues/508)/[#509](https://github.com/univ-lehavre/cluster/issues/509)) ([647b1a9](https://github.com/univ-lehavre/cluster/commit/647b1a9a8e5f189048e134cc1ad4c9917dce5579))
+* **plan:** refonte nestor — coche étape 1 + lots 2-5 (mergés) ([09f67b1](https://github.com/univ-lehavre/cluster/commit/09f67b1cc3c1f6074036e130931674ee30736f8d))
+* **readme:** régénère le bloc « le dépôt en chiffres » (34 scénarios, ADR 0060) ([f817822](https://github.com/univ-lehavre/cluster/commit/f81782203508206a98d61d896f153d12481be27f))
+
 ## [2.44.0](https://github.com/univ-lehavre/cluster/compare/v2.43.0...v2.44.0) (2026-06-25)
 
 
