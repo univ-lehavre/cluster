@@ -566,7 +566,7 @@ class AssertSafeIsolation(unittest.TestCase):
         # `_assert_bench_target` LÈVE (cible non sûre) → le callback assert_safe lève → le
         # moteur wrappe en IsolationRefused → `_run_path_engine` re-lève en _UsageError.
         # AUCUN play lancé, AUCUNE VM touchée (sentinelles launch + provision).
-        def _refuse(action):
+        def _refuse(action, *_a, **_k):
             raise cli._UsageError(f"REFUS : `{action}` cible non-banc (test)")
 
         self._patch(cli, "_assert_bench_target", _refuse)
@@ -587,7 +587,7 @@ class AssertSafeIsolation(unittest.TestCase):
         # Bout-en-bout par main() : la garde top-level de cmd_up (`_assert_bench_target`) LÈVE
         # → main mappe _UsageError en code 2. Vaut pour le chemin python comme bash (garde
         # AVANT le routage du flag) — la garde d'isolation s'applique aux DEUX engines.
-        def _refuse(action):
+        def _refuse(action, *_a, **_k):
             raise cli._UsageError(f"REFUS : `{action}` cible non-banc (test)")
 
         self._patch(cli, "_assert_bench_target", _refuse)
@@ -667,7 +667,7 @@ class SeedPhaseWiring(unittest.TestCase):
         # La garde BANC est BRANCHÉE : `_assert_bench_target` est appelée pour gitops-seed
         # (via assert_safe du moteur ET via assert_target du seed). On compte ses appels.
         guard_calls = []
-        self._patch(cli, "_assert_bench_target", lambda action: guard_calls.append(action))
+        self._patch(cli, "_assert_bench_target", lambda action, *a, **k: guard_calls.append(action))
         self._stub_do()
         code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
         self.assertEqual(code, 0)

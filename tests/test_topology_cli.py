@@ -102,7 +102,7 @@ def setUpModule():
     # Garde d'isolation neutralisée PAR DÉFAUT : les tests métier (up/next/destroy/…)
     # n'ont pas de vrai banc et ne doivent pas être bloqués par elle. La classe
     # `BenchTargetGuard` la RÉACTIVE explicitement pour la tester (cf. _REAL_ASSERT_BENCH).
-    cli._assert_bench_target = lambda action: None
+    cli._assert_bench_target = lambda *a, **k: None
     # Gate de santé (#355) neutralisée PAR DÉFAUT (renvoie sain) : sans banc, sonder le
     # dernier maillon bouclerait 30×4s. Les tests de `next` stubent déjà launch_phase ;
     # la gate elle-même est testée à part (NextHealthGate) avec sa propre stub.
@@ -352,7 +352,7 @@ class Epreuves(unittest.TestCase):
         }
         cli._ready_nodes = lambda *_a: ["node1"]
         cli._observed_layers = lambda phases: observed
-        cli._assert_bench_target = lambda action: None
+        cli._assert_bench_target = lambda *a, **k: None
         self._orig_exists = cli.os.path.exists
         cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else self._orig_exists(p)
         for k, v in orig.items():
@@ -2392,7 +2392,7 @@ class Access(unittest.TestCase):
         # ne vise pas le banc (ADR 0053). Pas de KUBECONFIG exporté, pas de banc.
         self._stub(bench=False)
         cli._assert_bench_target = _REAL_ASSERT_BENCH
-        self.addCleanup(setattr, cli, "_assert_bench_target", lambda action: None)
+        self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
         orig_ctx = cli._context_targets_bench
         cli._context_targets_bench = lambda: False
         self.addCleanup(setattr, cli, "_context_targets_bench", orig_ctx)
@@ -2410,7 +2410,7 @@ class BenchTargetGuard(unittest.TestCase):
 
     def _arm(self, *, bench_exists, targets_bench, kubeconfig_env=None):
         cli._assert_bench_target = _REAL_ASSERT_BENCH
-        self.addCleanup(setattr, cli, "_assert_bench_target", lambda action: None)
+        self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
         orig_exists = cli.os.path.exists
         cli.os.path.exists = lambda p: (
             bench_exists if p == cli._BENCH_KUBECONFIG else orig_exists(p)

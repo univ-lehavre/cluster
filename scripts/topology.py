@@ -1490,15 +1490,25 @@ def _context_targets_bench() -> bool:
     return out.returncode == 0 and server.startswith(("https://127.0.0.1:", "https://localhost:"))
 
 
-def _assert_bench_target(action: str) -> None:
+def _assert_bench_target(action: str, topo: Topology | None = None) -> None:
     """Garde d'isolation (ADR 0053) : une commande BANC mutante ne s'exécute QUE sur
     une cible prouvée-banc. Si le kubeconfig du banc est absent ET que le contexte
     courant ne vise pas le banc, REFUS (code 2) — protège la prod d'une mutation par
     erreur. Échappatoire prod EXPLICITE : `KUBECONFIG` exporté = intention assumée
     (ADR 0065) — la garde ne bloque alors pas (et `discover` n'est jamais gardé,
-    ADR 0074)."""
+    ADR 0074).
+
+    PROVISIONNING FROM-SCRATCH (`up`) : quand `topo` est fourni ET déclare
+    `target_kind: lima`, le banc n'existe PAS ENCORE (c'est `up` qui le CRÉE) — exiger
+    un kubeconfig de banc bloquerait le cas légitime du montage depuis zéro (vécu : un
+    `down` puis `up` était refusé). La TOPOLOGIE qui déclare `lima` est alors le signal
+    sûr (= `EXPECTED_TARGET_KIND=lima` du bash), tant qu'aucun `KUBECONFIG` prod n'est
+    exporté. Une topo `prod` reste soumise à la garde stricte (jamais de from-scratch
+    prod sans cible prouvée)."""
     if os.environ.get("KUBECONFIG"):
         return  # intention explicite assumée par l'opérateur
+    if topo is not None and topo.target_kind == "lima":
+        return  # `up` from-scratch d'un banc déclaré : la topo lima EST le signal sûr
     if os.path.exists(_BENCH_KUBECONFIG) and _context_targets_bench():
         return  # banc présent ET contexte = banc : nominal
     raise _UsageError(
@@ -2965,7 +2975,7 @@ def _run_path_engine(
         # INVARIANT DE BOUCLE (ADR 0097 §5.c) : garde d'isolation AVANT CHAQUE phase. La
         # garde gère l'échappatoire KUBECONFIG (ADR 0065 — elle rend tôt si exporté). Pour
         # une phase à play unitaire (Ansible SSH/exec), on valide AUSSI l'inventaire.
-        _assert_bench_target(f"nestor up --engine=python ({phase})")
+        _assert_bench_target(f"nestor up --engine=python ({phase})", topo)
         if _phases.has_phase_plan(phase) and _phases.phase_plan(phase).playbook is not None:
             _assert_inventory_safe(f"nestor up --engine=python ({phase})", ctx.inventory, topo)
 
@@ -3192,9 +3202,12 @@ def cmd_up(args: argparse.Namespace) -> int:
     Là où `next` monte UNE couche (1er drift), `up` monte TOUTE la séquence. Code 0
     si le montage réussit ; 1 si run-phases.sh échoue ; 2 (usage) si confirmation
     refusée / chemin incohérent avec le backend."""
-    _assert_bench_target("nestor up")
     path = _resolve(args.file)
     topo = load_topology(path)
+    # Garde APRÈS le chargement : `up` from-scratch d'un banc (target_kind: lima) est légitime
+    # même sans kubeconfig de banc existant (c'est `up` qui le crée) — la topo lima est le
+    # signal sûr. Une topo prod reste sous garde stricte (cible prouvée requise).
+    _assert_bench_target("nestor up", topo)
     target = args.target or default_target(topo)
     try:
         seq = expected_phase_sequence(topo, target)
