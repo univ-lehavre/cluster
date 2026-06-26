@@ -603,5 +603,209 @@ class AssertSafeIsolation(unittest.TestCase):
         self.assertIn("REFUS", err)
 
 
+class SeedPhaseWiring(unittest.TestCase):
+    """La phase DÉLÉGUÉE `gitops-seed` (playbook=None) est routée vers `seed.run_seed`,
+    pas vers un playbook — et ne crashe PLUS au montage (TypeError os.path.join(None)).
+
+    On STUBE le `do(step)` réel (`_seed_do_banc`) et la garde (`_assert_bench_target`) pour
+    prouver le CÂBLAGE + le fail-fast, ZÉRO Gitea réel (honnêteté ADR 0034). Le seed banc
+    réel (gitea-init) se prouve au banc (cf. `cli._seed_banc_todo`)."""
+
+    def _patch(self, obj, name, value):
+        orig = getattr(obj, name)
+        setattr(obj, name, value)
+        self.addCleanup(setattr, obj, name, orig)
+
+    def setUp(self):
+        # Gardes neutralisées (testées à part), gate gitops-seed → saine (pas de cluster).
+        self._patch(cli, "_assert_bench_target", lambda *_a, **_k: None)
+        self._patch(cli, "_assert_inventory_safe", lambda *_a, **_k: None)
+        self._patch(cli, "_wait_layer_healthy", lambda *_a, **_k: True)
+
+    def _stub_do(self, *, verdict_by_step=None):
+        """Stub `_seed_do_banc` → un `do(step)` injecté (zéro kubectl/Gitea). Enregistre les
+        steps vus ; `verdict_by_step` permet de faire échouer un step précis (fail-fast)."""
+        seen = []
+        verdicts = verdict_by_step or {}
+
+        def _fake_do_factory(topo, config):
+            def do(step):
+                seen.append(step)
+                return verdicts.get(step, True)
+
+            return do
+
+        self._patch(cli, "_seed_do_banc", _fake_do_factory)
+        return seen
+
+    def test_gitops_seed_routes_to_run_seed_not_playbook(self):
+        # gitops-seed (playbook=None) → seed.run_seed, JAMAIS launch_phase_idempotent (qui
+        # ferait os.path.join(_ROOT, None) → TypeError). Sentinelle sur le runner.
+        def _boom_play(*_a, **_k):
+            raise AssertionError("gitops-seed routé vers un playbook (launch_phase_idempotent)")
+
+        self._patch(cli._runner, "launch_phase_idempotent", _boom_play)
+        seen = self._stub_do()
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
+        self.assertEqual(code, 0)
+        # Les 7 étapes du seed banc ont été jouées DANS L'ORDRE (via run_seed → do).
+        from nestor import seed as _seed
+
+        self.assertEqual(seen, list(_seed.seed_steps("banc")))
+
+    def test_playbook_none_does_not_crash(self):
+        # Régression directe du crash : la phase à playbook=None ne lève PAS de TypeError ;
+        # elle est montée (code 0) via le câblage seed.
+        self._stub_do()
+        try:
+            code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
+        except TypeError as exc:  # pragma: no cover — le bug d'origine
+            self.fail(f"playbook=None a crashé (os.path.join(_ROOT, None)) : {exc}")
+        self.assertEqual(code, 0)
+
+    def test_banc_guard_is_wired(self):
+        # La garde BANC est BRANCHÉE : `_assert_bench_target` est appelée pour gitops-seed
+        # (via assert_safe du moteur ET via assert_target du seed). On compte ses appels.
+        guard_calls = []
+        self._patch(cli, "_assert_bench_target", lambda action: guard_calls.append(action))
+        self._stub_do()
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
+        self.assertEqual(code, 0)
+        # Au moins une fois (assert_safe en tête de phase + assert_target dans run_seed).
+        self.assertTrue(guard_calls)
+        self.assertTrue(all("gitops-seed" in a for a in guard_calls))
+
+    def test_guard_refused_maps_to_code_2(self):
+        # La garde banc REFUSE (cible prod) → SeedGuardRefused → IsolationRefused → _UsageError
+        # → code 2. AUCUN step seed exécuté (la garde protège en amont). On prouve le MAPPING
+        # SeedGuardRefused → code 2 (le câblage assert_target=_assert_bench_target est prouvé
+        # par test_banc_guard_is_wired) : run_seed lève le refus AVANT tout step.
+        from nestor import seed as _seed
+
+        seen = self._stub_do()
+
+        def _run_seed_refuses(kind, config, *, assert_target, do):
+            self.assertEqual(kind, "banc")  # le seed monté est bien le banc
+            raise _seed.SeedGuardRefused("garde banc refuse la prod (test)")
+
+        # `_launch_seed` résout `_seed.run_seed` = attribut du module `nestor.seed` (= cli._seed).
+        self._patch(cli._seed, "run_seed", _run_seed_refuses)
+        with self.assertRaises(cli._UsageError):
+            _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
+        self.assertEqual(seen, [])
+
+    def test_failed_step_fails_fast_code_1(self):
+        # Un step KO → SeedError → PathError fail-fast → code 1 (aucun fallback bash).
+        seen = self._stub_do(verdict_by_step={"org-repo": False})
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
+        self.assertEqual(code, 1)
+        # On s'est arrêté SUR org-repo (3e step) — pas de step au-delà.
+        self.assertEqual(seen, ["admin", "token", "org-repo"])
+
+    def test_api_ok_distinguishes_success_from_real_failure(self):
+        # Correctif d'audit : org-repo/webhook VALIDENT le code HTTP (plus de `return True`
+        # inconditionnel). 2xx (créé) et 409/422 (existe déjà) = idempotent ok ; 401 (token
+        # invalide), 5xx, ou code vide (exec KO) = ÉCHEC → le step échoue (pas de faux-vert).
+        for code in ("200", "201", "409", "422"):
+            self.assertTrue(cli._seed_api_ok(code), f"{code} doit être OK")
+        for code in ("401", "403", "500", "", "000"):
+            self.assertFalse(cli._seed_api_ok(code), f"{code} doit être un ÉCHEC")
+
+    def test_seed_never_uses_fqdn_in_kubectl_exec(self):
+        # Le seed RÉEL (`_seed_do_banc`) ne tape JAMAIS le FQDN svc.cluster.local : il exec
+        # DANS le pod gitea (localhost:3000). On espionne `_kubectl` et `_kubectl_apply_stdin`
+        # et on vérifie qu'AUCUN argv kubectl exec ne contient 'svc.cluster.local'. La seule
+        # occurrence légitime est dans le repoURL d'un Application/hook (résolu DANS le cluster
+        # par argocd-repo-server, pas par l'hôte) — jamais dans un `kubectl exec ... curl`.
+        from nestor import seed as _seed
+
+        exec_argvs = []
+        applied = []
+
+        def _spy_kubectl(*args, **kw):
+            argv = list(args)
+            # `exec` argv : on capture ce qui suit `--` (la commande DANS le pod).
+            if "exec" in argv:
+                exec_argvs.append(argv)
+            # Stubs de retour pour que le do() avance : pod trouvé, secrets/token non vides.
+            if "get" in argv and "pod" in argv:
+                return subprocess.CompletedProcess(args, 0, stdout="gitea-0", stderr="")
+            if "get" in argv and "secret" in argv:
+                # base64('x') = 'eA==' (mot de passe / secret non vide, décodable).
+                if any("jsonpath" in str(a) for a in argv):
+                    return subprocess.CompletedProcess(args, 0, stdout="eA==", stderr="")
+                return subprocess.CompletedProcess(args, 0, stdout="exists", stderr="")
+            if "exec" in argv:
+                # generate-access-token --raw → un token non vide ; curl → code 200.
+                if "generate-access-token" in argv:
+                    return subprocess.CompletedProcess(args, 0, stdout="tok123\n", stderr="")
+                return subprocess.CompletedProcess(args, 0, stdout="200", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        def _spy_apply(manifest, **kw):
+            applied.append(manifest)
+            return subprocess.CompletedProcess(["kubectl", "apply"], 0, stdout="", stderr="")
+
+        self._patch(cli, "_kubectl", _spy_kubectl)
+        self._patch(cli, "_kubectl_apply_stdin", _spy_apply)
+        # push-code-location est STUBÉ (lève) — on le neutralise ici pour exercer les AUTRES
+        # gestes réels (admin/token/org-repo/webhook-secret/webhook/application) et inspecter
+        # leurs argv. On reconstruit un do() qui saute push-code-location.
+        config = _seed.SeedConfig.from_topology(_topo(_LIMA_SOLO))
+        real_do = cli._seed_do_banc(_topo(_LIMA_SOLO), config)
+
+        def do_skip_stub(step):
+            if step == "push-code-location":
+                return True  # STUBÉ ailleurs ; on exerce les gestes réels
+            return real_do(step)
+
+        for step in _seed.seed_steps("banc"):
+            do_skip_stub(step)
+        # AUCUN `kubectl exec … curl …` ne TAPE Gitea via un FQDN : la cible curl est l'URL
+        # `http://localhost:3000/api/v1…` (Gitea depuis le pod), jamais `gitea-…svc.cluster.local`
+        # (qui timeouterait côté glibc/curl, mémoire dns-fqdn-timeout). Le FQDN argocd-server du
+        # CORPS du hook (config.url) est légitime : c'est le callback résolu PAR Gitea DANS le
+        # cluster, jamais une cible curl — on vérifie donc l'URL de l'API, pas tout l'argv.
+        for argv in exec_argvs:
+            if "curl" not in argv:
+                continue
+            # L'URL de l'API Gitea est l'argument qui commence par http(s):// et contient /api/v1.
+            api_urls = [a for a in argv if str(a).startswith("http") and "/api/v1" in str(a)]
+            self.assertTrue(api_urls, f"exec curl sans URL d'API Gitea : {argv}")
+            for url in api_urls:
+                self.assertNotIn("svc.cluster.local", url, f"FQDN Gitea dans la cible curl : {url}")
+                self.assertIn("localhost:3000", url)
+
+    def test_seed_banc_todo_declared(self):
+        # La frontière code-écrit / preuve-banc du seed est DÉCLARÉE (honnêteté ADR 0034).
+        self.assertTrue(cli._seed_banc_todo())
+        self.assertTrue(all(isinstance(t, str) and t for t in cli._seed_banc_todo()))
+
+    def test_gitops_seed_chains_after_dataops(self):
+        # Le chemin enchaîne dataops → gitops-seed : la phase déléguée se monte APRÈS la
+        # couche dataops (parité de la séquence run-phases.sh). dataops a des hooks e2e STUBÉS
+        # qui LÈVENT → on neutralise les hooks pour exercer l'enchaînement de routage. Les
+        # hooks sont résolus via `nestor.phases.e2e_hooks_for` (importé localement par
+        # _run_path_engine) → on patche le module.
+        self._patch(_phases, "e2e_hooks_for", lambda *_a, **_k: ())
+
+        def _ok_idem(*_a, **_k):
+            return _runner.IdempotenceResult(
+                deployed=_runner.RunResult(rc=0, status="successful", changed=0),
+                replayed=_runner.RunResult(rc=0, status="successful", changed=0),
+                verdict="ok",
+                message="ok",
+            )
+
+        self._patch(cli._runner, "launch_phase_idempotent", _ok_idem)
+        seen = self._stub_do()
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["dataops", "gitops-seed"], "solo")
+        self.assertEqual(code, 0)
+        # Le seed (ses 7 steps) a bien été joué APRÈS dataops (sinon `seen` serait vide).
+        from nestor import seed as _seed
+
+        self.assertEqual(seen, list(_seed.seed_steps("banc")))
+
+
 if __name__ == "__main__":
     unittest.main()

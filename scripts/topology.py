@@ -123,6 +123,7 @@ from nestor import refresh_plan as _refresh_plan  # noqa: E402
 from nestor import roundtrip as _roundtrip  # noqa: E402
 from nestor import runner as _runner  # noqa: E402
 from nestor import scale as _scale  # noqa: E402
+from nestor import seed as _seed  # noqa: E402
 from nestor import smoke as _smoke  # noqa: E402
 from nestor.history import (  # noqa: E402
     last_run_for_target,
@@ -2373,6 +2374,449 @@ def _provision_via_bash(topo: Topology, stack_name: str) -> int:
     ).returncode
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SEED GITOPS (phase DÉLÉGUÉE `gitops-seed`) — câblage façade du LOT 8 (ADR 0097 §2/§3).
+#
+# `nestor/seed.py:run_seed` est PUR (logique : gardes opposées banc/prod + ordre des
+# étapes ; I/O injectée). ICI la façade BRANCHE l'I/O RÉELLE sur le banc : chaque étape
+# de `seed_steps('banc')` exécute le geste de `bench/lima/gitea-init.sh`, via
+# `kubectl exec DANS le pod gitea` (Gitea écoute `localhost:3000` — JAMAIS le FQDN
+# `*.svc.cluster.local`, qui timeoute côté glibc/curl quand un search domain externe est
+# présent, drift dirqual 2026-06-22) + `kubectl` pour les Secrets / l'apply de l'Application.
+#
+# ⚠️ HONNÊTETÉ (ADR 0034) : ce câblage MUTE un Gitea/Argo CD vivant — sa preuve DÉFINITIVE
+# est un RUN BANC du mainteneur (impossible dans cette session). Les tests (test_facade.py)
+# stubent TOUTE l'I/O (kubectl espionné, do() injecté) : ils prouvent le ROUTAGE + la garde,
+# pas le seed réel. Les gestes trop liés au format d'une RÉPONSE API réelle (Contents API :
+# SHA d'un fichier existant) sont STUBÉS PRÉCISÉMENT (voir l'étape `push-code-location`),
+# avec un `_BANC_TODO` ciblé — le maximum est câblé pour de vrai (admin/token/org-repo/
+# webhook-secret/webhook/application).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Ce que le câblage RÉEL du seed banc ne couvre PAS encore (à câbler+prouver au banc,
+# ADR 0034) — frontière déclarée, exposée par `_seed_banc_todo()` (testable).
+_SEED_BANC_TODO = (
+    "étape `push-code-location` STUBÉE : la Contents API create-or-update (lire le SHA "
+    "d'un fichier existant dans la RÉPONSE JSON, PUT-avec-sha vs POST) dépend du format de "
+    "réponse réel de Gitea — à porter+prouver au banc (gitea-init.sh:109-143)",
+    "dédup du webhook par URL (gitea-init.sh:163-166) : le comptage parse la réponse "
+    "`GET /hooks` réelle — ici on POST best-effort (Gitea refuse un doublon) ; affiner+prouver",
+    "run banc gitops-seed (gitea-init réel : admin/token/org-repo/webhook/application) "
+    "consigné — PREUVE DÉFINITIVE, reste à faire au banc",
+)
+
+
+def _seed_banc_todo() -> tuple[str, ...]:
+    """Frontière code-écrit / preuve-banc du seed (honnêteté ADR 0034). Testable."""
+    return _SEED_BANC_TODO
+
+
+class _SeedLaunchResult:
+    """Résultat d'un montage de phase DÉLÉGUÉE (seed), au moule de `IdempotenceResult`.
+
+    `run_path` lit `getattr(res, "ok")` / `.message` du callback `launch` ; on expose donc
+    `.ok` (bool) + `.message` pour qu'une phase seed s'intègre comme une phase à play."""
+
+    def __init__(self, ok: bool, message: str = "") -> None:
+        self.ok = ok
+        self.message = message
+
+
+def _gitea_pod(ns: str) -> str:
+    """Nom du pod gitea (réplica unique, Recreate) — parité `gitea_pod()` de gitea-init.sh.
+
+    Lecture seule (kubectl get, cible sûre `_kubectl_env`). Lève `_path.PathError` si absent
+    (le seed n'a pas de sens sans Gitea posé — fail-fast honnête, ADR 0046)."""
+    out = _kubectl(
+        "-n",
+        ns,
+        "get",
+        "pod",
+        "-l",
+        "app=gitea",
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+    )
+    pod = out.stdout.strip() if out and out.returncode == 0 else ""
+    if not pod:
+        raise _path.PathError(
+            f"seed gitops : pod gitea introuvable (ns `{ns}`) — Gitea est-il posé "
+            "(phase `gitops`) sur la cible banc ? (gitea-init.sh:49)"
+        )
+    return pod
+
+
+def _seed_api_ok(code: str) -> bool:
+    """Verdict d'idempotence d'un appel API Gitea du seed (parité du `|| true` ciblé du bash).
+
+    `code` = code HTTP rendu par `_api` (vide si l'exec a échoué : curl absent / pod
+    injoignable). Succès = 2xx (créé) OU « existe déjà » (409 conflit / 422 unprocessable —
+    idempotent au rejeu). Un code vide (exec KO) ou une vraie erreur (401 token invalide,
+    5xx) = ÉCHEC → le step échoue (fail-fast, pas de faux-vert — correctif d'audit)."""
+    if not code:
+        return False  # exec KO (out None / rc≠0) → pas un succès
+    return code.startswith("2") or code in ("409", "422")
+
+
+def _gitea_exec(ns: str, pod: str, argv: list[str], *, timeout: int = 60):
+    """Exécute `argv` DANS le pod gitea (`kubectl exec`) — parité `gitea_cli()` de
+    gitea-init.sh. C'est le MOULE anti-FQDN : la CLI/curl tape Gitea sur `localhost:3000`
+    DEPUIS le pod, donc AUCUNE résolution `*.svc.cluster.local` côté hôte (piège DNS).
+
+    Renvoie le CompletedProcess (cible sûre `_kubectl_env`, jamais la prod) ou None si
+    injoignable. L'appelant DÉCIDE (idempotence : un `user already exists` n'est pas une erreur)."""
+    return _kubectl("-n", ns, "exec", pod, "--", *argv, timeout=timeout)
+
+
+def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
+    """Construit le `do(step)` RÉEL du seed banc (porte `bench/lima/gitea-init.sh`).
+
+    Pour CHAQUE étape de `seed.seed_steps('banc')`, exécute le geste correspondant via
+    `kubectl exec DANS le pod gitea` (localhost:3000, JAMAIS le FQDN) + `kubectl` pour les
+    Secrets / l'apply de l'Application. Idempotent (un step déjà fait = ok, pas d'erreur).
+
+    Le token API (étape 2) doit être réutilisé par les étapes API suivantes (3/6) : le
+    `do(step) -> bool` étant sans état, on le THREADE via une closure `state` mutable —
+    exactement comme la variable `token` du `main()` bash, locale au run. La cible kube est
+    la cible SÛRE (`_kubectl`/`_kubectl_env`) ; le pod est résolu une fois au 1er besoin."""
+    ns, argocd_ns = config.ns, config.argocd_ns
+    org, repo = config.org, config.repo
+    api_base = f"{config.api}/api/v1"
+    state: dict[str, str] = {}
+
+    def pod() -> str:
+        if "pod" not in state:
+            state["pod"] = _gitea_pod(ns)
+        return state["pod"]
+
+    def _api(method: str, path: str, body: str | None = None, *, ok_codes=("2",)):
+        """Appel REST à Gitea DEPUIS le pod (curl localhost:3000) — parité `api()` bash.
+
+        `kubectl exec pod -- curl -sS -w '\\n%{http_code}' …` : on sépare le CODE HTTP du
+        corps pour DÉCIDER (idempotence) sans parser un FQDN ni résoudre du DNS côté hôte."""
+        url = f"{api_base}{path}"
+        argv = [
+            "curl",
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "-X",
+            method,
+            "-H",
+            f"Authorization: token {state.get('token', '')}",
+            "-H",
+            "Content-Type: application/json",
+            url,
+        ]
+        if body is not None:
+            argv += ["-d", body]
+        out = _gitea_exec(ns, pod(), argv)
+        code = out.stdout.strip() if out and out.returncode == 0 else ""
+        return out, code
+
+    def admin() -> bool:
+        # 1/7 — admin Gitea (idempotent). Le mot de passe vit dans le Secret K8s `gitea-admin`
+        # (créé s'il manque) ; `gitea admin user create` échoue si l'utilisateur existe → on
+        # AVALE ce cas (idempotent), comme le `|| true` du bash (gitea-init.sh:69-84).
+        chk = _kubectl("-n", ns, "get", "secret", "gitea-admin")
+        if not (chk and chk.returncode == 0):
+            # Mot de passe : généré dans le cluster (jamais versionné, ADR 0023). On le laisse
+            # à kubectl `create secret --from-literal` ; le banc le (re)lira au besoin.
+            _kubectl(
+                "-n",
+                ns,
+                "create",
+                "secret",
+                "generic",
+                "gitea-admin",
+                "--from-literal=username=" + config.admin_user,
+                "--from-literal=password=" + _seed_gen_secret(),
+            )
+        pw = _kubectl(
+            "-n",
+            ns,
+            "get",
+            "secret",
+            "gitea-admin",
+            "-o",
+            "jsonpath={.data.password}",
+        )
+        admin_pw = _b64decode(pw.stdout.strip()) if pw and pw.returncode == 0 else ""
+        if not admin_pw:
+            return False
+        _gitea_exec(
+            ns,
+            pod(),
+            [
+                "gitea",
+                "admin",
+                "user",
+                "create",
+                "--username",
+                config.admin_user,
+                "--password",
+                admin_pw,
+                "--email",
+                config.admin_email,
+                "--admin",
+                "--must-change-password=false",
+            ],
+        )  # rc≠0 si l'utilisateur existe déjà → idempotent (on ne propage pas l'échec)
+        return True
+
+    def token() -> bool:
+        # 2/7 — token API. `--raw` n'affiche QUE la valeur (pas de préfixe à parser) ;
+        # nom unique par run (un nom pris ferait échouer). On CAPTURE le stdout et on strippe
+        # le whitespace (parité gitea-init.sh:90-94) ; vide → échec (fail-fast).
+        token_name = f"atlas-init-{os.getpid()}-{int(time.time())}"
+        out = _gitea_exec(
+            ns,
+            pod(),
+            [
+                "gitea",
+                "admin",
+                "user",
+                "generate-access-token",
+                "--username",
+                config.admin_user,
+                "--token-name",
+                token_name,
+                "--scopes",
+                "all",
+                "--raw",
+            ],
+        )
+        tok = "".join((out.stdout or "").split()) if out and out.returncode == 0 else ""
+        if not tok:
+            return False
+        state["token"] = tok
+        return True
+
+    def org_repo() -> bool:
+        # 3/7 — organisation + dépôt des workflows (idempotent : un 422 « existe déjà » est OK,
+        # parité du `|| true` bash, gitea-init.sh:127-131). On POST les deux ; un code 2xx OU
+        # un « already exists » (409/422) = succès idempotent. Un ÉCHEC réel (token invalide
+        # 401, Gitea 500, exec KO → code vide) = échec (fail-fast, pas de faux-vert — audit).
+        _, c_org = _api("POST", "/orgs", f'{{"username":"{org}"}}')
+        _, c_repo = _api(
+            "POST",
+            f"/orgs/{org}/repos",
+            f'{{"name":"{repo}","auto_init":true,"default_branch":"main"}}',
+        )
+        return _seed_api_ok(c_org) and _seed_api_ok(c_repo)
+
+    def push_code_location() -> bool:
+        # 4/7 — push de la code-location jouet (Contents API create-or-update).
+        # _BANC : STUBÉ. Le geste réel (gitea-init.sh:109-143) LIT le SHA d'un fichier
+        # existant dans la RÉPONSE JSON d'un `GET /contents`, puis PUT-avec-sha (MAJ) vs POST
+        # (création), et VÉRIFIE la présence de `"commit"` dans la réponse. Ce parsing dépend
+        # du FORMAT de réponse réel de Gitea — trop lié au cluster vivant pour être écrit sans
+        # banc (un faux parsing pousserait une version périmée → Argo CD déploierait du drift).
+        # On REFUSE de verdir à tort : on lève (honnêteté ADR 0034). Voir `_SEED_BANC_TODO`.
+        raise _path.PathError(
+            "seed gitops étape `push-code-location` NON câblée (STUB) : Contents API "
+            "create-or-update (SHA du fichier existant, PUT/POST) à porter+prouver au banc "
+            "— _BANC (gitea-init.sh:109-143, ADR 0034)"
+        )
+
+    def webhook_secret() -> bool:
+        # 5/7 — secret partagé `webhook.gitea.secret` (argocd-secret). Idempotent : on lit le
+        # secret partagé `argocd-webhook-shared` (créé s'il manque), puis on patche
+        # `argocd-secret` (parité gitea-init.sh:145-158). Le secret vit dans le cluster.
+        chk = _kubectl("-n", argocd_ns, "get", "secret", "argocd-webhook-shared")
+        if not (chk and chk.returncode == 0):
+            _kubectl(
+                "-n",
+                argocd_ns,
+                "create",
+                "secret",
+                "generic",
+                "argocd-webhook-shared",
+                "--from-literal=secret=" + _seed_gen_secret(),
+            )
+        got = _kubectl(
+            "-n",
+            argocd_ns,
+            "get",
+            "secret",
+            "argocd-webhook-shared",
+            "-o",
+            "jsonpath={.data.secret}",
+        )
+        wh = _b64decode(got.stdout.strip()) if got and got.returncode == 0 else ""
+        if not wh:
+            return False
+        state["wh_secret"] = wh
+        patch = _kubectl(
+            "-n",
+            argocd_ns,
+            "patch",
+            "secret",
+            "argocd-secret",
+            "--type",
+            "merge",
+            "-p",
+            '{"stringData":{"webhook.gitea.secret":"' + wh + '"}}',
+        )
+        return bool(patch and patch.returncode == 0)
+
+    def webhook() -> bool:
+        # 6/7 — webhook Gitea → argocd-server/api/webhook. On POST le hook (events push,
+        # content_type json, secret partagé). _BANC : la DÉDUP par URL (compter les hooks
+        # existants en parsant `GET /hooks`) dépend du format de réponse réel — ici on POST
+        # best-effort (Gitea refuse un doublon, idempotent de fait) ; affinage au banc
+        # (_SEED_BANC_TODO). Le repoURL du hook est intra-cluster (résolu par Gitea, pas l'hôte).
+        hooks_url = f"http://argocd-server.{argocd_ns}.svc.cluster.local/api/webhook"
+        body = (
+            '{"type":"gitea","active":true,"events":["push"],"config":{"url":"'
+            + hooks_url
+            + '","content_type":"json","secret":"'
+            + state.get("wh_secret", "")
+            + '"}}'
+        )
+        _, c_hook = _api("POST", f"/repos/{org}/{repo}/hooks", body)
+        # 2xx OU « existe déjà » (Gitea refuse un doublon) = ok ; échec réel (token/exec) = KO.
+        return _seed_api_ok(c_hook)
+
+    def application() -> bool:
+        # 7/7 — Application Argo CD `atlas-workflows` (repoURL Gitea injecté, valeur de
+        # déploiement, ADR 0023). `kubectl apply -f -` du manifeste rendu (parité
+        # gitea-init.sh:172-198). Pur kubectl (aucun token, aucune réponse API à parser).
+        manifest = _seed_application_manifest(config)
+        out = _kubectl_apply_stdin(manifest)
+        return bool(out and out.returncode == 0)
+
+    handlers = {
+        "admin": admin,
+        "token": token,
+        "org-repo": org_repo,
+        "push-code-location": push_code_location,
+        "webhook-secret": webhook_secret,
+        "webhook": webhook,
+        "application": application,
+    }
+
+    def do(step: str) -> bool:
+        handler = handlers.get(step)
+        if handler is None:
+            raise _path.PathError(f"seed gitops : étape banc inconnue `{step}` (façade)")
+        return handler()
+
+    return do
+
+
+def _seed_gen_secret() -> str:
+    """Secret aléatoire (32 alnum) — parité `gen_secret()` de gitea-init.sh (jamais versionné,
+    ADR 0023 ; vit uniquement dans le cluster). `secrets` (stdlib) plutôt que /dev/urandom."""
+    import secrets
+    import string
+
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(32))
+
+
+def _b64decode(b64: str) -> str:
+    """Décode un Secret K8s (`{.data.X}` est base64). Vide si illisible (l'appelant décide)."""
+    import base64
+
+    try:
+        return base64.b64decode(b64).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return ""
+
+
+def _seed_application_manifest(config) -> str:
+    """Rend le manifeste de l'Application Argo CD `atlas-workflows` (repoURL Gitea injecté).
+
+    Le repoURL intra-cluster est `config.workflows_repo_url()` (résolu par argocd-repo-server
+    DANS le cluster, pas par l'hôte). Parité gitea-init.sh:177-198 (template versionné =
+    application.example.yaml ; ici la valeur de déploiement, ADR 0023)."""
+    return (
+        "apiVersion: argoproj.io/v1alpha1\n"
+        "kind: Application\n"
+        "metadata:\n"
+        "  name: atlas-workflows\n"
+        f"  namespace: {config.argocd_ns}\n"
+        "spec:\n"
+        f"  project: {config.org}\n"
+        "  source:\n"
+        f"    repoURL: {config.workflows_repo_url()}\n"
+        "    targetRevision: main\n"
+        "    path: .\n"
+        "  destination:\n"
+        "    server: https://kubernetes.default.svc\n"
+        "    namespace: dagster\n"
+        "  syncPolicy:\n"
+        "    automated:\n"
+        "      prune: true\n"
+        "      selfHeal: true\n"
+        "    syncOptions:\n"
+        "      - CreateNamespace=false\n"
+    )
+
+
+def _kubectl_apply_stdin(manifest: str, *, timeout: int = _REFRESH_TIMEOUT_S):
+    """`kubectl apply -f -` en passant `manifest` sur STDIN (cible sûre `_kubectl_env`).
+
+    Renvoie le CompletedProcess ou None si injoignable. SÉPARÉ de `_kubectl` (qui ne pousse
+    pas de STDIN) — moule de l'apply de l'Application du seed (gitea-init.sh:177)."""
+    try:
+        return subprocess.run(  # noqa: S603 — argv contrôlé, manifeste rendu d'une config validée
+            ["kubectl", "apply", "-f", "-", "--request-timeout=5s"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=manifest,
+            env=_kubectl_env(),
+            timeout=timeout,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult:
+    """Monte une phase DÉLÉGUÉE (seed) : route `gitops-seed` vers `seed.run_seed('banc', …)`.
+
+    BRANCHE la garde BANC (`_assert_bench_target`, cible = banc Lima) et le `do(step)` RÉEL
+    (`_seed_do_banc`, porté de gitea-init.sh). Mappe les verdicts du seed sur le moule du
+    moteur de chemin (FAIL-FAST, AUCUN fallback, ADR 0046) :
+      - `SeedGuardRefused` (garde banc refuse une cible prod) → `_path.IsolationRefused` (le
+        moteur la re-lève → `_run_path_engine` la mappe en `_UsageError` → code 2) ;
+      - `SeedError` (étape KO) → `_path.PathError` (fail-fast → code 1, aucun fallback).
+    Un succès → `_SeedLaunchResult(ok=True)` (le moteur l'intègre comme une phase montée).
+
+    Le seed PROD (`kind='prod'`, app-of-apps sur dirqual) N'EST PAS monté ici : le banc
+    mono-nœud teste `'banc'` ; la prod se prouve au rebuild dirqual (garde `assert_prod_target`
+    + `do()` prod à câbler+prouver, _SEED_BANC_TODO / seed.banc_todo). On ne fabrique PAS un
+    faux montage prod (honnêteté ADR 0034) — `run_seed('prod', …)` reste accessible côté
+    `nestor/seed.py`, sans montage façade tant que la preuve dirqual n'est pas en main."""
+    _ = derived  # le seed lit la config du YAML (SeedConfig.from_topology), pas le faisceau -e
+    if phase != "gitops-seed":
+        raise _path.PathError(
+            f"phase déléguée `{phase}` : aucun câblage seed connu (seul `gitops-seed` est porté)"
+        )
+    config = _seed.SeedConfig.from_topology(topo)
+    do = _seed_do_banc(topo, config)
+    print(f"→ {phase} : seed des DONNÉES via nestor/seed.py (gitea-init, garde banc)…")
+    try:
+        _seed.run_seed(
+            "banc",
+            config,
+            assert_target=lambda: _assert_bench_target(f"nestor up --engine=python ({phase})"),
+            do=do,
+        )
+    except _seed.SeedGuardRefused as exc:
+        # REFUS de garde (cible non-banc) = sécurité, PAS un échec de montage → IsolationRefused
+        # (le moteur re-lève, _run_path_engine mappe en _UsageError → code 2). Rien n'a muté.
+        raise _path.IsolationRefused(str(exc)) from exc
+    except _seed.SeedError as exc:
+        # Étape KO → fail-fast (ADR 0046), AUCUN fallback : remonte en PathError (code 1).
+        raise _path.PathError(f"seed gitops (banc) : {exc}") from exc
+    return _SeedLaunchResult(ok=True, message="seed banc gitops appliqué")
+
+
 def _run_path_engine(
     topo: Topology,
     target: str,
@@ -2424,6 +2868,12 @@ def _run_path_engine(
         # gate, le moteur appelle bien la gate ; les hooks e2e (dataops) sont joués ICI, après
         # succès du play — ils LÈVENT E2EHookStubbed (attendu, voir _BANC_TODO).
         plan = _phases.phase_plan(phase)
+        # PHASE DÉLÉGUÉE (playbook is None) : ce N'EST PAS un play Ansible mais une étape de
+        # DONNÉES portée par `nestor/seed.py` (gitops-seed → gitea-init.sh). On NE fait donc
+        # PAS `os.path.join(_ROOT, None)` (TypeError au montage) : on route vers le câblage
+        # seed (run_seed banc, garde _assert_bench_target). Voir `_launch_seed`.
+        if plan.playbook is None:
+            return _launch_seed(phase, topo, derived)
         playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
         extravars = _phases.extravars_for(phase, derived)
         print(f"→ {phase} : montage idempotent via ansible-runner ({plan.playbook})…")
