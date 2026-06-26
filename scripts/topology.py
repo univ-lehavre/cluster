@@ -63,6 +63,7 @@ La logique de mapping exception→code est testée par tests/test_topology_cli.p
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import datetime as dt
 import difflib
@@ -150,6 +151,11 @@ _BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
 # (l'inventaire PROD). `next` doit viser CELUI-CI pour une topo lima — sinon un montage
 # banc SSH sur la prod (faille ADR 0053). Choisi par `_inventory_for(topo)`.
 _BENCH_INVENTORY = os.path.join(_ROOT, "bench", "lima", ".work", "inventory.yaml")
+# Manifestes de la code-location JOUET poussés dans Gitea par le seed banc (Contents API ;
+# step `push-code-location`, parité gitea-init.sh:SAMPLE_DIR). VERSIONNÉS dans le dépôt (pas
+# dans le pod) → on les LIT côté hôte puis on les base64-encode côté Python (le `base64` du
+# bash agissait sur l'hôte aussi : le fichier n'est pas dans le pod gitea).
+_SEED_SAMPLE_DIR = os.path.join(_ROOT, "bench", "lima", "atlas-workflow-sample")
 # Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
 # un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha_probes._vm_exec).
 _REFRESH_TIMEOUT_S = 8
@@ -2392,22 +2398,24 @@ def _provision_via_bash(topo: Topology, stack_name: str) -> int:
 # ⚠️ HONNÊTETÉ (ADR 0034) : ce câblage MUTE un Gitea/Argo CD vivant — sa preuve DÉFINITIVE
 # est un RUN BANC du mainteneur (impossible dans cette session). Les tests (test_facade.py)
 # stubent TOUTE l'I/O (kubectl espionné, do() injecté) : ils prouvent le ROUTAGE + la garde,
-# pas le seed réel. Les gestes trop liés au format d'une RÉPONSE API réelle (Contents API :
-# SHA d'un fichier existant) sont STUBÉS PRÉCISÉMENT (voir l'étape `push-code-location`),
-# avec un `_BANC_TODO` ciblé — le maximum est câblé pour de vrai (admin/token/org-repo/
-# webhook-secret/webhook/application).
+# pas le seed réel. Les 7 steps sont désormais CÂBLÉS pour de vrai (admin/token/org-repo/
+# push-code-location/webhook-secret/webhook/application) — y compris la Contents API
+# create-or-update (push-code-location), dont le PARSING de réponse (SHA existant, présence
+# de `"commit"`) reste à PROUVER au banc (format réel de Gitea) sans plus lever de STUB.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Ce que le câblage RÉEL du seed banc ne couvre PAS encore (à câbler+prouver au banc,
 # ADR 0034) — frontière déclarée, exposée par `_seed_banc_todo()` (testable).
 _SEED_BANC_TODO = (
-    "étape `push-code-location` STUBÉE : la Contents API create-or-update (lire le SHA "
-    "d'un fichier existant dans la RÉPONSE JSON, PUT-avec-sha vs POST) dépend du format de "
-    "réponse réel de Gitea — à porter+prouver au banc (gitea-init.sh:109-143)",
+    "étape `push-code-location` CÂBLÉE (Contents API create-or-update : GET du SHA, "
+    'PUT-avec-sha vs POST, vérif `"commit"`) — le PARSING de la réponse réelle de Gitea '
+    "(objet vs liste de `GET /contents`, forme du PUT/POST) reste à PROUVER au banc "
+    "(gitea-init.sh:109-143) : le step TENTE le vrai push et échoue honnêtement si un détail "
+    "de format cloche, il ne lève plus de STUB à l'aveugle",
     "dédup du webhook par URL (gitea-init.sh:163-166) : le comptage parse la réponse "
     "`GET /hooks` réelle — ici on POST best-effort (Gitea refuse un doublon) ; affiner+prouver",
-    "run banc gitops-seed (gitea-init réel : admin/token/org-repo/webhook/application) "
-    "consigné — PREUVE DÉFINITIVE, reste à faire au banc",
+    "run banc gitops-seed (gitea-init réel : admin/token/org-repo/push-code-location/"
+    "webhook/application) consigné — PREUVE DÉFINITIVE, reste à faire au banc",
 )
 
 
@@ -2463,6 +2471,47 @@ def _seed_api_ok(code: str) -> bool:
     return code.startswith("2") or code in ("409", "422")
 
 
+def _seed_contents_sha(resp_body: str) -> str:
+    """Extrait le `sha` d'une réponse `GET /repos/.../contents/<path>` de Gitea.
+
+    Parse JSON PROPRE (préférable au grep bash) + ROBUSTE : `GET /contents/<path>` rend un
+    OBJET pour un fichier, mais une LISTE pour un répertoire (et un message d'erreur pour un
+    404 — le fichier n'existe pas encore). On renvoie le `sha` du 1er objet plausible, sinon
+    une chaîne VIDE (= « pas de fichier existant » → l'appelant fera un POST de création,
+    parité du `sha` vide du bash). Un corps illisible → vide (l'appelant décide)."""
+    if not resp_body or not resp_body.strip():
+        return ""
+    try:
+        data = json.loads(resp_body)
+    except (ValueError, TypeError):
+        return ""
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return ""
+    sha = data.get("sha")
+    return sha if isinstance(sha, str) else ""
+
+
+def _seed_resp_has_commit(resp_body: str) -> bool:
+    """Vrai si la réponse d'un PUT/POST `/contents` contient un objet `commit` (parité du
+    `grep -q '"commit"'` du bash). Un PUT/POST réussi de la Contents API renvoie
+    `{"content": …, "commit": {…}}` ; sans `commit`, l'écriture A ÉCHOUÉ (l'ancienne version
+    resterait dans Gitea → Argo CD déploierait un manifeste périmé : drift à éviter).
+
+    Parse JSON propre ; on tolère qu'un corps non-JSON contienne malgré tout le marqueur
+    (fail-safe identique au grep du bash) → l'appelant échoue (return False) si rien."""
+    if not resp_body:
+        return False
+    try:
+        data = json.loads(resp_body)
+        if isinstance(data, dict) and isinstance(data.get("commit"), dict):
+            return True
+    except (ValueError, TypeError):
+        pass
+    return '"commit"' in resp_body
+
+
 def _gitea_exec(ns: str, pod: str, argv: list[str], *, timeout: int = 60):
     """Exécute `argv` DANS le pod gitea (`kubectl exec`) — parité `gitea_cli()` de
     gitea-init.sh. C'est le MOULE anti-FQDN : la CLI/curl tape Gitea sur `localhost:3000`
@@ -2494,19 +2543,25 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
             state["pod"] = _gitea_pod(ns)
         return state["pod"]
 
-    def _api(method: str, path: str, body: str | None = None, *, ok_codes=("2",)):
-        """Appel REST à Gitea DEPUIS le pod (curl localhost:3000) — parité `api()` bash.
+    def _api_full(method: str, path: str, body: str | None = None):
+        """Appel REST à Gitea DEPUIS le pod (curl localhost:3000) — parité `api()` bash, CORPS
+        INCLUS. Renvoie `(out, code, resp_body)`.
 
-        `kubectl exec pod -- curl -sS -w '\\n%{http_code}' …` : on sépare le CODE HTTP du
-        corps pour DÉCIDER (idempotence) sans parser un FQDN ni résoudre du DNS côté hôte."""
+        `kubectl exec pod -- curl -sS -w '\\n%{http_code}' …` (PAS de `-o /dev/null`) : curl
+        écrit le CORPS de la réponse puis, sur une DERNIÈRE ligne, le code HTTP (moule du bash
+        `-w '\\n%{http_code}'`). On sépare la dernière ligne (code) du reste (corps) pour
+        DÉCIDER (idempotence) ET LIRE la réponse (SHA d'un fichier, présence de `"commit"`)
+        sans parser un FQDN ni résoudre du DNS côté hôte.
+
+        Le CORPS est nécessaire à `push-code-location` (Contents API : lire le SHA existant,
+        vérifier `"commit"`) ; les steps org-repo/webhook n'en ont besoin que du code → ils
+        passent par le wrapper `_api` (corps ignoré)."""
         url = f"{api_base}{path}"
         argv = [
             "curl",
             "-sS",
-            "-o",
-            "/dev/null",
             "-w",
-            "%{http_code}",
+            "\n%{http_code}",
             "-X",
             method,
             "-H",
@@ -2518,7 +2573,18 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
         if body is not None:
             argv += ["-d", body]
         out = _gitea_exec(ns, pod(), argv)
-        code = out.stdout.strip() if out and out.returncode == 0 else ""
+        if not (out and out.returncode == 0):
+            return out, "", ""
+        # Le code HTTP est sur la DERNIÈRE ligne ; le corps est tout ce qui précède (le `-w
+        # '\\n%{http_code}'` ajoute UNE ligne après le corps, exactement comme le bash).
+        raw = out.stdout or ""
+        resp_body, _sep, code = raw.rpartition("\n")
+        return out, code.strip(), resp_body
+
+    def _api(method: str, path: str, body: str | None = None):
+        """Variante CODE-SEUL de `_api_full` (corps ignoré) — pour org-repo/webhook qui ne
+        décident que sur le code HTTP. Renvoie `(out, code)` (parité de l'API d'origine)."""
+        out, code, _resp = _api_full(method, path, body)
         return out, code
 
     def admin() -> bool:
@@ -2620,18 +2686,38 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
         return _seed_api_ok(c_org) and _seed_api_ok(c_repo)
 
     def push_code_location() -> bool:
-        # 4/7 — push de la code-location jouet (Contents API create-or-update).
-        # _BANC : STUBÉ. Le geste réel (gitea-init.sh:109-143) LIT le SHA d'un fichier
-        # existant dans la RÉPONSE JSON d'un `GET /contents`, puis PUT-avec-sha (MAJ) vs POST
-        # (création), et VÉRIFIE la présence de `"commit"` dans la réponse. Ce parsing dépend
-        # du FORMAT de réponse réel de Gitea — trop lié au cluster vivant pour être écrit sans
-        # banc (un faux parsing pousserait une version périmée → Argo CD déploierait du drift).
-        # On REFUSE de verdir à tort : on lève (honnêteté ADR 0034). Voir `_SEED_BANC_TODO`.
-        raise _path.PathError(
-            "seed gitops étape `push-code-location` NON câblée (STUB) : Contents API "
-            "create-or-update (SHA du fichier existant, PUT/POST) à porter+prouver au banc "
-            "— _BANC (gitea-init.sh:109-143, ADR 0034)"
-        )
+        # 4/7 — push de la code-location jouet (Contents API create-or-update, idempotent).
+        # Parité gitea-init.sh:109-143 (push_gitea_file) pour les 3 manifestes versionnés de
+        # `bench/lima/atlas-workflow-sample/` (_SEED_SAMPLE_DIR). Pour CHAQUE fichier :
+        #   1. base64 du CONTENU lu côté HÔTE (le fichier est versionné, PAS dans le pod : on
+        #      l'encode en Python, jamais via un `base64` exécuté dans le pod) ;
+        #   2. GET /contents/<path> → SHA du fichier existant (vide au 1er passage / 404) ;
+        #   3. sha présent → PUT-avec-sha (MAJ) ; absent → POST (création) ;
+        #   4. VÉRIFIER `"commit"` dans la réponse — un PUT/POST raté laisse l'ANCIENNE version
+        #      dans Gitea → Argo CD déploierait un manifeste périmé (drift). Sans `commit` =
+        #      ÉCHEC → return False (fail-fast : run_seed s'arrête net, aucun faux-vert).
+        for fname in ("code-location.yaml", "workspace-patch.yaml", "reload-hook.yaml"):
+            try:
+                with open(os.path.join(_SEED_SAMPLE_DIR, fname), "rb") as fh:
+                    content_b64 = base64.b64encode(fh.read()).decode("ascii")
+            except OSError:
+                return False  # fichier sample illisible → fail-fast (le seed n'a pas de sens)
+            contents_path = f"/repos/{org}/{repo}/contents/{fname}"
+            # GET du SHA existant (404 si absent → sha vide, on créera par POST). Le code HTTP
+            # n'est PAS gaté ici (un 404 est attendu au 1er passage) : on lit le corps.
+            _, _get_code, get_body = _api_full("GET", contents_path)
+            sha = _seed_contents_sha(get_body)
+            if sha:
+                body = json.dumps(
+                    {"content": content_b64, "sha": sha, "message": f"update {fname} (atlas-init)"}
+                )
+                _, _code, resp = _api_full("PUT", contents_path, body)
+            else:
+                body = json.dumps({"content": content_b64, "message": f"add {fname} (atlas-init)"})
+                _, _code, resp = _api_full("POST", contents_path, body)
+            if not _seed_resp_has_commit(resp):
+                return False  # PUT/POST raté → return False (fail-fast, drift évité)
+        return True
 
     def webhook_secret() -> bool:
         # 5/7 — secret partagé `webhook.gitea.secret` (argocd-secret). Idempotent : on lit le
@@ -2731,8 +2817,6 @@ def _seed_gen_secret() -> str:
 
 def _b64decode(b64: str) -> str:
     """Décode un Secret K8s (`{.data.X}` est base64). Vide si illisible (l'appelant décide)."""
-    import base64
-
     try:
         return base64.b64decode(b64).decode("utf-8")
     except (ValueError, UnicodeDecodeError):

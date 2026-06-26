@@ -18,9 +18,11 @@ banc. La preuve définitive du chemin `--engine=python` est un run banc mono-nœ
 mainteneur (cf. `nestor.path.banc_todo`). NE PRÉTENDS JAMAIS l'avoir prouvé ici.
 """
 
+import base64
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import sys
@@ -761,19 +763,16 @@ class SeedPhaseWiring(unittest.TestCase):
 
         self._patch(cli, "_kubectl", _spy_kubectl)
         self._patch(cli, "_kubectl_apply_stdin", _spy_apply)
-        # push-code-location est STUBÉ (lève) — on le neutralise ici pour exercer les AUTRES
-        # gestes réels (admin/token/org-repo/webhook-secret/webhook/application) et inspecter
-        # leurs argv. On reconstruit un do() qui saute push-code-location.
+        # Les 7 gestes réels (admin/token/org-repo/push-code-location/webhook-secret/webhook/
+        # application) sont exercés et leurs argv inspectés — y compris push-code-location, qui
+        # exec `curl localhost:3000/api/v1/.../contents/...` (jamais le FQDN). Son verdict
+        # importe peu ICI (le spy curl rend un corps vide → POST sans `commit`) : on n'inspecte
+        # que les URL d'API, pas le succès du push (prouvé par les tests dédiés plus bas).
         config = _seed.SeedConfig.from_topology(_topo(_LIMA_SOLO))
         real_do = cli._seed_do_banc(_topo(_LIMA_SOLO), config)
 
-        def do_skip_stub(step):
-            if step == "push-code-location":
-                return True  # STUBÉ ailleurs ; on exerce les gestes réels
-            return real_do(step)
-
         for step in _seed.seed_steps("banc"):
-            do_skip_stub(step)
+            real_do(step)
         # AUCUN `kubectl exec … curl …` ne TAPE Gitea via un FQDN : la cible curl est l'URL
         # `http://localhost:3000/api/v1…` (Gitea depuis le pod), jamais `gitea-…svc.cluster.local`
         # (qui timeouterait côté glibc/curl, mémoire dns-fqdn-timeout). Le FQDN argocd-server du
@@ -789,10 +788,139 @@ class SeedPhaseWiring(unittest.TestCase):
                 self.assertNotIn("svc.cluster.local", url, f"FQDN Gitea dans la cible curl : {url}")
                 self.assertIn("localhost:3000", url)
 
+    # ── push-code-location (step 4/7, Contents API create-or-update) ────────────────
+    # CÂBLÉ (plus de STUB) : pour les 3 manifestes de `bench/lima/atlas-workflow-sample/`,
+    # base64 (Python) → GET du SHA → PUT-avec-sha (existe) vs POST (404) → vérif `"commit"`.
+    # On STUBE `_gitea_exec` (curl DANS le pod) avec un faux Gitea : I/O injectée, zéro cluster.
+    _PCL_FILES = ("code-location.yaml", "workspace-patch.yaml", "reload-hook.yaml")
+
+    def _fake_gitea(self, *, existing=False, commit=True):
+        """Faux `_gitea_exec` modélisant la Contents API de Gitea pour push-code-location.
+
+        `existing` : le GET /contents rend un fichier avec un `sha` (→ PUT) ou un 404 (→ POST).
+        `commit` : le PUT/POST rend (ou non) un objet `commit` (→ succès ou échec fail-fast).
+        Enregistre les appels exec curl (method, path, body) dans la liste renvoyée."""
+        from nestor import seed as _seed
+
+        config = _seed.SeedConfig.from_topology(_topo(_LIMA_SOLO))
+        api_base = f"{config.api}/api/v1"
+        calls = []
+
+        def _exec(ns, pod, argv, **kw):
+            if "curl" not in argv:
+                # generate-access-token --raw → token ; autres exec → ok.
+                if "generate-access-token" in argv:
+                    return subprocess.CompletedProcess(argv, 0, "tok123\n", "")
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            # Reconstitue method/url/body de l'argv curl (parité _api_full).
+            method = argv[argv.index("-X") + 1]
+            url = next(a for a in argv if str(a).startswith("http") and "/api/v1" in str(a))
+            path = str(url)[len(api_base) :]
+            body = argv[argv.index("-d") + 1] if "-d" in argv else None
+            calls.append((method, path, body, str(url)))
+            # `-w '\n%{http_code}'` : corps puis DERNIÈRE ligne = code HTTP (moule réel).
+            if method == "GET":
+                if existing:
+                    payload = json.dumps({"name": "x", "sha": "deadbeefsha", "type": "file"})
+                    return subprocess.CompletedProcess(argv, 0, payload + "\n200", "")
+                # 404 : Gitea rend un message d'erreur JSON, pas de `sha`.
+                payload = json.dumps({"message": "object does not exist [id: ...]"})
+                return subprocess.CompletedProcess(argv, 0, payload + "\n404", "")
+            # PUT/POST : succès = objet content + commit ; échec = pas de commit.
+            if commit:
+                payload = json.dumps({"content": {"name": "x"}, "commit": {"sha": "c0ffee"}})
+                code = "200" if method == "PUT" else "201"
+                return subprocess.CompletedProcess(argv, 0, payload + "\n" + code, "")
+            payload = json.dumps({"message": "nope"})
+            return subprocess.CompletedProcess(argv, 0, payload + "\n422", "")
+
+        self._patch(cli, "_gitea_exec", _exec)
+        self._patch(cli, "_gitea_pod", lambda *_a, **_k: "gitea-0")
+        # token() doit réussir pour que push_code_location ait un token threadé ; le do() le pose.
+        return config, calls
+
+    def _push_only(self, config):
+        """Construit le do() réel et joue token (pour le state) puis push-code-location seul."""
+        do = cli._seed_do_banc(_topo(_LIMA_SOLO), config)
+        self.assertTrue(do("token"), "token doit réussir pour threader l'auth")
+        return do
+
+    def test_push_code_location_new_files_post(self):
+        # Fichiers ABSENTS (GET → 404, sha vide) → POST de création pour les 3, chacun renvoie
+        # un `commit` → succès. On vérifie : 1 GET + 1 POST par fichier, dans l'ordre.
+        config, calls = self._fake_gitea(existing=False, commit=True)
+        do = self._push_only(config)
+        self.assertTrue(do("push-code-location"))
+        gets = [c for c in calls if c[0] == "GET"]
+        posts = [c for c in calls if c[0] == "POST"]
+        puts = [c for c in calls if c[0] == "PUT"]
+        self.assertEqual(len(gets), 3)
+        self.assertEqual(len(posts), 3)  # 404 → création
+        self.assertEqual(puts, [])  # aucun PUT (pas de sha)
+        # Les 3 fichiers du sample sont ciblés (path /contents/<fname>) ET le body porte un
+        # `content` base64 + le message « add ... », pas de `sha`.
+        for fname in self._PCL_FILES:
+            post = next(c for c in posts if c[1].endswith(f"/contents/{fname}"))
+            payload = json.loads(post[2])
+            self.assertIn("content", payload)
+            self.assertNotIn("sha", payload)
+            self.assertIn("add", payload["message"])
+            # Le content est le base64 DU FICHIER lu côté hôte (Python), décodable.
+            with open(os.path.join(cli._SEED_SAMPLE_DIR, fname), "rb") as fh:
+                self.assertEqual(base64.b64decode(payload["content"]), fh.read())
+
+    def test_push_code_location_existing_files_put_with_sha(self):
+        # Fichiers EXISTANTS (GET → 200 avec sha) → PUT-avec-sha (MAJ idempotente) pour les 3.
+        config, calls = self._fake_gitea(existing=True, commit=True)
+        do = self._push_only(config)
+        self.assertTrue(do("push-code-location"))
+        puts = [c for c in calls if c[0] == "PUT"]
+        posts = [c for c in calls if c[0] == "POST"]
+        self.assertEqual(len(puts), 3)
+        self.assertEqual(posts, [])  # sha présent → PUT, jamais POST
+        for fname in self._PCL_FILES:
+            put = next(c for c in puts if c[1].endswith(f"/contents/{fname}"))
+            payload = json.loads(put[2])
+            self.assertEqual(payload["sha"], "deadbeefsha")  # le sha du GET est threadé
+            self.assertIn("content", payload)
+            self.assertIn("update", payload["message"])
+
+    def test_push_code_location_no_commit_fails_fast(self):
+        # Une réponse PUT/POST SANS `commit` (écriture ratée → l'ancienne version resterait) →
+        # le step échoue (return False) : fail-fast, drift Argo CD évité (ADR 0034).
+        config, _calls = self._fake_gitea(existing=False, commit=False)
+        do = self._push_only(config)
+        self.assertFalse(do("push-code-location"))
+
+    def test_push_code_location_no_longer_raises_stub(self):
+        # Régression directe : le step ne lève PLUS de PathError 'STUB' à l'aveugle — il TENTE
+        # le vrai push (et échoue honnêtement si un détail cloche). Ici succès nominal.
+        config, _calls = self._fake_gitea(existing=False, commit=True)
+        do = self._push_only(config)
+        try:
+            self.assertTrue(do("push-code-location"))
+        except cli._path.PathError as exc:  # pragma: no cover — l'ancien STUB
+            self.fail(f"push-code-location lève encore un STUB : {exc}")
+
+    def test_push_code_location_never_uses_fqdn(self):
+        # Aucun argv curl de push-code-location ne tape le FQDN : cible = localhost:3000.
+        config, calls = self._fake_gitea(existing=True, commit=True)
+        do = self._push_only(config)
+        do("push-code-location")
+        self.assertTrue(calls)
+        for _method, _path, _body, url in calls:
+            self.assertNotIn("svc.cluster.local", url, f"FQDN dans push-code-location : {url}")
+            self.assertIn("localhost:3000", url)
+
     def test_seed_banc_todo_declared(self):
         # La frontière code-écrit / preuve-banc du seed est DÉCLARÉE (honnêteté ADR 0034).
         self.assertTrue(cli._seed_banc_todo())
         self.assertTrue(all(isinstance(t, str) and t for t in cli._seed_banc_todo()))
+        # push-code-location N'EST PLUS listé comme STUBÉ : le câblage est fait (preuve = banc).
+        self.assertFalse(
+            any("STUBÉE" in t and "push-code-location" in t for t in cli._seed_banc_todo()),
+            "push-code-location ne doit plus être marqué STUBÉ (il est câblé)",
+        )
 
     def test_gitops_seed_chains_after_dataops(self):
         # Le chemin enchaîne dataops → gitops-seed : la phase déléguée se monte APRÈS la
