@@ -2088,9 +2088,9 @@ def cmd_preview(args: argparse.Namespace) -> int:
         elif _KUBECONFIG_AUTO_BENCH and _kubeconfig_reaches_api(_BENCH_KUBECONFIG):
             _warn(
                 "preview lit le BANC, mais ton shell n'a pas KUBECONFIG exporté — un "
-                "`kubectl` direct vise ~/.kube/config (souvent la PROD). Aligne le shell : "
-                "`nestor stack select <banc>` (pose le contexte) ou "
-                "`kubectl --context <banc> …`."
+                "`kubectl` direct vise ~/.kube/config (souvent la PROD). Le plus simple : "
+                "`nestor kubectl …` (vise la stack active, sans toucher le shell). Sinon "
+                "`nestor stack select <banc>` ou `kubectl --context <banc> …`."
             )
     runs = load_runs(args.history or _RUNS_HISTORY)
     now = int(dt.datetime.now(tz=dt.UTC).timestamp())
@@ -2947,8 +2947,9 @@ def _run_path_engine(
     - `assert_safe(phase)` : la GARDE d'isolation banc (`_assert_bench_target`) à CHAQUE phase
       (invariant de boucle, ADR 0097 §5.c) ; l'échappatoire KUBECONFIG (ADR 0065) est gérée
       DANS la garde. Pour une phase à play unitaire, on ajoute `_assert_inventory_safe`.
-    - `launch(phase)` : montage idempotent via `runner.launch_phase_idempotent` (double-passage
-      PROUVE changed=0, ADR 0052), `-e` restreints par `phases.extravars_for`.
+    - `launch(phase)` : montage via `runner.launch_phase` (UN passage + gate, parité bash —
+      pas de double-passage `changed=0` qui fausserait les builds à tag mutable ; l'idempotence
+      se prouve par le rejeu du chemin entier), `-e` restreints par `phases.extravars_for`.
     - `gate(phase)` : santé post-montage routée par `phases.gate_kind_for` (→ _wait_layer_healthy).
     - `provision('up')` : STUB → `run-phases.sh up` (artefact node-side irréductible, §5.b).
     - `bootstrap`/`ha` : réutilisent `_bootstrap.run_bootstrap`/`_path.run_ha_3cp` (déjà portés
@@ -2969,11 +2970,14 @@ def _run_path_engine(
             _assert_inventory_safe(f"nestor up --engine=python ({phase})", ctx.inventory, topo)
 
     def launch(phase: str):
-        # Montage IDEMPOTENT (double-passage, ADR 0052). Le playbook est résolu relatif au
-        # private_data_dir/project (comme `_monter_phase`). Les `-e` sont RESTREINTS aux clés
-        # de la phase (parité run-phases.sh : chaque play ne reçoit que ses `-e`). APRÈS la
-        # gate, le moteur appelle bien la gate ; les hooks e2e (dataops) sont joués ICI, après
-        # succès du play — ils LÈVENT E2EHookStubbed (attendu, voir _BANC_TODO).
+        # Montage d'UNE phase (UN SEUL passage + gate de santé) — PARITÉ run-phases.sh, qui
+        # lance le playbook une fois puis gate (pas de double-passage `changed=0`). Choix
+        # assumé : certaines phases buildent une image à TAG MUTABLE (`force_rebuild=true`,
+        # portal/mlflow) → un rejeu est LÉGITIMEMENT `changed` (rebuild voulu). Exiger
+        # `changed=0` par phase rendait un faux « idempotence cassée » sur ces builds. L'idem-
+        # potence se prouve par le REJEU du CHEMIN entier (`nestor up` 2× → « rien à appliquer »,
+        # ADR 0052), pas par un double-passage par play. Les `-e` sont RESTREINTS aux clés de
+        # la phase (parité). Les hooks e2e (dataops) sont joués APRÈS succès du play.
         plan = _phases.phase_plan(phase)
         # PHASE DÉLÉGUÉE (playbook is None) : ce N'EST PAS un play Ansible mais une étape de
         # DONNÉES portée par `nestor/seed.py` (gitops-seed → gitea-init.sh). On NE fait donc
@@ -2983,12 +2987,12 @@ def _run_path_engine(
             return _launch_seed(phase, topo, derived)
         playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
         extravars = _phases.extravars_for(phase, derived)
-        print(f"→ {phase} : montage idempotent via ansible-runner ({plan.playbook})…")
-        result = _runner.launch_phase_idempotent(
+        print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
+        result = _runner.launch_phase(
             playbook,
             extravars,
             private_data_dir,
-            inventory=ctx.inventory,
+            ctx.inventory,
             ansible_config=ansible_cfg,
             kubeconfig=os.environ.get("KUBECONFIG"),
             target_kind=topo.target_kind,
@@ -2996,7 +3000,8 @@ def _run_path_engine(
         # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy) : ils LÈVENT
         # E2EHookStubbed tant qu'ils ne sont pas câblés+prouvés au banc (honnêteté ADR 0034).
         # On ne les joue QUE si le montage a réussi (un hook après un play KO n'a pas de sens).
-        if result.ok:
+        # `RunResult` (un passage) n'a pas `.ok` (propre à IdempotenceResult) : succès = rc==0.
+        if result.rc == 0:
             for hook in _phases.e2e_hooks_for(phase):
                 hook()  # lève E2EHookStubbed — message clair « _BANC : hook e2e à câbler »
         return result

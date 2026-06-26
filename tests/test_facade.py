@@ -298,24 +298,20 @@ class CallbacksWireRealBricks(unittest.TestCase):
         self.addCleanup(setattr, obj, name, orig)
 
     def _stub_idempotent(self, calls):
-        """Stub `runner.launch_phase_idempotent` : enregistre (playbook, extravars) et rend ok."""
+        """Stub `runner.launch_phase` (UN passage + gate, parité bash — plus de double-passage
+        `changed=0` qui faussait les builds à tag mutable). Enregistre (playbook, extravars)."""
 
         def _fake(playbook, extravars, private_data_dir, inventory, **kw):
             calls.append({"playbook": playbook, "extravars": extravars, "inventory": inventory})
-            return _runner.IdempotenceResult(
-                deployed=_runner.RunResult(rc=0, status="successful", changed=0),
-                replayed=_runner.RunResult(rc=0, status="successful", changed=0),
-                verdict="ok",
-                message="ok",
-            )
+            return _runner.RunResult(rc=0, status="successful", changed=0)
 
-        orig = cli._runner.launch_phase_idempotent
-        cli._runner.launch_phase_idempotent = _fake
-        self.addCleanup(setattr, cli._runner, "launch_phase_idempotent", orig)
+        orig = cli._runner.launch_phase
+        cli._runner.launch_phase = _fake
+        self.addCleanup(setattr, cli._runner, "launch_phase", orig)
 
     def test_launch_calls_idempotent_with_restricted_extravars(self):
         # Une séquence d'UNE seule couche applicative (storage-simple) : le callback `launch`
-        # doit appeler launch_phase_idempotent avec les `-e` RESTREINTS de la phase.
+        # doit appeler launch_phase (un passage) avec les `-e` RESTREINTS de la phase.
         launch_calls = []
         self._stub_idempotent(launch_calls)
         topo = _topo(_LIMA_SOLO)
@@ -492,7 +488,7 @@ class BootstrapCallbackWiring(unittest.TestCase):
         def _boom_layer(*_a, **_k):
             raise AssertionError("couche applicative montée malgré l'échec du socle")
 
-        self._patch(cli._runner, "launch_phase_idempotent", _boom_layer)
+        self._patch(cli._runner, "launch_phase", _boom_layer)
         spy = self._spy(launch_rc=2)
         code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap", "storage-simple"], "solo")
         self.assertEqual(code, 1)
@@ -530,27 +526,26 @@ class BootstrapCallbackWiring(unittest.TestCase):
         spy = self._spy()
 
         # provision : run-phases.sh up renvoyé 0 par le spy ci-dessus (arm "up" → défaut 0).
-        # couche applicative : launch_phase_idempotent stubé ok.
+        # couche applicative : launch_phase (un passage) stubé ok.
         layer_calls = []
 
         def _fake_idem(playbook, extravars, *a, **k):
             layer_calls.append(playbook)
-            return _runner.IdempotenceResult(
-                deployed=_runner.RunResult(rc=0, status="successful", changed=0),
-                replayed=_runner.RunResult(rc=0, status="successful", changed=0),
-                verdict="ok",
-                message="ok",
-            )
+            return _runner.RunResult(rc=0, status="successful", changed=0)
 
-        self._patch(cli._runner, "launch_phase_idempotent", _fake_idem)
+        self._patch(cli._runner, "launch_phase", _fake_idem)
         code = _engine(_topo(_LIMA_SOLO), "layers", ["up", "bootstrap", "storage-simple"], "solo")
         self.assertEqual(code, 0)
         # provision (up) puis bootstrap (inventory/facts/ha-cni) ont bien été appelés.
         arms = self._arms(spy["rp"])
         self.assertIn("up", arms)
         self.assertEqual(arms[arms.index("up") + 1 :], ["inventory", "facts", "ha-cni"])
-        # La couche applicative storage-simple a été montée APRÈS le socle.
-        self.assertEqual(len(layer_calls), 1)
+        # La couche applicative storage-simple a été montée APRÈS le socle. Les playbooks du
+        # bootstrap passent AUSSI par launch_phase (même brique depuis la bascule 1-passage) :
+        # 5 playbooks socle (checks/cri/kubeadm/control-planes/initialisation — join-workers
+        # OMIS car control unique sans worker) + storage-simple, qui est le DERNIER launch.
+        self.assertIn("local-path.yaml", layer_calls[-1])  # storage-simple → local-path.yaml
+        self.assertEqual(len(layer_calls), 6)  # 5 playbooks socle + storage-simple
 
 
 class AssertSafeIsolation(unittest.TestCase):
@@ -583,7 +578,7 @@ class AssertSafeIsolation(unittest.TestCase):
         def _boom_prov(*_a, **_k):
             raise AssertionError("provision lancé malgré le REFUS d'isolation")
 
-        self._patch(cli._runner, "launch_phase_idempotent", _boom_launch)
+        self._patch(cli._runner, "launch_phase", _boom_launch)
         self._patch(cli, "_provision_via_bash", _boom_prov)
         with self.assertRaises(cli._UsageError):
             _engine(_topo(_LIMA_SOLO), "layers", ["up", "storage-simple"], "solo")
@@ -647,9 +642,9 @@ class SeedPhaseWiring(unittest.TestCase):
         # gitops-seed (playbook=None) → seed.run_seed, JAMAIS launch_phase_idempotent (qui
         # ferait os.path.join(_ROOT, None) → TypeError). Sentinelle sur le runner.
         def _boom_play(*_a, **_k):
-            raise AssertionError("gitops-seed routé vers un playbook (launch_phase_idempotent)")
+            raise AssertionError("gitops-seed routé vers un playbook (launch_phase)")
 
-        self._patch(cli._runner, "launch_phase_idempotent", _boom_play)
+        self._patch(cli._runner, "launch_phase", _boom_play)
         seen = self._stub_do()
         code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
         self.assertEqual(code, 0)
@@ -931,14 +926,9 @@ class SeedPhaseWiring(unittest.TestCase):
         self._patch(_phases, "e2e_hooks_for", lambda *_a, **_k: ())
 
         def _ok_idem(*_a, **_k):
-            return _runner.IdempotenceResult(
-                deployed=_runner.RunResult(rc=0, status="successful", changed=0),
-                replayed=_runner.RunResult(rc=0, status="successful", changed=0),
-                verdict="ok",
-                message="ok",
-            )
+            return _runner.RunResult(rc=0, status="successful", changed=0)
 
-        self._patch(cli._runner, "launch_phase_idempotent", _ok_idem)
+        self._patch(cli._runner, "launch_phase", _ok_idem)
         seen = self._stub_do()
         code = _engine(_topo(_LIMA_SOLO), "layers", ["dataops", "gitops-seed"], "solo")
         self.assertEqual(code, 0)
