@@ -621,6 +621,9 @@ class SeedPhaseWiring(unittest.TestCase):
         self._patch(cli, "_assert_bench_target", lambda *_a, **_k: None)
         self._patch(cli, "_assert_inventory_safe", lambda *_a, **_k: None)
         self._patch(cli, "_wait_layer_healthy", lambda *_a, **_k: True)
+        # Gate « gitea/argocd Ready » (rollout status) → succès par défaut (pas de cluster).
+        # Un test la fait échouer explicitement pour prouver le blocage avant les steps.
+        self._patch(cli, "_kubectl", lambda *_a, **_k: subprocess.CompletedProcess([], 0, "", ""))
 
     def _stub_do(self, *, verdict_by_step=None):
         """Stub `_seed_do_banc` → un `do(step)` injecté (zéro kubectl/Gitea). Enregistre les
@@ -701,6 +704,16 @@ class SeedPhaseWiring(unittest.TestCase):
         self.assertEqual(code, 1)
         # On s'est arrêté SUR org-repo (3e step) — pas de step au-delà.
         self.assertEqual(seen, ["admin", "token", "org-repo"])
+
+    def test_gate_blocks_seed_until_gitea_argocd_ready(self):
+        # Gate avant le seed (parité run-phases.sh) : si gitea/argocd ne sont pas Ready
+        # (rollout status rc≠0), le seed s'arrête AVANT le moindre geste mutant (constaté au
+        # banc : sans gate, admin tapait un pod pas prêt → token KO trompeur). Code 1, 0 step.
+        self._patch(cli, "_kubectl", lambda *_a, **_k: subprocess.CompletedProcess([], 1, "", ""))
+        seen = self._stub_do()
+        code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
+        self.assertEqual(code, 1)
+        self.assertEqual(seen, [])  # AUCUN step joué : la gate bloque en amont
 
     def test_api_ok_distinguishes_success_from_real_failure(self):
         # Correctif d'audit : org-repo/webhook VALIDENT le code HTTP (plus de `return True`

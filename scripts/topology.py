@@ -2805,6 +2805,17 @@ def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult
             f"phase déléguée `{phase}` : aucun câblage seed connu (seul `gitops-seed` est porté)"
         )
     config = _seed.SeedConfig.from_topology(topo)
+    # GATE avant le seed : Gitea ET Argo CD doivent être Ready (parité run-phases.sh:1082-1085).
+    # Sans cette attente, le 1er geste (`gitea admin user create` via exec) tape un pod qui
+    # démarre encore → la création échoue silencieusement et `token` casse APRÈS (constaté au
+    # banc). On bloque jusqu'à Ready, comme le bash, avant le moindre geste mutant.
+    for ns_dep, dep, to in (("gitea", "gitea", "120s"), ("argocd", "argocd-server", "180s")):
+        roll = _kubectl("-n", ns_dep, "rollout", "status", f"deploy/{dep}", f"--timeout={to}")
+        if not (roll and roll.returncode == 0):
+            raise _path.PathError(
+                f"seed gitops (banc) : {ns_dep}/{dep} non Ready avant le seed "
+                f"(rollout status timeout {to}) — le socle GitOps doit être prêt (ADR 0046)"
+            )
     do = _seed_do_banc(topo, config)
     print(f"→ {phase} : seed des DONNÉES via nestor/seed.py (gitea-init, garde banc)…")
     try:
