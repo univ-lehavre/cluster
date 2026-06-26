@@ -2546,7 +2546,7 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
         admin_pw = _b64decode(pw.stdout.strip()) if pw and pw.returncode == 0 else ""
         if not admin_pw:
             return False
-        _gitea_exec(
+        created = _gitea_exec(
             ns,
             pod(),
             [
@@ -2563,8 +2563,15 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
                 "--admin",
                 "--must-change-password=false",
             ],
-        )  # rc≠0 si l'utilisateur existe déjà → idempotent (on ne propage pas l'échec)
-        return True
+        )
+        # rc=0 → créé. rc≠0 → idempotent SEULEMENT si « user already exists » (parité du
+        # `|| true` CIBLÉ du bash). Tout autre échec (pod pas prêt, mdp refusé, exec KO) =
+        # ÉCHEC réel : sinon `token` échouera après, sans que la cause soit signalée ICI
+        # (constaté au banc : admin avalait un échec → token KO trompeur). On VÉRIFIE.
+        if created and created.returncode == 0:
+            return True
+        blob = ((created.stdout or "") + (created.stderr or "")) if created else ""
+        return "already exists" in blob
 
     def token() -> bool:
         # 2/7 — token API. `--raw` n'affiche QUE la valeur (pas de préfixe à parser) ;
