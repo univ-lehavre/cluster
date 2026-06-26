@@ -232,10 +232,7 @@ def run_path(
                 # `launch` peut rendre un IdempotenceResult (`.ok` = double-passage changed=0)
                 # OU un RunResult (un seul passage, parité bash : succès = `rc==0`) OU un
                 # résultat de seed (`.ok`). On accepte les deux : `.ok` s'il existe, sinon rc==0.
-                if hasattr(res, "ok"):
-                    ok = bool(res.ok)
-                else:
-                    ok = getattr(res, "rc", 1) == 0
+                ok = bool(res.ok) if hasattr(res, "ok") else getattr(res, "rc", 1) == 0
                 result.steps.append(
                     PathStep(phase, ok, getattr(res, "verdict", "") or getattr(res, "message", ""))
                 )
