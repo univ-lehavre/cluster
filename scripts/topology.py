@@ -1050,7 +1050,7 @@ def cmd_destroy(args: argparse.Namespace) -> int:
 
     Codes : 0 succès (ou rien à détruire) ; 1 échec du down délégué ; 2 confirmation
     refusée / hors TTY sans --yes."""
-    _assert_bench_target("nestor destroy")
+    _assert_bench_target("nestor down")
     path = _resolve(args.file)
     topo = load_topology(path)
     stack = topo.catalog.get("topology", "—")
@@ -4169,7 +4169,8 @@ _DISPATCH = {
     "up": cmd_up,  # calque `pulumi up` : monte TOUTE la séquence (délègue à run-phases.sh)
     "next": cmd_next,  # applique la PROCHAINE couche (1er drift, granularité fine)
     "remove": cmd_remove,  # supprime UNE couche + sa clôture (inverse de next, ADR 0054)
-    "destroy": cmd_destroy,  # calque `pulumi destroy`
+    "down": cmd_destroy,  # symétrique de `up` (run-phases.sh)
+    "destroy": cmd_destroy,  # ALIAS rétrocompat (calque `pulumi destroy`)
     # Groupes noun-verb (annexe rangée) : artefacts dérivés/constatés + épreuves.
     "artifact": cmd_artifact,
     "test": cmd_test,
@@ -4225,9 +4226,10 @@ def _build_parser() -> argparse.ArgumentParser:
             "  next        monter UNE couche : la prochaine qui manque\n"
             "  remove      supprimer UNE couche (et ses dépendantes) — inverse de next\n"
             "  up          construire le cluster en entier (machines + couches)\n"
-            "  destroy     supprimer les machines (VMs) de la stack active\n"
+            "  down        supprimer les machines (VMs) de la stack active\n"
             "\n"
             "Commandes annexes :\n"
+            "  kubectl     lancer kubectl sur la cible de la stack active (sans export)\n"
             "  access      ouvrir l'accès dev (URLs des services + identifiants)\n"
             "  scale       ajuster les replicas au nombre de nœuds\n"
             "  discover    reconstruire un topology.yaml depuis un cluster réel\n"
@@ -4476,8 +4478,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="confirmer la fusion (requis hors TTY)"
     )
 
+    # `down` (symétrique de `up`, cf. run-phases.sh) ; `destroy` reste un ALIAS (rétrocompat
+    # scénarios/scripts + calque `pulumi destroy`).
     p_destroy = sub.add_parser(
-        "destroy", help="supprimer les machines (VMs) de la configuration active"
+        "down",
+        aliases=["destroy"],
+        help="supprimer les machines (VMs) de la configuration active",
     )
     _add_file(p_destroy)
     p_destroy.add_argument(
