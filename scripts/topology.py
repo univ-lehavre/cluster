@@ -2998,13 +2998,20 @@ def _run_path_engine(
         playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
         extravars = _phases.extravars_for(phase, derived)
         print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
+        # KUBECONFIG du play : le kubeconfig BANC rapatrié par bootstrap (ctx.kubeconfig_local
+        # → bench/lima/.work/kubeconfig, server: 127.0.0.1:6443 — le forward de l'API). En
+        # FROM-SCRATCH, os.environ['KUBECONFIG'] est VIDE au démarrage (le banc n'existe pas
+        # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
+        # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
+        # passe le kubeconfig du contexte, qui existe dès que bootstrap l'a rapatrié. Un
+        # KUBECONFIG opérateur explicite (banc déjà monté) reste prioritaire.
         result = _runner.launch_phase(
             playbook,
             extravars,
             private_data_dir,
             ctx.inventory,
             ansible_config=ansible_cfg,
-            kubeconfig=os.environ.get("KUBECONFIG"),
+            kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
             target_kind=topo.target_kind,
         )
         # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy) : ils LÈVENT
@@ -3094,7 +3101,9 @@ def _run_path_engine(
                 private_data_dir,
                 ctx.inventory,
                 ansible_config=ansible_cfg,
-                kubeconfig=os.environ.get("KUBECONFIG"),
+                # Cohérence avec le callback `launch` : en from-scratch KUBECONFIG est vide au
+                # démarrage → repli sur le kubeconfig banc rapatrié (ctx.kubeconfig_local).
+                kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
                 target_kind=topo.target_kind,
             )
 
