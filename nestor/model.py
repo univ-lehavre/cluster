@@ -24,18 +24,46 @@ VALID_TARGET_KINDS = {"prod", "lima"}
 # bare-metal/local (pod statique, annonce ARP) ; kube-vip-lb = via LB-IPAM ;
 # external = LB fourni par le terrain (cloud, ADR 0040).
 VALID_LB_MODES = {"kube-vip-arp", "kube-vip-lb", "external"}
-# Modes d'exposition applicative — UN SEUL câblé (ADR 0020/0071 réécrit). `gateway` =
-# bordure L7 Cilium exposée en hostNetwork (l'Envoy du Gateway bind 80/443 sur l'IP du
-# nœud, SANS LB-IPAM) ; `none` = ClusterIP seuls (accès par port-forward). `lb-ipam` ET
-# `hostport` sont des ALIAS déprécié-doux de `gateway` : `hostport` (« 80/443 sur l'IP de
-# l'hôte ») est désormais ABSORBÉ par gateway-hostNetwork, qui fait la même chose en
-# gagnant le routage L7/SNI + le TLS de bordure (ADR 0071).
-VALID_EXPOSITION_MODES = {"gateway", "none"}
-_EXPOSITION_ALIASES = {"lb-ipam": "gateway", "hostport": "gateway"}
-# Défaut d'exposition GLOBAL (ADR 0071) : `gateway` partout. Le hostNetwork ne réclame ni
-# plage IP ni interface L2 annonçable → aussi reproductible sur le banc Lima que sur une
-# VM publique mono-NIC (plus de défaut par terrain).
-_EXPOSITION_DEFAULT = "gateway"
+# Modes d'exposition applicative (ADR 0092, qui SUPERSEDE 0071). `nodeport` = exposition
+# L4 par un port du nœud (`http://<IP-nœud>:<port>`, Cilium-eBPF, ZÉRO DNS / ZÉRO LB-IPAM /
+# ZÉRO Gateway) — c'est le mode CANONIQUE et le DÉFAUT depuis ADR 0092. `gateway` = ancien
+# monde : bordure L7 Cilium en hostNetwork (Envoy bind 80/443 sur l'IP du nœud, SNI/TLS de
+# bordure) — conservé comme mode LEGACY DÉCLARABLE explicitement (rétrocompat), mais ce
+# n'est PLUS le défaut. `none` = ClusterIP seuls (accès par port-forward). Alias :
+# `hostport` (« le hostPort L4 sur l'IP du nœud ») → `nodeport` (c'est le mécanisme même de
+# l'ADR 0092) ; `lb-ipam` → `gateway` (lb-ipam reste l'ancien monde L7, inchangé).
+VALID_EXPOSITION_MODES = {"nodeport", "gateway", "none"}
+_EXPOSITION_ALIASES = {"hostport": "nodeport", "lb-ipam": "gateway"}
+# Défaut d'exposition GLOBAL (ADR 0092) : `nodeport` partout. Le L4 sur le port du nœud ne
+# réclame ni DNS, ni plage LB-IPAM, ni interface L2 annonçable → aussi reproductible sur le
+# banc Lima que sur une VM publique mono-NIC (plus de défaut par terrain, plus de défaut
+# gateway). `gateway` ne s'arme que si la topologie le DÉCLARE explicitement.
+_EXPOSITION_DEFAULT = "nodeport"
+
+
+# Ressources VM par défaut (LOT 8, ADR 0097 §3) — remontent les VM_CPUS/VM_MEMORY/VM_DISK
+# que `bench/lima/run-phases.sh:117-125` lisait de l'ENV. Désormais LE YAML porte ces
+# valeurs (`resources:` global + surcharge optionnelle par node) ; nestor les LIT du YAML
+# et le moteur (path.py) les passe au provisioning (`lima_render_node` bash garde le RENDU,
+# Python décide les VALEURS). Défauts = ceux du bash (4 vCPU, 12 GiB, 40 GiB — la chaîne
+# MLOps complète sature 2 vCPU / 8 GiB, et 20 GiB de disque déclenche DiskPressure ; cf.
+# le commentaire dimensionnant de run-phases.sh). PLUS de lecture VM_* côté Python.
+_DEFAULT_CPUS = 4
+_DEFAULT_MEMORY = "12GiB"
+_DEFAULT_DISK = "40GiB"
+
+
+@dataclass(frozen=True)
+class NodeResources:
+    """Ressources d'une VM (banc Lima) : cpus / mémoire / disque (LOT 8, ADR 0097 §3).
+
+    Remplace les variables d'env `VM_CPUS`/`VM_MEMORY`/`VM_DISK`. Le bloc `resources:`
+    du YAML porte le défaut GLOBAL (niveau topologie) ; un node peut le surcharger
+    champ par champ (`nodes[].resources`). IMMUABLE — dérivé à la lecture, pas muté."""
+
+    cpus: int = _DEFAULT_CPUS
+    memory: str = _DEFAULT_MEMORY
+    disk: str = _DEFAULT_DISK
 
 
 @dataclass
@@ -44,6 +72,10 @@ class Node:
     roles: list[str]
     ansible_host: str | None = None
     disks: list[str] | None = None
+    # Surcharge des ressources VM PROPRE à ce node (LOT 8) : un dict partiel
+    # (`{cpus, memory, disk}` — chaque champ optionnel) qui prime sur le `resources:`
+    # global. None → le node hérite intégralement du défaut global de la topologie.
+    resources: dict[str, Any] | None = None
 
     def has_role(self, role: str) -> bool:
         return role in self.roles
@@ -61,6 +93,26 @@ class Topology:
     storage: dict[str, Any] = field(default_factory=dict)
     hardening: dict[str, Any] = field(default_factory=dict)
     resources: dict[str, Any] | None = None
+    # ── Blocs de config remontés de l'ENV vers le YAML (LOT 8, ADR 0097 §3) ──────
+    # Chaque bloc regroupe par DOMAINE les paramètres qui étaient des variables d'env
+    # éparses du bash (run-phases.sh) ou du Python. nestor LIT ces blocs du YAML, plus
+    # de l'env. Tous optionnels — un défaut documenté par accesseur quand absent.
+    #   ceph    : {block_device, hdd_glob, data_device_glob, nvme_block_device, min_hdd}
+    #             (ex-CEPH_BLOCK_DEVICE/CEPH_HDD_GLOB/… de run-phases.sh:139-143).
+    #   ha      : {vip, iface} (ex-HA_VIP/HA_VIP_IFACE de run-phases.sh:1632-1642).
+    #   gitea   : {org, repo, ns, admin_user, admin_email, svc, api,
+    #             org_cluster, repo_apps, org_atlas, repo_atlas} (ex-GITEA_*).
+    #   cilium  : {cluster_name, cluster_id} (ex-CILIUM_CLUSTER_*).
+    #   atlas   : {repo_dir, citation_revision, citation_image_digest,
+    #             citation_image_name, expected_cluster} (ex-ATLAS_REPO_DIR/CITATION_*/
+    #             EXPECTED_CLUSTER du seed prod).
+    #   portal  : {contract, listen_port, seuil_jours} (ex-PORTAL_*/SEUIL_JOURS Python).
+    ceph: dict[str, Any] = field(default_factory=dict)
+    ha: dict[str, Any] = field(default_factory=dict)
+    gitea: dict[str, Any] = field(default_factory=dict)
+    cilium: dict[str, Any] = field(default_factory=dict)
+    atlas: dict[str, Any] = field(default_factory=dict)
+    portal: dict[str, Any] = field(default_factory=dict)
     target_kind: str = "prod"
     # Chemin du kubeconfig de la cible (ADR 0090). SOURCE DE VÉRITÉ pour viser un
     # cluster prod en LECTURE (`preview`/état réel) sans dépendre du contexte
@@ -107,15 +159,40 @@ class Topology:
 
     @property
     def exposition_mode(self) -> str:
-        """Mode d'exposition CANONIQUE (ADR 0020/0071) : `gateway` | `none`.
+        """Mode d'exposition CANONIQUE (ADR 0092, supersede 0071) : `nodeport` | `gateway`
+        | `none`.
 
-        `exposition.mode` déclaré (alias `lb-ipam`/`hostport` → `gateway` résolus) prime ;
-        sinon défaut GLOBAL `gateway` (gateway-hostNetwork, reproductible partout — ADR
-        0071 ; plus de défaut par terrain)."""
+        `exposition.mode` déclaré (alias résolus : `hostport` → `nodeport`, `lb-ipam` →
+        `gateway`) prime ; sinon défaut GLOBAL `nodeport` (exposition L4 sur le port du
+        nœud, reproductible partout sans DNS ni LB-IPAM — ADR 0092). `gateway` (ancien
+        monde L7 en hostNetwork) reste DÉCLARABLE pour rétrocompat, mais n'est plus le
+        défaut."""
         declared = self.exposition.get("mode") if isinstance(self.exposition, dict) else None
         if declared:
             return _EXPOSITION_ALIASES.get(declared, declared)
         return _EXPOSITION_DEFAULT
+
+    @property
+    def default_resources(self) -> NodeResources:
+        """Ressources VM par DÉFAUT de la topologie (LOT 8, ADR 0097 §3).
+
+        Lit le bloc `resources:` GLOBAL du YAML (ex-VM_CPUS/VM_MEMORY/VM_DISK de l'env).
+        Champs absents → défauts du bash (4 vCPU / 12 GiB / 40 GiB). PUR : aucune lecture
+        d'environnement — la source unique est le YAML."""
+        return _resources_from(self.resources or {}, NodeResources())
+
+    def node_resources(self, node_name: str) -> NodeResources:
+        """Ressources EFFECTIVES d'un node : défaut global SURCHARGÉ par `nodes[].resources`.
+
+        C'est ce que le moteur (path.py) passera à `lima_render_node` — Python décide les
+        VALEURS depuis le YAML, le bash garde le rendu du template. Le défaut global
+        (`default_resources`) sert de base ; la surcharge per-node prime champ par champ
+        (un node sans `resources:` hérite intégralement du global). Lève `TopologyError`
+        si le node est inconnu (fail-closed : on ne dimensionne pas une VM inexistante)."""
+        for n in self.nodes:
+            if n.name == node_name:
+                return _resources_from(n.resources or {}, self.default_resources)
+        raise TopologyError(f"node `{node_name}` inconnu dans la topologie")
 
     @property
     def declared_layers(self) -> list[str]:
@@ -128,6 +205,24 @@ class Topology:
         from nestor.layers import layers_from_profile
 
         return layers_from_profile(self.catalog.get("profile", "base"))
+
+
+def _resources_from(raw: dict[str, Any], base: NodeResources) -> NodeResources:
+    """Fusionne un dict `resources` PARTIEL sur une base (PUR, LOT 8).
+
+    Chaque champ absent du dict hérite de `base` (le défaut global, ou les défauts
+    constants pour le global lui-même). `cpus` est COERCÉ en int (le YAML peut le
+    porter en chaîne) ; lève `TopologyError` s'il n'est pas convertible."""
+    cpus = raw.get("cpus", base.cpus)
+    try:
+        cpus = int(cpus)
+    except (TypeError, ValueError) as exc:
+        raise TopologyError(f"`resources.cpus` = {cpus!r} non entier") from exc
+    return NodeResources(
+        cpus=cpus,
+        memory=str(raw.get("memory", base.memory)),
+        disk=str(raw.get("disk", base.disk)),
+    )
 
 
 def _parse_node(raw: dict[str, Any]) -> Node:
@@ -147,6 +242,7 @@ def _parse_node(raw: dict[str, Any]) -> Node:
         roles=list(roles),
         ansible_host=raw.get("ansible_host"),
         disks=raw.get("disks"),
+        resources=raw.get("resources"),  # LOT 8 : surcharge VM per-node (None → global)
     )
 
 
@@ -168,6 +264,14 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
         storage=data.get("storage", {}) or {},
         hardening=data.get("hardening", {}) or {},
         resources=data.get("resources"),
+        # LOT 8 (ADR 0097 §3) : blocs de config remontés de l'env vers le YAML. Tous
+        # optionnels — un `{}` quand absent, l'accesseur de domaine porte le défaut.
+        ceph=data.get("ceph", {}) or {},
+        ha=data.get("ha", {}) or {},
+        gitea=data.get("gitea", {}) or {},
+        cilium=data.get("cilium", {}) or {},
+        atlas=data.get("atlas", {}) or {},
+        portal=data.get("portal", {}) or {},
         target_kind=target_kind,
         kubeconfig=data.get("kubeconfig"),  # ADR 0090 ; None → résolution par défaut
         layers=list(data.get("layers") or []),  # ADR 0069 ; vide → dérivé du profil
@@ -188,9 +292,9 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
                 f"`network.control_plane_lb.mode` = {mode!r} inconnu "
                 f"(valides : {sorted(VALID_LB_MODES)} — ADR 0047/0055)"
             )
-    # exposition.mode : enum validé si déclaré (ADR 0020/0071). Les alias `lb-ipam` et
-    # `hostport` sont résolus en `gateway` AVANT validation ; un mode inconnu lève (sinon
-    # étiquette morte).
+    # exposition.mode : enum validé si déclaré (ADR 0092, supersede 0071). Les alias sont
+    # résolus AVANT validation (`hostport` → `nodeport`, `lb-ipam` → `gateway`) ; un mode
+    # inconnu lève (sinon étiquette morte).
     expo = topo.exposition.get("mode") if isinstance(topo.exposition, dict) else None
     if expo is not None:
         canonical = _EXPOSITION_ALIASES.get(expo, expo)
@@ -198,7 +302,7 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
             raise TopologyError(
                 f"`exposition.mode` = {expo!r} inconnu "
                 f"(valides : {sorted(VALID_EXPOSITION_MODES)} ; "
-                f"alias lb-ipam/hostport → gateway — ADR 0071)"
+                f"alias hostport → nodeport, lb-ipam → gateway — ADR 0092)"
             )
     return topo
 

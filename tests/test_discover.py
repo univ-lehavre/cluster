@@ -219,14 +219,15 @@ class Assemble(unittest.TestCase):
         res = assemble(**self._probe_gitops_localpath())
         self.assertEqual(res.topology["layers"], ["gitops"])
         self.assertEqual(res.topology["storage"]["backend"], "local-path")
-        self.assertNotIn("exposition", res.topology)  # gateway implicite
+        self.assertNotIn("exposition", res.topology)  # nodeport implicite (défaut ADR 0092)
         self.assertEqual(res.unknown, [Unknown("Namespace", "squat")])
 
     def test_assembled_topology_is_valid(self):
         # ADR 0074 §5 : la sortie passe topology_from_dict (boucle discover→validate).
         res = assemble(**self._probe_gitops_localpath())
         topo = topology_from_dict(res.topology)  # ne lève pas
-        self.assertEqual(topo.exposition_mode, "gateway")
+        # Reassemblée sans bloc `exposition` → défaut ADR 0092 (`nodeport`), plus `gateway`.
+        self.assertEqual(topo.exposition_mode, "nodeport")
 
     def test_extra_unknown_merged(self):
         # un Deployment hors catalogue repéré par la façade s'ajoute à l'inconnu.

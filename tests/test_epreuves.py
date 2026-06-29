@@ -62,20 +62,39 @@ class Catalogue(unittest.TestCase):
             self.assertIn(e.type, {"unit", "intég", "chaos"})
             self.assertIn(e.profil_min, {"base", "store", "obs", "dataops"})
             self.assertIn(e.backend_req, {None, "ceph"})
+            self.assertIn(e.statut, {"actif", "caduc"})
+            # Un caduc DOIT tracer sa raison (honnêteté des Runs, ADR 0052) ;
+            # un actif n'en a pas.
+            if e.statut == "caduc":
+                self.assertIsNotNone(e.raison_caduc)
+            else:
+                self.assertIsNone(e.raison_caduc)
+
+    def test_caducs_exclus_sur_toute_topologie(self):
+        # Garde-fou : une épreuve caduque (terrain Vagrant multi-node / ha-3cp
+        # abandonné, ADR 0097) est exclue QUELLE QUE SOIT la topologie — même
+        # celle qui, sans la caducité, la rendrait jouable.
+        caducs = {e.num for e in EPREUVES if e.statut == "caduc"}
+        self.assertEqual(caducs, {"03", "04", "19", "30"})
+        for kind in ("prod", "lima"):
+            for backend in ("ceph", "local-path"):
+                jouables, _ = filter_epreuves(_topo(kind=kind, backend=backend))
+                nums_j = {e.num for e in jouables}
+                self.assertEqual(caducs & nums_j, set(), f"caduc jouable en {kind}/{backend}")
 
 
 class Filtrage(unittest.TestCase):
     def test_dataops_ceph_multi_joue_la_quasi_totalite(self):
         jouables, exclues = filter_epreuves(_topo())
         nums_ex = {e.num for e, _ in exclues}
-        # En prod, seuls les offensifs (17/18/19/20/21) sont exclus.
-        self.assertEqual(nums_ex, {"17", "18", "19", "20", "21"})
-        # 29 jouables : +30 (ha-3cp, jouable au catalogue car multi/local-path ;
-        # se SKIP au runtime si le banc n'a pas 3 CP) +31 (contrat, topo-agnostique)
-        # +32 (portail, topo-agnostique base ; SKIP si portail non déployé)
-        # +33 (cache CNPG, dataops/topo-agnostique ; SKIP si base cache absente)
-        # +34 (build→digest→gitops, dataops/topo-agnostique ; SKIP si chaîne build absente).
-        self.assertEqual(len(jouables), 29)
+        # En prod, sont exclus : les offensifs (17/18/20/21, interdits prod ADR 0025)
+        # ET les 4 caducs (03/04/19/30 — terrain Vagrant multi-node / ha-3cp abandonné,
+        # ADR 0097 ; 19 est à la fois offensif ET caduc). Soit {03,04,17,18,19,20,21,30}.
+        self.assertEqual(nums_ex, {"03", "04", "17", "18", "19", "20", "21", "30"})
+        # 26 jouables : 34 − 8 exclus. Les caducs (03/04/19/30) sortent d'office
+        # (epreuve_jouable les rejette AVANT tout autre filtre) ; restent les 26
+        # épreuves actives non offensives jouables en prod dataops/ceph/multi.
+        self.assertEqual(len(jouables), 26)
 
     def test_backend_local_path_exclut_les_ceph(self):
         _, exclues = filter_epreuves(_topo(backend="local-path"))

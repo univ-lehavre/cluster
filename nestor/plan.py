@@ -306,9 +306,9 @@ class PlanState:
 
     Résultat PUR (aucune I/O) de `compute_plan_state` — la source UNIQUE consommée
     par `cmd_preview`/`cmd_next`/`cmd_up` (fin de la divergence preview≠next : les
-    trois dérivent du MÊME calcul). `done` = socle/couches tenus faits après que le
-    RÉEL a primé sur l'historique ; `a_appliquer` = ce qui reste à monter (ordonner
-    via `seq` à l'affichage)."""
+    trois dérivent du MÊME calcul). `done` = socle/couches que le RÉEL SEUL confirme
+    (refonte lot 6 : plus d'historique) ; `a_appliquer` = ce qui reste à monter
+    (ordonner via `seq` à l'affichage)."""
 
     done: frozenset[str]
     a_appliquer: frozenset[str]
@@ -316,50 +316,44 @@ class PlanState:
 
 def compute_plan_state(
     seq: list[str],
-    run_phases: list[str] | None,
     observed_socle: set[str],
     observed_layers: set[str],
-    freshness: str,
-    signal_phases: set[str] | None = None,
 ) -> PlanState:
     """Calcule `done`/`a_appliquer` d'un chemin — LE calcul partagé (ADR 0052/0056 §7).
 
     Fonction PURE : tout l'état RÉEL arrive en PARAMÈTRES (aucun kubectl ici). La
     façade (qui sonde le cluster) fournit :
     - `seq` : la séquence ORDONNÉE attendue (`expected_phase_sequence`) ;
-    - `run_phases` : les phases du dernier run de la stack (historique), ou None ;
-    - `observed_socle` : socle PROUVÉ par le réel (`observed_done_phases` : VMs/nœuds) ;
+    - `observed_socle` : socle PROUVÉ par le réel (`observed_done_phases` : VMs/nœuds
+      Ready), ∅ quand le réel ne confirme rien (VMs détruites, Kubernetes mort) ;
     - `observed_layers` : couches applicatives observées SAINES (`_observed_layers`),
-      ∅ quand on NE sonde PAS le cluster (pas de nœud Ready / cible prod sans cible) ;
-    - `freshness` : verdict `history.verdict_for_run` (`frais`/`perime`/`jamais`) ;
-    - `signal_phases` : phases de `seq` ayant un signal connu (`_LAYER_SIGNAL`) — ∅
-      quand on ne sonde PAS (sinon on ré-ajouterait à tort des couches non vérifiées).
+      ∅ quand on NE sonde PAS le cluster (pas de nœud Ready / cible prod sans cible).
 
-    Le RÉEL PRIME sur l'historique, DANS LES DEUX SENS pour les couches à signal :
-    une couche observée saine sort de `a_appliquer` ; une couche à signal connu que
-    le réel NE confirme PAS y RENTRE même si l'historique la dit faite (le garde
-    `if "up" not in done` que `cmd_next` n'avait PAS — VRAI bug corrigé ici).
+    `done` DÉRIVE DU RÉEL SEUL — PLUS DE L'HISTORIQUE (décision mainteneur, refonte
+    lot 6). `done = observed_socle ∪ observed_layers` : EXACTEMENT ce que le cluster
+    CONFIRME (VMs/nœuds Ready pour up/bootstrap, couches saines pour les layers à
+    signal). L'historique (`runs-history.yaml`) ne décide PLUS `done` : il ne sert
+    qu'à la FRAÎCHEUR (`verdict_for_run`, dérivée SÉPARÉMENT en amont, #216) et au
+    cache socle (#219) — usages préservés, hors de ce calcul.
+
+    CONSÉQUENCE COHÉRENTE (le bug du mainteneur) : si `bootstrap` n'est pas observé
+    (Kubernetes mort), AUCUNE couche aval n'entre dans `observed_layers` (le kubectl
+    échoue) → toutes sont « à appliquer ». La cohérence de dépendance devient NATURELLE
+    (le réel ne ment pas) : plus besoin du garde ad hoc `if "up" not in done` — un
+    socle absent rend `observed_layers` vide, donc rien aval n'est tenu fait.
+
+    Le RÉEL fait AUTORITÉ DANS LES DEUX SENS : une couche observée saine est `done` (et
+    hors de `a_appliquer`), même sans run consigné ; une couche que le réel NE confirme
+    PAS est « à appliquer », même si un vieux run la disait faite (l'historique ne
+    survit plus au réel).
     """
-    done = set(run_phases) if run_phases is not None else set()
-    # Le RÉEL prime sur l'historique : un vieux run consigne up/bootstrap, mais si les
-    # VMs ont été détruites (limactl vide), ces phases ne sont PLUS faites — on RESTREINT
-    # `done` au socle que le réel CONFIRME, AVANT diff_phases.
-    done -= {"up", "bootstrap"} - observed_socle
-    # COHÉRENCE DE DÉPENDANCE : rien ne tient au-dessus d'un socle absent. Si `up` n'est
-    # pas fait (VMs à créer), AUCUNE couche aval ne peut l'être → on vide `done` de tout
-    # sauf le socle réellement observé (sinon « VMs à créer MAIS ceph à-jour »). C'est LE
-    # garde que `cmd_next` n'avait pas (classe de bug, pas instance).
-    if "up" not in done:
-        done &= observed_socle
-    a_appliquer = set(diff_phases(seq, done, freshness))
-    a_appliquer -= observed_socle
-    # Le RÉEL fait AUTORITÉ pour les couches à signal connu, DANS LES DEUX SENS :
-    #  - une couche observée SAINE n'est plus « à installer » (run non consigné) → retirée ;
-    #  - une couche à signal connu que le réel NE confirme PAS (détruite, ou posée à moitié)
-    #    est « à installer » même si l'historique la dit faite (sinon MLflow absent ✓ à-jour).
-    a_appliquer -= observed_layers
-    if signal_phases:
-        a_appliquer |= {p for p in seq if p in signal_phases and p not in observed_layers}
+    # `done` = RÉEL SEUL : socle prouvé (VMs/nœuds) ∪ couches saines observées. PLUS de
+    # `set(run_phases)` : l'historique n'entre PLUS dans le calcul de `done` (refonte lot 6).
+    done = set(observed_socle) | set(observed_layers)
+    # `a_appliquer` = tout ce que le réel NE confirme PAS, dans l'ordre de `seq`. Comme
+    # `done` ne vient QUE du réel, la cohérence de dépendance est intrinsèque : un socle
+    # absent (observed_layers vide) laisse TOUTES les couches aval « à appliquer ».
+    a_appliquer = {p for p in seq if p not in done}
     return PlanState(done=frozenset(done), a_appliquer=frozenset(a_appliquer))
 
 

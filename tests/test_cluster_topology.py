@@ -166,27 +166,43 @@ class Kubeconfig(unittest.TestCase):
 
 
 class Exposition(unittest.TestCase):
-    """exposition.mode (ADR 0020/0071 réécrit) : mode UNIQUE `gateway` (en hostNetwork),
-    `none` conservé, alias `lb-ipam`/`hostport` → `gateway`, défaut GLOBAL gateway."""
+    """exposition.mode (ADR 0092, supersede 0071) : défaut CANONIQUE `nodeport` (L4 sur le
+    port du nœud, zéro DNS/LB-IPAM), `gateway` (ancien monde L7 hostNetwork) gardé DÉCLARABLE
+    pour rétrocompat mais plus le défaut, `none` conservé, alias `hostport` → `nodeport` et
+    `lb-ipam` → `gateway`."""
 
-    def test_default_lima_is_gateway(self):
-        # Renversement (ADR 0071) : gateway-hostNetwork reproductible partout, donc
-        # le banc Lima n'a plus de défaut `hostport` propre — gateway par défaut.
+    def test_default_lima_is_nodeport(self):
+        # ADR 0092 : le L4 sur le port du nœud est reproductible partout (banc Lima comme
+        # VM publique), donc défaut GLOBAL `nodeport` — plus de défaut gateway par terrain.
         t = topology_from_dict(_base(target_kind="lima"))
+        self.assertEqual(t.exposition_mode, "nodeport")
+
+    def test_default_prod_is_nodeport(self):
+        t = topology_from_dict(_base(target_kind="prod"))
+        self.assertEqual(t.exposition_mode, "nodeport")
+
+    def test_no_exposition_block_defaults_to_nodeport(self):
+        # Une topo SANS bloc `exposition` retombe sur le défaut ADR 0092 (`nodeport`),
+        # pas sur l'ancien `gateway` (le renversement doit valoir aussi pour l'implicite).
+        topo = topology_from_dict(_base())
+        self.assertNotIn("mode", topo.exposition)
+        self.assertEqual(topo.exposition_mode, "nodeport")
+
+    def test_gateway_still_declarable_legacy(self):
+        # Rétrocompat : `gateway` (ancien monde L7 en hostNetwork, ADR 0071) reste un mode
+        # DÉCLARABLE explicitement — il n'est pas supprimé, seulement déchu du rang de défaut.
+        t = topology_from_dict(_base(exposition={"mode": "gateway"}))
         self.assertEqual(t.exposition_mode, "gateway")
 
-    def test_default_prod_is_gateway(self):
-        t = topology_from_dict(_base(target_kind="prod"))
-        self.assertEqual(t.exposition_mode, "gateway")
+    def test_hostport_alias_resolves_to_nodeport(self):
+        # `hostport` (« le hostPort L4 sur l'IP du nœud ») EST le mécanisme de l'ADR 0092 :
+        # alias canonique vers `nodeport` (renversement de l'ancien alias → gateway).
+        t = topology_from_dict(_base(exposition={"mode": "hostport"}))
+        self.assertEqual(t.exposition_mode, "nodeport")
 
     def test_lb_ipam_alias_resolves_to_gateway(self):
+        # `lb-ipam` reste l'ANCIEN monde L7 (Gateway/LB-IPAM) : alias inchangé → `gateway`.
         t = topology_from_dict(_base(exposition={"mode": "lb-ipam"}))
-        self.assertEqual(t.exposition_mode, "gateway")
-
-    def test_hostport_alias_resolves_to_gateway(self):
-        # `hostport` (« 80/443 sur l'IP de l'hôte ») est ABSORBÉ par gateway-hostNetwork :
-        # alias déprécié-doux, pour ne pas casser les topology.yaml existants (ADR 0071).
-        t = topology_from_dict(_base(exposition={"mode": "hostport"}))
         self.assertEqual(t.exposition_mode, "gateway")
 
     def test_none_accepted(self):
@@ -199,33 +215,9 @@ class Exposition(unittest.TestCase):
             topology_from_dict(_base(exposition={"mode": "bogus"}))
 
 
-class HaThreeCpExample(unittest.TestCase):
-    """La topologie ha-3cp déclarée (hyperconvergé, local-path) est valide et
-    expose la mécanique HA attendue (#250, ADR 0055/0056)."""
-
-    def setUp(self):
-        self.topo = load_topology(os.path.join(_ROOT, "topologies", "ha-3cp.example.yaml"))
-
-    def test_three_hyperconverged_control_planes(self):
-        # 3 CP hyperconvergés → 3 control, 0 worker pur (ils schedulent, ADR 0007).
-        self.assertEqual(self.topo.control_nodes, ["cp1", "cp2", "cp3"])
-        self.assertEqual(self.topo.worker_nodes, [])
-        self.assertTrue(self.topo.is_ha_control_plane)
-
-    def test_vip_declared_kube_vip_arp(self):
-        lb = self.topo.network.get("control_plane_lb")
-        self.assertEqual(lb.get("mode"), "kube-vip-arp")
-
-    def test_local_path_storage_ha_orthogonal(self):
-        # HA ⊥ stockage (#250) : la topologie HA se prouve en local-path, pas Ceph.
-        self.assertEqual(self.topo.storage.get("backend"), "local-path")
-
-    def test_status_is_target_not_built(self):
-        # Honnêteté (ADR 0052/0030) : `cible` tant qu'aucun run banc ne l'a prouvé.
-        self.assertEqual(self.topo.catalog.get("status"), "cible")
-
-    def test_lima_target(self):
-        self.assertEqual(self.topo.target_kind, "lima")
+# (Classe HaThreeCpExample retirée : la topologie ha-3cp est abandonnée 2026-06-29 —
+# ADR 0055 Superseded by 0097, topologies/ha-3cp.example.yaml supprimée. La HA multi-CP se
+# reprend si de nouvelles ressources permettent un banc multi-nœud.)
 
 
 class ByteExactInvariant(unittest.TestCase):
@@ -422,6 +414,110 @@ class OsdDerivation(unittest.TestCase):
         # prod générique : pas de disks_per_node → None (le rôle/hosts.yaml décide).
         topo = topology_from_dict(_base(storage={"backend": "ceph"}))
         self.assertIsNone(derive_osd_expected(topo))
+
+
+class VmResources(unittest.TestCase):
+    """LOT 8 (ADR 0097 §3) : ressources VM lues du YAML — plus de VM_CPUS/VM_MEMORY/VM_DISK
+    en env. Bloc `resources:` global au niveau topo + surcharge optionnelle par node."""
+
+    def test_defaults_when_absent(self):
+        # Sans bloc `resources:`, les défauts du bash (4 vCPU / 12 GiB / 40 GiB).
+        topo = topology_from_dict(_base())
+        r = topo.default_resources
+        self.assertEqual((r.cpus, r.memory, r.disk), (4, "12GiB", "40GiB"))
+
+    def test_global_resources_read_from_yaml(self):
+        # Le bloc global remonte les ex-VM_* (lu du YAML, pas de l'env).
+        topo = topology_from_dict(_base(resources={"cpus": 8, "memory": "16GiB", "disk": "60GiB"}))
+        r = topo.default_resources
+        self.assertEqual((r.cpus, r.memory, r.disk), (8, "16GiB", "60GiB"))
+
+    def test_partial_global_resources_fill_defaults(self):
+        # Un champ seul surchargé → les autres gardent le défaut.
+        topo = topology_from_dict(_base(resources={"cpus": 2}))
+        r = topo.default_resources
+        self.assertEqual((r.cpus, r.memory, r.disk), (2, "12GiB", "40GiB"))
+
+    def test_node_inherits_global(self):
+        # Un node sans `resources:` hérite intégralement du global.
+        topo = topology_from_dict(
+            _base(
+                nodes=[{"name": "cp1", "roles": ["control"]}],
+                resources={"cpus": 6, "memory": "24GiB", "disk": "80GiB"},
+            )
+        )
+        r = topo.node_resources("cp1")
+        self.assertEqual((r.cpus, r.memory, r.disk), (6, "24GiB", "80GiB"))
+
+    def test_node_override_wins_field_by_field(self):
+        # La surcharge per-node prime CHAMP PAR CHAMP sur le global.
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {"name": "cp1", "roles": ["control"], "resources": {"cpus": 12}},
+                    {"name": "n1", "roles": ["worker"]},
+                ],
+                resources={"cpus": 4, "memory": "12GiB", "disk": "40GiB"},
+            )
+        )
+        cp1 = topo.node_resources("cp1")
+        self.assertEqual((cp1.cpus, cp1.memory, cp1.disk), (12, "12GiB", "40GiB"))
+        # Le worker sans surcharge garde le global.
+        n1 = topo.node_resources("n1")
+        self.assertEqual(n1.cpus, 4)
+
+    def test_unknown_node_rejected(self):
+        topo = topology_from_dict(_base())
+        with self.assertRaises(TopologyError):
+            topo.node_resources("ghost")
+
+    def test_non_integer_cpus_rejected(self):
+        # La coercion (et donc le rejet) se fait à la LECTURE des ressources (pure).
+        topo = topology_from_dict(_base(resources={"cpus": "huit"}))
+        with self.assertRaises(TopologyError):
+            _ = topo.default_resources
+
+    def test_cpus_string_coerced(self):
+        # Le YAML peut porter cpus en chaîne ("8") → coercé en int.
+        topo = topology_from_dict(_base(resources={"cpus": "8"}))
+        self.assertEqual(topo.default_resources.cpus, 8)
+
+
+class ConfigBlocks(unittest.TestCase):
+    """LOT 8 (ADR 0097 §3) : blocs de config remontés de l'env vers le YAML (un bloc par
+    domaine). nestor LIT ces blocs du YAML ; absents → `{}` (l'accesseur/seed porte le défaut)."""
+
+    def test_blocks_default_to_empty(self):
+        topo = topology_from_dict(_base())
+        for block in (topo.ceph, topo.ha, topo.gitea, topo.cilium, topo.atlas, topo.portal):
+            self.assertEqual(block, {})
+
+    def test_ceph_block_read(self):
+        topo = topology_from_dict(
+            _base(ceph={"block_device": "vde", "hdd_glob": "/sys/block/vd[b-d]", "min_hdd": 3})
+        )
+        self.assertEqual(topo.ceph["block_device"], "vde")
+        self.assertEqual(topo.ceph["min_hdd"], 3)
+
+    def test_ha_block_read(self):
+        topo = topology_from_dict(_base(ha={"vip": "10.0.0.40", "iface": "eth0"}))
+        self.assertEqual(topo.ha["vip"], "10.0.0.40")
+        self.assertEqual(topo.ha["iface"], "eth0")
+
+    def test_gitea_block_read(self):
+        topo = topology_from_dict(_base(gitea={"org": "atlas", "ns": "gitea", "repo": "workflows"}))
+        self.assertEqual(topo.gitea["org"], "atlas")
+        self.assertEqual(topo.gitea["ns"], "gitea")
+
+    def test_atlas_and_portal_blocks_read(self):
+        topo = topology_from_dict(
+            _base(
+                atlas={"repo_dir": "../atlas", "citation_revision": "c98feea9"},
+                portal={"seuil_jours": 30, "listen_port": 8080},
+            )
+        )
+        self.assertEqual(topo.atlas["citation_revision"], "c98feea9")
+        self.assertEqual(topo.portal["seuil_jours"], 30)
 
 
 if __name__ == "__main__":

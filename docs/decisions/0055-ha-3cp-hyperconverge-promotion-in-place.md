@@ -126,8 +126,26 @@ ne collisionnent **que** s'ils revendiquent la même IP. Deux garde-fous :
 
 ## Statut
 
-Accepted (2026-06-11 ; promu de Proposed le 2026-06-13). **Précise**
-[ADR 0047](0047-topologie-ha-3cp-control-plane-dedie.md) (variante
+Superseded by [ADR 0097](0097-moteur-chemin-python-bash-artefacts.md)
+(2026-06-29). Initialement Accepted (2026-06-11 ; promu de Proposed le
+2026-06-13).
+
+> **Topologie `ha-3cp` abandonnée (2026-06-29).** La cible HA hyperconvergée
+> décrite ici n'est plus poursuivie : sa preuve exigeait un **banc 3-VM**
+> (quorum etcd impair + failover de VIP), or ce banc est **abandonné** (poste de
+> dev sans les ressources pour 3 VM — cf. le passage au banc mono-nœud
+> local-path comme référence). La HA du control plane ne se prouvant **que** sur
+> prod (rebuild dirqual ~sept. 2026), l'outillage `ha-3cp` (orchestration,
+> sondes etcd/VIP, chemin banc, exemple de topologie) est **retiré** par
+> [ADR 0097](0097-moteur-chemin-python-bash-artefacts.md) ; le geste CNI
+> `ha-cni` (pose Cilium + fetch kubeconfig du bootstrap **normal**, sans rapport
+> avec la HA malgré son nom) est **conservé**. Le plan
+> [plan-ha-3cp-control-plane](../plans/plan-ha-3cp-control-plane.md) passe
+> **Abandonné**. Cet ADR reste **immuable sur le fond**
+> ([ADR 0057](0057-gouvernance-documentaire-adr-plan-issue.md) : un ADR décide,
+> immuable) : seul son statut acte que la décision n'est plus active.
+
+**Précise** [ADR 0047](0047-topologie-ha-3cp-control-plane-dedie.md) (variante
 hyperconvergée 4 nœuds, là où 0047 décrit le modèle CP dédiés 6 VMs) et
 **amende** [ADR 0002](0002-control-plane-unique-avec-endpoint.md) (argument « 3
 workers » caduc, taint CP retiré). Bâtit sur

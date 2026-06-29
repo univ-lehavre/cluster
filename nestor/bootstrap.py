@@ -1,7 +1,8 @@
 """Orchestration du socle k8s (`bootstrap` : k8s + CRI + CNI) en Python (ADR 0017/0049).
 
 Migration incrémentale de `phase_bootstrap`/`bootstrap_node_sequence` (run-phases.sh)
-vers Python, sur le MÊME moule que `ha.py` : la LOGIQUE (séquence ordonnée des
+vers Python, sur le MÊME moule que le moteur de chemin (`path.run_path`) : la LOGIQUE
+(séquence ordonnée des
 playbooks, extravars) est PURE et testable sans banc ; l'I/O réelle (lancer un
 playbook, écrire l'inventaire, poser la CNI, récupérer le kubeconfig) est INJECTÉE
 par la façade — qui la branche sur `runner.launch_phase` (Ansible) et les briques
@@ -113,7 +114,7 @@ def run_bootstrap(
     doit renvoyer un objet à `.rc`/`.status` (RunResult). `run_cni()` : pose la CNI
     (façade → brique bash run-phases.sh, ADR 0049). `has_workers` : voir
     `bootstrap_playbooks` — un control unique sans worker OMET `join-workers.yaml`.
-    `sleep` : inutilisé ici (signature homogène avec ha.run_ha_3cp ; réservé à
+    `sleep` : inutilisé ici (signature homogène avec path.run_path ; réservé à
     d'éventuelles gates futures).
 
     L'inventaire, le kubeconfig et la dérivation de cp_ip/iface restent à la façade

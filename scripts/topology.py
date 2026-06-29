@@ -63,6 +63,7 @@ La logique de mapping exception→code est testée par tests/test_topology_cli.p
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import datetime as dt
 import difflib
@@ -114,14 +115,16 @@ from nestor import (  # noqa: E402
 from nestor import bootstrap as _bootstrap  # noqa: E402
 from nestor import discover as _discover  # noqa: E402
 from nestor import graph as _graph  # noqa: E402
-from nestor import ha as _ha  # noqa: E402
 from nestor import isolation as _isolation  # noqa: E402
+from nestor import kube_context as _kube_context  # noqa: E402
+from nestor import path as _path  # noqa: E402
 from nestor import prod_target as _prod_target  # noqa: E402
 from nestor import refresh_fuse as _refresh_fuse  # noqa: E402
 from nestor import refresh_plan as _refresh_plan  # noqa: E402
 from nestor import roundtrip as _roundtrip  # noqa: E402
 from nestor import runner as _runner  # noqa: E402
 from nestor import scale as _scale  # noqa: E402
+from nestor import seed as _seed  # noqa: E402
 from nestor import smoke as _smoke  # noqa: E402
 from nestor.history import (  # noqa: E402
     last_run_for_target,
@@ -148,8 +151,14 @@ _BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
 # (l'inventaire PROD). `next` doit viser CELUI-CI pour une topo lima — sinon un montage
 # banc SSH sur la prod (faille ADR 0053). Choisi par `_inventory_for(topo)`.
 _BENCH_INVENTORY = os.path.join(_ROOT, "bench", "lima", ".work", "inventory.yaml")
+# Manifestes de la code-location JOUET poussés dans Gitea par le seed banc (Contents API ;
+# step `push-code-location`, parité gitea-init.sh:SAMPLE_DIR). VERSIONNÉS dans le dépôt (pas
+# dans le pod) → on les LIT côté hôte puis on les base64-encode côté Python (le `base64` du
+# bash agissait sur l'hôte aussi : le fichier n'est pas dans le pod gitea).
+_SEED_SAMPLE_DIR = os.path.join(_ROOT, "bench", "lima", "atlas-workflow-sample")
 # Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
-# un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha._vm_exec).
+# un démon Lima bloqué ne doit JAMAIS figer le refresh (un `limactl shell`/SSH peut pendre
+# indéfiniment sans borne — sous-process qui ne rend jamais la main, constaté au banc).
 _REFRESH_TIMEOUT_S = 8
 
 
@@ -191,6 +200,38 @@ def _kubectl_env(declared: str | None = None) -> dict[str, str]:
     (`_bench_kubeconfig`) — jamais le ~/.kube/config implicite de la prod. `declared`
     = `kubeconfig:` de la topologie (ADR 0090), propagé pour viser une cible prod."""
     return {**os.environ, "KUBECONFIG": _bench_kubeconfig(declared)}
+
+
+def cmd_kubectl(args: argparse.Namespace) -> int:
+    """`nestor kubectl <args…>` : lance kubectl sur la cible de la STACK ACTIVE.
+
+    Remplaçant ergonomique de l'ancien `nestor env` (supprimé LOT 8) : au lieu d'imprimer
+    `export KUBECONFIG=<banc>` à `eval`, `nestor` EXÉCUTE kubectl avec le bon kubeconfig —
+    résolu par `_bench_kubeconfig` (ADR 0053/0090 : KUBECONFIG explicite → `kubeconfig:` de
+    la topo → banc Lima → `/dev/null`, JAMAIS `~/.kube/config` = la prod par accident). Donc
+    `nestor kubectl get pods -A` vise TOUJOURS la cible déclarée, sans manipuler l'env du
+    shell. Les arguments résiduels sont passés tels quels à kubectl (passthrough).
+
+    Code = celui de kubectl. Pas de cible sûre (banc absent, prod sans `kubeconfig:`) →
+    `_bench_kubeconfig` rend `/dev/null` et kubectl échoue proprement (honnête, ADR 0053).
+
+    NB : `main()` pose un KUBECONFIG=banc par DÉFAUT (`_default_kubeconfig_to_bench`) pour
+    les sondes « état réel ». Ce défaut AUTO (≠ intention opérateur, `_KUBECONFIG_AUTO_BENCH`)
+    NE doit PAS écraser la cible DÉCLARÉE de la stack : si la stack prod est active, `nestor
+    kubectl` doit viser la PROD (sinon il taperait le banc même prod sélectionnée). On
+    neutralise donc le défaut auto avant de résoudre depuis la topo (un KUBECONFIG posé
+    EXPLICITEMENT par l'opérateur, lui, reste prioritaire — intention respectée, ADR 0090)."""
+    topo = load_topology(_resolve(args.file))
+    if _KUBECONFIG_AUTO_BENCH:
+        # défaut posé par nestor lui-même → on le retire pour que _bench_kubeconfig résolve
+        # la cible DÉCLARÉE (prod via topo.kubeconfig), pas le banc auto.
+        os.environ.pop("KUBECONFIG", None)
+    env = _kubectl_env(topo.kubeconfig)
+    passthrough = list(getattr(args, "kubectl_args", []) or [])
+    proc = subprocess.run(  # noqa: S603 — kubectl + args opérateur, cible sûre (env)
+        ["kubectl", *passthrough], env=env, check=False
+    )
+    return proc.returncode
 
 
 def _kubeconfig_reaches_api(kubeconfig: str) -> bool:
@@ -254,20 +295,6 @@ def _active_stack_name(file_arg: str | None) -> str | None:
         return None
     try:
         return load_topology(path).catalog.get("topology")
-    except (TopologyError, FileNotFoundError, OSError):
-        return None
-
-
-def _active_topology_safe() -> Topology | None:
-    """La topologie de la stack ACTIVE (`topology.yaml`), ou None si absente/illisible.
-
-    Sert aux gardes d'isolation (ADR 0084) qui doivent connaître `target_kind` sans `-f`
-    (ex. `env`, appelé par le wrapper sans argument). Robuste : toute erreur → None
-    (l'appelant retombe sur le comportement banc par défaut)."""
-    if not os.path.exists(_DEFAULT_TOPOLOGY):
-        return None
-    try:
-        return load_topology(_DEFAULT_TOPOLOGY)
     except (TopologyError, FileNotFoundError, OSError):
         return None
 
@@ -364,7 +391,7 @@ def _confirm(prompt: str, *, default: bool, no_input: bool) -> bool:
     à la casse ; toute autre saisie re-demande."""
     if no_input:
         return default
-    hint = "O/n" if default else "o/N"
+    hint = "OUI/non" if default else "oui/NON"
     while True:
         answer = input(f"{prompt} [{hint}] : ").strip().lower()
         if not answer:
@@ -381,24 +408,31 @@ def _choisir_couche(
 ) -> str | None:
     """Menu numéroté quand PLUSIEURS couches sont montables (choix d'ordre, ADR 0066).
 
-    `choix` est ordonné selon le chemin (le 1er = ordre conventionnel = DÉFAUT).
-    `libelle(phase)` rend le texte humain affiché. Renvoie la phase choisie, ou None
-    si l'opérateur annule (saisie vide hors défaut interdite : Entrée = défaut). Sous
-    `no_input` (CI/non-TTY/--yes) : renvoie le défaut sans prompter — pas de menu
-    interactif à l'aveugle."""
+    `choix` est ordonné selon le chemin (le 1er = ordre conventionnel). `libelle(phase)`
+    rend le texte humain affiché. Renvoie la phase choisie, ou None si l'opérateur annule.
+
+    Principe « par défaut, nestor ne fait rien » : en interactif (TTY), une Entrée vide
+    ANNULE (renvoie None) — PLUS de « défaut 1 ». L'opérateur DOIT choisir un numéro.
+
+    Sous `no_input`, le seul appelant (`cmd_next`) ne l'active QUE pour `--yes` (hors TTY
+    SANS --yes, il refuse AVANT d'atteindre le menu) : `--yes` est une demande EXPLICITE
+    d'agir → on retient l'ordre conventionnel (`choix[0]`), déterministe pour la CI. Le
+    « rien par défaut » vaut pour l'interactif ; `--yes` a dit oui."""
     if no_input:
         return choix[0]
     print("Plusieurs couches sont installables maintenant — laquelle monter ?", file=sys.stderr)
     for i, phase in enumerate(choix, 1):
-        marque = "  (défaut)" if i == 1 else ""
-        print(f"  {i}) {libelle(phase)}{marque}", file=sys.stderr)
+        print(f"  {i}) {libelle(phase)}", file=sys.stderr)
     while True:
-        rep = input(f"Numéro [1-{len(choix)}, défaut 1] : ").strip()
+        rep = input(f"Numéro [1-{len(choix)}] (Entrée = annuler) : ").strip()
         if not rep:
-            return choix[0]
+            return None
         if rep.isdigit() and 1 <= int(rep) <= len(choix):
             return choix[int(rep) - 1]
-        print(f"    réponds un numéro entre 1 et {len(choix)} (ou Entrée pour 1)", file=sys.stderr)
+        print(
+            f"    réponds un numéro entre 1 et {len(choix)} (ou Entrée pour annuler)",
+            file=sys.stderr,
+        )
 
 
 def _activate_symlink(target_rel: str) -> None:
@@ -489,9 +523,11 @@ def cmd_stack_new(args: argparse.Namespace) -> int:
         f"({len(topo.control_nodes)} control / {len(topo.worker_nodes)} worker)."
     )
 
-    # Activation : on la PROPOSE une fois la topo créée (oui par défaut) plutôt que
-    # de l'exiger en flag. `--activate` force le oui sans demander ; `--no-input`
-    # retient le défaut (oui que si --activate, pour rester déterministe en CI).
+    # Activation : on la PROPOSE une fois la topo créée plutôt que de l'exiger en flag.
+    # `--activate` force le oui sans demander ; `--no-input` ne touche RIEN (défaut False,
+    # déterministe en CI). Principe « par défaut, nestor ne fait rien » : Entrée vide =
+    # NE PAS activer (le symlink d'activation pointe la PROD ; ne jamais le repointer à
+    # l'aveugle). L'opérateur active explicitement (« oui ») ou via `stack select`.
     if args.activate:
         activate = True
     elif args.no_input:
@@ -499,7 +535,7 @@ def cmd_stack_new(args: argparse.Namespace) -> int:
     else:
         activate = _confirm(
             f"Activer `{plan.name}` maintenant (topology.yaml → {plan.target}) ?",
-            default=True,
+            default=False,
             no_input=False,
         )
 
@@ -560,8 +596,9 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     """`stack select` : active une topologie EXISTANTE et POSE le KUBECONFIG de la cible.
 
     Calque `pulumi stack select` : choisit la stack courante parmi le catalogue,
-    repointe le symlink `topology.yaml`, et — comme `nestor env` — imprime sur
-    STDOUT une ligne `export KUBECONFIG=…` à `eval` dans le shell :
+    repointe le symlink `topology.yaml`, POSE un CONTEXTE kubectl nommé `<stack>`
+    dans le kubeconfig de la cible (LOT 8, ADR 0097 §3 — remplace `nestor env`), et
+    imprime sur STDOUT une ligne `export KUBECONFIG=…` à `eval` dans le shell :
 
         eval "$(nestor stack select banc)"
 
@@ -569,8 +606,10 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     s'il est monté (`bench/lima/.work/kubeconfig`), sinon **`/dev/null`** (vide) —
     JAMAIS `~/.kube/config` (la prod). Un `kubectl`/`cilium` direct dans le shell
     vise alors la bonne cible, ou échoue proprement (« pas de banc »), au lieu de
-    taper la prod par accident. Un process NE PEUT PAS exporter dans le shell PARENT
-    (invariant Unix) → le patron `eval`, comme `ssh-agent`/`nestor env`.
+    taper la prod par accident. Le contexte nommé permet AUSSI `kubectl --context
+    <stack> …` sans aucune variable d'env (mécanisme standard k8s). Un process NE
+    PEUT PAS exporter dans le shell PARENT (invariant Unix) → le patron `eval`,
+    comme `ssh-agent`.
 
     TOUS les messages humains vont sur STDERR (inertes pour `eval`) ; seule la ligne
     `export` va sur STDOUT. Sans `eval` (appel nu `nestor stack select`), la stack
@@ -604,6 +643,11 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         f"✓ activée : topology.yaml → {target_rel} (chemin dérivé : {default_target(topo)})",
         file=sys.stderr,
     )
+
+    # CONTEXTE kubectl nommé (LOT 8, ADR 0097 §3) : remplace `nestor env`. On pose un
+    # contexte `<stack>` dans le kubeconfig de la cible (best-effort, non bloquant) — le
+    # mécanisme STANDARD k8s (`kubectl --context <stack>`) supplante l'export de KUBECONFIG.
+    _pose_named_context(topo, args.name)
 
     # PROD (ADR 0090) : la cible n'est pas le banc Lima mais le cluster déclaré. Si la
     # topo ne déclare pas encore son `kubeconfig:`, c'est ICI (à l'activation — déjà une
@@ -838,21 +882,22 @@ def _observed_layers(phases: list[str]) -> set[str]:
     return done
 
 
-def _probe_observed_layers(seq: list[str], nodes_ready: list[str]) -> tuple[set[str], set[str]]:
+def _probe_observed_layers(seq: list[str], nodes_ready: list[str]) -> set[str]:
     """Sonde RÉELLE des couches applicatives, partagée par preview/next/up (ADR 0090).
 
-    Renvoie `(observed_layers, signal_phases)` que `compute_plan_state` consomme :
-    - `observed_layers` : couches de `seq` à signal connu OBSERVÉES saines (kubectl) ;
-    - `signal_phases` : l'ENSEMBLE des phases de `seq` qui ONT un signal connu — pour
-      que le calcul ré-ajoute celles à signal NON confirmées par le réel (2e sens).
+    Renvoie `observed_layers` que `compute_plan_state` consomme : les couches de `seq`
+    à signal connu OBSERVÉES saines (kubectl). C'est la moitié du RÉEL (avec le socle)
+    dont `done` dérive ENTIÈREMENT depuis la refonte lot 6 (`done` = réel seul) : une
+    couche à signal NON confirmée par le réel n'y figure PAS → elle est « à appliquer »
+    naturellement (plus de ré-injection ad hoc d'un set `signal_phases`).
 
     Sonde UNIQUEMENT si le cluster ciblé répond (`nodes_ready`) : sinon `_observed_layers`
     (kubeconfig banc) lirait le banc Lima pour une stack prod sans cible (ADR 0084) — on
-    rend alors `(∅, ∅)` (le RÉEL n'a honnêtement rien à dire, donc aucune ré-injection)."""
+    rend alors ∅ (le RÉEL n'a honnêtement rien à dire : tout l'aval est « à appliquer »)."""
     if not nodes_ready:
-        return set(), set()
+        return set()
     signal_phases = {p for p in seq if p in _LAYER_SIGNAL}
-    return _observed_layers(list(signal_phases)), signal_phases
+    return _observed_layers(list(signal_phases))
 
 
 # ── Sondes de `discover` (ADR 0074) : I/O kubectl irréductible (ADR 0049). Lisent
@@ -976,8 +1021,9 @@ def _discover_gateways_present() -> bool:
 def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
     """Confirme la DESTRUCTION des VMs `vms`. --yes saute ; hors TTY sans --yes : refus.
 
-    Garde-fou anti-destruction silencieuse : sur un TTY, on invite l'opérateur
-    (liste les VMs) ; sans TTY (CI/script), on EXIGE --yes (sinon on ne détruit RIEN)."""
+    Garde-fou anti-destruction silencieuse : sur un TTY, on invite l'opérateur (liste
+    les VMs) via `_confirm` (hint « oui/NON », défaut False = Entrée vide ne détruit
+    RIEN) ; sans TTY (CI/script), on EXIGE --yes (sinon on ne détruit RIEN)."""
     if assume_yes:
         return True
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -986,8 +1032,11 @@ def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
             file=sys.stderr,
         )
         return False
-    rep = input(f"⚠️  DÉTRUIRE définitivement les VMs {vms} (+ disques) ? [oui/non] ")
-    return rep.strip().lower() in ("oui", "o", "yes", "y")
+    return _confirm(
+        f"⚠️  DÉTRUIRE définitivement les VMs {vms} (+ disques) ?",
+        default=assume_yes,
+        no_input=assume_yes,
+    )
 
 
 def cmd_destroy(args: argparse.Namespace) -> int:
@@ -1002,7 +1051,7 @@ def cmd_destroy(args: argparse.Namespace) -> int:
 
     Codes : 0 succès (ou rien à détruire) ; 1 échec du down délégué ; 2 confirmation
     refusée / hors TTY sans --yes."""
-    _assert_bench_target("nestor destroy")
+    _assert_bench_target("nestor down")
     path = _resolve(args.file)
     topo = load_topology(path)
     stack = topo.catalog.get("topology", "—")
@@ -1214,8 +1263,8 @@ def _run_scenarios(jouables, pretes_fn, *, full: bool, topo) -> int:
     `nestor` calcule donc le `ONLY=` au lieu d'un SKIP composé à la main. Garde banc imposée."""
     if pretes_fn is None:
         raise _UsageError(
-            "`--run` exige un banc joignable (état réel) — exporter KUBECONFIG / `nestor env`, "
-            "ou monter le banc (`nestor up`)."
+            "`--run` exige un banc joignable (état réel) — `nestor stack select <banc>` "
+            "(pose le contexte), ou monter le banc (`nestor up`)."
         )
     _assert_bench_target("nestor test scenarios --run")
     pretes = [e for e in jouables if pretes_fn(e)]
@@ -1301,56 +1350,34 @@ def _run_for_target(runs, target: str | None):
     return run if run is not None else latest_run(runs)
 
 
-def cmd_env(args: argparse.Namespace) -> int:
-    """`env` : imprime la ligne `export KUBECONFIG=<banc>` à `eval` dans le shell.
+def _pose_named_context(topo: Topology, stack: str) -> None:
+    """Pose/met à jour le CONTEXTE kubectl nommé `stack` dans son kubeconfig (LOT 8).
 
-    Un process NE PEUT PAS exporter une variable dans le shell PARENT (invariant
-    Unix) — d'où le patron `eval "$(topology.py env)"` (comme `ssh-agent`/`docker-env`).
-    Cela PERSISTE le kubeconfig du banc dans LE shell courant, pour que `kubectl`/
-    `cilium` directs (hors topology.py) visent le banc eux aussi. topology.py lui-même
-    n'en a pas besoin (main() pose déjà le défaut par process) — c'est un confort shell.
+    REMPLACE `nestor env` (ADR 0097 §3) : au lieu d'imprimer `export KUBECONFIG=<banc>`
+    (paramétrage-par-env aboli), `nestor` maintient un contexte nommé par topologie (banc,
+    dirqual…) dérivé du champ `kubeconfig:` du YAML (prod) / du kubeconfig du banc (lima).
+    L'opérateur branche `kubectl --context <stack>` SANS variable d'env (mécanisme standard
+    k8s, cohérent ADR 0090).
 
-    Sans `--force`, on respecte un KUBECONFIG déjà exporté (intention explicite) : on
-    n'imprime rien d'écrasant, juste un rappel commenté sur stderr. Si le banc n'a pas
-    de kubeconfig (pas encore monté), erreur d'usage."""
-    # Garde d'isolation (ADR 0084) : `env` pose le kubeconfig du BANC — sans objet pour
-    # une stack active `target_kind: prod`. L'exporter polluerait le shell prod avec le
-    # banc (et DÉSARMERAIT `_assert_bench_target` qui voit alors un KUBECONFIG « explicite »
-    # → `up`/`next` croiraient pouvoir muter, créant des VMs Lima sur une cible prod).
-    # Le wrapper `nestor` appelle `env --force` après up/next : on refuse en prod.
-    active = _active_topology_safe()
-    if active is not None and active.target_kind != "lima":
-        print(
-            f"# stack active `{active.catalog.get('topology', '?')}` est "
-            f"target_kind={active.target_kind} — `nestor env` ne pose PAS le kubeconfig "
-            "du banc (ADR 0084). Pour la prod, exporter le KUBECONFIG prod explicitement "
-            "ou `nestor discover --cp <nœud>`."
+    Best-effort, NON BLOQUANT (appelé depuis `stack select`, qui doit rester rapide) :
+    une topo prod sans `kubeconfig:`, un banc non monté, ou un kubectl en échec → on
+    SIGNALE sur stderr et on continue (le contexte n'est pas vital à l'activation)."""
+    try:
+        plan = _kube_context.context_plan(
+            stack,
+            kubeconfig=topo.kubeconfig,
+            target_kind=topo.target_kind,
+            bench_kubeconfig=_BENCH_KUBECONFIG,
         )
-        return 0
-    if not os.path.exists(_BENCH_KUBECONFIG):
-        raise _UsageError(
-            f"kubeconfig du banc absent ({_BENCH_KUBECONFIG}) — monter le socle d'abord "
-            "(`topology.py up`)"
-        )
-    bench = os.path.abspath(_BENCH_KUBECONFIG)
-    current = os.environ.get("KUBECONFIG")
-    # `/dev/null` (placeholder posé par `stack select` quand le banc n'existait pas
-    # encore) ou un chemin VIDE/INEXISTANT ne sont PAS une intention explicite de
-    # l'utilisateur : on les remplace par le banc sans exiger --force (sinon on reste
-    # bloqué sur /dev/null après le montage). Seul un VRAI kubeconfig tiers est respecté.
-    placeholder = (
-        not current
-        or os.path.abspath(current) == os.path.abspath(os.devnull)
-        or not os.path.exists(current)
+        _kube_context.apply_context(plan)
+    except _kube_context.ContextError as exc:
+        _warn(f"contexte kubectl « {stack} » non posé : {exc}")
+        return
+    print(
+        f"  contexte kubectl « {stack} » à jour — `kubectl --context {stack} …` "
+        "(plus de `nestor env`, ADR 0097 §3).",
+        file=sys.stderr,
     )
-    if current and not args.force and not placeholder and os.path.abspath(current) != bench:
-        # KUBECONFIG tiers RÉEL déjà posé : on NE l'écrase PAS (sauf --force). Rappel
-        # commenté (sur stdout pour rester `eval`-safe : un commentaire shell est inerte).
-        print(f"# KUBECONFIG déjà défini ({current}) — `env --force` pour viser le banc")
-        return 0
-    # Ligne eval-able. `eval "$(topology.py env)"` exporte dans le shell courant.
-    print(f"export KUBECONFIG={shlex.quote(bench)}")
-    return 0
 
 
 def cmd_access(args: argparse.Namespace) -> int:
@@ -1385,8 +1412,13 @@ def _kubectl(*args: str, timeout: int = _REFRESH_TIMEOUT_S):
     CompletedProcess (rc/stdout) ou None si injoignable — l'appelant décide. Le
     kubeconfig vise le banc, sinon un kubeconfig VIDE — jamais la prod (ADR 0053)."""
     try:
+        # `--request-timeout` est un flag GLOBAL kubectl : il DOIT précéder la commande et
+        # surtout le `--` d'un `exec` (sinon il est passé à la commande du conteneur — un
+        # `kubectl exec pod -- gitea …` voyait `gitea … --request-timeout=5s` → « flag not
+        # defined », tout geste seed cassé). On l'insère juste après `kubectl`, où kubectl le
+        # consomme toujours, quelle que soit la sous-commande (get/exec/apply/rollout).
         return subprocess.run(  # noqa: S603 — argv contrôlé (table de workloads)
-            ["kubectl", *args, "--request-timeout=5s"],
+            ["kubectl", "--request-timeout=5s", *args],
             check=False,
             capture_output=True,
             text=True,
@@ -1459,15 +1491,25 @@ def _context_targets_bench() -> bool:
     return out.returncode == 0 and server.startswith(("https://127.0.0.1:", "https://localhost:"))
 
 
-def _assert_bench_target(action: str) -> None:
+def _assert_bench_target(action: str, topo: Topology | None = None) -> None:
     """Garde d'isolation (ADR 0053) : une commande BANC mutante ne s'exécute QUE sur
     une cible prouvée-banc. Si le kubeconfig du banc est absent ET que le contexte
     courant ne vise pas le banc, REFUS (code 2) — protège la prod d'une mutation par
     erreur. Échappatoire prod EXPLICITE : `KUBECONFIG` exporté = intention assumée
     (ADR 0065) — la garde ne bloque alors pas (et `discover` n'est jamais gardé,
-    ADR 0074)."""
+    ADR 0074).
+
+    PROVISIONNING FROM-SCRATCH (`up`) : quand `topo` est fourni ET déclare
+    `target_kind: lima`, le banc n'existe PAS ENCORE (c'est `up` qui le CRÉE) — exiger
+    un kubeconfig de banc bloquerait le cas légitime du montage depuis zéro (vécu : un
+    `down` puis `up` était refusé). La TOPOLOGIE qui déclare `lima` est alors le signal
+    sûr (= `EXPECTED_TARGET_KIND=lima` du bash), tant qu'aucun `KUBECONFIG` prod n'est
+    exporté. Une topo `prod` reste soumise à la garde stricte (jamais de from-scratch
+    prod sans cible prouvée)."""
     if os.environ.get("KUBECONFIG"):
         return  # intention explicite assumée par l'opérateur
+    if topo is not None and topo.target_kind == "lima":
+        return  # `up` from-scratch d'un banc déclaré : la topo lima EST le signal sûr
     if os.path.exists(_BENCH_KUBECONFIG) and _context_targets_bench():
         return  # banc présent ET contexte = banc : nominal
     raise _UsageError(
@@ -1477,7 +1519,7 @@ def _assert_bench_target(action: str) -> None:
         "la PRODUCTION par erreur (ADR 0053).\n"
         "  • Monter le banc d'abord : `bench/lima/run-phases.sh up`\n"
         "  • Ou, si l'intention est délibérée hors-banc, exporter KUBECONFIG "
-        'explicitement : `eval "$(bench/lima/env.sh export)"`'
+        "explicitement (ex. `export KUBECONFIG=~/.kube/<topo>.config`, ADR 0097 §3)"
     )
 
 
@@ -1723,8 +1765,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
         os.environ["KUBECONFIG"] = out_path  # les sondes suivantes l'utilisent
     if not _ready_nodes():
         raise _UsageError(
-            "banc injoignable (aucun nœud Ready) — exporter KUBECONFIG ou `nestor env`, "
-            "ou monter le cluster (`nestor up`)"
+            "banc injoignable (aucun nœud Ready) — `nestor stack select <banc>` (pose "
+            "le contexte) ou monter le cluster (`nestor up`)"
         )
     result = _discover.assemble(
         nodes=_discover_node_roles(),
@@ -1837,8 +1879,8 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     real_layers, real_backend = _real_layers_backend()
     if real_backend is None and not real_layers:
         raise _UsageError(
-            "cluster injoignable (aucun nœud Ready / aucune couche lue) — exporter "
-            "KUBECONFIG ou `nestor env`, ou monter le cluster (`nestor up`)"
+            "cluster injoignable (aucun nœud Ready / aucune couche lue) — "
+            "`nestor stack select <topo>` (pose le contexte) ou monter le cluster (`nestor up`)"
         )
     # Le DÉCLARÉ, AU MÊME GRAIN que le réel : `discover` émet des PHASES (storage-simple,
     # monitoring, gitops, dataops…), tandis que `declared_layers` peut être des ALIAS de
@@ -2038,28 +2080,19 @@ def cmd_preview(args: argparse.Namespace) -> int:
     _resolve_prod_kubeconfig_into_env(topo, path, no_input=getattr(args, "no_input", False))
     # Avertissements d'ALIGNEMENT SHELL — propres au BANC (ADR 0053). Une stack
     # `target_kind: prod` ne lit PAS le banc (gating ADR 0084) : ces messages, pensés
-    # pour le banc, seraient TROMPEURS en prod (ils invitent à `nestor env` qui, en prod,
-    # ne pose rien). On ne les émet donc que pour une stack lima.
-    if topo.target_kind == "lima":
-        # Lecture seule : on ne BLOQUE pas. Quand aucun banc n'est monté, la sonde vise
-        # /dev/null (jamais la prod, ADR 0053) → la section RÉEL est VIDE. On le DIT
-        # simplement plutôt que de laisser croire à un cluster éteint.
-        if _active_kubeconfig() is None and not _context_targets_bench():
-            _warn(
-                "cluster non installé — pas de connexion possible pour l'instant "
-                "(le monter : `nestor up`). L'état réel ci-dessous est vide."
-            )
-        # MISMATCH SHELL ↔ preview : `_default_kubeconfig_to_bench` a posé le banc pour CE
-        # process (l'opérateur n'avait pas exporté KUBECONFIG) — mais le shell reste sans
-        # KUBECONFIG (process ≠ parent). preview lit le BANC pendant qu'un `kubectl` nu du
-        # shell vise ~/.kube/config (souvent la PROD). On AVERTIT (non bloquant) d'aligner
-        # le shell. Seulement si le banc est JOIGNABLE (sinon le 1er warning suffit).
-        elif _KUBECONFIG_AUTO_BENCH and _kubeconfig_reaches_api(_BENCH_KUBECONFIG):
-            _warn(
-                "preview lit le BANC, mais ton shell n'a pas KUBECONFIG exporté — un "
-                "`kubectl` direct vise ~/.kube/config (souvent la PROD). Aligne le shell : "
-                'eval "$(nestor env)".'
-            )
+    # pour le banc, seraient TROMPEURS en prod (ils invitent à aligner le shell sur le
+    # banc, sans objet en prod). On ne les émet donc que pour une stack lima.
+    # Lecture seule : on ne BLOQUE pas. Quand aucun banc n'est monté, la sonde vise
+    # /dev/null (jamais la prod, ADR 0053) → la section RÉEL est VIDE. On le DIT simplement
+    # plutôt que de laisser croire à un cluster éteint. Émis SEULEMENT pour une stack lima
+    # (une stack prod ne lit pas le banc, ADR 0084 — le message serait trompeur).
+    # NB : plus de warning « ton shell n'a pas KUBECONFIG » : `preview` lit DÉJÀ le bon banc
+    # (process ≠ shell), et `nestor kubectl …` rend obsolète le `kubectl` nu qu'on prémunissait.
+    if topo.target_kind == "lima" and _active_kubeconfig() is None and not _context_targets_bench():
+        _warn(
+            "cluster non installé — pas de connexion possible pour l'instant "
+            "(le monter : `nestor up`). L'état réel ci-dessous est vide."
+        )
     runs = load_runs(args.history or _RUNS_HISTORY)
     now = int(dt.datetime.now(tz=dt.UTC).timestamp())
     target = args.target  # None → default_target le déduit
@@ -2115,7 +2148,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
     )
     # exposition : le mode EFFECTIF (dérivé), pas la déclaration brute — un bloc
     # `exposition` absent ne veut pas dire « pas d'exposition » : le défaut global est
-    # `gateway` (ADR 0071). On annote « (défaut) » quand rien n'est déclaré.
+    # `nodeport` (L4 sur le port du nœud, ADR 0092 qui supersede 0071). On annote
+    # « (défaut) » quand rien n'est déclaré.
     expo_declare = isinstance(topo.exposition, dict) and topo.exposition.get("mode")
     expo_label = topo.exposition_mode + ("" if expo_declare else " (défaut)")
     print(f"  couches        : {couches_label}{storage_part}  ·  exposition : {expo_label}")
@@ -2168,23 +2202,17 @@ def cmd_preview(args: argparse.Namespace) -> int:
     run = last_run_for_topology(runs, stack_name)
     freshness, _ = verdict_for_run(run, resolved_target, now)
     observed_socle = observed_done_phases(declared, vms_present, nodes_ready)
-    # Couches applicatives observées (signaux kubectl) + leur set de phases-à-signal :
-    # ne sonder QUE si le cluster ciblé répond (nœuds Ready) — sinon `_observed_layers`
-    # (kubeconfig banc) lirait les couches du banc Lima pour une stack prod sans cible
-    # (ADR 0084). nodes_ready vide en prod sans KUBECONFIG → on ne sonde rien et on ne
-    # ré-ajoute rien (`signal_phases=∅` : le RÉEL n'a rien à dire, RÉEL honnêtement vide).
-    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
-    # LE calcul partagé (preview == next == up) — le RÉEL prime DANS LES DEUX SENS, garde
-    # `if "up" not in done` inclus (ADR 0052/0056 §7). Fonction PURE : tout l'état réel
-    # ci-dessus est passé en paramètre (aucun kubectl dans compute_plan_state).
-    state = compute_plan_state(
-        seq,
-        run.phases if run is not None else None,
-        observed_socle,
-        observed_layers,
-        freshness,
-        signal_phases=signal_phases,
-    )
+    # Couches applicatives observées saines (signaux kubectl) : ne sonder QUE si le
+    # cluster ciblé répond (nœuds Ready) — sinon `_observed_layers` (kubeconfig banc)
+    # lirait les couches du banc Lima pour une stack prod sans cible (ADR 0084).
+    # nodes_ready vide en prod sans KUBECONFIG → on ne sonde rien (RÉEL honnêtement vide).
+    observed_layers = _probe_observed_layers(seq, nodes_ready)
+    # LE calcul partagé (preview == next == up) — `done` dérive du RÉEL SEUL (refonte
+    # lot 6) : observed_socle ∪ observed_layers, PLUS de l'historique. Si Kubernetes est
+    # mort, observed_layers est vide → toutes les couches aval sont « à appliquer » (la
+    # cohérence de dépendance est naturelle). La fraîcheur (ci-dessus) reste calculée à
+    # part (verdict_for_run) et n'influence QUE l'affichage rejeu/inédit, pas `done`.
+    state = compute_plan_state(seq, observed_socle, observed_layers)
     a_appliquer = set(state.a_appliquer)
     # jamais monté ≠ rejeu : `jamais` (aucun run de la stack) → « à installer » (inédit) ;
     # `perime` (run existant mais plus frais) → « à rejouer ».
@@ -2220,14 +2248,18 @@ def _confirm_apply(target: str, *, assume_yes: bool) -> bool:
     """Confirme le montage COMPLET du chemin `target` avant de déléguer à run-phases.sh.
 
     --yes saute ; hors TTY sans --yes : refus (un montage complet n'est jamais
-    silencieux). Sur TTY : invite explicite (le chemin nommé monte toute la séquence)."""
+    silencieux). Sur TTY : invite explicite via `_confirm` (hint « oui/NON », défaut
+    False = Entrée vide ne monte RIEN ; --yes force le défaut à True et saute)."""
     if assume_yes:
         return True
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("montage refusé hors TTY sans --yes (pas de montage silencieux).", file=sys.stderr)
         return False
-    rep = input(f"Monter TOUTE la séquence du chemin `{target}` ? [oui/non] ")
-    return rep.strip().lower() in ("oui", "o", "yes", "y")
+    return _confirm(
+        f"Monter TOUTE la séquence du chemin `{target}` ?",
+        default=assume_yes,
+        no_input=assume_yes,
+    )
 
 
 def _nodes_override(topo) -> str:
@@ -2262,11 +2294,1046 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
         **os.environ,
         "NODES_OVERRIDE": _nodes_override(topo),
         "STACK_NAME": stack_name,
-        # exposition.mode CONSÉQUENT (ADR 0020/0071) : Gateway en hostNetwork (80/443
-        # sur l'IP du nœud) en mode `gateway` (défaut) ; `none` n'arme rien. Alias
-        # lb-ipam/hostport déjà résolus par exposition_mode.
+        # exposition.mode CONSÉQUENT (ADR 0092, supersede 0071) : `nodeport` (L4 sur le
+        # port du nœud) est le défaut ; `gateway` n'arme l'ancienne bordure L7 hostNetwork
+        # que s'il est déclaré ; `none` n'arme rien. Alias hostport→nodeport, lb-ipam→
+        # gateway déjà résolus par exposition_mode.
         "EXPOSITION_MODE": topo.exposition_mode,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CÂBLAGE FAÇADE du moteur de chemin Python (`nestor.path.run_path`) — LOT 6 (ADR 0097).
+#
+# POURQUOI ICI et non dans un module `nestor/facade.py` séparé : les callbacks RÉELS sont
+# des closures sur des fonctions PRIVÉES de CETTE façade (`_wait_layer_healthy`,
+# `_assert_bench_target`, `_assert_inventory_safe`, `_runner`, `_kubectl`, `_inventory_for`).
+# Un module `nestor/facade.py` devrait les ré-importer depuis `scripts/topology.py` — qui
+# n'est PAS un module de paquet (dossier `scripts/` sans `__init__`, chargé par chemin) →
+# import bancal/circulaire. Le PRÉCÉDENT du dépôt (`cmd_bootstrap_seq`) construit DÉJÀ
+# ses callbacks réels en closures ICI, à côté de l'I/O qu'ils enveloppent.
+# On suit ce moule : `nestor.path` reste PUR (logique d'orchestration testée stubée), la
+# façade ICI branche les callbacks sur le réel (runner/kubectl/limactl). La construction de
+# `PathContext` (PURE, dérivée de la topo) est isolée dans `_path_context` → testable sans I/O.
+#
+# ⚠️ MOTEUR UNIQUE (ADR 0097, bascule achevée) : `cmd_up` MONTE TOUJOURS via ce câblage
+# (`_run_path_engine`) — l'ancien filet bash `--engine=bash`/run-phases.sh a été RETIRÉ
+# (plus de double source de vérité). AUCUN fallback bash : un échec du moteur Python
+# s'ARRÊTE NET (corriger-le-code-pas-l-état, ADR 0046), il n'est JAMAIS masqué par un repli.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _path_context(topo: Topology) -> _path.PathContext:
+    """Construit `PathContext` depuis la TOPOLOGIE (PUR — aucune I/O, ADR 0097 §5.a).
+
+    Remplace les globales bash de run-phases.sh (CP:83 / API_PORT:90 / KUBECONFIG_LOCAL:148
+    / REPO / INVENTORY) par un dataclass IMMUABLE dérivé de la topo, plus de globale ambiante :
+    - `cp` : 1er nœud `control` (run-phases.sh:83-87 : 1er `:control` de NODES, sinon 1er
+      nœud). DÉRIVÉ, jamais codé en dur (`cp1`).
+    - `api_port` : 6443 (= run-phases.sh:90 `API_PORT`).
+    - `kubeconfig_local` / `inventory` : chemins du BANC Lima, IDENTIQUES à
+      run-phases.sh (`KUBECONFIG_LOCAL`/`INVENTORY` = `<WORKDIR>/kubeconfig` /
+      `<WORKDIR>/inventory.yaml`). Réutilise `_BENCH_KUBECONFIG`/`_inventory_for`.
+    - `repo` : racine du dépôt (= `REPO` de lib.sh) — pour résoudre les playbooks.
+    - `nodes` : tuple des nœuds attendus Ready (compte du gate socle `nodes_ready_all`)."""
+    controls = topo.control_nodes
+    cp = controls[0] if controls else (topo.nodes[0].name if topo.nodes else "")
+    return _path.PathContext(
+        cp=cp,
+        api_port=6443,
+        kubeconfig_local=_BENCH_KUBECONFIG,
+        repo=os.path.abspath(_ROOT),
+        inventory=_inventory_for(topo),
+        nodes=tuple(n.name for n in topo.nodes),
+    )
+
+
+def _provision_via_bash(topo: Topology, stack_name: str) -> int:
+    """STUB DOCUMENTÉ du provisioning amont `up` (ADR 0097 §5.b) : délègue à `run-phases.sh up`.
+
+    Le provisioning VM (limactl render/start, disques Ceph conditionnels, gate disques,
+    dérivation cp_ip/iface) ET `write_inventory` byte-stable sont l'artefact node-side
+    IRRÉDUCTIBLE (ADR 0049 — Lima/limactl reste bash). On NE le réécrit PAS en Python ici :
+    on POUSSE `run-phases.sh up` comme on applique un manifeste (Python pousse, consomme un
+    `rc`, ne lit pas la logique bash, ADR 0097 §2.a). `phase_up` lit les RESSOURCES VM via
+    VM_CPUS/VM_MEMORY/VM_DISK ; LOT 8 veut qu'elles viennent du YAML (`topo.node_resources`).
+    Pendant la TRANSITION, on les passe en env DEPUIS le YAML (Python décide les VALEURS, bash
+    garde le RENDU `lima_render_node`). Mono-nœud banc : un seul jeu de ressources (le CP).
+
+    RESTE BANC (§5.b) : portage RÉEL du callback (limactl render/start + write_inventory) — non
+    inventé ici (un faux provisioning serait pire que rien). Voir `_path.banc_todo`."""
+    env = _runphases_env(topo, stack_name)
+    # LOT 8 (ADR 0097 §3) : ressources VM du YAML, plus de l'env. Le banc mono-nœud n'a qu'un
+    # CP → on passe SES ressources. `run-phases.sh:117/124/125` lit VM_CPUS/VM_MEMORY/VM_DISK
+    # (n'écrase PAS un défaut si déjà posé) ; on les pose DEPUIS la topo le temps de la
+    # transition (le câblage direct `lima_render_node(<valeurs>)` reste à faire+prouver au banc).
+    ctx = _path_context(topo)
+    if ctx.cp:
+        res = topo.node_resources(ctx.cp)
+        env = {
+            **env,
+            "VM_CPUS": str(res.cpus),
+            "VM_MEMORY": res.memory,
+            "VM_DISK": res.disk,
+        }
+    runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
+    print("→ up : provisioning des VMs via run-phases.sh (limactl, ADR 0049)…")
+    return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
+        ["bash", runphases, "up"],
+        check=False,
+        env=env,
+    ).returncode
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SEED GITOPS (phase DÉLÉGUÉE `gitops-seed`) — câblage façade du LOT 8 (ADR 0097 §2/§3).
+#
+# `nestor/seed.py:run_seed` est PUR (logique : gardes opposées banc/prod + ordre des
+# étapes ; I/O injectée). ICI la façade BRANCHE l'I/O RÉELLE sur le banc : chaque étape
+# de `seed_steps('banc')` exécute le geste de `bench/lima/gitea-init.sh`, via
+# `kubectl exec DANS le pod gitea` (Gitea écoute `localhost:3000` — JAMAIS le FQDN
+# `*.svc.cluster.local`, qui timeoute côté glibc/curl quand un search domain externe est
+# présent, drift dirqual 2026-06-22) + `kubectl` pour les Secrets / l'apply de l'Application.
+#
+# ⚠️ HONNÊTETÉ (ADR 0034) : ce câblage MUTE un Gitea/Argo CD vivant — sa preuve DÉFINITIVE
+# est un RUN BANC du mainteneur (impossible dans cette session). Les tests (test_facade.py)
+# stubent TOUTE l'I/O (kubectl espionné, do() injecté) : ils prouvent le ROUTAGE + la garde,
+# pas le seed réel. Les 7 steps sont désormais CÂBLÉS pour de vrai (admin/token/org-repo/
+# push-code-location/webhook-secret/webhook/application) — y compris la Contents API
+# create-or-update (push-code-location), dont le PARSING de réponse (SHA existant, présence
+# de `"commit"`) reste à PROUVER au banc (format réel de Gitea) sans plus lever de STUB.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Ce que le câblage RÉEL du seed banc ne couvre PAS encore (à câbler+prouver au banc,
+# ADR 0034) — frontière déclarée, exposée par `_seed_banc_todo()` (testable).
+_SEED_BANC_TODO = (
+    "étape `push-code-location` CÂBLÉE (Contents API create-or-update : GET du SHA, "
+    'PUT-avec-sha vs POST, vérif `"commit"`) — le PARSING de la réponse réelle de Gitea '
+    "(objet vs liste de `GET /contents`, forme du PUT/POST) reste à PROUVER au banc "
+    "(gitea-init.sh:109-143) : le step TENTE le vrai push et échoue honnêtement si un détail "
+    "de format cloche, il ne lève plus de STUB à l'aveugle",
+    "dédup du webhook par URL (gitea-init.sh:163-166) : le comptage parse la réponse "
+    "`GET /hooks` réelle — ici on POST best-effort (Gitea refuse un doublon) ; affiner+prouver",
+    "run banc gitops-seed (gitea-init réel : admin/token/org-repo/push-code-location/"
+    "webhook/application) consigné — PREUVE DÉFINITIVE, reste à faire au banc",
+)
+
+
+def _seed_banc_todo() -> tuple[str, ...]:
+    """Frontière code-écrit / preuve-banc du seed (honnêteté ADR 0034). Testable."""
+    return _SEED_BANC_TODO
+
+
+class _SeedLaunchResult:
+    """Résultat d'un montage de phase DÉLÉGUÉE (seed), au moule de `IdempotenceResult`.
+
+    `run_path` lit `getattr(res, "ok")` / `.message` du callback `launch` ; on expose donc
+    `.ok` (bool) + `.message` pour qu'une phase seed s'intègre comme une phase à play."""
+
+    def __init__(self, ok: bool, message: str = "") -> None:
+        self.ok = ok
+        self.message = message
+
+
+def _gitea_pod(ns: str) -> str:
+    """Nom du pod gitea (réplica unique, Recreate) — parité `gitea_pod()` de gitea-init.sh.
+
+    Lecture seule (kubectl get, cible sûre `_kubectl_env`). Lève `_path.PathError` si absent
+    (le seed n'a pas de sens sans Gitea posé — fail-fast honnête, ADR 0046)."""
+    out = _kubectl(
+        "-n",
+        ns,
+        "get",
+        "pod",
+        "-l",
+        "app=gitea",
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+    )
+    pod = out.stdout.strip() if out and out.returncode == 0 else ""
+    if not pod:
+        raise _path.PathError(
+            f"seed gitops : pod gitea introuvable (ns `{ns}`) — Gitea est-il posé "
+            "(phase `gitops`) sur la cible banc ? (gitea-init.sh:49)"
+        )
+    return pod
+
+
+def _seed_api_ok(code: str) -> bool:
+    """Verdict d'idempotence d'un appel API Gitea du seed (parité du `|| true` ciblé du bash).
+
+    `code` = code HTTP rendu par `_api` (vide si l'exec a échoué : curl absent / pod
+    injoignable). Succès = 2xx (créé) OU « existe déjà » (409 conflit / 422 unprocessable —
+    idempotent au rejeu). Un code vide (exec KO) ou une vraie erreur (401 token invalide,
+    5xx) = ÉCHEC → le step échoue (fail-fast, pas de faux-vert — correctif d'audit)."""
+    if not code:
+        return False  # exec KO (out None / rc≠0) → pas un succès
+    return code.startswith("2") or code in ("409", "422")
+
+
+def _seed_contents_sha(resp_body: str) -> str:
+    """Extrait le `sha` d'une réponse `GET /repos/.../contents/<path>` de Gitea.
+
+    Parse JSON PROPRE (préférable au grep bash) + ROBUSTE : `GET /contents/<path>` rend un
+    OBJET pour un fichier, mais une LISTE pour un répertoire (et un message d'erreur pour un
+    404 — le fichier n'existe pas encore). On renvoie le `sha` du 1er objet plausible, sinon
+    une chaîne VIDE (= « pas de fichier existant » → l'appelant fera un POST de création,
+    parité du `sha` vide du bash). Un corps illisible → vide (l'appelant décide)."""
+    if not resp_body or not resp_body.strip():
+        return ""
+    try:
+        data = json.loads(resp_body)
+    except (ValueError, TypeError):
+        return ""
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return ""
+    sha = data.get("sha")
+    return sha if isinstance(sha, str) else ""
+
+
+def _seed_resp_has_commit(resp_body: str) -> bool:
+    """Vrai si la réponse d'un PUT/POST `/contents` contient un objet `commit` (parité du
+    `grep -q '"commit"'` du bash). Un PUT/POST réussi de la Contents API renvoie
+    `{"content": …, "commit": {…}}` ; sans `commit`, l'écriture A ÉCHOUÉ (l'ancienne version
+    resterait dans Gitea → Argo CD déploierait un manifeste périmé : drift à éviter).
+
+    Parse JSON propre ; on tolère qu'un corps non-JSON contienne malgré tout le marqueur
+    (fail-safe identique au grep du bash) → l'appelant échoue (return False) si rien."""
+    if not resp_body:
+        return False
+    try:
+        data = json.loads(resp_body)
+        if isinstance(data, dict) and isinstance(data.get("commit"), dict):
+            return True
+    except (ValueError, TypeError):
+        # Corps non-JSON : on n'échoue PAS ici — on retombe sur le fallback texte
+        # ci-dessous (parité du `grep -q '"commit"'` du bash, fail-safe).
+        pass
+    return '"commit"' in resp_body
+
+
+def _gitea_exec(ns: str, pod: str, argv: list[str], *, timeout: int = 60):
+    """Exécute `argv` DANS le pod gitea (`kubectl exec`) — parité `gitea_cli()` de
+    gitea-init.sh. C'est le MOULE anti-FQDN : la CLI/curl tape Gitea sur `localhost:3000`
+    DEPUIS le pod, donc AUCUNE résolution `*.svc.cluster.local` côté hôte (piège DNS).
+
+    Renvoie le CompletedProcess (cible sûre `_kubectl_env`, jamais la prod) ou None si
+    injoignable. L'appelant DÉCIDE (idempotence : un `user already exists` n'est pas une erreur)."""
+    return _kubectl("-n", ns, "exec", pod, "--", *argv, timeout=timeout)
+
+
+def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
+    """Construit le `do(step)` RÉEL du seed banc (porte `bench/lima/gitea-init.sh`).
+
+    Pour CHAQUE étape de `seed.seed_steps('banc')`, exécute le geste correspondant via
+    `kubectl exec DANS le pod gitea` (localhost:3000, JAMAIS le FQDN) + `kubectl` pour les
+    Secrets / l'apply de l'Application. Idempotent (un step déjà fait = ok, pas d'erreur).
+
+    Le token API (étape 2) doit être réutilisé par les étapes API suivantes (3/6) : le
+    `do(step) -> bool` étant sans état, on le THREADE via une closure `state` mutable —
+    exactement comme la variable `token` du `main()` bash, locale au run. La cible kube est
+    la cible SÛRE (`_kubectl`/`_kubectl_env`) ; le pod est résolu une fois au 1er besoin."""
+    ns, argocd_ns = config.ns, config.argocd_ns
+    org, repo = config.org, config.repo
+    api_base = f"{config.api}/api/v1"
+    state: dict[str, str] = {}
+
+    def pod() -> str:
+        if "pod" not in state:
+            state["pod"] = _gitea_pod(ns)
+        return state["pod"]
+
+    def _api_full(method: str, path: str, body: str | None = None):
+        """Appel REST à Gitea DEPUIS le pod (curl localhost:3000) — parité `api()` bash, CORPS
+        INCLUS. Renvoie `(out, code, resp_body)`.
+
+        `kubectl exec pod -- curl -sS -w '\\n%{http_code}' …` (PAS de `-o /dev/null`) : curl
+        écrit le CORPS de la réponse puis, sur une DERNIÈRE ligne, le code HTTP (moule du bash
+        `-w '\\n%{http_code}'`). On sépare la dernière ligne (code) du reste (corps) pour
+        DÉCIDER (idempotence) ET LIRE la réponse (SHA d'un fichier, présence de `"commit"`)
+        sans parser un FQDN ni résoudre du DNS côté hôte.
+
+        Le CORPS est nécessaire à `push-code-location` (Contents API : lire le SHA existant,
+        vérifier `"commit"`) ; les steps org-repo/webhook n'en ont besoin que du code → ils
+        passent par le wrapper `_api` (corps ignoré)."""
+        url = f"{api_base}{path}"
+        argv = [
+            "curl",
+            "-sS",
+            "-w",
+            "\n%{http_code}",
+            "-X",
+            method,
+            "-H",
+            f"Authorization: token {state.get('token', '')}",
+            "-H",
+            "Content-Type: application/json",
+            url,
+        ]
+        if body is not None:
+            argv += ["-d", body]
+        out = _gitea_exec(ns, pod(), argv)
+        if not (out and out.returncode == 0):
+            return out, "", ""
+        # Le code HTTP est sur la DERNIÈRE ligne ; le corps est tout ce qui précède (le `-w
+        # '\\n%{http_code}'` ajoute UNE ligne après le corps, exactement comme le bash).
+        raw = out.stdout or ""
+        resp_body, _sep, code = raw.rpartition("\n")
+        return out, code.strip(), resp_body
+
+    def _api(method: str, path: str, body: str | None = None):
+        """Variante CODE-SEUL de `_api_full` (corps ignoré) — pour org-repo/webhook qui ne
+        décident que sur le code HTTP. Renvoie `(out, code)` (parité de l'API d'origine)."""
+        out, code, _resp = _api_full(method, path, body)
+        return out, code
+
+    def admin() -> bool:
+        # 1/7 — admin Gitea (idempotent). Le mot de passe vit dans le Secret K8s `gitea-admin`
+        # (créé s'il manque) ; `gitea admin user create` échoue si l'utilisateur existe → on
+        # AVALE ce cas (idempotent), comme le `|| true` du bash (gitea-init.sh:69-84).
+        chk = _kubectl("-n", ns, "get", "secret", "gitea-admin")
+        if not (chk and chk.returncode == 0):
+            # Mot de passe : généré dans le cluster (jamais versionné, ADR 0023). On le laisse
+            # à kubectl `create secret --from-literal` ; le banc le (re)lira au besoin.
+            _kubectl(
+                "-n",
+                ns,
+                "create",
+                "secret",
+                "generic",
+                "gitea-admin",
+                "--from-literal=username=" + config.admin_user,
+                "--from-literal=password=" + _seed_gen_secret(),
+            )
+        pw = _kubectl(
+            "-n",
+            ns,
+            "get",
+            "secret",
+            "gitea-admin",
+            "-o",
+            "jsonpath={.data.password}",
+        )
+        admin_pw = _b64decode(pw.stdout.strip()) if pw and pw.returncode == 0 else ""
+        if not admin_pw:
+            return False
+        created = _gitea_exec(
+            ns,
+            pod(),
+            [
+                "gitea",
+                "admin",
+                "user",
+                "create",
+                "--username",
+                config.admin_user,
+                "--password",
+                admin_pw,
+                "--email",
+                config.admin_email,
+                "--admin",
+                "--must-change-password=false",
+            ],
+        )
+        # rc=0 → créé. rc≠0 → idempotent SEULEMENT si « user already exists » (parité du
+        # `|| true` CIBLÉ du bash). Tout autre échec (pod pas prêt, mdp refusé, exec KO) =
+        # ÉCHEC réel : sinon `token` échouera après, sans que la cause soit signalée ICI
+        # (constaté au banc : admin avalait un échec → token KO trompeur). On VÉRIFIE.
+        if created and created.returncode == 0:
+            return True
+        blob = ((created.stdout or "") + (created.stderr or "")) if created else ""
+        return "already exists" in blob
+
+    def token() -> bool:
+        # 2/7 — token API. `--raw` n'affiche QUE la valeur (pas de préfixe à parser) ;
+        # nom unique par run (un nom pris ferait échouer). On CAPTURE le stdout et on strippe
+        # le whitespace (parité gitea-init.sh:90-94) ; vide → échec (fail-fast).
+        token_name = f"atlas-init-{os.getpid()}-{int(time.time())}"
+        out = _gitea_exec(
+            ns,
+            pod(),
+            [
+                "gitea",
+                "admin",
+                "user",
+                "generate-access-token",
+                "--username",
+                config.admin_user,
+                "--token-name",
+                token_name,
+                "--scopes",
+                "all",
+                "--raw",
+            ],
+        )
+        tok = "".join((out.stdout or "").split()) if out and out.returncode == 0 else ""
+        if not tok:
+            return False
+        state["token"] = tok
+        return True
+
+    def org_repo() -> bool:
+        # 3/7 — organisation + dépôt des workflows (idempotent : un 422 « existe déjà » est OK,
+        # parité du `|| true` bash, gitea-init.sh:127-131). On POST les deux ; un code 2xx OU
+        # un « already exists » (409/422) = succès idempotent. Un ÉCHEC réel (token invalide
+        # 401, Gitea 500, exec KO → code vide) = échec (fail-fast, pas de faux-vert — audit).
+        _, c_org = _api("POST", "/orgs", f'{{"username":"{org}"}}')
+        _, c_repo = _api(
+            "POST",
+            f"/orgs/{org}/repos",
+            f'{{"name":"{repo}","auto_init":true,"default_branch":"main"}}',
+        )
+        return _seed_api_ok(c_org) and _seed_api_ok(c_repo)
+
+    def push_code_location() -> bool:
+        # 4/7 — push de la code-location jouet (Contents API create-or-update, idempotent).
+        # Parité gitea-init.sh:109-143 (push_gitea_file) pour les 3 manifestes versionnés de
+        # `bench/lima/atlas-workflow-sample/` (_SEED_SAMPLE_DIR). Pour CHAQUE fichier :
+        #   1. base64 du CONTENU lu côté HÔTE (le fichier est versionné, PAS dans le pod : on
+        #      l'encode en Python, jamais via un `base64` exécuté dans le pod) ;
+        #   2. GET /contents/<path> → SHA du fichier existant (vide au 1er passage / 404) ;
+        #   3. sha présent → PUT-avec-sha (MAJ) ; absent → POST (création) ;
+        #   4. VÉRIFIER `"commit"` dans la réponse — un PUT/POST raté laisse l'ANCIENNE version
+        #      dans Gitea → Argo CD déploierait un manifeste périmé (drift). Sans `commit` =
+        #      ÉCHEC → return False (fail-fast : run_seed s'arrête net, aucun faux-vert).
+        for fname in ("code-location.yaml", "workspace-patch.yaml", "reload-hook.yaml"):
+            try:
+                with open(os.path.join(_SEED_SAMPLE_DIR, fname), "rb") as fh:
+                    content_b64 = base64.b64encode(fh.read()).decode("ascii")
+            except OSError:
+                return False  # fichier sample illisible → fail-fast (le seed n'a pas de sens)
+            contents_path = f"/repos/{org}/{repo}/contents/{fname}"
+            # GET du SHA existant (404 si absent → sha vide, on créera par POST). Le code HTTP
+            # n'est PAS gaté ici (un 404 est attendu au 1er passage) : on lit le corps.
+            _, _get_code, get_body = _api_full("GET", contents_path)
+            sha = _seed_contents_sha(get_body)
+            if sha:
+                body = json.dumps(
+                    {"content": content_b64, "sha": sha, "message": f"update {fname} (atlas-init)"}
+                )
+                _, _code, resp = _api_full("PUT", contents_path, body)
+            else:
+                body = json.dumps({"content": content_b64, "message": f"add {fname} (atlas-init)"})
+                _, _code, resp = _api_full("POST", contents_path, body)
+            if not _seed_resp_has_commit(resp):
+                return False  # PUT/POST raté → return False (fail-fast, drift évité)
+        return True
+
+    def webhook_secret() -> bool:
+        # 5/7 — secret partagé `webhook.gitea.secret` (argocd-secret). Idempotent : on lit le
+        # secret partagé `argocd-webhook-shared` (créé s'il manque), puis on patche
+        # `argocd-secret` (parité gitea-init.sh:145-158). Le secret vit dans le cluster.
+        chk = _kubectl("-n", argocd_ns, "get", "secret", "argocd-webhook-shared")
+        if not (chk and chk.returncode == 0):
+            _kubectl(
+                "-n",
+                argocd_ns,
+                "create",
+                "secret",
+                "generic",
+                "argocd-webhook-shared",
+                "--from-literal=secret=" + _seed_gen_secret(),
+            )
+        got = _kubectl(
+            "-n",
+            argocd_ns,
+            "get",
+            "secret",
+            "argocd-webhook-shared",
+            "-o",
+            "jsonpath={.data.secret}",
+        )
+        wh = _b64decode(got.stdout.strip()) if got and got.returncode == 0 else ""
+        if not wh:
+            return False
+        state["wh_secret"] = wh
+        patch = _kubectl(
+            "-n",
+            argocd_ns,
+            "patch",
+            "secret",
+            "argocd-secret",
+            "--type",
+            "merge",
+            "-p",
+            '{"stringData":{"webhook.gitea.secret":"' + wh + '"}}',
+        )
+        return bool(patch and patch.returncode == 0)
+
+    def webhook() -> bool:
+        # 6/7 — webhook Gitea → argocd-server/api/webhook. On POST le hook (events push,
+        # content_type json, secret partagé). _BANC : la DÉDUP par URL (compter les hooks
+        # existants en parsant `GET /hooks`) dépend du format de réponse réel — ici on POST
+        # best-effort (Gitea refuse un doublon, idempotent de fait) ; affinage au banc
+        # (_SEED_BANC_TODO). Le repoURL du hook est intra-cluster (résolu par Gitea, pas l'hôte).
+        hooks_url = f"http://argocd-server.{argocd_ns}.svc.cluster.local/api/webhook"
+        body = (
+            '{"type":"gitea","active":true,"events":["push"],"config":{"url":"'
+            + hooks_url
+            + '","content_type":"json","secret":"'
+            + state.get("wh_secret", "")
+            + '"}}'
+        )
+        _, c_hook = _api("POST", f"/repos/{org}/{repo}/hooks", body)
+        # 2xx OU « existe déjà » (Gitea refuse un doublon) = ok ; échec réel (token/exec) = KO.
+        return _seed_api_ok(c_hook)
+
+    def application() -> bool:
+        # 7/7 — Application Argo CD `atlas-workflows` (repoURL Gitea injecté, valeur de
+        # déploiement, ADR 0023). `kubectl apply -f -` du manifeste rendu (parité
+        # gitea-init.sh:172-198). Pur kubectl (aucun token, aucune réponse API à parser).
+        manifest = _seed_application_manifest(config)
+        out = _kubectl_apply_stdin(manifest)
+        return bool(out and out.returncode == 0)
+
+    handlers = {
+        "admin": admin,
+        "token": token,
+        "org-repo": org_repo,
+        "push-code-location": push_code_location,
+        "webhook-secret": webhook_secret,
+        "webhook": webhook,
+        "application": application,
+    }
+
+    def do(step: str) -> bool:
+        handler = handlers.get(step)
+        if handler is None:
+            raise _path.PathError(f"seed gitops : étape banc inconnue `{step}` (façade)")
+        return handler()
+
+    return do
+
+
+def _seed_gen_secret() -> str:
+    """Secret aléatoire (32 alnum) — parité `gen_secret()` de gitea-init.sh (jamais versionné,
+    ADR 0023 ; vit uniquement dans le cluster). `secrets` (stdlib) plutôt que /dev/urandom."""
+    import secrets
+    import string
+
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(32))
+
+
+def _b64decode(b64: str) -> str:
+    """Décode un Secret K8s (`{.data.X}` est base64). Vide si illisible (l'appelant décide)."""
+    try:
+        return base64.b64decode(b64).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return ""
+
+
+def _seed_application_manifest(config) -> str:
+    """Rend le manifeste de l'Application Argo CD `atlas-workflows` (repoURL Gitea injecté).
+
+    Le repoURL intra-cluster est `config.workflows_repo_url()` (résolu par argocd-repo-server
+    DANS le cluster, pas par l'hôte). Parité gitea-init.sh:177-198 (template versionné =
+    application.example.yaml ; ici la valeur de déploiement, ADR 0023)."""
+    return (
+        "apiVersion: argoproj.io/v1alpha1\n"
+        "kind: Application\n"
+        "metadata:\n"
+        "  name: atlas-workflows\n"
+        f"  namespace: {config.argocd_ns}\n"
+        "spec:\n"
+        f"  project: {config.org}\n"
+        "  source:\n"
+        f"    repoURL: {config.workflows_repo_url()}\n"
+        "    targetRevision: main\n"
+        "    path: .\n"
+        "  destination:\n"
+        "    server: https://kubernetes.default.svc\n"
+        "    namespace: dagster\n"
+        "  syncPolicy:\n"
+        "    automated:\n"
+        "      prune: true\n"
+        "      selfHeal: true\n"
+        "    syncOptions:\n"
+        "      - CreateNamespace=false\n"
+    )
+
+
+def _kubectl_apply_stdin(manifest: str, *, timeout: int = _REFRESH_TIMEOUT_S):
+    """`kubectl apply -f -` en passant `manifest` sur STDIN (cible sûre `_kubectl_env`).
+
+    Renvoie le CompletedProcess ou None si injoignable. SÉPARÉ de `_kubectl` (qui ne pousse
+    pas de STDIN) — moule de l'apply de l'Application du seed (gitea-init.sh:177)."""
+    try:
+        return subprocess.run(  # noqa: S603 — argv contrôlé, manifeste rendu d'une config validée
+            ["kubectl", "apply", "-f", "-", "--request-timeout=5s"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=manifest,
+            env=_kubectl_env(),
+            timeout=timeout,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+# ── Harnais e2e dataops : preuve OpenLineage→Marquez (porte run-phases.sh:1213) ───
+# I/O kubectl IRRÉDUCTIBLE (ADR 0049) ; toute la DÉCISION (manifeste du Job, comptage des
+# jobs, verdict du compteur avant/après) est PURE dans `nestor.phases`. Le moteur substitue
+# ce câblage au STUB du registre pour `dataops_chain_emit_and_verify` (cf. `_E2E_HOOK_IMPL`).
+
+
+def _marquez_job_count(ol_ns: str) -> int | None:
+    """Nombre de jobs visibles dans Marquez pour le namespace OpenLineage `ol_ns`.
+
+    Port de `marquez_job_count` (run-phases.sh:1273) : interroge l'API Marquez
+    `GET /api/v1/namespaces/<ol_ns>/jobs` DEPUIS UN POD ÉPHÉMÈRE busybox du ns marquez
+    (`kubectl run … -- wget`), JAMAIS depuis l'hôte — le FQDN `marquez.marquez.svc.cluster.
+    local` ne se résout QUE dans le cluster (piège DNS, mémoire dns-fqdn-timeout). Le JSON
+    rendu est compté par la logique PURE `phases.parse_marquez_job_count` (totalCount, sinon
+    len(jobs)). Renvoie l'entier, ou `None` si illisible/injoignable (→ verdict `skip`)."""
+    from nestor import phases as _phases
+
+    url = f"{_phases.MARQUEZ_URL}/api/v1/namespaces/{ol_ns}/jobs"
+    # Pod jetable, nom unique par PID (parité `marquez-count-$$`), auto-supprimé (--rm).
+    out = _kubectl(
+        "-n",
+        "marquez",
+        "run",
+        f"marquez-count-{os.getpid()}",
+        "--rm",
+        "-i",
+        "--restart=Never",
+        "--image=busybox:1.36",
+        "--quiet",
+        "--",
+        "sh",
+        "-c",
+        f"wget -qO- '{url}' 2>/dev/null",
+        # Le pod busybox doit DÉMARRER, requêter, et être nettoyé : on borne large (le
+        # défaut _REFRESH_TIMEOUT_S=8s ne suffit pas à un pull/run de pod).
+        timeout=120,
+    )
+    if not (out and out.returncode == 0):
+        return None
+    return _phases.parse_marquez_job_count(out.stdout)
+
+
+def _job_succeeded(ns: str, name: str) -> bool:
+    """`True` si le Job `ns/name` a `status.succeeded == 1` (port de `emit_done`,
+    run-phases.sh:1250). Lecture bornée, cible sûre ; toute incertitude → False."""
+    out = _kubectl("-n", ns, "get", "job", name, "-o", "jsonpath={.status.succeeded}")
+    return bool(out and out.returncode == 0 and (out.stdout or "").strip() == "1")
+
+
+def _chain_emit_and_verify_banc(*, sleep=time.sleep) -> None:
+    """Preuve e2e de la chaîne Dagster → OpenLineage → Marquez (porte run-phases.sh:1213).
+
+    Le geste RÉEL câblé (I/O kubectl + API Marquez), substitué au STUB du registre pour
+    `dataops_chain_emit_and_verify` :
+      1. compteur de jobs Marquez AVANT (`_marquez_job_count`) ;
+      2. `kubectl apply` du Job émetteur jetable `ol-emit-toy` (ns dagster, image
+         `registry:80/dagster-openlineage-emit:dev`, `dagster asset materialize`) — manifeste
+         rendu PUR par `phases.emit_toy_job_manifest` ;
+      3. poll de `status.succeeded == 1` (max 300 s, intervalle 10 s) ; échec → logs du Job +
+         erreur claire (image émetteur poussée ? cf. réserve `build_emitter_image`) ;
+      4. `sleep 5` (Marquez traite COMPLETE), compteur APRÈS ;
+      5. verdict `phases.classify_marquez_ingest(before, after)` : `ok` (lineage présent) sinon
+         on LÈVE (jamais un faux vert, honnêteté ADR 0034) ;
+      6. teardown : `kubectl delete job ol-emit-toy --wait=false`.
+
+    ⚠️ RÉSERVE (cf. `phases.banc_todo`) : dépend de l'image émetteur, poussée par le rôle
+    `platform-build-images` SOUS `build_emitter_image=true` (banc e2e). Le play `dataops` du
+    moteur Python NE passe PAS encore ce drapeau → si l'image manque, le Job reste
+    ImagePullBackOff et le poll échoue : on LÈVE (étape 3) plutôt qu'un faux succès. La cible
+    kube est la cible SÛRE (`_kubectl`/`_kubectl_env`, jamais la prod) ; le FQDN Marquez n'est
+    tapé QUE depuis un pod intra-cluster (Job + busybox), jamais depuis l'hôte (piège DNS)."""
+    from nestor import phases as _phases
+
+    ns = _phases.EMITTER_NAMESPACE
+    ol_ns = _phases.EMITTER_OL_NAMESPACE
+    job = _phases.EMITTER_JOB_NAME
+
+    job_before = _marquez_job_count(ol_ns)
+
+    manifest = _phases.emit_toy_job_manifest()
+    applied = _kubectl_apply_stdin(manifest)
+    if not (applied and applied.returncode == 0):
+        detail = (applied.stderr.strip() if applied else "kubectl injoignable") or "(sans détail)"
+        raise _phases.E2EHookStubbed(
+            f"dataops e2e : apply du Job émetteur `{job}` échoué ({detail}) — "
+            "Dagster posé (ns dagster) sur la cible banc ?"
+        )
+
+    print("    attente de la complétion du run émetteur (max 5 min)…")
+    # Poll borné (parité `retry 300 10 emit_done`) : succès = status.succeeded==1.
+    succeeded = False
+    waited = 0
+    while waited <= 300:
+        if _job_succeeded(ns, job):
+            succeeded = True
+            break
+        sleep(10)
+        waited += 10
+    if not succeeded:
+        logs = _kubectl("-n", ns, "logs", f"job/{job}", "--tail=20")
+        tail = (logs.stdout if logs and logs.returncode == 0 else "") or ""
+        _kubectl("-n", ns, "delete", "job", job, "--wait=false")  # teardown best-effort
+        raise _phases.E2EHookStubbed(
+            f"dataops e2e : le run Dagster émetteur n'a pas réussi (image "
+            f"`{_phases.EMITTER_IMAGE}` poussée ? `build_emitter_image=true` requis au play "
+            f"dataops).\n{tail}"
+        )
+
+    print("    vérification de l'ingestion côté Marquez…")
+    sleep(5)  # laisse Marquez traiter l'événement COMPLETE
+    job_after = _marquez_job_count(ol_ns)
+    status, message = _phases.classify_marquez_ingest(job_before, job_after)
+
+    # Teardown de l'émetteur jetable (parité bash : best-effort, --wait=false).
+    _kubectl("-n", ns, "delete", "job", job, "--wait=false")
+
+    if status == "ok":
+        print(f"    ✓ {message}")
+        return
+    # skip (compteur illisible) comme fail (rien ingéré) → on LÈVE (pas de faux vert) :
+    # un harnais e2e qui ne PEUT PAS prouver l'ingestion n'a pas verdi (honnêteté ADR 0034).
+    raise _phases.E2EHookStubbed(
+        f"dataops e2e : {message} — sensor OpenLineage → API Marquez à vérifier (verdict={status})"
+    )
+
+
+# Implémentations RÉELLES (façade) des hooks e2e, substituées au STUB du registre
+# `phases.E2E_HOOKS` par le moteur (`launch`). SEUL `dataops_chain_emit_and_verify` est
+# câblé ; `dataops_egress_internet_check` reste STUBÉ (absent d'ici → le moteur joue le
+# stub du registre, qui LÈVE — hors périmètre, à câbler+prouver au banc). On mappe vers le
+# NOM de la fonction façade (pas une référence directe) pour une résolution TARDIVE via
+# `_e2e_hook_impl` — un test/patch de `_chain_emit_and_verify_banc` (attribut module) est
+# alors honoré (une référence figée dans le dict l'ignorerait).
+_E2E_HOOK_IMPL: dict[str, str] = {
+    "dataops_chain_emit_and_verify": "_chain_emit_and_verify_banc",
+}
+
+
+def _e2e_hook_impl(name: str) -> Callable[..., None] | None:
+    """Implémentation RÉELLE (façade) du hook e2e `name`, ou None s'il reste STUBÉ.
+
+    Résolution TARDIVE : on lit l'attribut module nommé dans `_E2E_HOOK_IMPL` au moment de
+    l'appel (via `globals()`), pour qu'un patch de test sur la fonction façade soit pris en
+    compte. Un hook absent de la table (egress) → None : l'appelant joue le STUB du registre."""
+    attr = _E2E_HOOK_IMPL.get(name)
+    return globals().get(attr) if attr else None
+
+
+def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult:
+    """Monte une phase DÉLÉGUÉE (seed) : route `gitops-seed` vers `seed.run_seed('banc', …)`.
+
+    BRANCHE la garde BANC (`_assert_bench_target`, cible = banc Lima) et le `do(step)` RÉEL
+    (`_seed_do_banc`, porté de gitea-init.sh). Mappe les verdicts du seed sur le moule du
+    moteur de chemin (FAIL-FAST, AUCUN fallback, ADR 0046) :
+      - `SeedGuardRefused` (garde banc refuse une cible prod) → `_path.IsolationRefused` (le
+        moteur la re-lève → `_run_path_engine` la mappe en `_UsageError` → code 2) ;
+      - `SeedError` (étape KO) → `_path.PathError` (fail-fast → code 1, aucun fallback).
+    Un succès → `_SeedLaunchResult(ok=True)` (le moteur l'intègre comme une phase montée).
+
+    Le seed PROD (`kind='prod'`, app-of-apps sur dirqual) N'EST PAS monté ici : le banc
+    mono-nœud teste `'banc'` ; la prod se prouve au rebuild dirqual (garde `assert_prod_target`
+    + `do()` prod à câbler+prouver, _SEED_BANC_TODO / seed.banc_todo). On ne fabrique PAS un
+    faux montage prod (honnêteté ADR 0034) — `run_seed('prod', …)` reste accessible côté
+    `nestor/seed.py`, sans montage façade tant que la preuve dirqual n'est pas en main."""
+    _ = derived  # le seed lit la config du YAML (SeedConfig.from_topology), pas le faisceau -e
+    if phase != "gitops-seed":
+        raise _path.PathError(
+            f"phase déléguée `{phase}` : aucun câblage seed connu (seul `gitops-seed` est porté)"
+        )
+    config = _seed.SeedConfig.from_topology(topo)
+    # GATE avant le seed : Gitea ET Argo CD doivent être Ready (parité run-phases.sh:1082-1085).
+    # Sans cette attente, le 1er geste (`gitea admin user create` via exec) tape un pod qui
+    # démarre encore → la création échoue silencieusement et `token` casse APRÈS (constaté au
+    # banc). On bloque jusqu'à Ready, comme le bash, avant le moindre geste mutant.
+    for ns_dep, dep, to in (("gitea", "gitea", "120s"), ("argocd", "argocd-server", "180s")):
+        roll = _kubectl("-n", ns_dep, "rollout", "status", f"deploy/{dep}", f"--timeout={to}")
+        if not (roll and roll.returncode == 0):
+            raise _path.PathError(
+                f"seed gitops (banc) : {ns_dep}/{dep} non Ready avant le seed "
+                f"(rollout status timeout {to}) — le socle GitOps doit être prêt (ADR 0046)"
+            )
+    do = _seed_do_banc(topo, config)
+    print(f"→ {phase} : seed des DONNÉES via nestor/seed.py (gitea-init, garde banc)…")
+    try:
+        _seed.run_seed(
+            "banc",
+            config,
+            assert_target=lambda: _assert_bench_target(f"nestor up ({phase})"),
+            do=do,
+        )
+    except _seed.SeedGuardRefused as exc:
+        # REFUS de garde (cible non-banc) = sécurité, PAS un échec de montage → IsolationRefused
+        # (le moteur re-lève, _run_path_engine mappe en _UsageError → code 2). Rien n'a muté.
+        raise _path.IsolationRefused(str(exc)) from exc
+    except _seed.SeedError as exc:
+        # Étape KO → fail-fast (ADR 0046), AUCUN fallback : remonte en PathError (code 1).
+        raise _path.PathError(f"seed gitops (banc) : {exc}") from exc
+    return _SeedLaunchResult(ok=True, message="seed banc gitops appliqué")
+
+
+def _run_path_engine(
+    topo: Topology,
+    target: str,
+    seq: list[str],
+    stack_name: str,
+    a_appliquer: set[str] | None = None,
+) -> int:
+    """Monte le chemin `target` via le moteur Python `nestor.path.run_path` (FLAG opt-in).
+
+    Câble les callbacks ABSTRAITS du moteur sur le RÉEL (runner/kubectl/limactl), sur le
+    moule de `cmd_bootstrap_seq` (closures à côté de l'I/O). FAIL-FAST : toute
+    PathError/IsolationRefused remonte (mappée en code 1) — AUCUN fallback bash (ADR 0046).
+
+    `a_appliquer` (issu de `compute_plan_state` = le RÉEL) RESTREINT la séquence montée aux
+    phases MANQUANTES : le moteur SAUTE ce qui est déjà `done` (cohérence avec le plan ✓/+ ;
+    plus de rejeu inutile d'une phase montée). None → monte toute `seq` (rétrocompat/tests).
+
+    Callbacks (cf. `nestor.path.run_path`) :
+    - `sequence` : la séquence calculée (`expected_phase_sequence`), FILTRÉE sur `a_appliquer`
+      (ordre de `seq` préservé), injectée au moteur.
+    - `assert_safe(phase)` : la GARDE d'isolation banc (`_assert_bench_target`) à CHAQUE phase
+      (invariant de boucle, ADR 0097 §5.c) ; l'échappatoire KUBECONFIG (ADR 0065) est gérée
+      DANS la garde. Pour une phase à play unitaire, on ajoute `_assert_inventory_safe`.
+    - `launch(phase)` : montage via `runner.launch_phase` (UN passage + gate, parité bash —
+      pas de double-passage `changed=0` qui fausserait les builds à tag mutable ; l'idempotence
+      se prouve par le rejeu du chemin entier), `-e` restreints par `phases.extravars_for`.
+    - `gate(phase)` : santé post-montage routée par `phases.gate_kind_for` (→ _wait_layer_healthy).
+    - `provision('up')` : STUB → `run-phases.sh up` (artefact node-side irréductible, §5.b).
+    - `bootstrap` : réutilise `_bootstrap.run_bootstrap` (déjà porté ailleurs) — le câblage
+      transport (cp_ip/iface, CNI) reste à prouver au banc (§5.b)."""
+    from nestor import phases as _phases
+
+    ctx = _path_context(topo)
+    private_data_dir = os.path.join(_ROOT, "bootstrap")
+    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
+    derived = derive_run_params(topo)
+
+    def assert_safe(phase: str) -> None:
+        # INVARIANT DE BOUCLE (ADR 0097 §5.c) : garde d'isolation AVANT CHAQUE phase. La
+        # garde gère l'échappatoire KUBECONFIG (ADR 0065 — elle rend tôt si exporté). Pour
+        # une phase à play unitaire (Ansible SSH/exec), on valide AUSSI l'inventaire.
+        _assert_bench_target(f"nestor up ({phase})", topo)
+        if _phases.has_phase_plan(phase) and _phases.phase_plan(phase).playbook is not None:
+            _assert_inventory_safe(f"nestor up ({phase})", ctx.inventory, topo)
+
+    def launch(phase: str):
+        # Montage d'UNE phase (UN SEUL passage + gate de santé) — PARITÉ run-phases.sh, qui
+        # lance le playbook une fois puis gate (pas de double-passage `changed=0`). Choix
+        # assumé : certaines phases buildent une image à TAG MUTABLE (`force_rebuild=true`,
+        # portal/mlflow) → un rejeu est LÉGITIMEMENT `changed` (rebuild voulu). Exiger
+        # `changed=0` par phase rendait un faux « idempotence cassée » sur ces builds. L'idem-
+        # potence se prouve par le REJEU du CHEMIN entier (`nestor up` 2× → « rien à appliquer »,
+        # ADR 0052), pas par un double-passage par play. Les `-e` sont RESTREINTS aux clés de
+        # la phase (parité). Les hooks e2e (dataops) sont joués APRÈS succès du play.
+        plan = _phases.phase_plan(phase)
+        # PHASE DÉLÉGUÉE (playbook is None) : ce N'EST PAS un play Ansible mais une étape de
+        # DONNÉES portée par `nestor/seed.py` (gitops-seed → gitea-init.sh). On NE fait donc
+        # PAS `os.path.join(_ROOT, None)` (TypeError au montage) : on route vers le câblage
+        # seed (run_seed banc, garde _assert_bench_target). Voir `_launch_seed`.
+        if plan.playbook is None:
+            return _launch_seed(phase, topo, derived)
+        playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
+        extravars = _phases.extravars_for(phase, derived)
+        print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
+        # KUBECONFIG du play : le kubeconfig BANC rapatrié par bootstrap (ctx.kubeconfig_local
+        # → bench/lima/.work/kubeconfig, server: 127.0.0.1:6443 — le forward de l'API). En
+        # FROM-SCRATCH, os.environ['KUBECONFIG'] est VIDE au démarrage (le banc n'existe pas
+        # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
+        # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
+        # passe le kubeconfig du contexte, qui existe dès que bootstrap l'a rapatrié. Un
+        # KUBECONFIG opérateur explicite (banc déjà monté) reste prioritaire.
+        result = _runner.launch_phase(
+            playbook,
+            extravars,
+            private_data_dir,
+            ctx.inventory,
+            ansible_config=ansible_cfg,
+            kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
+            target_kind=topo.target_kind,
+        )
+        # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy). On ne les joue
+        # QUE si le montage a réussi (un hook après un play KO n'a pas de sens). `RunResult`
+        # (un passage) n'a pas `.ok` (propre à IdempotenceResult) : succès = rc==0.
+        # On route CHAQUE hook (par NOM) vers son IMPLÉMENTATION RÉELLE de façade
+        # (`_E2E_HOOK_IMPL`, I/O kubectl) si elle existe, sinon vers le STUB du registre
+        # (`phases.E2E_HOOKS`, qui LÈVE E2EHookStubbed). Aujourd'hui :
+        #   - `dataops_chain_emit_and_verify` → CÂBLÉ (`_chain_emit_and_verify_banc`) ;
+        #   - `dataops_egress_internet_check` → STUB (lève — hors périmètre, à câbler au banc).
+        if result.rc == 0:
+            for name in _phases.phase_plan(phase).e2e_hooks:
+                impl = _e2e_hook_impl(name) or _phases.E2E_HOOKS[name]
+                impl()  # CÂBLÉ : tente le vrai geste (lève sur échec) ; STUB : lève E2EHookStubbed
+        return result
+
+    def gate(phase: str) -> bool:
+        # Santé post-montage routée par la NATURE de la gate (phases.gate_kind_for) :
+        # ready-replicas / cr-phase (CR Rook Ceph) / presence → _wait_layer_healthy (qui lit
+        # graph.LAYER_SIGNAL, source unique, et applique le bon critère readyReplicas/phase/
+        # présence). `none` (phase sans maillon discriminant) → _wait_layer_healthy rend True.
+        return _wait_layer_healthy(phase)
+
+    def provision(_phase: str) -> int:
+        return _provision_via_bash(topo, stack_name)
+
+    def _runphases(*cmd: str) -> subprocess.CompletedProcess:
+        # Rappel d'une sous-commande run-phases.sh (bash garde VM/CNI/inventaire/facts,
+        # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) —
+        # le bash en dérive le MÊME CP/NODES/WORKDIR que `provision` (un seul WORKDIR
+        # `.work` ⇒ inventaire/kubeconfig partagés avec PathContext).
+        return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
+            ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
+            check=False,
+            env=_runphases_env(topo, stack_name),
+            capture_output=True,
+            text=True,
+        )
+
+    def bootstrap(_phase: str) -> int:
+        # CÂBLAGE TRANSPORT du socle k8s+CNI (LOT 6, ADR 0097 §5.b). Même MOULE que
+        # `cmd_bootstrap_seq` (déjà éprouvé) : Python orchestre la séquence Ansible via
+        # `_bootstrap.run_bootstrap` (logique PURE testée), la façade branche l'I/O réelle
+        # sur les briques bash IRRÉDUCTIBLES (limactl/CNI/kubeconfig, ADR 0049). À la
+        # différence de `cmd_bootstrap_seq` qui RECEVAIT cp_ip/iface/inventaire déjà dérivés
+        # par `phase_bootstrap` (bash), ICI la façade les dérive elle-même du Lima vivant.
+
+        # 1. INVENTAIRE : `phase_up` (provision) NE l'écrit PAS (write_inventory vit dans
+        # `phase_bootstrap`). On le pose donc via l'arm bash `inventory <control> [workers]`
+        # (write_inventory byte-stable, ADR 0049) — control = nœuds `control`, workers = le
+        # reste. La DÉCISION (qui est control/worker) vient de la TOPO ; bash REND le format.
+        control_csv = ",".join(topo.control_nodes)
+        workers_csv = ",".join(topo.worker_nodes)
+        inv = _runphases("inventory", control_csv, *([workers_csv] if workers_csv else []))
+        if inv.returncode != 0:
+            raise _path.PathError(
+                f"socle (bootstrap) : écriture de l'inventaire (run-phases.sh inventory) "
+                f"en échec (rc={inv.returncode}) — {inv.stderr.strip()}"
+            )
+
+        # 2. cp_ip / iface DÉRIVÉS DU LIMA VIVANT via le contrat machine `emit_facts`
+        # (run-phases.sh facts ⇒ `CP_IP=…\nL2_IFACE=…`, byte-stable, ADR 0049/0056). Le bash
+        # garde la dérivation (vm_uservv2_ip/iface = limactl shell, artefact node-side) ;
+        # Python CONSOMME les faits, ne pilote pas limactl. cp_ip = advertiseAddress du CP.
+        facts = _runphases("facts")
+        if facts.returncode != 0:
+            raise _path.PathError(
+                f"socle (bootstrap) : dérivation des faits du banc (run-phases.sh facts) "
+                f"en échec (rc={facts.returncode}) — {facts.stderr.strip()}"
+            )
+        parsed = dict(
+            ln.split("=", 1)
+            for ln in facts.stdout.splitlines()
+            if "=" in ln and not ln.startswith("#")
+        )
+        cp_ip = parsed.get("CP_IP", "")
+        # NB : `L2_IFACE` n'est plus consommé ici — l'arm `cni` (ex `ha-cni <iface>`) ne
+        # prend plus d'argument iface (geste 100 % CNI, exposition L4 NodePort ADR 0092).
+        if not cp_ip:
+            raise _path.PathError(
+                "socle (bootstrap) : `CP_IP` absent des faits du banc (banc provisionné ? "
+                f"sortie={facts.stdout.strip()!r})"
+            )
+
+        # 3. CALLBACK launch : montage d'UN playbook du socle (checks→…→join-workers) via
+        # runner.launch_phase (le MÊME montage qu'`ha-3cp`/`cmd_bootstrap_seq`). Les 6
+        # playbooks du socle sont à la racine de `private_data_dir` (bootstrap/), résolus
+        # par leur nom (checks.yaml…). `-e control_plane_ip=<cp_ip>` (bootstrap_extravars).
+        def launch_socle(playbook: str, extravars: dict):
+            return _runner.launch_phase(
+                playbook,
+                extravars,
+                private_data_dir,
+                ctx.inventory,
+                ansible_config=ansible_cfg,
+                # Cohérence avec le callback `launch` : en from-scratch KUBECONFIG est vide au
+                # démarrage → repli sur le kubeconfig banc rapatrié (ctx.kubeconfig_local).
+                kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
+                target_kind=topo.target_kind,
+            )
+
+        # 4. CALLBACK run_cni : la CNI (Cilium dans la VM) reste un artefact bash (ADR 0049).
+        # On POUSSE l'arm `cni` — qui pose Cilium ET fetch le kubeconfig du CP
+        # (admin.conf sed-rewrite vers KUBECONFIG_LOCAL == ctx.kubeconfig_local). Python
+        # pousse, consomme un rc, ne lit pas la logique CNI/kubeconfig. Le fetch_kubeconfig
+        # est donc COUVERT par ce même geste (pas de 2e rappel séparé). Le geste est 100 %
+        # CNI (le vestige HA `ha-cni <iface>` a été renommé `cni`, plus d'argument iface).
+        def run_cni() -> int:
+            return _runphases("cni").returncode
+
+        # 5. has_workers : DÉRIVÉ DE LA TOPO (le moteur connaît la topologie) — un control
+        # unique sans worker OMET join-workers.yaml (cf. _bootstrap.bootstrap_playbooks).
+        has_workers = bool(topo.worker_nodes)
+        n_pb = len(_bootstrap.bootstrap_playbooks(has_workers=has_workers))
+        print(f"→ bootstrap : socle k8s ({n_pb} playbooks via runner, CP {ctx.cp} {cp_ip})…")
+        try:
+            result = _bootstrap.run_bootstrap(
+                cp_ip,
+                launch=launch_socle,
+                run_cni=run_cni,
+                has_workers=has_workers,
+            )
+        except _runner.RunnerUnavailable as exc:
+            raise _UsageError(str(exc)) from exc
+        except _bootstrap.BootstrapError as exc:
+            # FAIL-FAST (ADR 0046) : un échec du socle remonte en PathError → arrêt net,
+            # AUCUN fallback bash, AUCUNE couche applicative montée après.
+            raise _path.PathError(f"socle (bootstrap) : {exc}") from exc
+        for step in result.steps:
+            mark = "✓" if step.ok else "✗"
+            print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
+        return 0 if result.built else 1
+        # _BANC (ADR 0097 §5.b) : la façade TENTE désormais le vrai montage (inventaire +
+        # facts + 6 playbooks + cni). Restent à VALIDER au banc mono-nœud (le mainteneur,
+        # corriger-le-code-pas-l-état) : (a) que `run-phases.sh facts` rend bien CP_IP non
+        # vide APRÈS `provision` (VM démarrée, IP user-v2 posée) ; (b) que l'arm `cni`
+        # écrit le kubeconfig à l'emplacement EXACT attendu par les couches suivantes
+        # (KUBECONFIG_LOCAL == ctx.kubeconfig_local) et que le forward API 127.0.0.1:6443
+        # est joignable. Le format byte-stable de l'inventaire est déjà couvert (bats).
+
+    # Le moteur SAUTE les phases déjà `done` : on monte uniquement `a_appliquer` (le RÉEL,
+    # compute_plan_state), dans l'ORDRE de `seq`. None → toute la séquence (rétrocompat/tests).
+    monter = [p for p in seq if p in a_appliquer] if a_appliquer is not None else list(seq)
+    if a_appliquer is not None and not monter:
+        print("→ moteur Python : rien à monter (tout est déjà à-jour, état réel).")
+        return 0
+
+    print(f"→ moteur Python (run_path) : chemin `{target}` ({len(monter)} phase(s)), CP {ctx.cp}.")
+    try:
+        result = _path.run_path(
+            topo,
+            target,
+            sequence=lambda _t, _g: list(monter),
+            launch=launch,
+            gate=gate,
+            assert_safe=assert_safe,
+            provision=provision,
+            bootstrap=bootstrap,
+            # record : la consignation runs-history (#216) reste l'apanage de
+            # `metro_record_run` (bash, en fin de run-phases.sh) — elle agrège les durées
+            # ET les métriques échantillonnées par metrology.sh PENDANT le run, qu'un append
+            # Python ne reproduit pas byte-stable (history.py:20 — l'append est bash). STUB
+            # documenté (None) : le moteur Python ne consigne pas encore (à câbler au banc, §5.b).
+            record=None,
+        )
+    except _runner.RunnerUnavailable as exc:
+        raise _UsageError(str(exc)) from exc
+    except _path.IsolationRefused as exc:
+        # REFUS d'isolation = garde de sécurité, pas un échec de montage → code usage (2).
+        raise _UsageError(str(exc)) from exc
+    except _phases.E2EHookStubbed as exc:
+        # Hook e2e non câblé : honnêteté (ne pas verdir à tort) → on ARRÊTE NET (ADR 0034).
+        print(f"  ✗ _BANC : hook e2e à câbler — {exc}", file=sys.stderr)
+        return 1
+    except _path.PathError as exc:
+        # FAIL-FAST : montage KO → on relève le verdict (jamais de fallback bash, ADR 0046).
+        print(f"  ✗ {exc}", file=sys.stderr)
+        return 1
+    for step in result.steps:
+        mark = "✓" if step.ok else "✗"
+        print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
+    return 0 if result.built else 1
 
 
 def cmd_up(args: argparse.Namespace) -> int:
@@ -2274,17 +3341,19 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     L'ENTRÉE déclarative complète (inversion de frontière, ADR 0049/0056) : lit la
     stack active → DÉRIVE le chemin nommé (default_target) → affiche le PLAN (les
-    couches) → CONFIRME → DÉLÈGUE le montage COMPLET à `run-phases.sh <chemin>` (la
-    séquence PROUVÉE au banc, ADR 0034 — Python n'orchestre pas mieux limactl/le
-    bootstrap que bash ; il en est l'entrée, pas le moteur). Le code de sortie du
-    montage est propagé.
+    couches) → CONFIRME → MONTE la séquence via le moteur Python `nestor.path.run_path`
+    (`_run_path_engine`, ADR 0097 — SEUL moteur depuis le retrait du filet bash). Le
+    code de sortie du montage est propagé.
 
     Là où `next` monte UNE couche (1er drift), `up` monte TOUTE la séquence. Code 0
-    si le montage réussit ; 1 si run-phases.sh échoue ; 2 (usage) si confirmation
+    si le montage réussit ; 1 si le montage échoue ; 2 (usage) si confirmation
     refusée / chemin incohérent avec le backend."""
-    _assert_bench_target("nestor up")
     path = _resolve(args.file)
     topo = load_topology(path)
+    # Garde APRÈS le chargement : `up` from-scratch d'un banc (target_kind: lima) est légitime
+    # même sans kubeconfig de banc existant (c'est `up` qui le crée) — la topo lima est le
+    # signal sûr. Une topo prod reste sous garde stricte (cible prouvée requise).
+    _assert_bench_target("nestor up", topo)
     target = args.target or default_target(topo)
     try:
         seq = expected_phase_sequence(topo, target)
@@ -2293,40 +3362,22 @@ def cmd_up(args: argparse.Namespace) -> int:
     stack_name = topo.catalog.get("topology", "—")
 
     # ADR 0083 : l'ordre vient TOUJOURS de `seq` (expected_phase_sequence → graphe
-    # atomique). `cmd_up` choisit seulement par quel ARM bash l'exécuter :
-    #   - HA (topo.is_ha_control_plane) : socle d'amorçage non réductible à des layers
-    #     (kube-vip + join etcd) → arm `ha-3cp` (run-phases.sh inchangé, orchestré par
-    #     nestor/ha.py). La queue applicative éventuelle suit l'arm `layers`.
-    #   - `--target <preset>` explicite : arm nommé (rétrocompat CLI/scénarios).
-    #   - sinon (défaut `layers`) : arm GÉNÉRIQUE `layers <seq>` (Python décide l'ordre,
-    #     bash exécute — fini le preset dérivé, plus de 2e source de vérité).
-    # ADR 0083 : par défaut (`target == "layers"`), tout passe par l'arm GÉNÉRIQUE
-    # `layers <seq>` — Python décide l'ordre (graphe atomique), bash exécute, plus de
-    # preset dérivé. Un `--target <nom>` explicite (atlas, ha-3cp…) force l'arm nommé
-    # (rétrocompat CLI/scénarios). `ha-3cp` (dérivé pour une topo HA) garde son arm
-    # propre (amorçage VIP/etcd non réductible à des layers — refactor différé).
-    layers_seq = list(seq) if target == "layers" else None
+    # atomique) ; le moteur Python (`_run_path_engine`) MONTE cette séquence (un seul
+    # moteur depuis le retrait du filet bash). Un `--target <preset>` explicite (atlas,
+    # ha-3cp…) ne change que le NOM du chemin, pas l'exécuteur.
 
     # PLAN annoté — DÉRIVÉ du MÊME calcul que `preview`/`next` (compute_plan_state) pour
     # que les trois rendent le même verdict (fin de la divergence preview≠next≠up). `up`
     # monte TOUTE la séquence (idempotence run-phases.sh) ; l'annotation ✓/+ informe juste
     # l'opérateur de ce qui est DÉJÀ en place. Sonde RÉELLE identique à preview (ADR 0090).
-    runs = load_runs(args.history or _RUNS_HISTORY)
-    now = int(dt.datetime.now(tz=dt.UTC).timestamp())
-    run = last_run_for_topology(runs, stack_name)
-    freshness, _ = verdict_for_run(run, target, now)
     declared = topo.control_nodes + topo.worker_nodes
     nodes_ready = _ready_nodes(topo.target_kind)
     observed_socle = observed_done_phases(declared, _real_vms(topo.target_kind), nodes_ready)
-    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
-    state = compute_plan_state(
-        seq,
-        run.phases if run is not None else None,
-        observed_socle,
-        observed_layers,
-        freshness,
-        signal_phases=signal_phases,
-    )
+    observed_layers = _probe_observed_layers(seq, nodes_ready)
+    # `done` = RÉEL SEUL (refonte lot 6) — même calcul que preview/next. `cmd_up` monte
+    # TOUTE la séquence et n'affiche pas de verdict de fraîcheur (juste +/✓ à-jour) : il
+    # ne lit donc PLUS l'historique ici (la fraîcheur, #216, reste lue par preview/next).
+    state = compute_plan_state(seq, observed_socle, observed_layers)
     a_appliquer = set(state.a_appliquer)
 
     # Affiche le PLAN (les couches à monter) avant de confirmer — comme `preview`.
@@ -2340,38 +3391,17 @@ def cmd_up(args: argparse.Namespace) -> int:
         print("montage annulé.", file=sys.stderr)
         return 2
 
-    # NODES_OVERRIDE : la TOPOLOGIE pilote les nœuds du banc (inversion de frontière,
-    # ADR 0056 — la stack active décide, le harnais exécute). ha-3cp garde son
-    # override interne (3 CP). Construit avec `next` via le helper partagé.
-
-    # Délégation à run-phases.sh <chemin> : la séquence prouvée au banc (provisioning
-    # VM + bootstrap + orchestration ha-3cp + apps), bash garde le moteur (ADR 0049).
-    # STACK_NAME : le NOM de la stack active (= topologie déclarée). run-phases.sh le
-    # consigne dans `topologie:` de l'historique — c'est la CLÉ que `last_run_for_topology`
-    # matche pour le verdict de fraîcheur PAR STACK (deux stacks dérivant le même chemin
-    # ne partagent pas leur verdict). Sans lui, le bash écrivait un littéral générique
-    # qui ne matchait jamais la stack → PLAN « à installer » alors que la stack est montée.
-    # Preset nommé (run-phases.sh <chemin>) OU arm générique `layers <seq>` (palier
-    # non-préfixe) : dans les deux cas bash exécute, Python a décidé l'ordre.
-    runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
-    if layers_seq is not None:
-        argv = ["bash", runphases, "layers", ",".join(layers_seq)]
-        libelle = f"layers [{', '.join(topo.declared_layers)}]"
-    else:
-        # `--target <nom>` explicite (atlas…) ou ha-3cp dérivé : arm nommé (rétrocompat).
-        argv = ["bash", runphases, target]
-        libelle = f"chemin `{target}`"
-    print(f"→ montage {libelle} ({len(topo.nodes)} nœud(s)) via run-phases.sh…")
-    rc = subprocess.run(  # noqa: S603 — chemin codé, séquence dérivée d'une topo validée
-        argv,
-        check=False,
-        env=_runphases_env(topo, stack_name),
-    ).returncode
-    if rc != 0:
-        print(f"échec du montage ({libelle} rc={rc}).", file=sys.stderr)
-        return 1
-    print(f"✓ stack `{stack_name}` montée ({libelle}).")
-    return 0
+    # ── MOTEUR DE MONTAGE (ADR 0097) ───────────────────────────────────────────────
+    # Le moteur Python `nestor.path.run_path` est le SEUL moteur : prouvé de bout en bout
+    # au banc mono-nœud (from-scratch, 10 couches up→…→portal + preuve e2e OpenLineage→
+    # Marquez, ingestion vérifiée). L'ancien filet bash `--engine=bash`/run-phases.sh a été
+    # RETIRÉ (un seul moteur, plus de double source de vérité). La garde d'isolation banc
+    # s'applique ICI (`_assert_bench_target` en tête) ET à CHAQUE phase (callback
+    # `assert_safe`, invariant de boucle ADR 0097 §5.c). Le moteur Python ne porte PAS l'arm
+    # HA propre (amorçage VIP/etcd) : un chemin `ha-3cp` lèvera proprement (callback `ha`
+    # stubé) plutôt que de monter à moitié — on laisse le moteur trancher (fail-fast).
+    # `a_appliquer` (le RÉEL, compute_plan_state) : le moteur SAUTE les phases déjà `done`.
+    return _run_path_engine(topo, target, list(seq), stack_name, a_appliquer)
 
 
 # Libellés HUMAINS des phases AMONT — `next` les distingue comme `preview` : `up` =
@@ -2404,15 +3434,33 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
     Extrait de cmd_next pour être partagé par le chemin « 1re couche » et le menu
     multi-couches : une fois la phase CHOISIE, son montage est identique."""
     playbook_rel = phase_playbook(phase)
-    # Phases SANS playbook unitaire (`up`/`bootstrap` : provisioning bash limactl/cni.sh,
-    # ADR 0049 ; `gitops-seed` : script d'init Gitea ; `hardening`/`smoke-s3`/`wordpress` :
-    # tags/env/harnais) → DÉLÉGUÉES à l'arm run-phases.sh du MÊME nom. On le DÉRIVE de
-    # `playbook is None` (et de l'existence d'un arm) au lieu d'une liste codée : sinon le
-    # menu propose une couche (gitops-seed) que `next` refuse ensuite de monter — incohérent.
+    # Phases SANS playbook unitaire :
+    #   - `gitops-seed` (init Gitea, DONNÉES) → câblage Python `_launch_seed` (seed.run_seed),
+    #     le MÊME que `_run_path_engine` (un seul moteur depuis le retrait du filet bash) ;
+    #   - phases AMONT à arm run-phases.sh node-side IRRÉDUCTIBLE (`up` : provisioning limactl)
+    #     → délégation à l'arm bash du MÊME nom (ADR 0049).
+    # On DÉRIVE de `playbook is None` (pas d'une liste codée) : sinon le menu propose une
+    # couche que `next` refuse ensuite de monter — incohérent.
     if playbook_rel is None:
+        if phase == "gitops-seed":
+            # Phase DÉLÉGUÉE seed : route vers le câblage Python (parité _run_path_engine), pas
+            # un arm bash (retiré). Mappe les verdicts du moteur (PathError/IsolationRefused →
+            # fail-fast / usage) comme `_run_path_engine`.
+            _assert_bench_target(f"nestor next ({phase})")
+            stack_name = topo.catalog.get("topology", "—")
+            print(f"→ {phase} : {_quoi_couche(phase)} via nestor/seed.py…")
+            try:
+                _launch_seed(phase, topo, run_params)
+            except _path.IsolationRefused as exc:
+                raise _UsageError(str(exc)) from exc
+            except _path.PathError as exc:
+                print(f"échec de la phase `{phase}` : {exc}", file=sys.stderr)
+                return 1
+            print(f"✓ `{phase}` terminée — relancer `next` pour l'étape suivante ({stack_name}).")
+            return 0
         if not _has_runphases_arm(phase):
             raise _UsageError(
-                f"la phase `{phase}` n'a ni play unitaire ni arm run-phases.sh — "
+                f"la phase `{phase}` n'a ni play unitaire ni câblage Python/arm run-phases.sh — "
                 "non lançable via `nestor next`"
             )
         _assert_bench_target(f"nestor next ({phase})")
@@ -2547,19 +3595,13 @@ def cmd_next(args: argparse.Namespace) -> int:
         seq = expected_phase_sequence(topo, target)
     except (PlanError, TopologyError) as exc:
         raise _UsageError(str(exc)) from exc
-    # Couches observées saines + phases-à-signal (gating ADR 0084) — MÊME sonde que preview.
-    observed_layers, signal_phases = _probe_observed_layers(seq, nodes_ready)
-    # LE calcul partagé : `a_appliquer`/`done` dérivés EXACTEMENT comme `cmd_preview`
-    # (garde `if "up" not in done` + RÉEL prime dans LES DEUX SENS). `installable_now`
-    # ne fait plus que TRIER `a_appliquer` par satisfaction des dépendances → next == preview.
-    state = compute_plan_state(
-        seq,
-        run.phases if run is not None else None,
-        observed_socle,
-        observed_layers,
-        etat_frais,
-        signal_phases=signal_phases,
-    )
+    # Couches observées saines (gating ADR 0084) — MÊME sonde que preview.
+    observed_layers = _probe_observed_layers(seq, nodes_ready)
+    # LE calcul partagé : `done`/`a_appliquer` dérivés EXACTEMENT comme `cmd_preview` —
+    # du RÉEL SEUL (refonte lot 6), PLUS de l'historique. `installable_now` ne fait plus
+    # que TRIER `a_appliquer` par satisfaction des dépendances → next == preview. La
+    # fraîcheur (etat_frais) reste séparée : elle ne décide pas `done`, juste l'affichage.
+    state = compute_plan_state(seq, observed_socle, observed_layers)
     done = set(state.done)
     observed = observed_socle | observed_layers
     try:
@@ -2598,7 +3640,7 @@ def cmd_next(args: argparse.Namespace) -> int:
     no_input = args.yes  # à ce stade : soit TTY (on prompte), soit --yes (on saute)
     # Menu si PLUSIEURS couches montables ; sinon la seule. Choisir un numéro dans le
     # menu EST déjà la décision explicite → on NE redemande PAS de confirmation ensuite
-    # (un seul geste, pas de double [o/N] redondant).
+    # (un seul geste, pas de double [oui/NON] redondant).
     a_choisi_au_menu = len(montables) > 1
     if a_choisi_au_menu:
         phase = _choisir_couche(montables, _quoi_couche_label, no_input=no_input)
@@ -2622,114 +3664,16 @@ def cmd_next(args: argparse.Namespace) -> int:
     return _monter_phase(topo, phase, run_params)
 
 
-def cmd_ha_3cp(args: argparse.Namespace) -> int:
-    """Orchestre le montage HA `ha-3cp` (ADR 0047/0055, #250) — la partie ANSIBLE.
-
-    Les VM (limactl) et la CNI restent à run-phases.sh (orchestration de CLI, bash,
-    ADR 0049) ; cette commande reçoit `--cp-ip/--vip/--vip-iface` déjà dérivés du
-    banc, câble `ha.run_ha_3cp` au RÉEL : `launch` → runner.launch_phase (le MÊME
-    montage que `next --apply`), gates → limactl/kubectl, `run_cni` → un rappel vers
-    run-phases.sh. La logique (séquence, super-admin→admin, gates etcd) est testée
-    sans banc (tests/test_ha.py) ; ce câblage est la seule I/O réelle.
-    """
-    _assert_bench_target("ha-3cp")
-    import time
-
-    private_data_dir = os.path.join(_ROOT, "bootstrap")
-    # L'inventaire du banc est généré par run-phases.sh dans son WORKDIR (chemin
-    # ABSOLU passé via --inventory) — pas dans bootstrap/. On l'utilise tel quel ;
-    # un chemin relatif est résolu depuis bootstrap/ (compat usage hors banc).
-    inventory = (
-        args.inventory
-        if os.path.isabs(args.inventory)
-        else os.path.join(private_data_dir, args.inventory)
-    )
-    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
-    if not os.path.exists(inventory):
-        raise _UsageError(
-            f"inventaire absent : {inventory} (généré par run-phases.sh avant la délégation)"
-        )
-    kubeconfig = os.environ.get("KUBECONFIG")
-
-    def launch(playbook: str, extravars: dict, limit: str | None = None):
-        # playbook = 'kube-vip.yaml' → relatif à private_data_dir/<project> ;
-        # bootstrap/*.yaml sont à la racine du private_data_dir.
-        return _runner.launch_phase(
-            playbook,
-            extravars,
-            private_data_dir,
-            inventory,
-            ansible_config=ansible_cfg,
-            kubeconfig=kubeconfig,
-            target_kind="lima",
-            limit=limit,
-        )
-
-    def _runphases(*cmd: str) -> int:
-        """Rappel d'un sous-commande de run-phases.sh (bash garde VM/CNI/inventaire,
-        ADR 0049). Renvoie le code de sortie."""
-        return subprocess.run(  # noqa: S603 — chemin codé, arguments contrôlés
-            ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
-            check=False,
-        ).returncode
-
-    def set_inventory(control_hosts: list[str]) -> None:
-        # L'écriture d'inventaire reste du bash (write_inventory, format byte-stable).
-        # On réécrit l'inventaire avec les CP membres (primaire en tête) avant un join.
-        rc = _runphases("ha-inventory", ",".join(control_hosts))
-        if rc != 0:
-            raise _ha.HaError(f"réécriture de l'inventaire (control={control_hosts}) en échec")
-
-    # run_cni : la CNI reste portée par run-phases.sh (bash). On la rappelle via la
-    # sous-commande dédiée `ha-cni <vip-iface>` (cf. dispatch). Le Gateway s'expose en
-    # hostNetwork (ADR 0071) → plus de préfixe LB-IPAM à passer.
-    def run_cni():
-        rc = _runphases("ha-cni", args.vip_iface)
-        if rc != 0:
-            raise _ha.HaError(f"CNI (run-phases.sh ha-cni) en échec (rc={rc})")
-
-    def ready_count() -> int:
-        out = subprocess.run(  # noqa: S603 — kubectl, pas d'entrée shell
-            ["kubectl", "get", "nodes", "--no-headers"],
-            check=False,
-            capture_output=True,
-            text=True,
-            env={**os.environ, **({"KUBECONFIG": kubeconfig} if kubeconfig else {})},
-        )
-        return sum(1 for ln in out.stdout.splitlines() if " Ready " in f" {ln} ")
-
-    nodes = args.nodes.split(",")
-    print(f"→ ha-3cp : {len(nodes)} CP derrière la VIP {args.vip} (Ansible via Python/runner)")
-    try:
-        result = _ha.run_ha_3cp(
-            nodes,
-            args.cp_ip,
-            args.vip,
-            args.vip_iface,
-            launch=launch,
-            run_cni=run_cni,
-            set_inventory=set_inventory,
-            ready_count=ready_count,
-            sleep=time.sleep,
-        )
-    except _runner.RunnerUnavailable as exc:
-        raise _UsageError(str(exc)) from exc
-    for step in result.steps:
-        mark = "✓" if step.ok else "✗"
-        print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
-    return 0 if result.built else 1
-
-
 def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
     """Orchestre le socle k8s (`bootstrap`) — la partie ANSIBLE (interne, ADR 0063).
 
     Migration de bootstrap_node_sequence vers Python : lance les playbooks du socle
-    (checks→…→join-workers) via runner.launch_phase (le MÊME montage que ha-3cp), avec
+    (checks→…→join-workers) via runner.launch_phase, avec
     `-e control_plane_ip=<cp_ip>`. `join-workers` est SAUTÉ si l'inventaire n'a aucun
     worker (control unique). L'inventaire, la dérivation de cp_ip/iface, la CNI
     (Cilium dans la VM) et le kubeconfig restent à run-phases.sh (briques bash, ADR
     0049) ; cette commande reçoit cp_ip/inventaire déjà dérivés du banc et rappelle
-    `ha-cni <iface>` pour la CNI. La logique (séquence, fail-fast) est testée sans
+    l'arm `cni` pour la CNI. La logique (séquence, fail-fast) est testée sans
     banc (tests/test_bootstrap.py)."""
     _assert_bench_target("bootstrap-seq")
     private_data_dir = os.path.join(_ROOT, "bootstrap")
@@ -2757,17 +3701,17 @@ def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
         )
 
     def run_cni() -> int:
-        # CNI (+ GW API CRDs + kubeconfig) : brique bash réutilisée (ha-cni <iface>).
-        # Le Gateway s'expose en hostNetwork (ADR 0071) → plus de préfixe LB-IPAM.
-        # L'arm `ha-cni` dérive le CP du 1er nœud `control` de NODES (plus de `CP=cp1`
-        # codé) ; NODES vient de NODES_OVERRIDE, posé par `up` et hérité tout au long de
-        # la chaîne (up → run-phases.sh → bootstrap-seq → ici).
+        # CNI (+ kubeconfig) : brique bash réutilisée (arm `cni`). L'exposition est en L4
+        # NodePort (ADR 0092) → plus de Gateway/LB-IPAM, et l'arm `cni` (ex `ha-cni
+        # <iface>`) ne prend plus d'argument iface (geste 100 % CNI). L'arm dérive le CP
+        # du 1er nœud `control` de NODES (plus de `CP=cp1` codé) ; NODES vient de
+        # NODES_OVERRIDE, posé par `up` et hérité tout au long de la chaîne (up →
+        # run-phases.sh → bootstrap-seq → ici).
         return subprocess.run(  # noqa: S603 — chemin codé, arguments contrôlés
             [
                 "bash",
                 os.path.join(_ROOT, "bench", "lima", "run-phases.sh"),
-                "ha-cni",
-                args.l2_iface,
+                "cni",
             ],
             check=False,
             env={**os.environ},
@@ -3235,7 +4179,9 @@ _DISPATCH = {
     # refresh) ; `next` = appliquer LA prochaine couche (le vrai `up` complet — VMs +
     # orchestration de TOUTE la séquence — reste à coder).
     "preview": cmd_preview,  # calque `pulumi preview`
-    "env": cmd_env,  # imprime `export KUBECONFIG=<banc>` à eval dans le shell
+    # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) : `nestor` maintient des contextes kubectl
+    # nommés (posés par `stack select`). Remplaçant ergonomique = `nestor kubectl …` :
+    "kubectl": cmd_kubectl,  # kubectl sur la cible de la stack active (ex-`nestor env`)
     "access": cmd_access,  # accès dev (URLs + secrets) — délègue à access.sh (ADR 0048)
     "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
     "discover": cmd_discover,  # reconstruit un topology.yaml depuis le réel (ADR 0074, inverse de generate)  # noqa: E501
@@ -3243,11 +4189,11 @@ _DISPATCH = {
     "up": cmd_up,  # calque `pulumi up` : monte TOUTE la séquence (délègue à run-phases.sh)
     "next": cmd_next,  # applique la PROCHAINE couche (1er drift, granularité fine)
     "remove": cmd_remove,  # supprime UNE couche + sa clôture (inverse de next, ADR 0054)
-    "destroy": cmd_destroy,  # calque `pulumi destroy`
+    "down": cmd_destroy,  # symétrique de `up` (run-phases.sh)
+    "destroy": cmd_destroy,  # ALIAS rétrocompat (calque `pulumi destroy`)
     # Groupes noun-verb (annexe rangée) : artefacts dérivés/constatés + épreuves.
     "artifact": cmd_artifact,
     "test": cmd_test,
-    "ha-3cp": cmd_ha_3cp,  # interne (routée à part dans main, hors menu)
     "bootstrap-seq": cmd_bootstrap_seq,  # interne : socle k8s en Python (migration)
 }
 
@@ -3299,10 +4245,10 @@ def _build_parser() -> argparse.ArgumentParser:
             "  next        monter UNE couche : la prochaine qui manque\n"
             "  remove      supprimer UNE couche (et ses dépendantes) — inverse de next\n"
             "  up          construire le cluster en entier (machines + couches)\n"
-            "  destroy     supprimer les machines (VMs) de la stack active\n"
+            "  down        supprimer les machines (VMs) de la stack active\n"
             "\n"
             "Commandes annexes :\n"
-            '  env         brancher kubectl sur le banc : eval "$(nestor env)"\n'
+            "  kubectl     lancer kubectl sur la cible de la stack active (sans export)\n"
             "  access      ouvrir l'accès dev (URLs des services + identifiants)\n"
             "  scale       ajuster les replicas au nombre de nœuds\n"
             "  discover    reconstruire un topology.yaml depuis un cluster réel\n"
@@ -3459,12 +4405,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
     )
 
-    p_env = sub.add_parser(
-        "env",
-        help='brancher kubectl sur le cluster du banc : eval "$(nestor env)" dans ton shell',
+    # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) — plus de sous-parser. Remplaçant ergonomique :
+    # `nestor kubectl …` exécute kubectl avec le kubeconfig de la cible (stack active),
+    # résolu par _bench_kubeconfig (jamais la prod par accident). Plus de `export` à eval.
+    p_kubectl = sub.add_parser(
+        "kubectl",
+        help="lancer kubectl sur la cible de la stack active (remplace `nestor env`)",
     )
-    p_env.add_argument(
-        "--force", action="store_true", help="imprime le banc même si KUBECONFIG est déjà défini"
+    p_kubectl.add_argument(
+        "-f", "--file", default=None, help="topology.yaml à viser (défaut : stack active)"
+    )
+    # REMAINDER : tout ce qui suit `kubectl` est passé tel quel à la vraie commande kubectl
+    # (`nestor kubectl get pods -A`, `nestor kubectl -n monitoring logs …`).
+    p_kubectl.add_argument(
+        "kubectl_args", nargs=argparse.REMAINDER, help="arguments passés à kubectl"
     )
 
     p_access = sub.add_parser(
@@ -3543,8 +4497,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="confirmer la fusion (requis hors TTY)"
     )
 
+    # `down` (symétrique de `up`, cf. run-phases.sh) ; `destroy` reste un ALIAS (rétrocompat
+    # scénarios/scripts + calque `pulumi destroy`).
     p_destroy = sub.add_parser(
-        "destroy", help="supprimer les machines (VMs) de la configuration active"
+        "down",
+        aliases=["destroy"],
+        help="supprimer les machines (VMs) de la configuration active",
     )
     _add_file(p_destroy)
     p_destroy.add_argument(
@@ -3693,23 +4651,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="sauter la confirmation interactive (requis hors TTY pour détruire)",
     )
 
-    # ha-3cp : commande INTERNE (appelée par run-phases.sh avec --cp-ip/--vip dérivés
-    return ap
-
-
-def _build_ha_parser() -> argparse.ArgumentParser:
-    """Parser DÉDIÉ à la commande interne `ha-3cp` (hors du menu public).
-
-    ha-3cp est appelée par run-phases.sh avec --cp-ip/--vip dérivés du banc — ce
-    n'est pas un verbe du menu. On la garde HORS du parser principal (sinon argparse
-    l'expose dans le --help et la liste des choix). Routée à part dans main() ; sera
-    absorbée par `up` (inversion de frontière, ADR 0063)."""
-    ap = argparse.ArgumentParser(prog="topology ha-3cp")
-    ap.add_argument("--nodes", default="cp1,cp2,cp3", help="CP, le 1er = primaire (csv)")
-    ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
-    ap.add_argument("--vip", required=True, help="VIP de l'API (kube-vip)")
-    ap.add_argument("--vip-iface", required=True, dest="vip_iface", help="interface L2 de la VIP")
-    ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
     return ap
 
 
@@ -3718,7 +4659,7 @@ def _build_bootstrap_parser() -> argparse.ArgumentParser:
 
     Appelée par run-phases.sh:phase_bootstrap avec --cp-ip/--l2-iface/--inventory
     dérivés du banc — orchestre les 6 playbooks du socle en Python (migration de
-    bootstrap_node_sequence). Interne, routée à part dans main() comme ha-3cp."""
+    bootstrap_node_sequence). Interne, routée à part dans main()."""
     ap = argparse.ArgumentParser(prog="topology bootstrap-seq")
     ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
     ap.add_argument("--l2-iface", required=True, dest="l2_iface", help="interface L2 (LB-IPAM/CNI)")
@@ -3729,7 +4670,6 @@ def _build_bootstrap_parser() -> argparse.ArgumentParser:
 # Commandes INTERNES (hors menu) : nom → (builder de parser dédié). Routées à part
 # dans main() pour ne PAS polluer le --help / la liste des choix du menu public.
 _INTERNAL_PARSERS = {
-    "ha-3cp": _build_ha_parser,
     "bootstrap-seq": _build_bootstrap_parser,
 }
 

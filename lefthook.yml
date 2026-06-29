@@ -97,7 +97,7 @@ pre-push:
           ':!:docs/architecture/registre-drifts.yaml' \
           ':!:bench/lima/runs-history.yaml' \
           ':!:contract/*.example.yaml' \
-          ':!:topologies/*.example.yaml' \
+          ':!:topologies/*.yaml' \
           | xargs -0 -r kubeconform \
             -strict -ignore-missing-schemas \
             -schema-location default \

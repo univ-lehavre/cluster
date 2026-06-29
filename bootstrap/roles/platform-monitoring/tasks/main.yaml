@@ -28,7 +28,14 @@
         cmd: >-
           kubectl apply --server-side
           -f {{ platform_repo_dir }}/platform/kube-prometheus-stack/crds.yaml
-      changed_when: true
+      register: monitoring_crds_apply
+      # changed = au moins une ressource créée/modifiée. `kubectl apply` imprime une
+      # ligne « <res> unchanged » par CRD inchangée ; tout autre suffixe (created /
+      # configured / serverside-applied) = vrai changement. `changed_when: true` figeait
+      # changed → idempotence cassée au rejeu (ADR 0051, mémoire changed-when-creates-ment).
+      changed_when: >-
+        monitoring_crds_apply.stdout_lines
+        | reject('search', ' unchanged$') | list | length > 0
 
     # Attendre que les CRDs soient Established avant d'appliquer les CR (sinon
     # « no matches for kind … » au premier apply — race CRD/CR).

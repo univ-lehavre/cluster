@@ -87,6 +87,12 @@
       ansible.builtin.apt:
         update_cache: true
 
+    # NB : ce paquet `containerd.io` (apt) n'est PAS le containerd qui sert de runtime k8s —
+    # nerdctl-full (rôle platform-build-images) extrait son PROPRE containerd dans /usr/local/
+    # et POSE le service systemd /usr/local/lib/systemd/system/containerd.service. C'est CE
+    # binaire (bundlé par nerdctl) qui tourne. Le bug Yunix (issue #513) se règle donc en
+    # épinglant `nerdctl_version` (cf. platform-build-images), pas ici. On garde le paquet apt
+    # (dépendances + outillage), sans version épinglée.
     - name: Install the container runtime (containerd.io)
       ansible.builtin.apt:
         name: containerd.io

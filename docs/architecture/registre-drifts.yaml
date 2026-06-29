@@ -899,3 +899,255 @@ drifts:
       `contract/endpoints.example.yaml` (en-tête) et `docs/guide-dev-data.md`. Pas de
       nouvel ADR (résolution intra-pod, non couverte par 0019/0020/0021 exposition bordure).
     statut: corrige
+
+  # ── Refonte nestor moteur Python (#511) — runs --engine=python banc Lima
+  #    from-scratch (2026-06-26/29) — L59–L65 ; Yunix containerd 2.3.x = L66 ──
+  - id: L59
+    campagne: 'refonte nestor — moteur Python (#511), runs --engine=python au banc Lima from-scratch (2026-06-26/29)'
+    portee: code
+    symptome: >-
+      La phase `monitoring` cassait l'idempotence — 1 tâche `changed` au rejeu
+      (« Apply monitoring CRDs (server-side, via kubectl) »).
+    cause: >-
+      La tâche avait `changed_when: true` → TOUJOURS `changed` même quand
+      `kubectl apply --server-side` ne modifie rien (ADR 0051).
+    correctif: >-
+      `changed_when` dérivé de la sortie réelle de kubectl apply (changed = au
+      moins une ligne sans suffixe « unchanged »). Bug isolé : les autres
+      `changed_when: true` du bootstrap (build d'image `force_rebuild`, `creates:`,
+      postconf) sont légitimes. Commit 7bf2498.
+    statut: corrige
+
+  - id: L60
+    campagne: 'refonte nestor — moteur Python (#511), runs --engine=python au banc Lima from-scratch (2026-06-26/29)'
+    portee: code
+    symptome: >-
+      Le seed gitops (gitea-init porté en Python) échouait sur tous ses gestes —
+      admin/token KO, « Incorrect Usage: flag provided but not defined:
+      -request-timeout ».
+    cause: >-
+      `_kubectl` ajoutait `--request-timeout=5s` EN FIN d'argv. Pour un
+      `kubectl exec pod -- gitea …`, le flag GLOBAL atterrissait APRÈS le `--` →
+      passé à la commande du conteneur (gitea), pas à kubectl. RACINE de la
+      chaîne d'échecs du seed.
+    correctif: >-
+      Le flag global précède la sous-commande :
+      `['kubectl','--request-timeout=5s',*args]`. Prouvé au banc (admin
+      idempotent, token généré). Commit b288a62.
+    statut: corrige
+
+  - id: L61
+    campagne: 'refonte nestor — moteur Python (#511), runs --engine=python au banc Lima from-scratch (2026-06-26/29)'
+    portee: code
+    symptome: >-
+      Le seed reportait SUCCÈS (faux-vert) sur des étapes en échec réel — admin
+      avalait tout échec de création, org-repo/webhook retournaient `True` sans
+      lire le code HTTP. Masquait la cause d'un échec 2 étapes plus loin.
+    cause: >-
+      `admin()` faisait `return True` inconditionnel après `gitea admin user
+      create` (avalait TOUT, pas seulement « already exists ») ; `org_repo()` et
+      `webhook()` ignoraient le code HTTP de l'appel API.
+    correctif: >-
+      admin distingue créé / « already exists » (idempotent) / vrai échec ;
+      `_seed_api_ok` valide le code (2xx/409/422 ok, 401/5xx/vide = échec).
+      Trouvé par audit adversarial. Commits 91c212f, 0486a3c.
+    statut: corrige
+
+  - id: L62
+    campagne: 'refonte nestor — moteur Python (#511), runs --engine=python au banc Lima from-scratch (2026-06-26/29)'
+    portee: code
+    symptome: >-
+      Le seed tentait de créer l'admin Gitea alors que le pod gitea démarrait
+      encore → création KO → token KO ensuite.
+    cause: >-
+      Le câblage seed Python n'attendait pas Gitea/Argo CD Ready avant les gestes
+      (alors que run-phases.sh:1082-1085 fait `rollout status` des deux).
+    correctif: >-
+      Gate `rollout status deploy/gitea` + `deploy/argocd-server` AVANT le moindre
+      geste mutant du seed (ADR 0046). Commit 83c520c.
+    statut: corrige
+
+  - id: L63
+    campagne: 'refonte nestor — moteur Python (#511), runs --engine=python au banc Lima from-scratch (2026-06-26/29)'
+    portee: code
+    symptome: >-
+      En montage from-scratch, la phase `storage-simple` (play localhost, module
+      k8s) échouait : « Connection to 10.67.2.11:6443 timed out » — l'IP INTERNE
+      de la VM Lima (user-v2, non routable depuis l'hôte).
+    cause: >-
+      Le moteur Python passait `kubeconfig=os.environ.get('KUBECONFIG')`, VIDE en
+      from-scratch (le banc n'existe pas au démarrage de `nestor up`). Sans
+      KUBECONFIG, le module k8s tapait l'IP interne de l'inventaire au lieu du
+      forward 127.0.0.1.
+    correctif: >-
+      Repli sur `ctx.kubeconfig_local` (kubeconfig banc rapatrié par bootstrap,
+      server 127.0.0.1:6443) quand l'env est vide. Bug visible UNIQUEMENT en
+      from-scratch (masqué quand le banc préexiste). Commit 4db9d70.
+    statut: corrige
+
+  - id: L64
+    campagne: 'refonte nestor — moteur Python (#511), runs --engine=python au banc Lima from-scratch (2026-06-26/29)'
+    portee: code
+    symptome: >-
+      Après `run-phases.sh down`, `nestor up --engine=python` était REFUSÉ par la
+      garde d'isolation (« kubeconfig du banc absent »).
+    cause: >-
+      `_assert_bench_target` exigeait un kubeconfig de banc existant — paradoxe :
+      `up` est précisément la commande qui CRÉE le banc (le from-scratch part de
+      rien).
+    correctif: >-
+      La garde reçoit la topo ; si elle déclare `target_kind: lima` (=
+      EXPECTED_TARGET_KIND=lima du bash), c'est le signal sûr pour `up`
+      from-scratch. Une topo prod reste sous garde stricte. Commit f390a59.
+    statut: corrige
+
+  - id: L65
+    campagne: 'refonte nestor — moteur Python (#511), runs --engine=python au banc Lima from-scratch (2026-06-26/29)'
+    portee: code
+    symptome: >-
+      La phase `portal` (et potentiellement mlflow) échouait sur « idempotence
+      cassée : 2 tâches changed au rejeu » via le moteur Python, alors que le bash
+      montait portal sans erreur.
+    cause: >-
+      portal/mlflow buildent une image à TAG MUTABLE (`force_rebuild: true`) →
+      rebuild VOULU à chaque rejeu, donc `changed` légitime. Le moteur Python
+      appliquait un double-passage `changed=0` (`launch_phase_idempotent`) à TOUTES
+      les phases ; le bash run-phases.sh lance 1× + gate sans ce check.
+    correctif: >-
+      Le moteur lance 1 passage + gate (parité bash). L'idempotence se prouve par
+      le rejeu du CHEMIN entier (`nestor up` 2× → « rien à appliquer », ADR 0052),
+      pas par phase. Commits 4ea58dd, 7b5fb43.
+    statut: corrige
+
+  - id: L66
+    campagne: 'containerd 2.3.x bundlé par nerdctl-full — banc Lima (sous charge, montage dataops)'
+    portee: env
+    symptome: >-
+      Au banc Lima, sous charge (montage dataops, au moment d'attendre le dagster
+      webserver), ~13 % des nouveaux pods restent bloqués en ContainerCreating/Init :
+      « FailedCreatePodSandBox: failed to start shim: failed to create TTRPC
+      connection: unsupported protocol: \b\x03\x12Yunix:// » (octets protobuf
+      parasites devant ce qui devrait être « unix:// »). NON lié au reboot (hypothèse
+      initiale fausse : VM bootée bien avant le montage, containerd n'avait pas
+      redémarré) — survient à la NÉGOCIATION de nouveaux shims.
+    cause: >-
+      Cause racine PROUVÉE (et non l'abstract→normal socket supposé d'abord) : le
+      containerd qui sert de runtime k8s n'est PAS le paquet apt containerd.io —
+      c'est celui que `nerdctl-full` (rôle platform-build-images) embarque, extrait
+      dans /usr/local/ et dont il pose le service systemd
+      (/usr/local/lib/systemd/system/containerd.service), masquant le paquet apt.
+      nerdctl-full 2.3.3 embarque containerd 2.3.2, dont le nouveau protocole
+      `BootstrapParams` du shim (introduit en 2.3) partage stdout/stderr : si runc
+      écrit sur stderr au démarrage, les octets POLLUENT l'adresse socket que
+      containerd parse → « Yunix ». Bug de code upstream, PAS réglable par config.toml.
+    correctif: >-
+      nerdctl_version 2.3.3 → 2.2.2 (embarque containerd 2.2.1, antérieur au protocole
+      BootstrapParams, sans le bug) + ses 2 checksums (platform-build-images/defaults).
+      PROUVÉ au banc (ADR 0034) : containerd 2.2.1 installé, pods Dagster recréés →
+      Running en ~20 s SANS restart manuel, aucune erreur Yunix. Palliatif manuel
+      (restart containerd + delete pod --force) plus requis. La piste « restart/drop-in
+      post-bootstrap » était fausse (le bug est au montage à chaud, pas au reboot).
+      À rebumper vers 2.3.x quand containerd corrige le partage stdout/stderr du shim.
+    statut: corrige
+    issue: '#513' # corrigé : nerdctl-full 2.2.2 (containerd 2.2.1), prouvé au banc
+
+  # ── Drifts antérieurs à la refonte (postérieurs à L58, d'avant les runs
+  #    --engine=python) jamais consignés — L67–L72 ──────────────────────────
+  - id: L67
+    campagne: 'installation portail (ADR 0092) — banc Lima (2026-06-23)'
+    portee: code
+    symptome: >-
+      Après un rebuild de l'image portail (tag mutable `:dev`), un rollout ne
+      tirait jamais la nouvelle image : login/scheme absents après rebuild
+      (constaté dirqual) — l'ancienne image restait servie depuis le cache nœud.
+    cause: >-
+      Le tag `:dev` est mutable (le code/contrat embarqué évolue) mais
+      `imagePullPolicy` était à `IfNotPresent` (défaut k8s hors `:latest`), qui
+      garde l'image en cache → containerd ne re-tire pas le tag mutable.
+    correctif: >-
+      `imagePullPolicy: Always` dans `platform/portal/portal.yaml` → re-tire
+      l'image à chaque rollout. Commit cb50fd1.
+    statut: corrige
+
+  - id: L68
+    campagne: 'portail — banc Lima (2026-06-22)'
+    portee: code
+    symptome: >-
+      Preuve banc : TOUS les services déployés ressortaient en DRIFT (present
+      mais not ready) alors qu'ils tournent — verdict du portail faux partout.
+    cause: >-
+      `_endpoints_ready` utilisait le client bas niveau
+      `core_v1.api_client.call_api` (params query_params/response_type), qui
+      LEVAIT une ApiException silencieusement catchée → `ready=False` partout.
+    correctif: >-
+      Lecture via le client TYPÉ `DiscoveryV1Api.list_namespaced_endpoint_slice`
+      (label_selector `kubernetes.io/service-name`) ; `_apis` renvoie 3 clients
+      (Core, Discovery, Custom). Re-déployé au banc : 16 MATCH, 2 MISSING
+      (s3-ceph local-path + dashboard non déployé), 1 DRIFT — verdicts conformes
+      à l'état réel. Commit eda9ae8.
+    statut: corrige
+
+  - id: L69
+    campagne: 'portail — banc Lima (2026-06-23)'
+    portee: code
+    symptome: >-
+      Le portail rendait DRIFT pour les UI vendored et n'affichait aucun lien
+      vers elles.
+    cause: >-
+      Il observait le Service du contrat (ClusterIP sans nodePort) ; l'exposition
+      L4 passe par un Service séparé `<svc>-nodeport` que le portail ignorait.
+    correctif: >-
+      Observer aussi `<svc>-nodeport` (le Service d'exposition séparé) ;
+      `login_for()` affiche l'IDENTIFIANT à côté de la commande mot de passe ;
+      scheme `https` pour les UI qui terminent le TLS (dashboard Ceph). Commit
+      ab7f47f.
+    statut: corrige
+
+  - id: L70
+    campagne: 'audit prod dirqual — etcd backup (2026-06-24)'
+    portee: code
+    symptome: >-
+      Le rendu du template etcd-snapshot échouait : « Syntax error in template:
+      unexpected char » — révélant que l'etcd backup n'avait JAMAIS été actif sur
+      dirqual (rôle etcd-backup encore jamais joué, cf. bench/RESULTS.md:54).
+    cause: >-
+      Un commentaire shellcheck (ligne KEEP) contenait `{{ … }}` : Jinja tentait
+      d'évaluer l'expression au rendu du template. Bug latent introduit par le fix
+      CI 33cf7ec (SC1083), jamais exercé car le rôle n'avait jamais tourné.
+    correctif: >-
+      Reformuler le commentaire sans accolades Jinja. Le rendu réussit (snapshot
+      etcd 63 Mo produit sur control-plane). Commit 23f6aed.
+    statut: corrige
+
+  - id: L71
+    campagne: 'audit prod dirqual — CoreDNS SPOF (#487, 2026-06-25)'
+    portee: code
+    symptome: >-
+      Le durcissement de l'anti-affinité CoreDNS échouait : le module
+      `kubernetes.core.k8s` ne s'exécutait pas sur le control-plane (le rôle
+      `k8s-initialization` y tourne en become/sudo car kubeadm init l'exige).
+    cause: >-
+      La lib Python `kubernetes` est absente du nœud (provisionnée uniquement dans
+      le `.venv` du contrôleur, cf. metrics-server.yaml) → le module k8s ne peut
+      pas tourner SUR le control-plane.
+    correctif: >-
+      S'aligner sur les autres opérations k8s du rôle (taint, label) :
+      `kubectl patch --type=strategic` avec le kubeconfig local du nœud,
+      idempotent (no-op « no change » si déjà en place). Commit fa17a5c.
+    statut: corrige
+
+  - id: L72
+    campagne: 'chaîne MLOps mono-nœud — banc Lima (2026-06-23)'
+    portee: env
+    symptome: >-
+      La chaîne MLOps complète (monitoring + argocd + gitea + cnpg + registry +
+      dagster + mlflow) sur un nœud `banc.yaml` saturait 8 GiO : dagster-daemon
+      restait Pending / ProgressDeadlineExceeded (limits memory > 88 %, mesuré).
+    cause: >-
+      `VM_MEMORY` par défaut à 8 GiO insuffisant pour la charge applicative
+      empilée sur un seul nœud (c'est la charge applicative qui dimensionne, pas
+      Ceph vs local-path).
+    correctif: >-
+      `vm_memory_default` porté à 12 GiO (run-phases.sh), indépendant de
+      WITH_CEPH (les deux backends en ont besoin). Commit ad08529.
+    statut: corrige

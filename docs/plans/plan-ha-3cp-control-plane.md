@@ -2,22 +2,30 @@
 
 ## État
 
-> **État : Brouillon** (2026-06-24) · **Fonde :**
+> **État : Abandonné** (2026-06-29) · **Fonde :**
 > [ADR 0055](../decisions/0055-ha-3cp-hyperconverge-promotion-in-place.md)
-> (Accepted) +
+> (Superseded) +
 > [ADR 0047](../decisions/0047-topologie-ha-3cp-control-plane-dedie.md)
 > (Accepted). · **Issues :**
 > [#486](https://github.com/univ-lehavre/cluster/issues/486) (SPOF
 > control-plane), [#490](https://github.com/univ-lehavre/cluster/issues/490)
 > (scrape CP), [#487](https://github.com/univ-lehavre/cluster/issues/487)
 > (CoreDNS), suivi [#491](https://github.com/univ-lehavre/cluster/issues/491). ·
-> **Preuve :** `bench/lima/RESULTS.md` (run `ha-3cp` à consigner).
+> **Preuve :** `bench/lima/RESULTS.md` (run `ha-3cp` jamais consigné).
 >
-> ADR `Accepted` ⇒ mise en œuvre incrémentale autorisée
-> ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md)).
-> L'outillage HA existe **déjà en grande partie** (cf. §4) ; ce plan cadre la
-> **preuve banc 3-VM** puis la **promotion prod in-place**, pas l'écriture
-> _from-scratch_ des rôles.
+> **Abandonné (2026-06-29).** La topologie `ha-3cp` n'est plus poursuivie :
+> [ADR 0055](../decisions/0055-ha-3cp-hyperconverge-promotion-in-place.md) est
+> passé **Superseded** et son outillage est retiré. La preuve exigeait un **banc
+> 3-VM** (quorum etcd impair + failover VIP) qui est **abandonné** (poste de dev
+> sans les ressources pour 3 VM) ; la HA du control plane ne se prouvant **que**
+> sur prod, elle est instruite au **rebuild dirqual ~sept. 2026** (finding
+> #486), hors de ce plan. Le geste CNI `ha-cni` (pose Cilium + fetch kubeconfig
+> du bootstrap normal, sans rapport avec la HA) **reste** câblé. Le contenu
+> ci-dessous est conservé comme trace de l'instruction, non comme feuille de
+> route active.
+>
+> Le passage à `Abandonné` clôt la mise en œuvre incrémentale autorisée par
+> [ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md).
 
 Matérialise la mise en haute disponibilité du plan de contrôle de dirqual,
 réponse au finding majeur #486 de l'audit prod du 2026-06-24

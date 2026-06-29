@@ -1,7 +1,7 @@
 """Gates d'INFRA en Python : attendre une condition k8s (PVC Bound, nœuds Ready, OSD).
 
 Portage des gates bash (gate_test_pvc, nodes_ready_all, osds_up) vers Python, sur le
-moule `ha.py` : la LOGIQUE (boucle d'attente bornée + verdict) est PURE et testable ;
+moule du montage HA : la LOGIQUE (boucle d'attente bornée + verdict) est PURE et testable ;
 la lecture d'état k8s est INJECTÉE (la façade la branche sur le client `kubernetes`
 NATIF — objets typés, `pvc.status.phase`, `list_node()` — pas de grep de `kubectl`).
 

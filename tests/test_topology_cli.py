@@ -63,7 +63,7 @@ def _deny_run(argv, *a, **k):
         raise AssertionError(
             f"TEST NON BLINDÉ : appel subprocess RÉEL de provisionnement intercepté — {flat!r}. "
             "Le test doit stuber cli.subprocess.run (et toutes les closures internes "
-            "_runphases/run_cni/set_inventory de cmd_ha_3cp/cmd_bootstrap_seq)."
+            "_runphases/run_cni de cmd_bootstrap_seq)."
         )
     # kubectl get / config view (lecture) : neutralisé en CompletedProcess vide (déterminisme).
     return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
@@ -102,7 +102,7 @@ def setUpModule():
     # Garde d'isolation neutralisée PAR DÉFAUT : les tests métier (up/next/destroy/…)
     # n'ont pas de vrai banc et ne doivent pas être bloqués par elle. La classe
     # `BenchTargetGuard` la RÉACTIVE explicitement pour la tester (cf. _REAL_ASSERT_BENCH).
-    cli._assert_bench_target = lambda action: None
+    cli._assert_bench_target = lambda *a, **k: None
     # Gate de santé (#355) neutralisée PAR DÉFAUT (renvoie sain) : sans banc, sonder le
     # dernier maillon bouclerait 30×4s. Les tests de `next` stubent déjà launch_phase ;
     # la gate elle-même est testée à part (NextHealthGate) avec sa propre stub.
@@ -352,7 +352,7 @@ class Epreuves(unittest.TestCase):
         }
         cli._ready_nodes = lambda *_a: ["node1"]
         cli._observed_layers = lambda phases: observed
-        cli._assert_bench_target = lambda action: None
+        cli._assert_bench_target = lambda *a, **k: None
         self._orig_exists = cli.os.path.exists
         cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else self._orig_exists(p)
         for k, v in orig.items():
@@ -440,6 +440,102 @@ runs:
         code, _, err = _capture(["artifact", "runs", "--history", "/nope/runs.yaml"])
         self.assertEqual(code, 1)
         self.assertIn("erreur", err)
+
+
+class Kubectl(unittest.TestCase):
+    """`nestor kubectl …` : kubectl sur la cible de la stack active (ex-`nestor env`)."""
+
+    _BANC_TOPO = (
+        "catalog: {topology: banc}\n"
+        "layers: [storage-simple]\n"
+        "nodes:\n  - {name: node1, roles: [control, worker]}\n"
+        "storage: {backend: local-path}\ntarget_kind: lima\n"
+    )
+
+    def _topo_file(self) -> str:
+        fd, path = tempfile.mkstemp(suffix=".yaml")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(self._BANC_TOPO)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_passes_args_to_kubectl_with_safe_kubeconfig(self):
+        # `nestor kubectl get pods -A` → exécute `kubectl get pods -A` avec un KUBECONFIG
+        # forcé vers la cible SÛRE (_bench_kubeconfig), JAMAIS ~/.kube/config (la prod).
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            seen["kubeconfig"] = (k.get("env") or {}).get("KUBECONFIG")
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["kubectl", "-f", self._topo_file(), "get", "pods", "-A"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["argv"], ["kubectl", "get", "pods", "-A"])
+        # KUBECONFIG forcé (jamais None / ~/.kube/config implicite).
+        self.assertIsNotNone(seen["kubeconfig"])
+        self.assertNotIn(".kube/config", seen["kubeconfig"] or "")
+
+    def test_returns_kubectl_exit_code(self):
+        def _fake_run(argv, *a, **k):
+            return subprocess.CompletedProcess(args=argv, returncode=7)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["kubectl", "-f", self._topo_file(), "get", "nodes"])
+        self.assertEqual(code, 7)
+
+    def test_request_timeout_flag_precedes_args_not_after_exec_dashdash(self):
+        # Régression (constaté au banc) : `_kubectl` ajoutait `--request-timeout` EN FIN
+        # d'argv → pour un `exec pod -- gitea …`, le flag atterrissait APRÈS le `--`, donc
+        # passé à `gitea` (« flag not defined ») → tout geste seed cassé. Le flag GLOBAL doit
+        # précéder la sous-commande.
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            cli._kubectl("-n", "gitea", "exec", "pod", "--", "gitea", "admin", "user", "list")
+        argv = seen["argv"]
+        # --request-timeout est juste après `kubectl`, AVANT le `--` de l'exec.
+        self.assertEqual(argv[0], "kubectl")
+        self.assertTrue(argv[1].startswith("--request-timeout"))
+        self.assertLess(argv.index("--request-timeout=5s"), argv.index("--"))
+
+    def test_prod_stack_targets_declared_kubeconfig_not_bench(self):
+        # Stack PROD active : `nestor kubectl` doit viser le kubeconfig DÉCLARÉ (ADR 0090),
+        # PAS le banc — même si main() pose un défaut banc auto (_KUBECONFIG_AUTO_BENCH).
+        # Régression : sinon `nestor kubectl` taperait le banc avec la prod sélectionnée.
+        prod = (
+            "catalog: {topology: dirqual}\n"
+            "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
+            "storage: {backend: ceph}\ntarget_kind: prod\n"
+            "kubeconfig: ~/.kube/dirqual.config\n"
+        )
+        fd, path = tempfile.mkstemp(suffix=".yaml")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(prod)
+        self.addCleanup(os.unlink, path)
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["kc"] = (k.get("env") or {}).get("KUBECONFIG")
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        # Simule le défaut auto-banc posé par main() (le piège que le fix neutralise).
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            mock.patch.object(cli, "_KUBECONFIG_AUTO_BENCH", True),
+            mock.patch.object(cli.subprocess, "run", _fake_run),
+        ):
+            os.environ["KUBECONFIG"] = cli._BENCH_KUBECONFIG  # défaut auto-banc en place
+            cli.cmd_kubectl(
+                __import__("argparse").Namespace(file=path, kubectl_args=["get", "nodes"])
+            )
+        self.assertIn("dirqual.config", seen["kc"])  # vise la PROD, pas le banc
+        self.assertNotIn(".work/kubeconfig", seen["kc"])
 
 
 class Preview(unittest.TestCase):
@@ -762,26 +858,9 @@ runs:
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
-    def test_warns_when_bench_up_but_shell_kubeconfig_unset(self):
-        # Piège vécu : le banc est monté+joignable (preview le lit via le défaut auto),
-        # MAIS le shell n'a pas KUBECONFIG exporté → un `kubectl` nu vise ~/.kube/config
-        # (prod). preview doit AVERTIR de lancer `nestor env` (ADR 0053). On stube : banc
-        # présent (os.path.exists), joignable (_kubeconfig_reaches_api), KUBECONFIG absent
-        # → main() pose le défaut auto et arme _KUBECONFIG_AUTO_BENCH.
-        orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: p == cli._BENCH_KUBECONFIG or orig_exists(p)
-        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
-        orig_reach = cli._kubeconfig_reaches_api
-        cli._kubeconfig_reaches_api = lambda _kc: True
-        self.addCleanup(setattr, cli, "_kubeconfig_reaches_api", orig_reach)
-        orig_flag = cli._KUBECONFIG_AUTO_BENCH
-        self.addCleanup(setattr, cli, "_KUBECONFIG_AUTO_BENCH", orig_flag)
-        os.environ.pop("KUBECONFIG", None)  # _capture restaure l'env ensuite
-        # Warning d'alignement shell = comportement BANC (ADR 0084) → topo lima.
-        code, _, err = _capture(["preview", "-f", _example_as_lima(self)])
-        self.assertEqual(code, 0)
-        self.assertIn("nestor env", err)  # avertit d'aligner le shell
-        self.assertIn("PROD", err)
+    # (Retiré : test_warns_when_bench_up_but_shell_kubeconfig_unset — le warning
+    # « ton shell n'a pas KUBECONFIG » a été supprimé : preview lit déjà le bon banc et
+    # `nestor kubectl` rend obsolète le `kubectl` nu qu'on prémunissait.)
 
     def test_warns_on_backend_drift_ceph_residual(self):
         # #356 : topo local-path (banc.example), mais des SC ceph observées sur le cluster
@@ -1472,14 +1551,17 @@ runs:
         self.assertTrue(mounted[0].endswith("metrics-server.yaml"))  # metrics, pas storage
         self.assertIn("installables", err)  # le menu a bien été affiché
 
-    def test_interactive_empty_picks_default(self):
-        # TTY + Entrée (saisie vide) au menu : défaut = storage-simple, monté direct.
+    def test_interactive_empty_cancels_mounts_nothing(self):
+        # TTY + Entrée (saisie vide) au menu : « par défaut, nestor ne fait rien » →
+        # _choisir_couche renvoie None → montage ANNULÉ (code 2), AUCUNE couche montée.
+        # Plus de « défaut 1 » : l'opérateur doit choisir un numéro EXPLICITEMENT.
         mounted = self._spy_launch()
         topo, hist = self._fixtures()
-        self._stub_input([""])  # menu défaut ; pas de confirmation supplémentaire
-        code, _, _ = _capture(["next", "-f", topo, "--target", "atlas", "--history", hist])
-        self.assertEqual(code, 0)
-        self.assertTrue(mounted[0].endswith("local-path.yaml"))  # storage-simple (défaut)
+        self._stub_input([""])  # Entrée vide au menu = annuler
+        code, _, err = _capture(["next", "-f", topo, "--target", "atlas", "--history", hist])
+        self.assertEqual(code, 2)
+        self.assertEqual(mounted, [])  # rien monté
+        self.assertIn("annulé", err)
 
     def test_single_installable_no_menu(self):
         # storage-simple déjà fait : seul metrics-server reste montable → PAS de menu
@@ -1672,40 +1754,41 @@ class NextHealthGate(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("PAS saine", err.getvalue())
 
-    def test_gitops_seed_delegates_to_runphases_not_usage_error(self):
-        # Régression : `next` proposait gitops-seed (playbook None) puis _monter_phase
-        # levait « pas un play unitaire » → menu incohérent. Une phase SANS playbook mais
-        # AVEC un arm run-phases.sh doit être DÉLÉGUÉE (bash run-phases.sh <phase>), pas
-        # refusée. On stube subprocess.run pour capter la délégation.
+    def test_gitops_seed_routes_to_python_seed_not_usage_error(self):
+        # `gitops-seed` (playbook None) est une phase DÉLÉGUÉE : `_monter_phase` la route vers
+        # le câblage Python `_launch_seed` (seed.run_seed), PARITÉ `_run_path_engine` (un seul
+        # moteur depuis le retrait du filet bash). Elle ne lève PLUS « pas un play unitaire »
+        # et ne passe PLUS par un arm run-phases.sh. On stube `_launch_seed` (zéro Gitea réel).
         topo = cli.load_topology(_EXAMPLE)
-        captured = {}
+        called = {}
 
-        class _CP:
-            returncode = 0
+        def fake_seed(phase, t, derived):
+            called["phase"] = phase
+            return cli._SeedLaunchResult(ok=True, message="stub")
 
-        def fake_run(argv, **kw):
-            captured["argv"] = argv
-            return _CP()
+        orig_seed = cli._launch_seed
+        cli._launch_seed = fake_seed
+        self.addCleanup(setattr, cli, "_launch_seed", orig_seed)
+        # Aucun subprocess (ni run-phases.sh, ni ansible-runner) ne doit être lancé.
+        orig_run = cli.subprocess.run
 
-        orig = cli.subprocess.run
-        cli.subprocess.run = fake_run
-        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        def _no_subprocess(argv, **kw):
+            raise AssertionError(f"gitops-seed ne doit PAS sheller un subprocess : {argv!r}")
+
+        cli.subprocess.run = _no_subprocess
+        self.addCleanup(setattr, cli.subprocess, "run", orig_run)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             rc = cli._monter_phase(topo, "gitops-seed", {})
         self.assertEqual(rc, 0)
-        # délégué à `bash <run-phases.sh> gitops-seed`, JAMAIS un play ansible-runner.
-        self.assertEqual(captured["argv"][0], "bash")
-        self.assertEqual(captured["argv"][-1], "gitops-seed")
+        self.assertEqual(called["phase"], "gitops-seed")  # routé vers le seed Python
 
     def test_phase_without_playbook_and_without_arm_is_usage_error(self):
-        # garde-fou inverse : une phase sans play unitaire NI arm → erreur d'usage nette.
+        # garde-fou inverse : une phase déléguée sans play unitaire, sans câblage seed NI arm
+        # run-phases.sh (le filet bash a été retiré → `hardening` n'a plus d'arm) → usage net.
         topo = cli.load_topology(_EXAMPLE)
-        orig = cli._has_runphases_arm
-        cli._has_runphases_arm = lambda phase: False
-        self.addCleanup(setattr, cli, "_has_runphases_arm", orig)
         with self.assertRaises(cli._UsageError):
-            cli._monter_phase(topo, "gitops-seed", {})
+            cli._monter_phase(topo, "hardening", {})
 
 
 class Metrics(unittest.TestCase):
@@ -2084,49 +2167,39 @@ class Stack(unittest.TestCase):
 
 
 class UpCommand(unittest.TestCase):
-    """`up` : dérive le chemin → affiche le plan → confirme → délègue à run-phases.sh."""
+    """`up` : dérive le chemin → affiche le plan → confirme → MONTE via le moteur Python
+    `_run_path_engine` (SEUL moteur depuis le retrait du filet bash run-phases.sh)."""
 
-    def _stub_runphases(self, rc=0):
-        # Capture l'appel à run-phases.sh (PAS de vrai montage en test). `self.env`
-        # garde l'environnement passé (pour vérifier NODES_OVERRIDE).
-        # ADR 0083 : `expected_phase_sequence` shelle MAINTENANT le graphe atomique
-        # (rollback-lib.sh via `nestor.layers.subprocess.run`) pour DÉRIVER la séquence.
-        # On n'intercepte donc QUE `run-phases.sh` et on LAISSE PASSER les appels au
-        # graphe (`bash -c '. rollback-lib.sh && …'`) vers le vrai subprocess (local,
-        # déterministe, sans banc) — sinon `_rb` planterait sur un faux retour sans
-        # `.stdout`. On stube les DEUX modules (cli + nestor.layers).
+    def _stub_engine(self, rc=0):
+        # Espionne `_run_path_engine` (le SEUL moteur) : capture (target, seq, stack_name).
+        # Le montage (le moteur) est stubé ; on LAISSE PASSER les appels subprocess au GRAPHE
+        # (rollback-lib.sh) pour que `expected_phase_sequence` dérive la séquence (les sondes
+        # réelles _ready_nodes/_real_vms tapent limactl/kubectl → déniées en CompletedProcess
+        # vide, qu'elles tolèrent : plan annoté « tout à installer », neutre en test).
+        _install_graph_passthrough(self)
         calls = []
-        self.env = {}
-        # VRAI subprocess.run capté AVANT le default-deny du module (sinon `subprocess.run`
-        # est déjà `_deny_run`, qui rendrait un graphe vide).
-        real_run = _REAL_SUBPROCESS_RUN
 
-        def _spy(cmd, *a, **k):
-            argv = cmd if isinstance(cmd, list) else [cmd]
-            if any("run-phases.sh" in str(c) for c in argv):
-                calls.append(cmd)
-                self.env = k.get("env", {})
-                return subprocess.CompletedProcess(args=cmd, returncode=rc)
-            return real_run(cmd, *a, **k)  # laisse tourner le GRAPHE pour de vrai
+        def _spy(topo, target, seq, stack_name, a_appliquer=None):
+            calls.append({"target": target, "seq": list(seq), "stack_name": stack_name})
+            return rc
 
-        # `cli.subprocess` est le MÊME module que `nestor.layers.subprocess` : un seul poser.
-        orig = cli.subprocess.run
-        cli.subprocess.run = _spy
-        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        orig = cli._run_path_engine
+        cli._run_path_engine = _spy
+        self.addCleanup(setattr, cli, "_run_path_engine", orig)
         return calls
 
-    def test_yes_derives_path_and_delegates(self):
-        calls = self._stub_runphases()
+    def test_yes_derives_path_and_mounts_via_engine(self):
+        # `nestor up` dérive le chemin, affiche le plan, puis MONTE via `_run_path_engine`
+        # (un seul moteur). La séquence vient du graphe atomique (ADR 0083).
+        calls = self._stub_engine()
         code, out, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 0)
         self.assertIn("Couches à monter", out)  # le plan affiché
-        # ADR 0083 : `default_target` rend `layers` (plus de preset dérivé) → délégation
-        # à l'arm GÉNÉRIQUE `run-phases.sh layers <séquence-virgules>`, l'ordre venant du
-        # graphe atomique. socle.example (ceph) dérive up,bootstrap,ceph,sc,datalake,…
-        self.assertEqual(len(calls), 1)
-        self.assertIn("run-phases.sh", " ".join(calls[0]))
-        self.assertEqual(calls[0][-2], "layers")  # arm générique, pas un preset nommé
-        seq = calls[0][-1].split(",")  # séquence complète passée à `layers`
+        self.assertEqual(len(calls), 1)  # le moteur Python appelé une fois
+        # ADR 0083 : `default_target` rend `layers` (plus de preset dérivé), l'ordre venant
+        # du graphe atomique. socle.example (ceph) dérive bootstrap,ceph,sc,datalake,…
+        self.assertEqual(calls[0]["target"], "layers")
+        seq = calls[0]["seq"]
         # _EXAMPLE est `target_kind: prod` → PAS de phase `up` (nœuds baremetal
         # préexistants, ADR 0084) : le socle prod commence à `bootstrap`.
         self.assertNotIn("up", seq)
@@ -2135,50 +2208,35 @@ class UpCommand(unittest.TestCase):
         self.assertIn("datalake", seq)
 
     def test_explicit_target_overrides_derivation(self):
-        calls = self._stub_runphases()
+        calls = self._stub_engine()
         code, _, _ = _capture(["up", "-f", _EXAMPLE, "--target", "atlas-ceph", "--yes"])
         self.assertEqual(code, 0)
-        self.assertIn("atlas-ceph", calls[0])
+        self.assertEqual(calls[0]["target"], "atlas-ceph")
 
-    def test_passes_nodes_override_from_topology(self):
-        # La TOPOLOGIE pilote les nœuds du banc : up passe NODES_OVERRIDE dérivé.
-        self._stub_runphases()
-        # _EXAMPLE (socle.example) = cp1 control + node1..4 workers.
-        _capture(["up", "-f", _EXAMPLE, "--yes"])
-        override = self.env.get("NODES_OVERRIDE", "")
-        self.assertIn("cp1:control", override)
-        self.assertIn("node1:worker", override)
-
-    def test_single_node_topology_yields_one_node(self):
-        # Une topo 1 nœud → NODES_OVERRIDE à UN seul nœud (la topologie décide).
-        topo_yaml = (
-            "catalog: {topology: solo, profile: base}\n"
-            "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
-        )
-        path = _tmp(topo_yaml)
-        self.addCleanup(os.unlink, path)
-        self._stub_runphases()
-        _capture(["up", "-f", path, "--yes"])
-        self.assertEqual(self.env.get("NODES_OVERRIDE"), "cp1:control")
+    def test_passes_stack_name_to_engine(self):
+        # Le NOM de la stack active (catalog.topology) est transmis au moteur (clé de
+        # fraîcheur PAR STACK). _EXAMPLE (socle.example) déclare une topologie nommée.
+        calls = self._stub_engine()
+        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertNotEqual(calls[0]["stack_name"], "—")  # une vraie stack, pas le défaut
 
     def test_refuses_without_yes_off_tty(self):
-        calls = self._stub_runphases()
+        calls = self._stub_engine()
         code, _, err = _capture(["up", "-f", _EXAMPLE])  # hors TTY, pas de --yes
         self.assertEqual(code, 2)
-        self.assertEqual(calls, [])  # run-phases.sh JAMAIS appelé
+        self.assertEqual(calls, [])  # le moteur JAMAIS appelé (confirmation refusée)
         self.assertIn("refusé", err)
 
     def test_propagates_mount_failure(self):
-        self._stub_runphases(rc=2)  # run-phases.sh échoue
-        code, _, err = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        self._stub_engine(rc=1)  # le moteur Python échoue
+        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 1)
-        self.assertIn("échec", err)
 
     def test_incoherent_target_is_usage_error(self):
         # ADR 0083 : `atlas` est backend-agnostique (n'est plus incohérent sur ceph). Le
         # vrai cas incohérent reste un preset CEPH-ONLY (`storage-real`) sur une topo
-        # local-path → PlanError → usage (2), avant toute délégation.
+        # local-path → PlanError → usage (2), avant tout montage.
         topo_yaml = (
             "catalog: {topology: lp, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
@@ -2186,7 +2244,7 @@ class UpCommand(unittest.TestCase):
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
-        calls = self._stub_runphases()
+        calls = self._stub_engine()
         code, _, err = _capture(["up", "-f", path, "--target", "storage-real", "--yes"])
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])
@@ -2292,7 +2350,7 @@ class Access(unittest.TestCase):
         # ne vise pas le banc (ADR 0053). Pas de KUBECONFIG exporté, pas de banc.
         self._stub(bench=False)
         cli._assert_bench_target = _REAL_ASSERT_BENCH
-        self.addCleanup(setattr, cli, "_assert_bench_target", lambda action: None)
+        self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
         orig_ctx = cli._context_targets_bench
         cli._context_targets_bench = lambda: False
         self.addCleanup(setattr, cli, "_context_targets_bench", orig_ctx)
@@ -2310,7 +2368,7 @@ class BenchTargetGuard(unittest.TestCase):
 
     def _arm(self, *, bench_exists, targets_bench, kubeconfig_env=None):
         cli._assert_bench_target = _REAL_ASSERT_BENCH
-        self.addCleanup(setattr, cli, "_assert_bench_target", lambda action: None)
+        self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
         orig_exists = cli.os.path.exists
         cli.os.path.exists = lambda p: (
             bench_exists if p == cli._BENCH_KUBECONFIG else orig_exists(p)
@@ -2348,42 +2406,31 @@ class BenchTargetGuard(unittest.TestCase):
             cli._assert_bench_target("nestor up")
 
 
-class EnvCommand(unittest.TestCase):
-    """`env` : pose le kubeconfig du banc — mais PAS pour une stack active prod (ADR 0084)."""
+class EnvCommandRemoved(unittest.TestCase):
+    """`env` est SUPPRIMÉE (LOT 8, ADR 0097 §3) — plus dans le parseur ni le dispatch.
 
-    def _stub_active(self, target_kind):
-        # Topo active factice avec le target_kind voulu (sans toucher au symlink réel).
-        backend = "ceph" if target_kind == "prod" else "local-path"
-        topo_yaml = (
-            "catalog: {topology: fake-active, profile: base}\n"
-            "nodes:\n  - {name: n1, roles: [control, worker]}\n"
-            f"storage: {{backend: {backend}}}\ntarget_kind: {target_kind}\n"
+    Le branchement de kubectl passe désormais par le contexte nommé que `stack select`
+    pose dans le kubeconfig de la cible (`kubectl --context <topo> …`), sans variable
+    d'env. On PROUVE l'absence par construction, pas seulement par comportement."""
+
+    def test_env_absent_from_dispatch(self):
+        # La table de routage ne connaît plus `env` (cmd_env retiré du module).
+        self.assertNotIn("env", cli._DISPATCH)
+        self.assertFalse(hasattr(cli, "cmd_env"))
+
+    def test_env_absent_from_parser(self):
+        # `nestor env` → argparse refuse une sous-commande inconnue (SystemExit code 2).
+        parser = cli._build_parser()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+            parser.parse_args(["env"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_help_does_not_mention_env(self):
+        # Le menu d'aide ne propose plus `env` (retiré de l'epilog).
+        parser = cli._build_parser()
+        self.assertNotIn(
+            "env         brancher", parser.epilog or "", "le menu mentionne encore `env`"
         )
-        path = _tmp(topo_yaml)
-        self.addCleanup(os.unlink, path)
-        topo = load_topology(path)
-        orig = cli._active_topology_safe
-        cli._active_topology_safe = lambda: topo
-        self.addCleanup(setattr, cli, "_active_topology_safe", orig)
-
-    def test_prod_active_does_not_export_bench(self):
-        # Stack active prod → `env` ne pose PAS le banc (commentaire eval-safe, pas d'export).
-        self._stub_active("prod")
-        code, out, _ = _capture(["env"])
-        self.assertEqual(code, 0)
-        self.assertNotIn("export KUBECONFIG", out)
-        self.assertIn("target_kind=prod", out)
-
-    def test_lima_active_still_exports_bench(self):
-        # Stack active lima → comportement inchangé : `env` pose le banc (si présent).
-        self._stub_active("lima")
-        orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else orig_exists(p)
-        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
-        os.environ.pop("KUBECONFIG", None)
-        code, out, _ = _capture(["env"])
-        self.assertEqual(code, 0)
-        self.assertIn("export KUBECONFIG", out)
 
 
 class ModuleGuard(unittest.TestCase):
@@ -3207,6 +3254,97 @@ class Dispatch(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             cli.main([])
         self.assertEqual(ctx.exception.code, 2)
+
+
+class PromptUX(unittest.TestCase):
+    """Standardisation UX des prompts interactifs (« par défaut, nestor ne fait rien »).
+
+    Règle 1 — confirmation binaire : hint « oui/NON » (NON majuscule = défaut False),
+    Entrée vide = ne PAS faire ; `--yes`/`--no-input` force le défaut (CI). Règle 2 —
+    menu de sélection : Entrée vide → None (annuler), PLUS de « défaut 1 »."""
+
+    def _stub_input(self, reponses):
+        """Stube `builtins.input` : capte le PROMPT vu + sert `reponses` en file."""
+        import builtins
+
+        seen = []
+        it = iter(reponses)
+
+        def _fake(prompt=""):
+            seen.append(prompt)
+            return next(it)
+
+        orig = builtins.input
+        builtins.input = _fake
+        self.addCleanup(setattr, builtins, "input", orig)
+        return seen
+
+    # ── _confirm : hint + défaut ──────────────────────────────────────────────
+    def test_confirm_hint_default_false_is_oui_NON(self):
+        seen = self._stub_input([""])  # Entrée vide
+        self.assertIs(cli._confirm("Agir ?", default=False, no_input=False), False)
+        self.assertIn("[oui/NON]", seen[0])  # NON majuscule = défaut
+
+    def test_confirm_hint_default_true_is_OUI_non(self):
+        seen = self._stub_input([""])
+        self.assertIs(cli._confirm("Agir ?", default=True, no_input=False), True)
+        self.assertIn("[OUI/non]", seen[0])  # OUI majuscule = défaut
+
+    def test_confirm_empty_does_not_act(self):
+        # Entrée vide avec défaut False = NE PAS faire l'action (sécurité).
+        self._stub_input([""])
+        self.assertIs(cli._confirm("Détruire ?", default=False, no_input=False), False)
+
+    def test_confirm_accepts_oui_and_non_variants(self):
+        for rep in ("o", "oui", "y", "yes", "OUI", "Yes"):
+            self._stub_input([rep])
+            self.assertIs(cli._confirm("Agir ?", default=False, no_input=False), True, rep)
+        for rep in ("n", "non", "no", "NON"):
+            self._stub_input([rep])
+            self.assertIs(cli._confirm("Agir ?", default=True, no_input=False), False, rep)
+
+    def test_confirm_no_input_returns_default_without_prompt(self):
+        # --no-input (CI) : renvoie le défaut SANS prompter (input() jamais appelé).
+        def _boom(prompt=""):
+            raise AssertionError("input() ne doit pas être appelé sous no_input")
+
+        import builtins
+
+        orig = builtins.input
+        builtins.input = _boom
+        self.addCleanup(setattr, builtins, "input", orig)
+        self.assertIs(cli._confirm("Agir ?", default=False, no_input=True), False)
+        self.assertIs(cli._confirm("Agir ?", default=True, no_input=True), True)
+
+    # ── _choisir_couche : Entrée vide → None (rien monté) ─────────────────────
+    def test_choisir_empty_returns_none(self):
+        seen = self._stub_input([""])  # Entrée vide au menu
+        out = cli._choisir_couche(["a", "b", "c"], lambda p: p, no_input=False)
+        self.assertIsNone(out)  # annulé : rien à monter
+        self.assertIn("annuler", seen[0])  # invite annonce l'annulation
+        self.assertNotIn("défaut", seen[0])  # PLUS de « défaut 1 »
+
+    def test_choisir_explicit_number_picks_it(self):
+        self._stub_input(["2"])
+        self.assertEqual(cli._choisir_couche(["a", "b", "c"], lambda p: p, no_input=False), "b")
+
+    def test_choisir_reprompts_on_invalid_then_accepts(self):
+        seen = self._stub_input(["9", "0", "1"])  # hors borne, hors borne, puis valide
+        self.assertEqual(cli._choisir_couche(["a", "b"], lambda p: p, no_input=False), "a")
+        self.assertGreaterEqual(len(seen), 3)  # a bien re-demandé
+
+    def test_choisir_no_input_keeps_conventional_order(self):
+        # no_input (n'est activé QUE pour --yes par cmd_next) = demande explicite d'agir
+        # → ordre conventionnel (choix[0]), déterministe en CI. SANS prompter.
+        def _boom(prompt=""):
+            raise AssertionError("input() ne doit pas être appelé sous no_input")
+
+        import builtins
+
+        orig = builtins.input
+        builtins.input = _boom
+        self.addCleanup(setattr, builtins, "input", orig)
+        self.assertEqual(cli._choisir_couche(["a", "b"], lambda p: p, no_input=True), "a")
 
 
 if __name__ == "__main__":

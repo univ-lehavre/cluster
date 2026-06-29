@@ -299,8 +299,13 @@ recalculent `done`/`observed`/`a_appliquer` :
 - **Allowlist** : le test grep sens-unique **allowliste `ha-cni`** jusqu'à cette
   PR (aujourd'hui le grep rend 508 ET 1650 ; le lot 6 retire 508, le lot 9
   retire 1650).
-- **Preuve** : la circularité disparaît entièrement après ce lot ; run banc HA
-  3-VM (cf. [`plan-ha-3cp-control-plane.md`](plan-ha-3cp-control-plane.md)).
+- **Preuve** : la circularité disparaît entièrement après ce lot. ⚠️ Le **banc
+  3-VM est abandonné** (Mac sans ressources, comme le banc Ceph) : la HA
+  `ha-3cp` (et la fusion `ha.py` → `path.py`/`gates.py`/`ha_probes.py`) ne se
+  prouve **que sur prod** (rebuild dirqual, cf.
+  [`plan-ha-3cp-control-plane.md`](plan-ha-3cp-control-plane.md)), **jamais au
+  banc** — au banc, seule garantie = les tests unitaires. Le banc Lima reste
+  mono-nœud local-path (phases + ressources VM + seed s'y prouvent ; pas la HA).
 
 ## Stratégie de preuve
 
@@ -363,13 +368,18 @@ recalculent `done`/`observed`/`a_appliquer` :
 - [x] **Lot 5** — `check_topology.py` (4 familles, scan `import_role`
       rôle→rôle) + `pnpm lint:topology` CI + hook lefthook `bootstrap/roles/`.
       _(gelé)_
-- [ ] **Lot 6** — moteur `nestor/path.py` ; `cmd_up`/`cmd_next` n'appellent plus
-      `run-phases.sh` ; grep sens-unique = 0 (sauf `ha-cni`) ; banc
-      from-scratch + prod, `changed=0`. _(gelé)_
-- [ ] **Lot 7** — ~12 phases plateforme triviales **puis** harnais e2e
-      (`dataops_chain_emit_and_verify`, `egress_check`) ; banc + prod. _(gelé)_
-- [ ] **Lot 8** — env → YAML (~40 variables supprimées, exception
-      `KUBECONFIG`) + `nestor/seed.py` (gardes opposés banc/prod) ; banc + prod.
-      _(gelé)_
-- [ ] **Lot 9** — HA exception nommée levée (`run_ha_3cp` + `ha-cni` portés) ;
-      allowlist grep retirée ; circularité éteinte ; banc HA + prod. _(gelé)_
+- [x] **Lot 6** — moteur `nestor/path.py` écrit (PR #511). _Reste_ : brancher
+      `cmd_up`/`cmd_next` (façade) + provisioning Python ; grep sens-unique → 0
+      (sauf `ha-cni`) ; preuve **banc mono-nœud** from-scratch `changed=0`.
+- [x] **Lot 7** — `nestor/phases.py` écrit (~10 phases plateforme, gates
+      dérivées du graphe ; harnais e2e
+      `dataops_chain_emit_and_verify`/`egress_check` déclarés mais STUBÉS).
+      _Reste_ : câblage façade + preuve banc.
+- [x] **Lot 8** — env → YAML écrit (`NodeResources` + blocs domaine, ~40
+      variables ; exception `KUBECONFIG`) ; `nestor/kube_context.py`
+      (`nestor env` supprimée) ; `nestor/seed.py` (gardes opposés banc/prod, I/O
+      stubée). _Reste_ : câblage provisioning/seed réels + preuve banc.
+- [x] **Lot 9** — fusion `ha.py` faite (`run_ha_3cp` → `path.py`, gates →
+      `gates.py`, sondes → `ha_probes.py` ; `ha.py` supprimé ; doublon résolu).
+      ⚠️ Preuve HA **sur prod uniquement** (banc 3-VM abandonné) ; reste :
+      retirer les rappels `run-phases.sh` (508/1650) au rebuild HA.
