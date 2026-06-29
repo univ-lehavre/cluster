@@ -1043,7 +1043,7 @@ drifts:
       (issue containerd #13316 proche mais distincte ; ttrpc-rust #115 sur le
       transport socket).
     statut: en-cours
-    issue: TODO # issue à créer — restart containerd post-bootstrap (Yunix 2.3.x), ADR 0058 §6
+    issue: '#513' # fix durable : restart containerd post-bootstrap (Yunix containerd 2.3.x)
 
   # ── Drifts antérieurs à la refonte (postérieurs à L58, d'avant les runs
   #    --engine=python) jamais consignés — L67–L72 ──────────────────────────
