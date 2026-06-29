@@ -172,6 +172,52 @@ class DataopsTriggersE2EHooks(unittest.TestCase):
             self.assertEqual(phases.e2e_hooks_for(phase), ())
 
 
+class ChainEmitPureLogic(unittest.TestCase):
+    """LOGIQUE PURE du harnais OpenLineage→Marquez (ADR 0017) — ports de dataops-assert.sh.
+
+    L'I/O kubectl vit dans la façade (`scripts/topology.py:_chain_emit_and_verify_banc`,
+    testée dans test_facade) ; ICI on prouve les DÉCISIONS pures, sans cluster : manifeste du
+    Job émetteur, comptage des jobs Marquez, verdict d'ingestion."""
+
+    def test_emit_job_manifest_carries_image_env_command(self):
+        m = phases.emit_toy_job_manifest()
+        self.assertIn("kind: Job", m)
+        self.assertIn("name: ol-emit-toy", m)
+        self.assertIn("namespace: dagster", m)
+        self.assertIn("image: registry:80/dagster-openlineage-emit:dev", m)
+        self.assertIn("OPENLINEAGE_URL", m)
+        self.assertIn("http://marquez.marquez.svc.cluster.local:5000", m)
+        self.assertIn("OPENLINEAGE_ENDPOINT", m)
+        self.assertIn("api/v1/lineage", m)
+        self.assertIn("OPENLINEAGE_NAMESPACE", m)
+        self.assertIn('"dagster", "asset", "materialize"', m)
+        self.assertIn("toy_assets", m)
+        self.assertIn("backoffLimit: 1", m)
+        self.assertIn("ttlSecondsAfterFinished: 600", m)
+        self.assertIn("restartPolicy: Never", m)
+
+    def test_parse_marquez_job_count(self):
+        # Port de parse_ol_job_count (dataops-assert.sh:119 / bats L113).
+        self.assertEqual(phases.parse_marquez_job_count('{"jobs":[],"totalCount":3}'), 3)
+        self.assertEqual(phases.parse_marquez_job_count('{"jobs":[{"name":"a"},{"name":"b"}]}'), 2)
+        self.assertIsNone(phases.parse_marquez_job_count(""))
+        self.assertIsNone(phases.parse_marquez_job_count("pas du json"))
+        self.assertIsNone(phases.parse_marquez_job_count('{"namespaces":[]}'))
+        # Un bool n'est PAS un totalCount valide (True == 1 en Python) — on retombe sur jobs.
+        self.assertIsNone(phases.parse_marquez_job_count('{"totalCount":true}'))
+
+    def test_classify_marquez_ingest(self):
+        # Port FIDÈLE de classify_marquez_ingest (dataops-assert.sh:62 / bats L50) : présence
+        # (after≥1) = ok, after==0 = fail, illisible = skip ; PAS un delta strict (idempotence).
+        self.assertEqual(phases.classify_marquez_ingest(0, 1)[0], "ok")
+        self.assertEqual(phases.classify_marquez_ingest(2, 2)[0], "ok")  # rejeu idempotent
+        self.assertEqual(phases.classify_marquez_ingest(0, 0)[0], "fail")
+        self.assertEqual(phases.classify_marquez_ingest(None, 1)[0], "skip")
+        self.assertEqual(phases.classify_marquez_ingest(1, None)[0], "skip")
+        # Le message d'un ok porte le compteur avant→après (info de diagnostic).
+        self.assertIn("0 → 1", phases.classify_marquez_ingest(0, 1)[1])
+
+
 class ExtravarsAreRestrictedPerPhase(unittest.TestCase):
     """Parité run-phases.sh : chaque play ne reçoit QUE ses `-e` (+ dataops_k8s_host)."""
 

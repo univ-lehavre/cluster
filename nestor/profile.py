@@ -154,4 +154,11 @@ def derive_run_params(topo: Topology) -> dict:
     osd = derive_osd_expected(topo)
     if osd is not None:
         out["ceph_osd_expected"] = osd
+    # Émetteur OpenLineage jetable (preuve e2e dataops_chain_emit_and_verify) : le banc Lima
+    # build l'image `dagster-openlineage-emit:dev` au play dataops (parité run-phases.sh:1031,
+    # `build_emitter_image=true` INCONDITIONNEL au banc). La PROD ne build PAS cet émetteur e2e
+    # (image jetable de validation, pas un livrable). Sans ce flag, le hook e2e lèverait sur un
+    # ImagePullBackOff (image absente du registry). Gardé au target_kind lima.
+    if topo.target_kind == "lima":
+        out["build_emitter_image"] = "true"
     return out

@@ -43,6 +43,7 @@ la donnée À CÔTÉ ; la bascule se fera AVEC la preuve banc en main (lot 6/7 m
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -108,12 +109,129 @@ def gate_kind_for(phase: str) -> str:
     return "presence"
 
 
-# ── Harnais e2e (réserve critique ADR 0097 §5 / lot 7) : STUBS à câbler au banc ──
+# ── Preuve e2e OpenLineage→Marquez : LOGIQUE PURE (ADR 0017) ─────────────────────
+# Le geste de `dataops_chain_emit_and_verify` (run-phases.sh:1213) se décompose en
+# (a) de l'I/O kubectl/API Marquez — câblée DANS LA FAÇADE (scripts/topology.py, ADR 0049),
+# et (b) de la DÉCISION PURE — portée ICI, testable sans cluster : QUEL manifeste de Job
+# émetteur appliquer, COMMENT compter les jobs d'une réponse Marquez, et QUEL verdict tirer
+# du compteur avant/après. Ce sont les ports des fonctions PURES bash `parse_ol_job_count`
+# (dataops-assert.sh:119) et `classify_marquez_ingest` (dataops-assert.sh:62).
+
+# Image de l'émetteur OpenLineage jetable (user-code maison), poussée au registry interne
+# par le rôle `platform-build-images` SOUS `build_emitter_image=true` (banc e2e seulement,
+# JAMAIS en prod). Le Job la matérialise (`dagster asset materialize`) → START/COMPLETE
+# OpenLineage vers Marquez. Le play `dataops` du moteur Python PASSE désormais
+# `build_emitter_image=true` au banc (derive_run_params le pose si target_kind==lima ; clé
+# dans extravars_keys de dataops) → l'image est buildée au montage, le hook e2e la trouve.
+# Si pour une raison le build manque, le hook échoue HONNÊTEMENT (Job ImagePullBackOff →
+# poll non `succeeded`), jamais un faux vert.
+EMITTER_IMAGE = "registry:80/dagster-openlineage-emit:dev"
+EMITTER_JOB_NAME = "ol-emit-toy"
+EMITTER_NAMESPACE = "dagster"
+EMITTER_OL_NAMESPACE = "dagster"
+# URL de l'API Marquez INTRA-CLUSTER : le Job tourne DANS le cluster → le FQDN
+# `*.svc.cluster.local` est LÉGITIME pour LUI (résolu par le DNS du cluster). Le compteur
+# de jobs, lui, est lu DEPUIS L'HÔTE → la façade NE tape JAMAIS ce FQDN directement (piège
+# DNS, mémoire dns-fqdn-timeout) : elle exec/run un pod qui le résout intra-cluster.
+MARQUEZ_URL = "http://marquez.marquez.svc.cluster.local:5000"
+MARQUEZ_ENDPOINT = "api/v1/lineage"
+
+
+def emit_toy_job_manifest(
+    *,
+    name: str = EMITTER_JOB_NAME,
+    namespace: str = EMITTER_NAMESPACE,
+    ol_namespace: str = EMITTER_OL_NAMESPACE,
+    image: str = EMITTER_IMAGE,
+    marquez_url: str = MARQUEZ_URL,
+    endpoint: str = MARQUEZ_ENDPOINT,
+) -> str:
+    """Manifeste du Job émetteur OpenLineage jetable (DONNÉE PURE — parité run-phases.sh:1222).
+
+    Un Job K8s qui matérialise un asset Dagster en process local (sans webserver), sensor
+    OpenLineage configuré par env : `OPENLINEAGE_URL` pointe l'API Marquez interne. backoff
+    1, ttl 600 s (auto-nettoyage), `restartPolicy: Never`. `command` matérialise l'asset
+    jouet (`toy_assets`), ce qui émet START/COMPLETE OpenLineage. Rendu en YAML littéral
+    (pas de dépendance à un sérialiseur) pour rester byte-stable et trivialement testable."""
+    return (
+        "apiVersion: batch/v1\n"
+        "kind: Job\n"
+        "metadata:\n"
+        f"  name: {name}\n"
+        f"  namespace: {namespace}\n"
+        "spec:\n"
+        "  backoffLimit: 1\n"
+        "  ttlSecondsAfterFinished: 600\n"
+        "  template:\n"
+        "    spec:\n"
+        "      restartPolicy: Never\n"
+        "      containers:\n"
+        "        - name: emit\n"
+        f"          image: {image}\n"
+        "          imagePullPolicy: IfNotPresent\n"
+        "          env:\n"
+        "            - name: OPENLINEAGE_URL\n"
+        f'              value: "{marquez_url}"\n'
+        "            - name: OPENLINEAGE_ENDPOINT\n"
+        f'              value: "{endpoint}"\n'
+        "            - name: OPENLINEAGE_NAMESPACE\n"
+        f'              value: "{ol_namespace}"\n'
+        '          command: ["dagster", "asset", "materialize", "--select", "*", '
+        '"-m", "toy_assets"]\n'
+    )
+
+
+def parse_marquez_job_count(json_text: str | None) -> int | None:
+    """Nombre de jobs d'une réponse Marquez `GET /api/v1/namespaces/<ns>/jobs` (PUR).
+
+    Port de `parse_ol_job_count` (dataops-assert.sh:119) : l'objet `{"jobs":[…],
+    "totalCount":N}` → `totalCount` s'il est entier, sinon `len(jobs)`. Renvoie `None`
+    (≈ le `"?"` du bash) si le JSON est vide / illisible / sans champ exploitable —
+    l'appelant le classe en `skip` (Marquez injoignable, pas un échec d'ingestion)."""
+    if not json_text or not json_text.strip():
+        return None
+    try:
+        data = json.loads(json_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    total = data.get("totalCount")
+    if isinstance(total, int) and not isinstance(total, bool):
+        return total
+    jobs = data.get("jobs")
+    if isinstance(jobs, list):
+        return len(jobs)
+    return None
+
+
+def classify_marquez_ingest(before: int | None, after: int | None) -> tuple[str, str]:
+    """Verdict d'ingestion OpenLineage d'après le compteur de jobs Marquez avant/après (PUR).
+
+    Port FIDÈLE de `classify_marquez_ingest` (dataops-assert.sh:62) — verdict `(status,
+    message)`, `status ∈ {ok, fail, skip}` :
+      - `before` ou `after` illisible (`None`) → `skip` (API joignable ? — pas un échec) ;
+      - `after >= 1` → `ok` (lineage PRÉSENT ; `before` = info du message) ;
+      - `after == 0` → `fail` (rien ingéré).
+
+    NB (parité bash, bats L56) : on teste la PRÉSENCE (`after >= 1`), PAS un delta strict :
+    le run est IDEMPOTENT (Marquez ne vide pas le namespace), donc un 2ᵉ passage laisse
+    `after == before` alors que l'ingestion a bien eu lieu. Un delta `> 0` exigé donnerait
+    un faux `fail` au rejeu. Le compteur `before` n'est qu'informatif."""
+    if before is None or after is None:
+        return ("skip", "Marquez : compteur de jobs illisible (API joignable ?)")
+    if after >= 1:
+        return ("ok", f"Marquez : lineage présent ({before} → {after} jobs)")
+    return ("fail", f"Marquez : aucun job ingéré ({before} → {after})")
+
+
+# ── Harnais e2e (réserve critique ADR 0097 §5 / lot 7) : 1 câblé, 1 STUB ─────────
 # Ces harnais PROUVENT le maillon final que _wait_layer_healthy ne couvre PAS (un
 # Deployment Marquez Ready ne prouve PAS qu'un run Dagster émet du lineage ingéré). Ils
-# sont DÉCLARÉS comme hooks de la phase `dataops` ; leur IMPLÉMENTATION réelle (Job K8s,
-# poll, delta API Marquez, bascule NetworkPolicy + probe egress) est trop liée au cluster
-# vivant pour être écrite sans banc → STUB explicite qui REFUSE de verdir à tort.
+# sont DÉCLARÉS comme hooks de la phase `dataops`. `dataops_chain_emit_and_verify` est
+# désormais CÂBLÉ DANS LA FAÇADE (Job émetteur + poll + delta Marquez, I/O kubectl) ; le
+# STUB ci-dessous reste le DÉFAUT du registre (appelé sans I/O injectée → lève, honnêteté).
+# `dataops_egress_internet_check` reste STUBÉ (bascule NetworkPolicy + probe egress 443).
 
 
 class E2EHookStubbed(RuntimeError):
@@ -125,17 +243,20 @@ class E2EHookStubbed(RuntimeError):
 
 
 def _hook_chain_emit_and_verify(**_kw) -> None:
-    """STUB de `dataops_chain_emit_and_verify` (run-phases.sh:1213, ~62 l.).
+    """DÉFAUT du registre pour `dataops_chain_emit_and_verify` (run-phases.sh:1213, ~62 l.).
 
-    RÉEL à câbler (à PROUVER au banc) : déployer le Job émetteur OpenLineage jetable
-    (image `registry:80/dagster-openlineage-emit:dev`, `dagster asset materialize`),
-    poller sa complétion (`status.succeeded == 1`, max 5 min), puis VÉRIFIER l'ingestion
-    côté Marquez par le DELTA du compteur de jobs (`marquez_job_count` avant/après,
-    verdict `classify_marquez_ingest`), enfin teardown du Job. Tant que ce n'est pas
-    câblé+prouvé, on LÈVE (jamais un faux « ok »)."""
+    Le geste RÉEL (Job émetteur OpenLineage `registry:80/dagster-openlineage-emit:dev` +
+    `dagster asset materialize`, poll `status.succeeded == 1` ~5 min, puis vérif d'ingestion
+    Marquez par le compteur de jobs avant/après — `parse_marquez_job_count` /
+    `classify_marquez_ingest` ci-dessus — enfin teardown du Job) exige de l'I/O kubectl :
+    il est CÂBLÉ DANS LA FAÇADE (`scripts/topology.py:_chain_emit_and_verify_banc`, ADR 0049)
+    et substitué à ce défaut par le moteur (`_E2E_HOOK_IMPL`). Ce défaut N'A PAS l'I/O
+    injectée → il LÈVE (jamais un faux « ok », honnêteté ADR 0034) : il n'est atteint que si
+    quelqu'un joue le registre nu sans passer par la façade."""
     raise E2EHookStubbed(
-        "dataops_chain_emit_and_verify NON câblé (STUB) : Job émetteur OpenLineage + poll "
-        "+ delta Marquez à porter et PROUVER au banc (run-phases.sh:1213, ADR 0097 §5)"
+        "dataops_chain_emit_and_verify appelé SANS I/O injectée (défaut registre) : le geste "
+        "réel (Job émetteur + delta Marquez) vit dans la façade — voir "
+        "scripts/topology.py:_chain_emit_and_verify_banc (run-phases.sh:1213, ADR 0097 §5)"
     )
 
 
@@ -234,6 +355,9 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
             "cnpg_storage_class",
             "cnpg_s3_backing",
             "cnpg_s3_endpoint",
+            # banc Lima seulement (derive_run_params le pose si target_kind==lima) : build
+            # l'émetteur OpenLineage jetable requis par le hook e2e dataops_chain_emit_and_verify.
+            "build_emitter_image",
         ),
         e2e_hooks=("dataops_chain_emit_and_verify", "dataops_egress_internet_check"),
         note="playbook + gate Marquez Ready, PUIS 2 harnais e2e (OpenLineage→Marquez, "
@@ -336,11 +460,14 @@ def e2e_hooks_for(phase: str) -> tuple[Callable[..., None], ...]:
 # suivants touchent le montage RÉEL et exigent un RUN BANC from-scratch (impossible dans
 # cette session — NE PAS prétendre l'avoir fait) :
 _BANC_TODO = (
-    # 1. CÂBLER les hooks e2e `dataops` sur le réel : remplacer les stubs
-    #    `_hook_chain_emit_and_verify` / `_hook_egress_internet_check` par le vrai
-    #    harnais (Job OpenLineage + delta Marquez ; bascule NetworkPolicy + probe 443)
-    #    et les PROUVER au banc (run-phases.sh:1213/1312). Tant que stub → lève.
-    "harnais e2e dataops (OpenLineage→Marquez + egress 443) — à câbler+prouver au banc",
+    # 1. `dataops_chain_emit_and_verify` est CÂBLÉ (Job OpenLineage + delta Marquez, façade
+    #    `_chain_emit_and_verify_banc`) — RESTE À PROUVER AU BANC (run-phases.sh:1213) +
+    #    GARANTIR l'image émetteur : le play `dataops` du moteur Python NE passe PAS encore
+    #    `build_emitter_image=true` (le bash si, run-phases.sh:1031) → sans build, le Job
+    #    ImagePullBackOff → le hook échoue honnêtement. `_hook_egress_internet_check` reste
+    #    STUBÉ (bascule NetworkPolicy + probe 443 — à câbler+prouver au banc, run-phases.sh:1312).
+    "harnais e2e dataops : chain_emit CÂBLÉ (prouver au banc + garantir l'image émetteur) ; "
+    "egress 443 encore STUBÉ — à câbler+prouver au banc",
     # 2. SURCHARGES banc des phases Ceph (ceph_metadata_device=vde, ceph_osd_memory_request,
     #    dossier dé-épinglé arm64, /var/lib/rook node-side) : paramètres de PROVISIONNEMENT
     #    propres au banc Lima, à poser par la façade et PROUVER (OSD up, HEALTH_OK).

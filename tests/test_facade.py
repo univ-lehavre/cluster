@@ -370,12 +370,28 @@ class CallbacksWireRealBricks(unittest.TestCase):
         self.assertEqual(code, 1)
 
     def test_e2e_hook_stubbed_stops_net(self):
-        # dataops a des hooks e2e STUBÉS qui LÈVENT → le montage s'arrête NET (code 1), PAS
-        # de verdissement à tort (honnêteté ADR 0034). Le play réussit, le hook lève.
+        # dataops joue DEUX hooks e2e : `chain_emit_and_verify` (CÂBLÉ) puis
+        # `egress_internet_check` (encore STUBÉ → LÈVE). Même si le 1er passe, le 2nd stoppe
+        # NET le montage (code 1) — PAS de verdissement à tort (honnêteté ADR 0034). On stube
+        # le hook CÂBLÉ en succès (pas d'I/O kubectl en test) pour isoler le rôle du stub.
         self._stub_idempotent([])
+        self._patch(cli, "_chain_emit_and_verify_banc", lambda *_a, **_k: None)
         topo = _topo(_LIMA_SOLO)
         code = _engine(topo, "layers", ["dataops"], "solo")
         self.assertEqual(code, 1)
+
+    def test_chain_hook_routed_to_real_facade_impl(self):
+        # Le moteur SUBSTITUE l'implémentation RÉELLE de façade (`_chain_emit_and_verify_banc`)
+        # au STUB du registre pour `dataops_chain_emit_and_verify` — il ne joue plus le stub
+        # `phases.E2E_HOOKS` (qui lèverait E2EHookStubbed). On espionne l'impl façade : si le
+        # play réussit, elle est appelée ; on neutralise l'egress (stub) pour s'arrêter avant.
+        self._stub_idempotent([])
+        called = []
+        self._patch(cli, "_chain_emit_and_verify_banc", lambda *_a, **_k: called.append(True))
+        # On laisse l'egress lever (code 1) ; ce qui compte : le hook CÂBLÉ a bien été joué.
+        topo = _topo(_LIMA_SOLO)
+        _engine(topo, "layers", ["dataops"], "solo")
+        self.assertEqual(called, [True], "le hook chain réel (façade) doit être joué, pas le stub")
 
 
 class BootstrapCallbackWiring(unittest.TestCase):
@@ -612,6 +628,11 @@ class SeedPhaseWiring(unittest.TestCase):
         orig = getattr(obj, name)
         setattr(obj, name, value)
         self.addCleanup(setattr, obj, name, orig)
+
+    def _patch_dict_item(self, mapping, key, value):
+        orig = mapping[key]
+        mapping[key] = value
+        self.addCleanup(mapping.__setitem__, key, orig)
 
     def setUp(self):
         # Gardes neutralisées (testées à part), gate gitops-seed → saine (pas de cluster).
@@ -919,11 +940,14 @@ class SeedPhaseWiring(unittest.TestCase):
 
     def test_gitops_seed_chains_after_dataops(self):
         # Le chemin enchaîne dataops → gitops-seed : la phase déléguée se monte APRÈS la
-        # couche dataops (parité de la séquence run-phases.sh). dataops a des hooks e2e STUBÉS
-        # qui LÈVENT → on neutralise les hooks pour exercer l'enchaînement de routage. Les
-        # hooks sont résolus via `nestor.phases.e2e_hooks_for` (importé localement par
-        # _run_path_engine) → on patche le module.
-        self._patch(_phases, "e2e_hooks_for", lambda *_a, **_k: ())
+        # couche dataops (parité de la séquence run-phases.sh). dataops joue 2 hooks e2e ; pour
+        # exercer l'ENCHAÎNEMENT de routage (pas les hooks), on neutralise les deux : le hook
+        # CÂBLÉ (`_chain_emit_and_verify_banc`, façade) en succès, et le STUB du registre de
+        # l'egress (`E2E_HOOKS[...]`, qui sinon lèverait E2EHookStubbed → arrêt net).
+        self._patch(cli, "_chain_emit_and_verify_banc", lambda *_a, **_k: None)
+        self._patch_dict_item(
+            _phases.E2E_HOOKS, "dataops_egress_internet_check", lambda *_a, **_k: None
+        )
 
         def _ok_idem(*_a, **_k):
             return _runner.RunResult(rc=0, status="successful", changed=0)
@@ -936,6 +960,167 @@ class SeedPhaseWiring(unittest.TestCase):
         from nestor import seed as _seed
 
         self.assertEqual(seen, list(_seed.seed_steps("banc")))
+
+
+class ChainEmitAndVerifyWiring(unittest.TestCase):
+    """Le hook e2e `dataops_chain_emit_and_verify` CÂBLÉ (`_chain_emit_and_verify_banc`,
+    porte run-phases.sh:1213) — I/O kubectl INJECTÉE, ZÉRO cluster (honnêteté ADR 0034).
+
+    On prouve le GESTE (Job appliqué avec le bon manifeste, poll succeeded, compteur Marquez
+    avant/après, verdict delta, teardown) et l'anti-FQDN (le compteur ne tape JAMAIS le FQDN
+    Marquez depuis l'hôte : il run un pod intra-cluster). La preuve d'INGESTION réelle reste
+    un run banc du mainteneur (cf. `phases.banc_todo`)."""
+
+    def _patch(self, obj, name, value):
+        orig = getattr(obj, name)
+        setattr(obj, name, value)
+        self.addCleanup(setattr, obj, name, orig)
+
+    def _run(self):
+        """Joue le hook CÂBLÉ en AVALANT son stdout (les `print` de progression sont
+        légitimes en vrai run, parasites dans la sortie de test) et SANS attente réelle."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._chain_emit_and_verify_banc(sleep=lambda _s: None)
+
+    def _harness(self, *, counts, succeeded_after=1):
+        """Espionne `_kubectl` et `_kubectl_apply_stdin` pour modéliser un mini-cluster.
+
+        `counts` : suite de réponses (JSON ou None) que `kubectl run … wget` (le compteur
+        Marquez) rend successivement (AVANT, APRÈS). `succeeded_after` : nb d'appels `get job`
+        avant que `status.succeeded` passe à "1" (≥1 → la poll converge ; 0 → jamais succès).
+        Renvoie un dict des appels capturés (`apply`, `run_count`, `get_job`, `delete`, `logs`)."""
+        captured = {"apply": [], "run_count": [], "get_job": 0, "delete": [], "logs": 0}
+        count_iter = iter(counts)
+        get_job_calls = {"n": 0}
+
+        def _spy_kubectl(*args, **kw):
+            argv = list(args)
+            # Compteur Marquez : `kubectl -n marquez run … -- sh -c 'wget … <url>'`.
+            if "run" in argv and "-n" in argv and argv[argv.index("-n") + 1] == "marquez":
+                # L'URL wget est le dernier argument du `sh -c`.
+                captured["run_count"].append(argv)
+                try:
+                    payload = next(count_iter)
+                except StopIteration:
+                    payload = None
+                if payload is None:
+                    return subprocess.CompletedProcess(args, 1, "", "")
+                return subprocess.CompletedProcess(args, 0, payload, "")
+            # Poll de complétion : `kubectl -n dagster get job ol-emit-toy -o jsonpath=…`.
+            if "get" in argv and "job" in argv:
+                get_job_calls["n"] += 1
+                captured["get_job"] = get_job_calls["n"]
+                done = "1" if get_job_calls["n"] >= succeeded_after >= 1 else ""
+                return subprocess.CompletedProcess(args, 0, done, "")
+            if "delete" in argv and "job" in argv:
+                captured["delete"].append(argv)
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if "logs" in argv:
+                captured["logs"] += 1
+                return subprocess.CompletedProcess(args, 0, "boom", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        def _spy_apply(manifest, **kw):
+            captured["apply"].append(manifest)
+            return subprocess.CompletedProcess(["kubectl", "apply"], 0, "", "")
+
+        self._patch(cli, "_kubectl", _spy_kubectl)
+        self._patch(cli, "_kubectl_apply_stdin", _spy_apply)
+        return captured
+
+    def test_applies_emit_job_with_correct_image_env_command(self):
+        # Le manifeste appliqué est le Job émetteur : image, env OpenLineage, command Dagster.
+        cap = self._harness(counts=['{"totalCount":0}', '{"totalCount":1}'])
+        self._run()
+        self.assertEqual(len(cap["apply"]), 1)
+        manifest = cap["apply"][0]
+        self.assertIn("kind: Job", manifest)
+        self.assertIn("name: ol-emit-toy", manifest)
+        self.assertIn("namespace: dagster", manifest)
+        self.assertIn("image: registry:80/dagster-openlineage-emit:dev", manifest)
+        self.assertIn("OPENLINEAGE_URL", manifest)
+        self.assertIn("http://marquez.marquez.svc.cluster.local:5000", manifest)
+        self.assertIn("OPENLINEAGE_ENDPOINT", manifest)
+        self.assertIn("api/v1/lineage", manifest)
+        self.assertIn("OPENLINEAGE_NAMESPACE", manifest)
+        self.assertIn('"dagster", "asset", "materialize"', manifest)
+        self.assertIn("toy_assets", manifest)
+        self.assertIn("backoffLimit: 1", manifest)
+        self.assertIn("ttlSecondsAfterFinished: 600", manifest)
+        self.assertIn("restartPolicy: Never", manifest)
+
+    def test_delta_present_after_is_ok(self):
+        # Compteur 0 → 1 (lineage ingéré) : verdict ok → ne LÈVE PAS. Teardown joué.
+        cap = self._harness(counts=['{"totalCount":0}', '{"totalCount":1}'])
+        self._run()  # ne lève pas
+        self.assertTrue(cap["delete"], "le Job émetteur doit être supprimé (teardown)")
+
+    def test_idempotent_equal_count_still_ok(self):
+        # Parité bash (bats L56) : 2 → 2 (rejeu idempotent, Marquez ne vide pas) reste OK,
+        # car on teste la PRÉSENCE (after≥1), pas un delta strict.
+        self._harness(counts=['{"totalCount":2}', '{"totalCount":2}'])
+        self._run()  # ne lève pas
+
+    def test_after_zero_raises(self):
+        # after == 0 (rien ingéré) → LÈVE (pas de faux vert, honnêteté ADR 0034).
+        self._harness(counts=['{"totalCount":0}', '{"totalCount":0}'])
+        with self.assertRaises(_phases.E2EHookStubbed):
+            self._run()
+
+    def test_unreadable_count_raises_skip(self):
+        # Compteur illisible (Marquez injoignable) → skip → LÈVE (n'a rien PROUVÉ).
+        self._harness(counts=[None, None])
+        with self.assertRaises(_phases.E2EHookStubbed):
+            self._run()
+
+    def test_job_never_succeeds_raises_with_logs(self):
+        # Le Job ne réussit jamais (image émetteur absente ? cf. réserve build_emitter_image)
+        # → poll épuisé → LÈVE (mention image), logs du Job récupérés, teardown joué.
+        cap = self._harness(counts=['{"totalCount":0}'], succeeded_after=0)
+        with self.assertRaises(_phases.E2EHookStubbed) as ctx:
+            self._run()
+        self.assertIn("dagster-openlineage-emit", str(ctx.exception))
+        self.assertGreaterEqual(cap["logs"], 1)
+        self.assertTrue(cap["delete"])
+
+    def test_apply_failure_raises(self):
+        # L'apply du Job échoue (Dagster absent ?) → LÈVE avant tout poll.
+        def _spy_apply(manifest, **kw):
+            return subprocess.CompletedProcess(["kubectl", "apply"], 1, "", "no ns dagster")
+
+        self._patch(cli, "_kubectl_apply_stdin", _spy_apply)
+        self._patch(cli, "_kubectl", lambda *_a, **_k: subprocess.CompletedProcess([], 0, "", ""))
+        with self.assertRaises(_phases.E2EHookStubbed):
+            self._run()
+
+    def test_marquez_count_never_taps_fqdn_from_host(self):
+        # Le compteur Marquez run un pod busybox intra-cluster (`kubectl run … wget`) : c'est
+        # le pod qui résout le FQDN, JAMAIS l'hôte (piège DNS, mémoire dns-fqdn-timeout). On
+        # vérifie qu'AUCUN argv kubectl du compteur n'est un curl/wget HÔTE — c'est un `run`.
+        cap = self._harness(counts=['{"totalCount":0}', '{"totalCount":1}'])
+        self._run()
+        self.assertTrue(cap["run_count"], "le compteur doit passer par `kubectl run` (pod)")
+        for argv in cap["run_count"]:
+            # La cible Marquez (FQDN) n'apparaît QUE dans la commande EXÉCUTÉE DANS le pod
+            # (`sh -c 'wget … svc.cluster.local …'`), jamais comme cible d'un appel hôte.
+            self.assertIn("run", argv)
+            self.assertIn("--image=busybox:1.36", argv)
+            # Le FQDN est bien présent (dans le `wget` intra-pod), preuve que c'est intra-cluster.
+            self.assertTrue(any("svc.cluster.local" in str(a) for a in argv))
+
+    def test_pure_parse_and_classify(self):
+        # Les fonctions PURES portées de dataops-assert.sh sont fidèles (testées sans I/O).
+        p = _phases.parse_marquez_job_count
+        self.assertEqual(p('{"jobs":[],"totalCount":3}'), 3)
+        self.assertEqual(p('{"jobs":[{"name":"a"},{"name":"b"}]}'), 2)
+        self.assertIsNone(p(""))
+        self.assertIsNone(p("pas du json"))
+        self.assertIsNone(p('{"namespaces":[]}'))
+        c = _phases.classify_marquez_ingest
+        self.assertEqual(c(0, 1)[0], "ok")
+        self.assertEqual(c(2, 2)[0], "ok")  # idempotence (présence, pas delta)
+        self.assertEqual(c(0, 0)[0], "fail")
+        self.assertEqual(c(None, 1)[0], "skip")
 
 
 if __name__ == "__main__":

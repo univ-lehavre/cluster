@@ -2872,6 +2872,154 @@ def _kubectl_apply_stdin(manifest: str, *, timeout: int = _REFRESH_TIMEOUT_S):
         return None
 
 
+# ── Harnais e2e dataops : preuve OpenLineage→Marquez (porte run-phases.sh:1213) ───
+# I/O kubectl IRRÉDUCTIBLE (ADR 0049) ; toute la DÉCISION (manifeste du Job, comptage des
+# jobs, verdict du compteur avant/après) est PURE dans `nestor.phases`. Le moteur substitue
+# ce câblage au STUB du registre pour `dataops_chain_emit_and_verify` (cf. `_E2E_HOOK_IMPL`).
+
+
+def _marquez_job_count(ol_ns: str) -> int | None:
+    """Nombre de jobs visibles dans Marquez pour le namespace OpenLineage `ol_ns`.
+
+    Port de `marquez_job_count` (run-phases.sh:1273) : interroge l'API Marquez
+    `GET /api/v1/namespaces/<ol_ns>/jobs` DEPUIS UN POD ÉPHÉMÈRE busybox du ns marquez
+    (`kubectl run … -- wget`), JAMAIS depuis l'hôte — le FQDN `marquez.marquez.svc.cluster.
+    local` ne se résout QUE dans le cluster (piège DNS, mémoire dns-fqdn-timeout). Le JSON
+    rendu est compté par la logique PURE `phases.parse_marquez_job_count` (totalCount, sinon
+    len(jobs)). Renvoie l'entier, ou `None` si illisible/injoignable (→ verdict `skip`)."""
+    from nestor import phases as _phases
+
+    url = f"{_phases.MARQUEZ_URL}/api/v1/namespaces/{ol_ns}/jobs"
+    # Pod jetable, nom unique par PID (parité `marquez-count-$$`), auto-supprimé (--rm).
+    out = _kubectl(
+        "-n",
+        "marquez",
+        "run",
+        f"marquez-count-{os.getpid()}",
+        "--rm",
+        "-i",
+        "--restart=Never",
+        "--image=busybox:1.36",
+        "--quiet",
+        "--",
+        "sh",
+        "-c",
+        f"wget -qO- '{url}' 2>/dev/null",
+        # Le pod busybox doit DÉMARRER, requêter, et être nettoyé : on borne large (le
+        # défaut _REFRESH_TIMEOUT_S=8s ne suffit pas à un pull/run de pod).
+        timeout=120,
+    )
+    if not (out and out.returncode == 0):
+        return None
+    return _phases.parse_marquez_job_count(out.stdout)
+
+
+def _job_succeeded(ns: str, name: str) -> bool:
+    """`True` si le Job `ns/name` a `status.succeeded == 1` (port de `emit_done`,
+    run-phases.sh:1250). Lecture bornée, cible sûre ; toute incertitude → False."""
+    out = _kubectl("-n", ns, "get", "job", name, "-o", "jsonpath={.status.succeeded}")
+    return bool(out and out.returncode == 0 and (out.stdout or "").strip() == "1")
+
+
+def _chain_emit_and_verify_banc(*, sleep=time.sleep) -> None:
+    """Preuve e2e de la chaîne Dagster → OpenLineage → Marquez (porte run-phases.sh:1213).
+
+    Le geste RÉEL câblé (I/O kubectl + API Marquez), substitué au STUB du registre pour
+    `dataops_chain_emit_and_verify` :
+      1. compteur de jobs Marquez AVANT (`_marquez_job_count`) ;
+      2. `kubectl apply` du Job émetteur jetable `ol-emit-toy` (ns dagster, image
+         `registry:80/dagster-openlineage-emit:dev`, `dagster asset materialize`) — manifeste
+         rendu PUR par `phases.emit_toy_job_manifest` ;
+      3. poll de `status.succeeded == 1` (max 300 s, intervalle 10 s) ; échec → logs du Job +
+         erreur claire (image émetteur poussée ? cf. réserve `build_emitter_image`) ;
+      4. `sleep 5` (Marquez traite COMPLETE), compteur APRÈS ;
+      5. verdict `phases.classify_marquez_ingest(before, after)` : `ok` (lineage présent) sinon
+         on LÈVE (jamais un faux vert, honnêteté ADR 0034) ;
+      6. teardown : `kubectl delete job ol-emit-toy --wait=false`.
+
+    ⚠️ RÉSERVE (cf. `phases.banc_todo`) : dépend de l'image émetteur, poussée par le rôle
+    `platform-build-images` SOUS `build_emitter_image=true` (banc e2e). Le play `dataops` du
+    moteur Python NE passe PAS encore ce drapeau → si l'image manque, le Job reste
+    ImagePullBackOff et le poll échoue : on LÈVE (étape 3) plutôt qu'un faux succès. La cible
+    kube est la cible SÛRE (`_kubectl`/`_kubectl_env`, jamais la prod) ; le FQDN Marquez n'est
+    tapé QUE depuis un pod intra-cluster (Job + busybox), jamais depuis l'hôte (piège DNS)."""
+    from nestor import phases as _phases
+
+    ns = _phases.EMITTER_NAMESPACE
+    ol_ns = _phases.EMITTER_OL_NAMESPACE
+    job = _phases.EMITTER_JOB_NAME
+
+    job_before = _marquez_job_count(ol_ns)
+
+    manifest = _phases.emit_toy_job_manifest()
+    applied = _kubectl_apply_stdin(manifest)
+    if not (applied and applied.returncode == 0):
+        detail = (applied.stderr.strip() if applied else "kubectl injoignable") or "(sans détail)"
+        raise _phases.E2EHookStubbed(
+            f"dataops e2e : apply du Job émetteur `{job}` échoué ({detail}) — "
+            "Dagster posé (ns dagster) sur la cible banc ?"
+        )
+
+    print("    attente de la complétion du run émetteur (max 5 min)…")
+    # Poll borné (parité `retry 300 10 emit_done`) : succès = status.succeeded==1.
+    succeeded = False
+    waited = 0
+    while waited <= 300:
+        if _job_succeeded(ns, job):
+            succeeded = True
+            break
+        sleep(10)
+        waited += 10
+    if not succeeded:
+        logs = _kubectl("-n", ns, "logs", f"job/{job}", "--tail=20")
+        tail = (logs.stdout if logs and logs.returncode == 0 else "") or ""
+        _kubectl("-n", ns, "delete", "job", job, "--wait=false")  # teardown best-effort
+        raise _phases.E2EHookStubbed(
+            f"dataops e2e : le run Dagster émetteur n'a pas réussi (image "
+            f"`{_phases.EMITTER_IMAGE}` poussée ? `build_emitter_image=true` requis au play "
+            f"dataops).\n{tail}"
+        )
+
+    print("    vérification de l'ingestion côté Marquez…")
+    sleep(5)  # laisse Marquez traiter l'événement COMPLETE
+    job_after = _marquez_job_count(ol_ns)
+    status, message = _phases.classify_marquez_ingest(job_before, job_after)
+
+    # Teardown de l'émetteur jetable (parité bash : best-effort, --wait=false).
+    _kubectl("-n", ns, "delete", "job", job, "--wait=false")
+
+    if status == "ok":
+        print(f"    ✓ {message}")
+        return
+    # skip (compteur illisible) comme fail (rien ingéré) → on LÈVE (pas de faux vert) :
+    # un harnais e2e qui ne PEUT PAS prouver l'ingestion n'a pas verdi (honnêteté ADR 0034).
+    raise _phases.E2EHookStubbed(
+        f"dataops e2e : {message} — sensor OpenLineage → API Marquez à vérifier (verdict={status})"
+    )
+
+
+# Implémentations RÉELLES (façade) des hooks e2e, substituées au STUB du registre
+# `phases.E2E_HOOKS` par le moteur (`launch`). SEUL `dataops_chain_emit_and_verify` est
+# câblé ; `dataops_egress_internet_check` reste STUBÉ (absent d'ici → le moteur joue le
+# stub du registre, qui LÈVE — hors périmètre, à câbler+prouver au banc). On mappe vers le
+# NOM de la fonction façade (pas une référence directe) pour une résolution TARDIVE via
+# `_e2e_hook_impl` — un test/patch de `_chain_emit_and_verify_banc` (attribut module) est
+# alors honoré (une référence figée dans le dict l'ignorerait).
+_E2E_HOOK_IMPL: dict[str, str] = {
+    "dataops_chain_emit_and_verify": "_chain_emit_and_verify_banc",
+}
+
+
+def _e2e_hook_impl(name: str) -> Callable[..., None] | None:
+    """Implémentation RÉELLE (façade) du hook e2e `name`, ou None s'il reste STUBÉ.
+
+    Résolution TARDIVE : on lit l'attribut module nommé dans `_E2E_HOOK_IMPL` au moment de
+    l'appel (via `globals()`), pour qu'un patch de test sur la fonction façade soit pris en
+    compte. Un hook absent de la table (egress) → None : l'appelant joue le STUB du registre."""
+    attr = _E2E_HOOK_IMPL.get(name)
+    return globals().get(attr) if attr else None
+
+
 def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult:
     """Monte une phase DÉLÉGUÉE (seed) : route `gitops-seed` vers `seed.run_seed('banc', …)`.
 
@@ -3004,13 +3152,18 @@ def _run_path_engine(
             kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
             target_kind=topo.target_kind,
         )
-        # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy) : ils LÈVENT
-        # E2EHookStubbed tant qu'ils ne sont pas câblés+prouvés au banc (honnêteté ADR 0034).
-        # On ne les joue QUE si le montage a réussi (un hook après un play KO n'a pas de sens).
-        # `RunResult` (un passage) n'a pas `.ok` (propre à IdempotenceResult) : succès = rc==0.
+        # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy). On ne les joue
+        # QUE si le montage a réussi (un hook après un play KO n'a pas de sens). `RunResult`
+        # (un passage) n'a pas `.ok` (propre à IdempotenceResult) : succès = rc==0.
+        # On route CHAQUE hook (par NOM) vers son IMPLÉMENTATION RÉELLE de façade
+        # (`_E2E_HOOK_IMPL`, I/O kubectl) si elle existe, sinon vers le STUB du registre
+        # (`phases.E2E_HOOKS`, qui LÈVE E2EHookStubbed). Aujourd'hui :
+        #   - `dataops_chain_emit_and_verify` → CÂBLÉ (`_chain_emit_and_verify_banc`) ;
+        #   - `dataops_egress_internet_check` → STUB (lève — hors périmètre, à câbler au banc).
         if result.rc == 0:
-            for hook in _phases.e2e_hooks_for(phase):
-                hook()  # lève E2EHookStubbed — message clair « _BANC : hook e2e à câbler »
+            for name in _phases.phase_plan(phase).e2e_hooks:
+                impl = _e2e_hook_impl(name) or _phases.E2E_HOOKS[name]
+                impl()  # CÂBLÉ : tente le vrai geste (lève sur échec) ; STUB : lève E2EHookStubbed
         return result
 
     def gate(phase: str) -> bool:
