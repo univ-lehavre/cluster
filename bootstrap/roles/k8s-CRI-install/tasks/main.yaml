@@ -123,6 +123,34 @@
         mode: '0644'
       notify: Restart containerd
 
+    # FIX DURABLE Yunix (containerd 2.3.x, issue #513 / drift L66) : containerd 2.3 garde
+    # des sockets shim TTRPC dans /run/containerd/s/ qui survivent à un arrêt non-propre de
+    # la machine (reboot, VM relancée). Au démarrage suivant, le shim runc reçoit une adresse
+    # de socket mal parsée (« unsupported protocol: Yunix ») → TOUT nouveau pod reste bloqué
+    # en ContainerCreating. Le palliatif manuel (restart containerd + delete pod) marche car
+    # il RECRÉE les sockets — on l'automatise via un drop-in `ExecStartPre` qui PURGE les
+    # sockets shim AVANT chaque démarrage de containerd (sûr : containerd est arrêté à ce
+    # moment, aucun pod actif côté CRI ; au boot, kubelet recrée les sandboxes proprement).
+    # S'applique à CHAQUE boot/restart, pas seulement au montage (le bug revient à chaque
+    # reboot). À retirer quand containerd corrige le transport socket (cf. issue #513).
+    - name: Ensure the containerd systemd drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/containerd.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Purge stale TTRPC shim sockets before each containerd start (Yunix fix)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/containerd.service.d/10-purge-stale-shims.conf
+        mode: '0644'
+        content: |
+          # Drop-in généré par k8s-CRI-install (issue #513 / drift L66, containerd 2.3.x).
+          # Purge les sockets shim TTRPC périmés avant CHAQUE démarrage de containerd —
+          # ils survivent à un arrêt non-propre et causent « unsupported protocol: Yunix ».
+          [Service]
+          ExecStartPre=-/bin/rm -rf /run/containerd/s
+      notify: Restart containerd
+
     - name: Ensure containerd is enabled and running
       ansible.builtin.systemd_service:
         name: containerd
