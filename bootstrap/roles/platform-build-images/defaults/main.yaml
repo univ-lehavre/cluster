@@ -25,10 +25,20 @@ redcap_version: 'v17.1.3'
 # un binaire upstream séparé. La variante `-full` embarque buildkit/buildctl (build arm64).
 # Épinglé par version + checksum SHA256 par arch (ADR 0006). Bumper : changer la version
 # ET les deux checksums (github.com/containerd/nerdctl/releases → SHA256SUMS).
-nerdctl_version: '2.3.3'
+#
+# ⚠️ TENU À 2.2.x (PAS 2.3.x) à cause du bug Yunix (issue #513 / drift L66) : `-full`
+# embarque AUSSI son propre containerd, extrait dans /usr/local/ + pose le service systemd
+# /usr/local/lib/systemd/system/containerd.service → c'est CE containerd qui sert de runtime
+# k8s (il masque le paquet apt containerd.io). nerdctl-full 2.3.x embarque containerd 2.3.x,
+# dont le nouveau protocole `BootstrapParams` du shim partage stdout/stderr : si runc écrit
+# sur stderr au démarrage, les octets polluent l'adresse socket que containerd parse
+# (« unsupported protocol: \b\x03\x12Yunix:// ») → ~13 % des pods bloqués en
+# ContainerCreating sous charge. nerdctl-full 2.2.2 embarque containerd 2.2.1, sans ce bug.
+# Rebumper vers 2.3.x SEULEMENT quand containerd corrige le partage stdout/stderr du shim.
+nerdctl_version: '2.2.2'
 nerdctl_checksums:
-  amd64: 'sha256:8d39a120d8414e3aff15ac05accf51bbbad6baf54764ae709b09087e4544c1ad'
-  arm64: 'sha256:2322f29f451189dd790b5d7c599b4600c210ff0f2c10244308a8e6a024274066'
+  amd64: 'sha256:8a477f35533c6cc1120c19558d8142967c74f25a4b952b481f48104e030de914'
+  arm64: 'sha256:55d68d2613b5f065021146bac21f620cde9e7fdd4bd3eff74cd324f5462e107a'
 # Map arch Ansible (uname -m) → arch des assets nerdctl.
 nerdctl_arch_map:
   x86_64: amd64
