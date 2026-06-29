@@ -2198,8 +2198,10 @@ class UpCommand(unittest.TestCase):
         return calls
 
     def test_yes_derives_path_and_delegates(self):
+        # Délégation BASH (run-phases.sh) : le défaut moteur est désormais `python` (ADR 0097),
+        # donc on force `--engine=bash` pour tester le FILET de délégation (toujours présent).
         calls = self._stub_runphases()
-        code, out, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        code, out, _ = _capture(["up", "-f", _EXAMPLE, "--yes", "--engine", "bash"])
         self.assertEqual(code, 0)
         self.assertIn("Couches à monter", out)  # le plan affiché
         # ADR 0083 : `default_target` rend `layers` (plus de preset dérivé) → délégation
@@ -2218,15 +2220,19 @@ class UpCommand(unittest.TestCase):
 
     def test_explicit_target_overrides_derivation(self):
         calls = self._stub_runphases()
-        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--target", "atlas-ceph", "--yes"])
+        code, _, _ = _capture(
+            ["up", "-f", _EXAMPLE, "--target", "atlas-ceph", "--yes", "--engine", "bash"]
+        )
         self.assertEqual(code, 0)
         self.assertIn("atlas-ceph", calls[0])
 
     def test_passes_nodes_override_from_topology(self):
         # La TOPOLOGIE pilote les nœuds du banc : up passe NODES_OVERRIDE dérivé.
         self._stub_runphases()
-        # _EXAMPLE (socle.example) = cp1 control + node1..4 workers.
-        _capture(["up", "-f", _EXAMPLE, "--yes"])
+        # _EXAMPLE (socle.example) = cp1 control + node1..4 workers. NODES_OVERRIDE = un env
+        # passé à run-phases.sh → délégation BASH (--engine=bash, le moteur python défaut ne
+        # passe pas par cet env).
+        _capture(["up", "-f", _EXAMPLE, "--yes", "--engine", "bash"])
         override = self.env.get("NODES_OVERRIDE", "")
         self.assertIn("cp1:control", override)
         self.assertIn("node1:worker", override)
@@ -2241,7 +2247,8 @@ class UpCommand(unittest.TestCase):
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
         self._stub_runphases()
-        _capture(["up", "-f", path, "--yes"])
+        # délégation bash (NODES_OVERRIDE n'est passé que par le chemin run-phases.sh)
+        _capture(["up", "-f", path, "--yes", "--engine", "bash"])
         self.assertEqual(self.env.get("NODES_OVERRIDE"), "cp1:control")
 
     def test_refuses_without_yes_off_tty(self):
@@ -2253,7 +2260,7 @@ class UpCommand(unittest.TestCase):
 
     def test_propagates_mount_failure(self):
         self._stub_runphases(rc=2)  # run-phases.sh échoue
-        code, _, err = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        code, _, err = _capture(["up", "-f", _EXAMPLE, "--yes", "--engine", "bash"])
         self.assertEqual(code, 1)
         self.assertIn("échec", err)
 

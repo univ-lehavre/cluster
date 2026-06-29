@@ -204,21 +204,21 @@ class FlagRouting(unittest.TestCase):
         self.addCleanup(setattr, cli, "_run_path_engine", orig)
         return calls
 
-    def test_default_no_flag_delegates_to_run_phases_unchanged(self):
-        # NON-RÉGRESSION (invariant 4) : SANS `--engine`, cmd_up délègue à run-phases.sh
-        # et n'appelle JAMAIS le moteur python.
+    def test_default_no_flag_routes_to_python_engine(self):
+        # DÉFAUT = python (ADR 0097, bascule) : SANS `--engine`, cmd_up route vers le moteur
+        # Python (`_run_path_engine`) et n'appelle PAS run-phases.sh. Le bash reste le FILET
+        # via `--engine=bash` (cf. test suivant).
         rp_calls = self._spy_runphases()
         eng_calls = self._spy_engine()
         path = _tmp(_LIMA_SOLO)
         self.addCleanup(os.unlink, path)
         code, _, _ = _capture(["up", "-f", path, "--yes"])
         self.assertEqual(code, 0)
-        self.assertEqual(eng_calls, [])  # moteur python JAMAIS appelé
-        self.assertEqual(len(rp_calls), 1)  # run-phases.sh appelé UNE fois
-        self.assertIn("run-phases.sh", " ".join(rp_calls[0]))
+        self.assertEqual(len(eng_calls), 1)  # moteur python appelé (défaut)
+        self.assertEqual(rp_calls, [])  # run-phases.sh PAS appelé (plus le défaut)
 
     def test_engine_bash_explicit_delegates_to_run_phases(self):
-        # `--engine=bash` explicite = même comportement que le défaut.
+        # `--engine=bash` explicite = le FILET de délégation run-phases.sh (le défaut est python).
         rp_calls = self._spy_runphases()
         eng_calls = self._spy_engine()
         path = _tmp(_LIMA_SOLO)

@@ -3407,14 +3407,14 @@ def cmd_up(args: argparse.Namespace) -> int:
         print("montage annulé.", file=sys.stderr)
         return 2
 
-    # ── FLAG OPT-IN `--engine=python` (LOT 6, ADR 0097) ────────────────────────────
-    # Le DÉFAUT reste `bash` (run-phases.sh) — invariant 4 du plan : sans le flag, cmd_up
-    # se comporte EXACTEMENT comme avant (même délégation, mêmes sorties). Le flag permet
-    # au mainteneur de TESTER le moteur Python au banc mono-nœud (`run_path`). Repli env
-    # `NESTOR_ENGINE` (le flag CLI prime). La garde d'isolation banc s'applique aux DEUX
-    # chemins : ICI (`_assert_bench_target` en tête de cmd_up) ET, pour le chemin python,
-    # à CHAQUE phase via le callback `assert_safe` (invariant de boucle, ADR 0097 §5.c).
-    engine = getattr(args, "engine", None) or os.environ.get("NESTOR_ENGINE", "bash")
+    # ── MOTEUR DE MONTAGE (ADR 0097) ───────────────────────────────────────────────
+    # DÉFAUT = `python` (le moteur `run_path`) : prouvé de bout en bout au banc mono-nœud
+    # (from-scratch, 10 couches up→…→portal + preuve e2e OpenLineage→Marquez, ingestion
+    # vérifiée). `--engine=bash` (ou NESTOR_ENGINE=bash) garde run-phases.sh comme FILET de
+    # secours. Le flag CLI prime sur l'env. La garde d'isolation banc s'applique aux DEUX
+    # chemins : ICI (`_assert_bench_target` en tête) ET, en python, à CHAQUE phase
+    # (callback `assert_safe`, invariant de boucle ADR 0097 §5.c).
+    engine = getattr(args, "engine", None) or os.environ.get("NESTOR_ENGINE", "python")
     if engine == "python":
         # Le moteur Python ne porte PAS l'arm HA propre (amorçage VIP/etcd) : un chemin
         # `ha-3cp` derrière `--engine=python` lèvera proprement (callback `ha` stubé) plutôt
