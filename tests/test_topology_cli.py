@@ -858,27 +858,9 @@ runs:
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
-    def test_warns_when_bench_up_but_shell_kubeconfig_unset(self):
-        # Piège vécu : le banc est monté+joignable (preview le lit via le défaut auto),
-        # MAIS le shell n'a pas KUBECONFIG exporté → un `kubectl` nu vise ~/.kube/config
-        # (prod). preview doit AVERTIR d'aligner le shell (LOT 8 : `stack select` pose le
-        # contexte, plus `nestor env`). On stube : banc présent (os.path.exists), joignable
-        # (_kubeconfig_reaches_api), KUBECONFIG absent → main() pose le défaut auto et arme
-        # _KUBECONFIG_AUTO_BENCH.
-        orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: p == cli._BENCH_KUBECONFIG or orig_exists(p)
-        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
-        orig_reach = cli._kubeconfig_reaches_api
-        cli._kubeconfig_reaches_api = lambda _kc: True
-        self.addCleanup(setattr, cli, "_kubeconfig_reaches_api", orig_reach)
-        orig_flag = cli._KUBECONFIG_AUTO_BENCH
-        self.addCleanup(setattr, cli, "_KUBECONFIG_AUTO_BENCH", orig_flag)
-        os.environ.pop("KUBECONFIG", None)  # _capture restaure l'env ensuite
-        # Warning d'alignement shell = comportement BANC (ADR 0084) → topo lima.
-        code, _, err = _capture(["preview", "-f", _example_as_lima(self)])
-        self.assertEqual(code, 0)
-        self.assertIn("stack select", err)  # avertit d'aligner le shell (contexte nommé)
-        self.assertIn("PROD", err)
+    # (Retiré : test_warns_when_bench_up_but_shell_kubeconfig_unset — le warning
+    # « ton shell n'a pas KUBECONFIG » a été supprimé : preview lit déjà le bon banc et
+    # `nestor kubectl` rend obsolète le `kubectl` nu qu'on prémunissait.)
 
     def test_warns_on_backend_drift_ceph_residual(self):
         # #356 : topo local-path (banc.example), mais des SC ceph observées sur le cluster

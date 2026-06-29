@@ -2081,27 +2081,17 @@ def cmd_preview(args: argparse.Namespace) -> int:
     # `target_kind: prod` ne lit PAS le banc (gating ADR 0084) : ces messages, pensés
     # pour le banc, seraient TROMPEURS en prod (ils invitent à aligner le shell sur le
     # banc, sans objet en prod). On ne les émet donc que pour une stack lima.
-    if topo.target_kind == "lima":
-        # Lecture seule : on ne BLOQUE pas. Quand aucun banc n'est monté, la sonde vise
-        # /dev/null (jamais la prod, ADR 0053) → la section RÉEL est VIDE. On le DIT
-        # simplement plutôt que de laisser croire à un cluster éteint.
-        if _active_kubeconfig() is None and not _context_targets_bench():
-            _warn(
-                "cluster non installé — pas de connexion possible pour l'instant "
-                "(le monter : `nestor up`). L'état réel ci-dessous est vide."
-            )
-        # MISMATCH SHELL ↔ preview : `_default_kubeconfig_to_bench` a posé le banc pour CE
-        # process (l'opérateur n'avait pas exporté KUBECONFIG) — mais le shell reste sans
-        # KUBECONFIG (process ≠ parent). preview lit le BANC pendant qu'un `kubectl` nu du
-        # shell vise ~/.kube/config (souvent la PROD). On AVERTIT (non bloquant) d'aligner
-        # le shell. Seulement si le banc est JOIGNABLE (sinon le 1er warning suffit).
-        elif _KUBECONFIG_AUTO_BENCH and _kubeconfig_reaches_api(_BENCH_KUBECONFIG):
-            _warn(
-                "preview lit le BANC, mais ton shell n'a pas KUBECONFIG exporté — un "
-                "`kubectl` direct vise ~/.kube/config (souvent la PROD). Le plus simple : "
-                "`nestor kubectl …` (vise la stack active, sans toucher le shell). Sinon "
-                "`nestor stack select <banc>` ou `kubectl --context <banc> …`."
-            )
+    # Lecture seule : on ne BLOQUE pas. Quand aucun banc n'est monté, la sonde vise
+    # /dev/null (jamais la prod, ADR 0053) → la section RÉEL est VIDE. On le DIT simplement
+    # plutôt que de laisser croire à un cluster éteint. Émis SEULEMENT pour une stack lima
+    # (une stack prod ne lit pas le banc, ADR 0084 — le message serait trompeur).
+    # NB : plus de warning « ton shell n'a pas KUBECONFIG » : `preview` lit DÉJÀ le bon banc
+    # (process ≠ shell), et `nestor kubectl …` rend obsolète le `kubectl` nu qu'on prémunissait.
+    if topo.target_kind == "lima" and _active_kubeconfig() is None and not _context_targets_bench():
+        _warn(
+            "cluster non installé — pas de connexion possible pour l'instant "
+            "(le monter : `nestor up`). L'état réel ci-dessous est vide."
+        )
     runs = load_runs(args.history or _RUNS_HISTORY)
     now = int(dt.datetime.now(tz=dt.UTC).timestamp())
     target = args.target  # None → default_target le déduit
