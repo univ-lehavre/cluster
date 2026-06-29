@@ -55,6 +55,14 @@ class Epreuve:
     terrain: str
     profil_min: str  # base | store | obs | dataops
     backend_req: str | None  # 'ceph' | None
+    # Statut de jouabilité (parité avec le registre des drifts) : 'actif' par
+    # défaut ; 'caduc' quand l'épreuve n'a plus AUCUN terrain pour tourner (ex.
+    # banc Vagrant multi-node / topologie ha-3cp abandonnés faute de ressources,
+    # ADR 0097). Une épreuve caduque est exclue d'office par `epreuve_jouable`,
+    # AVANT tout autre filtre. Réversible : repasser à 'actif' quand le terrain
+    # revient. `raison_caduc` trace le pourquoi + la date (honnêteté des Runs).
+    statut: str = "actif"  # 'actif' | 'caduc'
+    raison_caduc: str | None = None
 
 
 # Catalogue — miroir de matrice-catalogue.md §2 (01-26) + en-têtes 27-29.
@@ -92,6 +100,12 @@ EPREUVES: list[Epreuve] = [
         TERRAIN_SSH,
         "store",
         "ceph",
+        statut="caduc",
+        raison_caduc=(
+            "2026-06-29 : exige le banc Vagrant multi-node (halt/up d'un worker) "
+            "ET Ceph, deux terrains abandonnés faute de ressources (ADR 0097). "
+            "Réversible si un banc multi-nœuds Ceph redevient disponible."
+        ),
     ),
     Epreuve(
         "04",
@@ -102,6 +116,12 @@ EPREUVES: list[Epreuve] = [
         TERRAIN_SSH,
         "base",
         None,
+        statut="caduc",
+        raison_caduc=(
+            "2026-06-29 : exige de halt le control plane via le banc Vagrant "
+            "multi-node (abandonné, ADR 0097) — impossible au banc mono-nœud "
+            "(halt du seul CP = plus rien à observer). Réversible."
+        ),
     ),
     Epreuve(
         "05",
@@ -245,6 +265,12 @@ EPREUVES: list[Epreuve] = [
         TERRAIN_OFFENSIF,
         "store",
         "ceph",  # éprouve la résilience Ceph (réplica ×3, min_size 2) sous partition réseau
+        statut="caduc",
+        raison_caduc=(
+            "2026-06-29 : partition réseau via le banc Vagrant multi-node + Ceph "
+            "multi-nœuds, deux terrains abandonnés faute de ressources (ADR 0097). "
+            "Réversible."
+        ),
     ),
     Epreuve(
         "20", "Chaos kill pods", "chaos", "chaos", TOPO_AGNOSTIQUE, TERRAIN_OFFENSIF, "base", None
@@ -341,8 +367,9 @@ EPREUVES: list[Epreuve] = [
     ),
     # ha-3cp : survie du control-plane à 1 panne (VIP kube-vip + quorum etcd).
     # chaos/résilience comme 19-21 ; terrain SSH (limactl + etcdctl host-side) ;
-    # exige multi-nœuds (3 CP — la topologie ha-3cp ; se SKIP au runtime hors
-    # ha-3cp). Local-path (HA ⊥ stockage) → backend_req=None. ADR 0047/0055, #250.
+    # exigeait multi-nœuds (3 CP — la topologie ha-3cp). CADUC : ha-3cp abandonnée
+    # (ADR 0097 supersede 0055, commit fd04ee0) → plus AUCune topologie 3-CP pour
+    # le jouer. ADR 0047/0055, #250.
     Epreuve(
         "30",
         "ha-3cp : survie à 1 panne CP (VIP + quorum etcd)",
@@ -352,6 +379,12 @@ EPREUVES: list[Epreuve] = [
         TERRAIN_SSH,
         "base",
         None,
+        statut="caduc",
+        raison_caduc=(
+            "2026-06-29 : prouve la valeur de la topologie ha-3cp, ABANDONNÉE "
+            "(ADR 0097 supersede 0055) faute de ressources pour un banc 3-VM. "
+            "Plus aucune topologie 3-CP ne peut le jouer. Réversible."
+        ),
     ),
     # Contrat d'interface cluster→atlas (ADR 0043) : dérive contract/endpoints
     # et vérifie chaque endpoint (Service + port + réponse). Transversal, agnostique
@@ -442,6 +475,8 @@ def epreuve_jouable(ep: Epreuve, topo: Topology) -> tuple[bool, str | None]:
     n_control = len(topo.control_nodes)
     n_worker = len(topo.worker_nodes)
 
+    if ep.statut == "caduc":
+        return False, f"caduc — {ep.raison_caduc or 'sans terrain'}"
     if ep.terrain == TERRAIN_OFFENSIF and topo.target_kind == "prod":
         return False, "offensif — interdit hors banc jetable (ADR 0025)"
     if not _profil_couvre(ep.profil_min, profil_topo):
