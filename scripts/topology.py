@@ -2508,6 +2508,8 @@ def _seed_resp_has_commit(resp_body: str) -> bool:
         if isinstance(data, dict) and isinstance(data.get("commit"), dict):
             return True
     except (ValueError, TypeError):
+        # Corps non-JSON : on n'échoue PAS ici — on retombe sur le fallback texte
+        # ci-dessous (parité du `grep -q '"commit"'` du bash, fail-safe).
         pass
     return '"commit"' in resp_body
 
