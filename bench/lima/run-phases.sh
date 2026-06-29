@@ -1,43 +1,44 @@
 #!/usr/bin/env bash
 #
-# Orchestrateur du banc léger Lima — équivalent fonctionnel du banc Vagrant
-# bench/multi-node/, mais sur des VMs Lima (vrai noyau, SSH natif) au lieu de
-# VirtualBox. Stockage MODULAIRE : local-path (rapide) par défaut, Ceph optionnel.
+# Harnais node-side du banc léger Lima — sur des VMs Lima (vrai noyau, SSH natif) au
+# lieu de VirtualBox. Stockage MODULAIRE : local-path (rapide) par défaut, Ceph optionnel.
 #
-# Chaque phase a un GATE : le script s'arrête (exit ≠ 0) si le critère de succès
-# n'est pas atteint. Toutes les phases sont idempotentes (rejouables).
+# ⚠️ L'ORCHESTRATION (séquence des couches, gates de santé, fraîcheur, HA) vit désormais
+# dans le MOTEUR PYTHON `nestor` (scripts/topology.py + nestor/path.py, ADR 0063/0097) :
+# c'est l'entrée NORMALE (`nestor up/next/remove`). Ce script ne porte plus les chemins
+# nommés agrégés (socle/atlas/storage-real/…) — le moteur les a remplacés. Il ne reste que
+# les BRIQUES IRRÉDUCTIBLES que le moteur APPELLE (provisioning VM/CNI/inventaire/faits,
+# ADR 0049/0056), les PHASES UNITAIRES qu'il consomme via l'arm `layers <seq>` (filet bash
+# `--engine=bash`), et le rollback par phase. Chaque phase a un GATE et est idempotente.
 #
 # À lancer depuis le POSTE DE CONTRÔLE (Mac), pas dans une VM.
 #
-# Usage :
+# Usage (briques irréductibles + phases unitaires ; l'entrée normale est `nestor`) :
+#   ── Briques node-side APPELÉES par le moteur Python (ADR 0049/0056) ──
 #   bench/lima/run-phases.sh up             # VMs + (si WITH_CEPH=1) disques bruts + gate vd* (#235)
-#   bench/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate 3 nœuds Ready
-#   BANC_JETABLE=1 [FAULT_TARGET=join|init|cri-keyring|cnpg-sc|argocd-netpol|addon] bench/lima/run-phases.sh bootstrap-fault # arrêt injecté : preuve de reprise (ADR 0050/0052 §5) — DESTRUCTIF. compensation (join/init) ou reprise classe a (cri-keyring/cnpg-sc/argocd-netpol/addon)
+#   bench/lima/run-phases.sh inventory <control_csv> [workers_csv] # (ré)écrit l'inventaire (write_inventory byte-stable)
+#   bench/lima/run-phases.sh facts          # contrat machine : imprime CP_IP/L2_IFACE (+ VIP si HA)
+#   bench/lima/run-phases.sh ha-cni <iface> # pose Cilium (L4 NodePort) + fetch kubeconfig banc
+#   bench/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
+#   bench/lima/run-phases.sh access [...]   # accès dev (URLs NodePort + secrets + .env atlas, ADR 0048)
+#   bench/lima/run-phases.sh down [vm…]     # détruit les VMs + disques nommés
+#   ── Phases unitaires (jouées par l'arm `layers <seq>` que `nestor up --engine=bash` pousse) ──
+#   bench/lima/run-phases.sh bootstrap      # bootstrap Ansible + Cilium + gate nœuds Ready
 #   bench/lima/run-phases.sh storage-simple # local-path-provisioner (rapide) + gate PVC Bound
 #   bench/lima/run-phases.sh metrics-server # Metrics API (kubectl top) + gate APIService Available (#252)
-#   bench/lima/run-phases.sh platform-prereqs # containerd insecure-registry (registry:80 HTTP)
 #   bench/lima/run-phases.sh ceph           # Rook-Ceph (metadataDevice=vde) + gate HEALTH_OK
 #   bench/lima/run-phases.sh sc             # StorageClasses Ceph + gate PVC Bound
 #   bench/lima/run-phases.sh datalake       # CephObjectStore RGW (cible S3 Barman) + gate Ready
 #   bench/lima/run-phases.sh smoke-s3       # smoke S3 PUT/GET/DELETE sur le RGW Ceph (scénario 06)
-#   bench/lima/run-phases.sh wordpress      # montage WordPress : PVC bloc RWO Ceph Bound + Pod Ready
 #   bench/lima/run-phases.sh hardening      # durcissement hôte (secure.yml, tags audit,detection — #240)
 #   bench/lima/run-phases.sh dataops        # chaîne DataOps via Ansible (dataops.yaml) + lineage (#173/#148)
 #   bench/lima/run-phases.sh gitops         # socle GitOps : Gitea + Argo CD via Ansible (gitops.yaml) + gate Ready (#230)
 #   bench/lima/run-phases.sh gitops-seed    # init dépôt Gitea : org/repo + workflow jouet + webhook + Application atlas (#231)
 #   bench/lima/run-phases.sh monitoring     # observabilité (Prometheus + Grafana + Loki), profil auto-détecté
-#   ── Chemins d'installation nommés (ADR 0045) ──
-#   bench/lima/run-phases.sh socle          # up → bootstrap → stockage (smoke rapide)
-#   bench/lima/run-phases.sh atlas          # socle léger → metrics-server → monitoring → gitops → dataops → gitops-seed (banc atlas, local-path)
-#   bench/lima/run-phases.sh storage-real   # socle Ceph → datalake → smoke S3 (RGW) + montage WordPress (preuve stockage réel)
-#   bench/lima/run-phases.sh cluster-dataops # socle Ceph → datalake → monitoring → dataops (chaîne DataOps sur Ceph)
-#   bench/lima/run-phases.sh atlas-ceph     # banc atlas COMPLET sur Ceph : datalake → monitoring → gitops → dataops → gitops-seed + UI (#232)
-#   ── Axe orthogonal durcissement (#240) : combinable avec tout chemin ──
-#   WITH_HARDENING=1 bench/lima/run-phases.sh atlas  # même chemin + secure.yml (audit,detection) après le socle
-#   bench/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
-#   bench/lima/run-phases.sh status         # état du banc : VMs, nœuds, phases, UIs, dernier run (#149)
+#   bench/lima/run-phases.sh mlflow         # serveur MLflow (suivi de modèles, backend CNPG + artefacts S3)
+#   bench/lima/run-phases.sh portal         # portail d'accès aux UI (NodePort L4, lecture seule)
+#   bench/lima/run-phases.sh layers <p1,p2,…> # séquence ORDONNÉE par le moteur Python (ADR 0069) : socle + queue applicative
 #   BANC_JETABLE=1 bench/lima/run-phases.sh rollback <phase>  # défait UNE phase (ns+CRD+node-side) pour la re-tester (ADR 0054) — DESTRUCTIF
-#   bench/lima/run-phases.sh down           # détruit les VMs + disques nommés
 #
 # Pré-requis poste : limactl (Lima ≥ 2.0), ansible-playbook, kubectl, python3.
 #
@@ -115,9 +116,6 @@ API_PORT=6443
 # scheduler laisse des pods Pending (`Insufficient cpu`, vécu au banc mono-nœud :
 # dagster-webserver non plaçable). 4 vCPU donne la marge.
 VM_CPUS=${VM_CPUS:-4}
-# Mémorise si VM_MEMORY a été FOURNI par l'opérateur (vs défaut dérivé) : un chemin
-# peut alors imposer son propre plancher SANS écraser un choix explicite (ha-3cp).
-VM_MEMORY_SET=${VM_MEMORY:+1}
 # 12 GiB pour les DEUX backends : la chaîne MLOps complète (dataops/mlflow) sature
 # 8 GiB sur un nœud, indépendamment de Ceph vs local-path (mesuré le 2026-06-23).
 VM_MEMORY_DEFAULT=12GiB
@@ -517,202 +515,6 @@ phase_bootstrap() {
     "${KUBECTL[@]}" get nodes -o wide
 }
 
-# ── Phase bootstrap-fault — ARRÊT INJECTÉ : prouve le rescue (ADR 0050/0052 §5) ─
-# Exerce le chemin de REPRISE d'un rôle à effet de bord non idempotent (init OU
-# join) en INJECTANT une faute, puis vérifie le protocole opposable de la règle 5
-# (ADR 0052) : 1er run ÉCHOUE → compensation `kubeadm reset` TRACÉE → re-jeu du
-# MÊME chemin RÉUSSIT. Le verdict passe par la fonction PURE classify_compensation
-# (testée bats, bench/unit/bootstrap-fault.bats) — symétrique de run_ansible_phase.
-#
-# DESTRUCTIF : la faute injectée casse un nœud SAIN. À ne lancer que sur un banc
-# JETABLE (garde BANC_JETABLE=1). Mode déterministe (ADR 0052 §3) : on retire le
-# marqueur `creates:` d'une étape DÉJÀ acquise puis on rejoue → le rôle re-tente
-# `kubeadm init/join` sur un demi-état réel → le rescue compense.
-#
-# Cible via FAULT_TARGET :
-#   - `join` (1er worker, DÉFAUT) : le rescue `kubeadm reset` ne touche QUE le
-#     worker → le control-plane et le cluster SURVIVENT, le kubeconfig banc reste
-#     valide. Mode RECOMMANDÉ (preuve fidèle du rescue sans détruire le cluster).
-#   - `init` (control-plane) : le rescue `kubeadm reset` DÉTRUIT etcd/le cluster ;
-#     le re-jeu reconstruit tout, mais le kubeconfig banc devient invalide et les
-#     phases suivantes cassent → réserver à un banc qu'on accepte de perdre.
-# Joue un playbook depuis l'hôte (kubeconfig banc), renvoie son rc sur $1 (nameref
-# via echo) — wrapper set+e/set -e pour capturer un échec sans planter le harnais.
-_fault_play() {
-    local pb=$1; shift
-    set +e
-    KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
-        "${REPO}/bootstrap/${pb}.yaml" "$@"
-    local rc=$?
-    set -e
-    return "${rc}"
-}
-
-phase_bootstrap_fault() {
-    preflight
-    [ "${BANC_JETABLE:-0}" = 1 ] || die "phase bootstrap-fault DESTRUCTIVE (casse un nœud sain) — exiger BANC_JETABLE=1 sur un banc jetable"
-    [ -f "${INVENTORY}" ] || die "inventaire absent — lancer 'bootstrap' d'abord"
-    # shellcheck source=bench/lima/bootstrap-fault-assert.sh
-    . "${HERE}/bootstrap-fault-assert.sh"
-
-    # DEUX familles d'arrêt injecté (doctrine ADR 0050) :
-    #  - COMPENSATION (init|join) : étape à effet de bord NON idempotent → le 1er
-    #    run échoue, le rescue COMPENSE (kubeadm reset), le re-jeu repart propre.
-    #    Verdict classify_compensation (exige le reset tracé).
-    #  - REPRISE classe (a) (cri-keyring|cnpg-sc|argocd-netpol|addon) : apply
-    #    déclaratif / opérateur idempotent → le 1er run échoue, le SIMPLE RE-JEU
-    #    reconverge SANS compensation. Verdict classify_redeploy_recovery (n'exige
-    #    AUCUN reset — l'exiger serait un faux-échec, malhonnêteté ADR 0052).
-    local target="${FAULT_TARGET:-join}"
-    case "${target}" in
-        init | join) _fault_compensation "${target}" ;;
-        cri-keyring | cnpg-sc | argocd-netpol | addon) _fault_redeploy "${target}" ;;
-        *) die "FAULT_TARGET inconnu : ${target} (init|join|cri-keyring|cnpg-sc|argocd-netpol|addon)" ;;
-    esac
-}
-
-# Famille COMPENSATION (init|join) — preuve du rescue compensateur (ADR 0052 §5).
-_fault_compensation() {
-    local target=$1 pb vm marker home entry
-    case "${target}" in
-        init)
-            pb=initialisation; vm="${CP}"
-            marker=/etc/kubernetes/admin.conf ;;
-        join)
-            pb=join-workers
-            for entry in "${NODES[@]}"; do
-                [ "${entry##*:}" = control ] || { vm="${entry%%:*}"; break; }
-            done
-            [ -n "${vm:-}" ] || die "bootstrap-fault join : aucun worker dans NODES"
-            # $HOME doit s'expandre DANS la VM (côté invité) → single-quote voulu.
-            # shellcheck disable=SC2016
-            home=$(vm_sh "${vm}" sh -c 'echo "$HOME"' | tr -d '\r')
-            marker="${home}/node-joined.log" ;;
-    esac
-
-    log "Phase bootstrap-fault — arrêt injecté COMPENSATION sur '${target}' (${vm}), rescue ADR 0050"
-    log "  injection : rm ${marker} sur ${vm} (l'étape ${target} re-tente sur un demi-état)"
-    vm_sh "${vm}" sudo rm -f "${marker}" \
-        || die "bootstrap-fault : échec de la suppression du marqueur ${marker}"
-
-    log "  1er run ${pb}.yaml — DOIT échouer puis compenser (kubeadm reset)"
-    local out1 first_rc reset_seen second_rc verdict
-    set +e
-    out1=$(KUBECONFIG="${KUBECONFIG_LOCAL}" ansible-playbook -i "${INVENTORY}" \
-        "${REPO}/bootstrap/${pb}.yaml" 2>&1)
-    first_rc=$?
-    set -e
-    printf '%s\n' "${out1}" | tail -25
-    reset_seen=$(printf '%s\n' "${out1}" | parse_kubeadm_reset)
-    log "  1er run : rc=${first_rc}, compensation tracée=${reset_seen}"
-
-    log "  re-jeu ${pb}.yaml — DOIT réussir (le chemin repart propre)"
-    _fault_play "${pb}"; second_rc=$?
-
-    verdict=$(classify_compensation "${first_rc}" "${reset_seen}" "${second_rc}")
-    case "${verdict%%|*}" in
-        ok) ok "${verdict#*|}" ;;
-        *) die "${verdict#*|}" ;;
-    esac
-}
-
-# Famille REPRISE classe (a) (cri-keyring|cnpg-sc|argocd-netpol|addon) — preuve
-# qu'une étape idempotente (apply/opérateur) reconverge par SIMPLE RE-JEU après
-# une faute, SANS compensation (ADR 0050 cas a / 0052 §5). Verdict
-# classify_redeploy_recovery (1er échoue → re-jeu vert, n'exige aucun reset).
-_fault_redeploy() {
-    local target=$1 pb=() inject_desc gate_pred first_rc second_rc verdict
-    case "${target}" in
-        # CRI keyring : cas d'IDEMPOTENCE-RÉPARATRICE (≠ « 1er échoue / 2e
-        # réussit »). On simule un arrêt PENDANT l'écriture du keyring (keyring
-        # tronqué, marqueur .valid jamais posé — l'arrêt réel survient avant le
-        # touch). Avec le CODE CORRIGÉ : l'absence de .valid fait re-jouer la
-        # tâche dearmor → keyring re-téléchargé + validé en UN run. Le verdict est
-        # la GATE (keyring valide + dépôt OK), pas classify_redeploy_recovery (il
-        # n'y a pas d'échec à reprendre, le fix répare au 1er run). AVEC L'ANCIEN
-        # code (creates: = le keyring lui-même), le re-jeu aurait SAUTÉ la tâche
-        # → keyring resté tronqué → apt update BADSIG : c'est le bug corrigé.
-        cri-keyring)
-            log "Phase bootstrap-fault — REPRISE cri-keyring (truncate keyring sur ${CP}, idempotence réparatrice)"
-            vm_sh "${CP}" sudo truncate -s0 /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
-                || die "bootstrap-fault cri-keyring : échec truncate keyring"
-            vm_sh "${CP}" sudo rm -f /etc/apt/keyrings/.kubernetes-apt-keyring.valid || true
-            log "  run kubeadm.yaml — DOIT re-valider le keyring (pas de compensation)"
-            _fault_play kubeadm; first_rc=$?
-            log "  run : rc=${first_rc}"
-            if [ "${first_rc}" != 0 ]; then
-                die "cri-keyring : le run a échoué (rc=${first_rc}) — le keyring n'a pas été réparé"
-            fi
-            if retry 60 5 cri_keyring_ok; then
-                ok "Reprise prouvée (ADR 0050 classe a, idempotence réparatrice) : keyring tronqué → re-validé en un run, dépôt k8s OK"
-            else
-                die "cri-keyring : keyring non réparé après le run (gate cri_keyring_ok)"
-            fi
-            return 0 ;;
-        # CNPG : SC bidon au 1er run → PVC Pending → gate santé expire → échec ;
-        # re-jeu avec la vraie SC (dérivée de WITH_CEPH) → Cluster healthy.
-        cnpg-sc)
-            local good_sc; good_sc=$(ceph_default_sc_or_localpath)
-            log "Phase bootstrap-fault — REPRISE cnpg-sc (SC bidon → ${good_sc})"
-            log "  1er run dataops.yaml -e cnpg_storage_class=does-not-exist — DOIT échouer"
-            _fault_play dataops -e cnpg_storage_class=does-not-exist; first_rc=$?
-            log "  1er run : rc=${first_rc}"
-            log "  re-jeu dataops.yaml -e cnpg_storage_class=${good_sc} — DOIT converger"
-            _fault_play dataops -e "cnpg_storage_class=${good_sc}"; second_rc=$?
-            verdict=$(classify_redeploy_recovery "${first_rc}" "${second_rc}" "")
-            case "${verdict%%|*}" in ok) ok "${verdict#*|}" ;; *) die "${verdict#*|}" ;; esac
-            return 0 ;;
-        # argocd : supprime la NetworkPolicy d'ingress argocd-server (nom réel
-        # `allow-argocd-server`, posée par allow-server-ingress.yaml) pendant la
-        # convergence → le re-jeu de gitops la re-pose et argocd reconverge.
-        argocd-netpol)
-            inject_desc="delete netpol allow-argocd-server (argocd)"
-            "${KUBECTL[@]}" -n argocd delete networkpolicy allow-argocd-server --ignore-not-found >/dev/null 2>&1 || true
-            pb=(gitops)
-            gate_pred=argocd_server_ready ;;
-        # addon générique : supprime le Deployment metrics-server pendant le wait.
-        addon)
-            inject_desc="delete deploy metrics-server"
-            "${KUBECTL[@]}" -n kube-system delete deploy metrics-server --ignore-not-found >/dev/null 2>&1 || true
-            pb=(metrics-server)
-            gate_pred=metrics_server_ready ;;
-    esac
-
-    log "Phase bootstrap-fault — arrêt injecté REPRISE sur '${target}' : ${inject_desc}"
-    log "  1er run ${pb[0]}.yaml après injection — peut échouer (faute prise)"
-    _fault_play "${pb[0]}"; first_rc=$?
-    log "  1er run : rc=${first_rc}"
-    log "  re-jeu ${pb[0]}.yaml — DOIT reconverger (sans compensation)"
-    _fault_play "${pb[0]}"; second_rc=$?
-
-    verdict=$(classify_redeploy_recovery "${first_rc}" "${second_rc}" "")
-    case "${verdict%%|*}" in ok) ok "${verdict#*|}" ;; *) die "${verdict#*|}" ;; esac
-    # Gate finale d'état (au-delà du rc) : la composante visée est saine.
-    if [ -n "${gate_pred:-}" ]; then
-        if retry 120 10 "${gate_pred}"; then
-            ok "gate de reprise OK (${gate_pred})"
-        else
-            die "gate de reprise ÉCHOUÉE (${gate_pred}) — reconvergence incomplète"
-        fi
-    fi
-}
-
-# Prédicats de gate de reprise (lecture seule).
-cri_keyring_ok() { vm_sh "${CP}" sh -c 'sudo gpg --show-keys /etc/apt/keyrings/kubernetes-apt-keyring.gpg >/dev/null 2>&1 && sudo apt-cache policy kubeadm 2>/dev/null | grep -q pkgs.k8s.io'; }
-argocd_server_ready() { [ "$("${KUBECTL[@]}" -n argocd get deploy argocd-server -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = 1 ]; }
-metrics_server_ready() { [ "$("${KUBECTL[@]}" -n kube-system get deploy metrics-server -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = 1 ]; }
-# SC par défaut selon le profil (Ceph → block-replicated ; léger → local-path).
-# SC par défaut selon le profil RÉEL du banc (détecté du cluster, pas de
-# WITH_CEPH qui n'est pas exporté dans la session bootstrap-fault) : si la SC
-# Ceph existe → mode Ceph, sinon local-path.
-ceph_default_sc_or_localpath() {
-    if "${KUBECTL[@]}" get storageclass rook-ceph-block-replicated > /dev/null 2>&1; then
-        echo rook-ceph-block-replicated
-    else
-        echo local-path
-    fi
-}
-
 # ── Phase storage-simple — local-path-provisioner (mode rapide, sans Ceph) ───
 # Provisionneur de stockage simple (PVC sur disque local du nœud) pour itérer
 # vite sur la couche applicative/plateforme sans payer les ~15 min de Ceph.
@@ -743,55 +545,6 @@ phase_metrics_server() {
     log "Phase metrics-server — Metrics API (kubectl top) via Ansible"
     run_ansible_phase bootstrap/metrics-server.yaml
     ok "Metrics API disponible — kubectl top nodes/pods opérant"
-}
-
-# ── Phase platform-prereqs — pré-requis transverses de la couche plateforme ──
-# Pose ce dont les addons plateforme ont besoin et que le bootstrap nu n'installe
-# pas : la config containerd « insecure registry » sur chaque nœud pour le registry
-# interne HTTP (registry:80, ADR 0011) — sinon ImagePullBackOff « HTTP response
-# to HTTPS client » au pull des images applicatives. (L'exposition des UI est en
-# L4 NodePort, ADR 0092 — plus de CRD Gateway API à poser.)
-phase_platform_prereqs() {
-    preflight
-    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
-
-    # Exposition L4 NodePort (ADR 0092) : plus de CRD Gateway API à poser — aucun
-    # objet Gateway/HTTPRoute n'est déployé (la bordure L7 est retirée).
-    log "Phase platform-prereqs — containerd insecure-registry (registry:80 HTTP) sur chaque nœud"
-    configure_insecure_registry
-}
-
-# Configure containerd pour tirer le registry interne HTTP (registry:80) : nom
-# 'registry' résolu vers la ClusterIP (servie par Cilium eBPF) + hosts.toml HTTP.
-# Idempotent. Restart containerd pour que le CRI relise certs.d.
-configure_insecure_registry() {
-    local reg_ip vm
-    # `|| true` : sous `set -e`, l'assignation `x=$(cmd-qui-échoue)` tue le script.
-    # Or sur le banc LÉGER (monitoring seul, sans dataops) le ns registry n'existe
-    # pas → `kubectl get` sort en 1 (drift L40). On tolère l'échec et on skippe
-    # proprement via le garde ci-dessous (le registry n'est requis que par dataops).
-    reg_ip=$("${KUBECTL[@]}" -n registry get svc registry -o jsonpath='{.spec.clusterIP}' 2> /dev/null || true)
-    if [ -z "${reg_ip}" ]; then
-        warn "Service registry/registry absent — déployer le registry interne d'abord (skip insecure-registry)"
-        return 0
-    fi
-    local entry
-    for entry in "${NODES[@]}"; do
-        vm="${entry%%:*}"
-        # shellcheck disable=SC2016 # ${REG_IP} s'expanse DANS la VM (posé par `env`), pas localement
-        vm_sh "${vm}" sudo env REG_IP="${reg_ip}" sh -c '
-            grep -q " registry$" /etc/hosts || echo "${REG_IP} registry" >> /etc/hosts
-            mkdir -p "/etc/containerd/certs.d/registry:80"
-            cat > "/etc/containerd/certs.d/registry:80/hosts.toml" <<EOF
-server = "http://registry:80"
-[host."http://registry:80"]
-  capabilities = ["pull", "resolve"]
-  skip_verify = true
-EOF
-            systemctl restart containerd
-        ' || die "${vm} : configuration insecure-registry échouée"
-        ok "${vm} : registry:80 HTTP insecure configuré"
-    done
 }
 
 # ── Phase 3 — Rook-Ceph ──────────────────────────────────────────────────────
@@ -886,67 +639,6 @@ phase_smoke_s3() {
         bash "${REPO}/bench/scenarios/06-object-store-smoke.sh" \
         || die "smoke-test S3 (RGW) en échec — voir la sortie ci-dessus"
     ok "smoke-test S3 réussi (PUT/GET/DELETE sur le RGW Ceph)"
-}
-
-# ── Phase wordpress — preuve bloc : PVC RWO Ceph Bound + Pod Ready ────────────
-# Monte l'exemple WordPress (storage/ceph/wordpress/) : MySQL + WordPress, chacun
-# un PVC `ReadWriteOnce` sur la StorageClass bloc Ceph `rook-ceph-block-replicated`.
-# GATE : les deux Deployments rollout et les PVC sont Bound. Mode Ceph uniquement.
-phase_wordpress() {
-    preflight
-    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'bootstrap' d'abord"
-    log "Phase wordpress — montage PVC bloc RWO sur la SC Ceph (storage/ceph/wordpress/)"
-    # Secret `wordpress-secret` (mot de passe MySQL) : NON versionné (ADR 0023) ;
-    # mysql.yaml/wordpress.yaml le référencent en secretKeyRef. Le banc le crée
-    # avec une valeur GÉNÉRIQUE de test (idempotent) — sans lui, les pods restent
-    # en CreateContainerConfigError (« secret wordpress-secret not found »).
-    "${KUBECTL[@]}" -n default create secret generic wordpress-secret \
-        --from-literal=password='banc-wordpress-example' \
-        --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - >/dev/null
-    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/wordpress/mysql.yaml"
-    "${KUBECTL[@]}" apply -f "${REPO}/storage/ceph/wordpress/wordpress.yaml"
-
-    # GATE : les Deployments deviennent disponibles (PVC RWO Bound + Pod Ready).
-    log "  Attente du rollout MySQL + WordPress (max 5 min)"
-    "${KUBECTL[@]}" -n default rollout status deploy/wordpress-mysql --timeout=300s \
-        || die "wordpress-mysql pas Ready : $("${KUBECTL[@]}" -n default describe pvc mysql-pv-claim | tail -10)"
-    "${KUBECTL[@]}" -n default rollout status deploy/wordpress --timeout=300s \
-        || die "wordpress pas Ready : $("${KUBECTL[@]}" -n default describe pvc wp-pv-claim | tail -10)"
-    ok "WordPress monté — PVC bloc RWO Bound + Pods Ready (preuve stockage bloc Ceph)"
-
-    # SMOKE HTTP : Pod Ready ≠ application qui sert. On vérifie que WordPress
-    # RÉPOND via son Service (pod busybox éphémère → GET http://wordpress/). Une
-    # install neuve redirige (301/302) vers /wp-admin/install.php : c'est la PREUVE
-    # qu'il sert (PHP + lecture/écriture sur le PVC bloc Ceph). On accepte tout
-    # code < 400 (200/301/302) ; un timeout/5xx = échec.
-    log "  Smoke HTTP WordPress (GET http://wordpress/ via le Service)"
-    local wp_code
-    wp_code=$("${KUBECTL[@]}" -n default run wp-smoke-$$ --rm -i --restart=Never \
-        --image=busybox:1.36 --quiet --command -- \
-        wget -S -T 10 -qO /dev/null 'http://wordpress.default.svc.cluster.local/' 2>&1 \
-        | grep -oE 'HTTP/[0-9.]+ [0-9]+' | grep -oE '[0-9]+$' | head -1)
-    if [ -n "${wp_code}" ] && [ "${wp_code}" -lt 400 ]; then
-        ok "🎉 WordPress répond (HTTP ${wp_code}) — application servie sur stockage bloc Ceph"
-    else
-        die "smoke WordPress : pas de réponse HTTP < 400 (obtenu '${wp_code:-aucune}')"
-    fi
-
-    # Cleanup COMPLET : l'exemple n'a pas vocation à rester (le chemin prouve le
-    # montage, pas un service durable). On supprime les workloads + Service ET les
-    # PVC bloc Ceph (sinon volumes RBD orphelins) + le Secret. KEEP_WORDPRESS=1
-    # conserve tout pour inspection.
-    if [ "${KEEP_WORDPRESS:-0}" = 1 ]; then
-        log "ℹ️  KEEP_WORDPRESS=1 — WordPress conservé (pods + PVC + secret)."
-    else
-        log "  Cleanup WordPress (workloads + PVC bloc Ceph + secret)"
-        "${KUBECTL[@]}" delete -f "${REPO}/storage/ceph/wordpress/wordpress.yaml" --wait=false 2> /dev/null || true
-        "${KUBECTL[@]}" delete -f "${REPO}/storage/ceph/wordpress/mysql.yaml" --wait=false 2> /dev/null || true
-        # PVC + Secret ne sont pas dans les manifestes delete -f ci-dessus (le PVC
-        # y est mais on force, et le Secret est créé par la phase, pas versionné).
-        "${KUBECTL[@]}" -n default delete pvc mysql-pv-claim wp-pv-claim --wait=false 2> /dev/null || true
-        "${KUBECTL[@]}" -n default delete secret wordpress-secret 2> /dev/null || true
-        ok "WordPress nettoyé — aucun volume RBD ni secret résiduel"
-    fi
 }
 
 # ── Phase hardening — axe ORTHOGONAL de durcissement hôte (ADR 0045 §3, #240) ─
@@ -1332,140 +1024,6 @@ dataops_egress_internet_check() {
     esac
 }
 
-# ── Status — visualisation de l'état du banc (#149) ──────────────────────────
-# Lecture seule : VMs Lima (état), nœuds K8s, phases franchies (déduites de
-# l'état réel du cluster, pas d'un fichier d'étape), liens vers les UIs, et le
-# dernier run consigné. Ne monte rien, ne casse rien — utile pour « où en est le
-# banc ? » sans relire les logs.
-phase_status() {
-    require_lima
-    log "État du banc Lima"
-
-    # 1. VMs Lima + disques.
-    printf '\n  \033[1mVMs Lima\033[0m\n'
-    local entry vm st
-    for entry in "${NODES[@]}"; do
-        vm="${entry%%:*}"
-        if vm_exists "${vm}"; then
-            st=$(limactl list "${vm}" --format '{{.Status}}' 2>/dev/null || echo '?')
-            printf '    %-7s %s\n' "${vm}" "${st}"
-        else
-            printf '    %-7s \033[2mabsente\033[0m\n' "${vm}"
-        fi
-    done
-
-    # Sans kubeconfig, le cluster n'est pas joignable : on s'arrête là.
-    if [ ! -f "${KUBECONFIG_LOCAL}" ]; then
-        printf '\n  \033[2mPas de kubeconfig (%s) — cluster non démarré ?\033[0m\n' "${KUBECONFIG_LOCAL}"
-        status_last_run
-        return 0
-    fi
-
-    # 2. Nœuds K8s + phases franchies (déduites des objets réellement présents).
-    printf '\n  \033[1mNœuds Kubernetes\033[0m\n'
-    "${KUBECTL[@]}" get nodes --no-headers 2>/dev/null \
-        | awk '{printf "    %-7s %s\n", $1, $2}' || printf '    \033[2minjoignable\033[0m\n'
-
-    printf '\n  \033[1mPhases franchies\033[0m (déduites de l'\''état du cluster)\n'
-    status_probe "nœuds Ready" nodes_ready_all
-    status_probe "Ceph (OSD up)" "ceph_present"
-    status_probe "StorageClass default" "sc_default_present"
-    status_probe "DataOps (Dagster+Marquez)" "dataops_present"
-    status_probe "monitoring (Prometheus)" "prometheus_present"
-
-    # Santé par composante (verdicts de la lib pure health-classify.sh, partagée
-    # avec bootstrap/state.sh). Le banc collecte via "${KUBECTL[@]}" (cible sûre)
-    # puis classe. Best-effort : une brique absente → skip (·), pas une erreur.
-    printf '\n  \033[1mSanté des composantes\033[0m\n'
-    # Collectes best-effort : `|| true` IMPÉRATIF sous set -e — un `kubectl get`
-    # sur une ressource/ns absent sort rc≠0 et tuerait l'affectation. La brique
-    # absente vaut alors vide → classify_* rend skip (·), pas une erreur.
-    local nr rn osd_up sc d_web m_api
-    nr=$("${KUBECTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 != "Ready" {print $1}' | tr '\n' ' ' || true)
-    rn=$("${KUBECTL[@]}" get nodes --no-headers 2>/dev/null | grep -cw Ready || true)
-    status_health "nœuds" "$(classify_nodes_ready "${nr}" "${rn}")"
-    osd_up=$(toolbox_ceph osd stat 2>/dev/null | grep -oE '[0-9]+ up' | grep -oE '^[0-9]+' || true)
-    status_health "Ceph OSD" "$(classify_ceph_osd "${osd_up:-}" "${OSD_EXPECTED}")"
-    sc=$("${KUBECTL[@]}" get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
-    status_health "StorageClass défaut" "$(classify_sc_default "${sc}")"
-    d_web=$("${KUBECTL[@]}" -n dagster get deploy dagster-dagster-webserver -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
-    status_health "Dagster webserver" "$(classify_deploy_ready "Dagster webserver" "${d_web:-}" "$([ -n "${d_web}" ] && echo 1 || echo '')")"
-    m_api=$("${KUBECTL[@]}" -n marquez get deploy marquez -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
-    status_health "Marquez API" "$(classify_deploy_ready "Marquez API" "${m_api:-}" "$([ -n "${m_api}" ] && echo 1 || echo '')")"
-
-    # 3. Liens vers les UIs exposées (port-forward suggéré, pas lancé).
-    printf '\n  \033[1mAccès UIs\033[0m (port-forward à lancer si besoin)\n'
-    status_ui "API K8s" "https://127.0.0.1:${API_PORT}" ""
-    # Grafana : le Service du chart s'appelle `kube-prometheus-stack-grafana`
-    # (pas `grafana`) — drift L57. Port-forward de secours ; l'accès recommandé
-    # passe par `access.sh` (Gateway + /etc/hosts, ADR 0048).
-    status_ui_pf "Grafana" monitoring svc/kube-prometheus-stack-grafana 3000 80
-    status_ui_pf "Prometheus" monitoring svc/prometheus-operated 9090 9090
-    status_ui_pf "Marquez (web)" marquez svc/marquez-web 3000 3000
-    status_ui_pf "Dagster" dagster svc/dagster-dagster-webserver 3001 80
-    printf '    %-16s \033[2mbench/lima/access.sh\033[0m → URLs *.cluster.lan cliquables + secrets + .env atlas\n' "Tout (dev)"
-
-    status_last_run
-}
-
-# Affiche une ligne « phase franchie » : ✓/✗ selon un prédicat (lecture seule).
-status_probe() {
-    local label=$1 pred=$2
-    if "${pred}" 2>/dev/null; then
-        printf '    \033[32m✓\033[0m %s\n' "${label}"
-    else
-        printf '    \033[2m·\033[0m %s\n' "${label}"
-    fi
-}
-
-# Affiche le verdict "STATUS|message" d'un classify_* (lib health-classify) :
-# ✓ ok / ✗ fail / · skip. L'appelant collecte (kubectl) puis classe.
-status_health() {
-    local label=$1 verdict=$2 status=${2%%|*} msg=${2#*|}
-    case "${status}" in
-        ok)   printf '    \033[32m✓\033[0m %s — %s\n' "${label}" "${msg}" ;;
-        fail) printf '    \033[31m✗\033[0m %s — %s\n' "${label}" "${msg}" ;;
-        *)    printf '    \033[2m·\033[0m %s — %s\n' "${label}" "${msg}" ;;
-    esac
-}
-
-# Prédicats de présence (best-effort, lecture seule) pour le status.
-ceph_present() { [ -n "$("${KUBECTL[@]}" -n rook-ceph get deploy rook-ceph-operator -o name 2>/dev/null)" ] && osds_up; }
-sc_default_present() { "${KUBECTL[@]}" get sc -o jsonpath='{range .items[*]}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}' 2>/dev/null | grep -q true; }
-dataops_present() { [ -n "$("${KUBECTL[@]}" -n dagster get deploy -o name 2>/dev/null)" ] && [ -n "$("${KUBECTL[@]}" -n marquez get deploy -o name 2>/dev/null)" ]; }
-prometheus_present() { [ -n "$("${KUBECTL[@]}" -n monitoring get pods -l app.kubernetes.io/name=prometheus -o name 2>/dev/null)" ]; }
-
-# Affiche un lien UI direct (déjà joignable, ex. API forwardée).
-status_ui() {
-    local label=$1 url=$2
-    printf '    %-16s %s\n' "${label}" "${url}"
-}
-
-# Affiche la commande port-forward d'une UI SI le Service existe.
-# Args : label ns ressource port_local port_distant
-status_ui_pf() {
-    local label=$1 ns=$2 res=$3 lport=$4 rport=$5
-    if "${KUBECTL[@]}" -n "${ns}" get "${res}" -o name >/dev/null 2>&1; then
-        printf '    %-16s \033[2mkubectl -n %s port-forward %s %s:%s\033[0m → http://127.0.0.1:%s\n' \
-            "${label}" "${ns}" "${res}" "${lport}" "${rport}" "${lport}"
-    fi
-}
-
-# Affiche le dernier run consigné dans l'historique (date + tuple).
-status_last_run() {
-    local f last
-    f=$(metro_history_file)
-    printf '\n  \033[1mDernier run consigné\033[0m\n'
-    if [ ! -f "${f}" ] || ! grep -q '^[[:space:]]*- id:' "${f}" 2>/dev/null; then
-        # shellcheck disable=SC2016  # `atlas` est un libellé littéral, pas une expansion
-        printf '    \033[2maucun (lancer un chemin, p.ex. `atlas`, pour en consigner un)\033[0m\n'
-        return 0
-    fi
-    last=$(grep -E '^[[:space:]]*- id:' "${f}" | tail -1 | sed -E 's/.*- id:[[:space:]]*//')
-    printf '    %s\n' "${last}"
-    printf '    \033[2m(détail : %s ; fraîcheur : bench/lima/check-freshness.sh)\033[0m\n' "$(basename "${f}")"
-}
-
 # ── Down — détruit VMs + disques nommés ──────────────────────────────────────
 # phase_down [vm…] — détruit les VMs nommées (+ leurs disques). Sans argument :
 # les NODES du harnais (banc complet). AVEC arguments (noms de VM) : seulement
@@ -1494,14 +1052,15 @@ phase_down() {
     ok "VMs démontées — rien ne subsiste"
 }
 
-# ── Chemins d'installation (ADR 0045) ───────────────────────────────────────
-# Quatre chemins nommés, du plus court au plus complet. Chacun monte d'abord le
-# SOCLE (up → bootstrap [+ ceph+sc en mode Ceph], avec cache #219), puis — pour les
-# chemins store+ en local-path — la couche stockage (run_storage_simple), puis ses
-# couches applicatives. Le chemin `socle`/base reste NU (k8s + CNI, sans stockage). L'observabilité (monitoring) est posée TÔT (avant gitops/dataops)
-# pour capter leur démarrage, et fournit le backing S3 SeaweedFS que dataops
-# consomme en mode léger. Axe orthogonal : WITH_HARDENING=1 durcit l'hôte sur
-# n'importe quel chemin (#240). L'agrégat `all` est supprimé (ADR 0045 §3).
+# ── Préfixe SOCLE des chemins (ADR 0045) ────────────────────────────────────
+# Les CHEMINS NOMMÉS AGRÉGÉS (socle/atlas/storage-real/cluster-dataops/atlas-ceph/ha-3cp)
+# ont été RETIRÉS : le moteur Python `nestor` (ADR 0097) porte désormais l'orchestration
+# (séquence + gates + fraîcheur). Ne reste que l'arm GÉNÉRIQUE `layers <seq>` (filet bash
+# `--engine=bash`), qui réutilise ce préfixe socle : il monte d'abord le SOCLE (up →
+# bootstrap [+ ceph+sc en mode Ceph], avec cache #219) via run_socle pour préserver le
+# cache + le verdict SOCLE_BUILT/record_if_fresh, applique le durcissement orthogonal
+# (WITH_HARDENING=1, #240) juste après, puis boucle sur la queue applicative ordonnée par
+# Python (storage-simple → metrics → monitoring → … chaque phase = un arm unitaire).
 #
 # Variable globale `SOCLE_BUILT` (0/1) : posée par run_socle, lue à la fin pour
 # ne consigner QUE les runs from-scratch (drift L49).
@@ -1513,15 +1072,15 @@ SOCLE_BUILT=0
 # Le socle de BASE = up → bootstrap (k8s + CNI SEULS) : le STOCKAGE n'en fait PAS
 # partie (ADR 0039 : `storage` ∈ profil store, pas base ; aligné sur plan.py). En
 # mode Ceph le socle pose ceph+sc (indissociable de ce backend). En local-path, la
-# couche `storage-simple` est posée SÉPARÉMENT par les chemins store+ (atlas…) via
-# run_storage_simple — le chemin `socle` (profil base) ne la pose PAS.
+# couche `storage-simple` est posée SÉPARÉMENT par la queue de `layers` (phase unitaire),
+# pas par le socle (profil base).
 run_socle() {
     local profil
     profil=$(metro_profil "${WITH_CEPH:-0}")
     SOCLE_BUILT=0
     if metro_cache_valid "${profil}"; then
         ok "socle réutilisé depuis le cache (clé inchangée) — up/bootstrap sautés (#219)"
-        log "ℹ️  Forcer un rebuild from-scratch (preuve ADR 0034) : NO_CACHE=1 $0 ${TARGET:-atlas}"
+        log "ℹ️  Forcer un rebuild from-scratch (preuve ADR 0034) : NO_CACHE=1 nestor up (ou $0 layers …)"
         return 0
     fi
     time_phase up phase_up
@@ -1535,14 +1094,6 @@ run_socle() {
     fi
     metro_cache_save "${profil}"
     SOCLE_BUILT=1
-}
-
-# Couche STOCKAGE local-path (storage-simple), posée par les chemins store+ APRÈS le
-# socle (atlas…). Le chemin `socle`/base ne l'appelle pas. No-op en mode Ceph (le
-# stockage Ceph est déjà dans run_socle).
-run_storage_simple() {
-    [ "${WITH_CEPH:-0}" = 1 ] && return 0
-    time_phase storage-simple phase_storage_simple
 }
 
 # Consigne le run SI from-scratch (socle réellement bâti). Un run sur cache (#219)
@@ -1586,75 +1137,6 @@ run_hardening_if_requested() {
     fi
 }
 
-# ── Chemin ha-3cp — control-plane HA hyperconvergé (ADR 0047/0055, #250) ─────
-# Prouve la MÉCANIQUE HA commune (VIP kube-vip + quorum etcd qui survit à la perte
-# d'1 CP) sur 3 VM HYPERCONVERGÉES en local-path (HA ⊥ stockage : pas de Ceph).
-# Séquence (chemin nommé codé, ADR 0045/0046 — jamais à la main) :
-#   1. 3 VM (NODES override) en local-path ;
-#   2. bootstrap du CP PRIMAIRE avec la VIP comme controlPlaneEndpoint : kube-vip
-#      posé AVANT l'init (la VIP doit répondre pendant `kubeadm init`), via
-#      super-admin.conf (k8s ≥ 1.29 : admin.conf inutilisable avant que l'API
-#      tourne), puis bascule du manifeste kube-vip sur admin.conf ;
-#   3. CNI (Cilium) ;
-#   4. promotion de cp2 puis cp3, UN À UN, avec gate `etcd health` entre chaque
-#      (fenêtre N=2 fragile) ;
-#   5. stockage local-path.
-# La PREUVE (VIP joignable, survie à 1 panne, changed=0) = un run de banc consigné
-# (ADR 0034/0052) ; ce code ne vaut pas preuve seul (#250 garde-fou).
-#
-# Variables d'amorçage : HA_VIP (la VIP de l'API) et HA_VIP_IFACE (interface L2)
-# sont dérivées du réseau Lima au run (pas codées — ADR 0023) ; surchargeables.
-run_ha_3cp() {
-    preflight
-    [ "${WITH_CEPH:-0}" = 1 ] && die "ha-3cp = local-path (HA ⊥ stockage, #250) ; ne pas combiner WITH_CEPH=1"
-
-    # Topologie HA : 3 CP hyperconvergés (override NODES — le défaut du harnais est
-    # 1 CP + 2 workers ; ha-3cp est une cible à outillage dédié, cf. en-tête NODES).
-    NODES=("cp1:control" "cp2:control" "cp3:control")
-    CP=cp1  # CP primaire (init + kubeconfig + cni)
-
-    # RAM allégée : un CP local-path (etcd + apiserver + kubelet, PAS d'OSD/Ceph)
-    # tient bien en deçà des 8 GiB du défaut léger. On vise 5 GiB/CP (3×5 = 15 GiB
-    # au lieu de 3×8 = 24). NB : 4 GiB ALLOUÉS ne laissent que ~3922 MB VISIBLES
-    # (overhead firmware) → sous le plancher de 4096 MB asserté par k8s-pre-install ;
-    # 5 GiB donne ~4900 MB visibles, au-dessus. Abaisser ce plancher pour un CP
-    # SANS OSD (le 4096 vise le dimensionnement Ceph) est un suivi à mesurer (#250).
-    # N'écrase PAS un VM_MEMORY fourni explicitement par l'opérateur.
-    [ -z "${VM_MEMORY_SET}" ] && VM_MEMORY=5GiB
-
-    time_phase up phase_up
-
-    # IP user-v2 du primaire (advertise + /etc/hosts). La VIP = même /24, hors DHCP
-    # et hors plage LB-IPAM ; dérivée si non fournie.
-    local cp_ip
-    cp_ip=$(vm_uservv2_ip "${CP}")
-    [ -n "${cp_ip}" ] || die "${CP} : pas d'IP user-v2"
-    local vip="${HA_VIP:-${cp_ip%.*}.40}"
-    local vip_iface
-    vip_iface="${HA_VIP_IFACE:-$(vm_uservv2_iface "${CP}")}"
-    [ -n "${vip_iface}" ] || die "${CP} : interface user-v2 introuvable (VIP)"
-    ok "ha-3cp : VIP ${vip} sur ${vip_iface} (CP primaire ${CP} ${cp_ip})"
-
-    # Inventaire (primaire seul en control au bootstrap ; les CP rejoignent ensuite,
-    # l'orchestration Python le reconstruit via --limit). HA_CP_IP/HA_VIP exportés
-    # pour la sous-commande Python et le rappel ha-cni.
-    write_inventory "${INVENTORY}" "${CP}" ""
-    export HA_CP_IP="${cp_ip}" HA_VIP="${vip}" HA_VIP_IFACE="${vip_iface}"
-
-    # Délégation de l'ORCHESTRATION ANSIBLE à Python (« Python parle Ansible »,
-    # ADR 0063) : topology.py ha-3cp lance les playbooks via runner.launch_phase,
-    # gère l'amorçage (super-admin→admin), les gates VIP/etcd, et rappelle ici
-    # `ha-cni` pour la CNI (qui reste du bash, ADR 0049). Le provisioning VM et la
-    # CNI restent à run-phases.sh ; le « cerveau » HA est en Python testé.
-    time_phase bootstrap-ha \
-        uv run python "${REPO}/scripts/topology.py" ha-3cp \
-        --nodes cp1,cp2,cp3 --cp-ip "${cp_ip}" --vip "${vip}" \
-        --vip-iface "${vip_iface}" --inventory "${INVENTORY}"
-
-    time_phase storage-simple phase_storage_simple
-    log "🎉 Chemin 'ha-3cp' : 3 CP hyperconvergés derrière la VIP ${vip} (local-path)."
-}
-
 # ha_cni VIP_IFACE LB_PREFIX — pose Cilium sur le CP primaire (rappelé par la
 # sous-commande Python ha-3cp ; la CNI reste du bash, ADR 0049). Dérive la plage
 # LB-IPAM du /24 du primaire ; fetch le kubeconfig local après.
@@ -1670,10 +1152,10 @@ phase_ha_cni() {
     fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc
 }
 
-# NB : l'orchestration HA (bootstrap primaire, gates VIP/etcd, promotion des CP)
-# vit désormais en PYTHON (nestor/ha.py via runner.launch_phase, ADR
-# 0063), déléguée par run_ha_3cp ; seuls le provisioning VM et la CNI (phase_ha_cni)
-# restent du bash ici (orchestration de CLI, ADR 0049).
+# NB : l'orchestration HA (bootstrap primaire, gates VIP/etcd, promotion des CP) vit
+# désormais ENTIÈREMENT en PYTHON (nestor/path.py via runner.launch_phase, ADR 0063/0097) —
+# l'ancien chemin bash `ha-3cp` a été retiré (le moteur Python remplace l'orchestration) ;
+# seuls le provisioning VM et la CNI (phase_ha_cni) restent du bash ici (ADR 0049).
 
 # emit_facts — CONTRAT MACHINE pour topology.py (inversion de frontière, ADR 0049/0056).
 # Imprime sur stdout, en KEY=VALUE byte-stable, les faits du banc que Python consomme :
@@ -1689,7 +1171,7 @@ emit_facts() {
     [ -n "${l2_if}" ] || die "${CP} : interface user-v2 introuvable"
     printf 'CP_IP=%s\n' "${cp_ip}"
     printf 'L2_IFACE=%s\n' "${l2_if}"
-    # HA = plus d'un nœud `control` dans NODES → on émet la VIP (même règle que run_ha_3cp).
+    # HA = plus d'un nœud `control` dans NODES → on émet la VIP (le moteur HA Python la consomme).
     for entry in "${NODES[@]}"; do
         [ "${entry##*:}" = control ] && n_control=$((n_control + 1))
     done
@@ -1703,13 +1185,10 @@ emit_facts() {
 case "${1:-}" in
     up) time_phase up phase_up ;;
     bootstrap) time_phase bootstrap phase_bootstrap ;;
-    bootstrap-fault) time_phase bootstrap-fault phase_bootstrap_fault ;;
     storage-simple) time_phase storage-simple phase_storage_simple ;;
     metrics-server) time_phase metrics-server phase_metrics_server ;;
-    platform-prereqs) time_phase platform-prereqs phase_platform_prereqs ;;
     datalake) time_phase datalake phase_datalake ;;
     smoke-s3) time_phase smoke-s3 phase_smoke_s3 ;;
-    wordpress) time_phase wordpress phase_wordpress ;;
     hardening) time_phase hardening phase_hardening ;;
     dataops) time_phase dataops phase_dataops ;;
     gitops) time_phase gitops phase_gitops ;;
@@ -1721,33 +1200,6 @@ case "${1:-}" in
     ceph) time_phase ceph phase_ceph ;;
     sc) time_phase sc phase_sc ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc ;;
-    # ── socle : up → bootstrap → stockage. Smoke-test rapide (ADR 0045). ──────
-    socle)
-        TARGET=socle
-        chemin_prelude
-        run_start=$(date +%s)
-        run_socle
-        run_hardening_if_requested
-        log "🎉 Chemin 'socle' : socle monté (profil $(metro_profil "${WITH_CEPH:-0}"))."
-        record_if_fresh "${run_start}"
-        ;;
-    # ── metrics : socle léger → metrics-server SEUL (palier fin, ADR 0068). ──────
-    # Plus petit cran d'observabilité : l'API `kubectl top` sans Prometheus/Grafana
-    # (obs). metrics-server n'a pas de dépendance stockage → posé juste après le
-    # socle, sans storage-simple. Cache socle #219 : up/bootstrap réutilisés.
-    metrics)
-        TARGET=metrics
-        if [ "${WITH_CEPH:-0}" = 1 ]; then
-            die "chemin 'metrics' = palier léger (ADR 0068) ; ne pas combiner avec WITH_CEPH=1"
-        fi
-        chemin_prelude
-        run_start=$(date +%s)
-        run_socle
-        run_hardening_if_requested
-        time_phase metrics-server phase_metrics_server
-        log "🎉 Chemin 'metrics' : socle → metrics-server (kubectl top opérant)."
-        record_if_fresh "${run_start}"
-        ;;
     # ── layers : séquence ARBITRAIRE de phases, ORDONNÉE par topology.py (ADR 0069). ─
     # L'arm générique des paliers SANS preset dédié (ex. [gitops, metrics]). Python
     # fournit l'ordre (resolve_layers, tri topo du graphe atomique) ; bash EXÉCUTE,
@@ -1775,109 +1227,6 @@ case "${1:-}" in
         log "🎉 Chemin 'layers' : socle → ${2//,/ → }."
         record_if_fresh "${run_start}"
         ;;
-    # ── atlas : socle léger → monitoring → gitops → dataops (ADR 0044/0045). ──
-    # Observabilité d'abord (capte la suite + pose SeaweedFS) ; puis socle GitOps
-    # (Gitea + Argo CD) ; puis l'INFRA DataOps (CNPG/Dagster/Marquez vides — les
-    # workflows atlas viendront par Argo CD, scénario 27 / #231). Profil local-path
-    # (pas de Ceph sur le banc atlas).
-    atlas)
-        TARGET=atlas
-        if [ "${WITH_CEPH:-0}" = 1 ]; then
-            die "chemin 'atlas' = profil local-path (ADR 0044) ; ne pas combiner avec WITH_CEPH=1 (utiliser 'storage-real'/'cluster-dataops')"
-        fi
-        chemin_prelude
-        run_start=$(date +%s)
-        run_socle
-        run_hardening_if_requested
-        run_storage_simple  # couche stockage local-path (atlas = dataops, crée des PVC)
-        # metrics-server AVANT monitoring : palier 1 autonome (#252), rend
-        # `kubectl top` opérant dès le socle — un dev atlas voit l'usage CPU/RAM.
-        time_phase metrics-server phase_metrics_server
-        time_phase monitoring phase_monitoring
-        time_phase gitops phase_gitops
-        time_phase dataops phase_dataops
-        # gitops-seed APRÈS dataops : l'init pousse un workflow qui référence
-        # l'image émetteur (buildée par dataops) et cible le ns dagster (monté
-        # par dataops). Argo CD réconcilie ensuite le workflow depuis Gitea.
-        time_phase gitops-seed phase_gitops_seed
-        # portail EN DERNIER : il observe les Services NodePort des couches montées
-        # ci-dessus (ADR 0091/0092) — placé tard pour avoir des UI à lister (il marche
-        # dès le socle, SKIP neutre par endpoint absent).
-        time_phase portal phase_portal
-        log "🎉 Chemin 'atlas' : storage-simple → metrics-server → monitoring → gitops → dataops → gitops-seed → portal."
-        log "ℹ️  Preuve e2e des workflows atlas par GitOps : scénario 27 (#231)."
-        log "👉 Accès dev (UI en NodePort L4 + secrets + .env atlas) : bench/lima/access.sh (ADR 0048/0092)."
-        record_if_fresh "${run_start}"
-        ;;
-    # ── storage-real : socle Ceph → datalake → smoke S3 + WordPress (ADR 0045). ─
-    # Preuve du STOCKAGE réel (bloc RWO + objet S3/RGW), PAS la chaîne applicative.
-    # Banc Ceph qui porte aussi les scénarios 01–22 (résilience/sécu/chaos).
-    storage-real)
-        TARGET="storage-real"
-        WITH_CEPH=1
-        chemin_prelude
-        run_start=$(date +%s)
-        run_socle
-        run_hardening_if_requested
-        time_phase datalake phase_datalake
-        time_phase smoke-s3 phase_smoke_s3
-        time_phase wordpress phase_wordpress
-        log "🎉 Chemin 'storage-real' (Ceph) : datalake → smoke S3 (RGW) → montage WordPress."
-        log "ℹ️  Scénarios 01–22 jouables sur ce banc monté (ADR 0045 §4)."
-        record_if_fresh "${run_start}"
-        ;;
-    # ── cluster-dataops : socle Ceph → datalake → monitoring → dataops (ADR 0045). ─
-    # Chaîne DataOps complète sur stockage réel (confirme atlas en mode Ceph).
-    # Pas de GitOps dans ce chemin.
-    cluster-dataops)
-        TARGET="cluster-dataops"
-        WITH_CEPH=1
-        chemin_prelude
-        run_start=$(date +%s)
-        run_socle
-        run_hardening_if_requested
-        time_phase datalake phase_datalake
-        time_phase monitoring phase_monitoring
-        time_phase dataops phase_dataops
-        log "🎉 Chemin 'cluster-dataops' (Ceph) : datalake → monitoring → dataops."
-        record_if_fresh "${run_start}"
-        ;;
-    # ── atlas-ceph : banc atlas COMPLET sur stockage réel (Ceph) + GitOps + UI. ──
-    # L'ordre est CODÉ (ne jamais enchaîner ces phases à la main) : le socle Ceph,
-    # puis datalake (RGW — requis par Loki/monitoring en mode Ceph ET par Barman),
-    # monitoring (observe la suite), gitops (Gitea+Argo CD, SC Ceph car WITH_CEPH),
-    # dataops (CNPG/Dagster/Marquez + build émetteur), enfin gitops-seed (pousse le
-    # workflow qui référence l'image émetteur buildée par dataops). C'est le banc
-    # sur lequel on vérifie les UI/portail (#232, scénario 28) en mode Ceph.
-    atlas-ceph)
-        TARGET="atlas-ceph"
-        WITH_CEPH=1
-        chemin_prelude
-        run_start=$(date +%s)
-        run_socle
-        run_hardening_if_requested
-        time_phase datalake phase_datalake
-        time_phase monitoring phase_monitoring
-        time_phase gitops phase_gitops
-        time_phase dataops phase_dataops
-        time_phase gitops-seed phase_gitops_seed
-        time_phase portal phase_portal
-        log "🎉 Chemin 'atlas-ceph' : Ceph → datalake → monitoring → gitops → dataops → gitops-seed → portal."
-        log "ℹ️  UI exposées : vérifier via le scénario 28 (URLs via Gateway, #232)."
-        record_if_fresh "${run_start}"
-        ;;
-    # ── ha-3cp : control-plane HA hyperconvergé, 3 CP derrière la VIP kube-vip ──
-    # (ADR 0047/0055, #250). local-path (HA ⊥ stockage). La PREUVE = ce run consigné
-    # (VIP joignable + quorum etcd survivant à 1 panne CP, ADR 0034/0052).
-    ha-3cp)
-        TARGET="ha-3cp"
-        WITH_CEPH=0
-        chemin_prelude
-        run_start=$(date +%s)
-        run_ha_3cp
-        run_hardening_if_requested
-        record_if_fresh "${run_start}"
-        ;;
     # ha-cni : rappel interne de la sous-commande Python ha-3cp (la CNI reste bash,
     # ADR 0049). Args : <vip_iface>. (Le préfixe LB-IPAM n'est plus requis : le
     # Gateway s'expose en hostNetwork, ADR 0071 — plus de pool d'IP au banc.)
@@ -1891,7 +1240,6 @@ case "${1:-}" in
     # ha-inventory <cp1,cp2,…> — ALIAS de compat (= inventory <cp> sans workers, HA
     # hyperconvergé). Conservé le temps de la transition (rappel ha-3cp). Préférer `inventory`.
     ha-inventory) [ -n "${2:-}" ] || die "usage : ha-inventory <cp1,cp2,…>"; mkdir -p "${WORKDIR}"; write_inventory "${INVENTORY}" "$(echo "$2" | tr ',' ' ')" "" ;;
-    status) phase_status ;;
     down) phase_down "${@:2}" ;;
     # Rollback d'UNE phase (ADR 0054, #274) : défait ce que `<phase>` a monté.
     # BANC_JETABLE=1 requis (destructif total). Ex : BANC_JETABLE=1 ... rollback ceph
