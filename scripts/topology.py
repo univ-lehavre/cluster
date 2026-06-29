@@ -73,6 +73,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 
@@ -232,6 +233,74 @@ def cmd_kubectl(args: argparse.Namespace) -> int:
         ["kubectl", *passthrough], env=env, check=False
     )
     return proc.returncode
+
+
+def _resolve_playbook(name: str) -> str:
+    """Chemin absolu d'un playbook : accepte `checks.yaml` (→ bootstrap/checks.yaml)
+    ou un chemin déjà relatif au dépôt (`bootstrap/checks.yaml`, `bootstrap/security/secure.yml`).
+    `_UsageError` (code 2) si introuvable — AVANT de dériver le moindre inventaire."""
+    for candidate in (name, os.path.join("bootstrap", name)):
+        path = os.path.join(_ROOT, candidate)
+        if os.path.isfile(path):
+            return path
+    raise _UsageError(f"playbook introuvable : {name} (ni {name} ni bootstrap/{name})")
+
+
+def cmd_ansible(args: argparse.Namespace) -> int:
+    """`nestor ansible <playbook> [args ansible…]` : lance un playbook sur la STACK ACTIVE
+    avec un inventaire DÉRIVÉ de la topologie — jamais un inventaire statique pointable.
+
+    Source unique d'inventaire (ADR 0098) : `bootstrap/hosts.yaml` n'existe plus. Au lieu de
+    `ansible-playbook -i bootstrap/hosts.yaml <play>` (le vecteur de l'incident Rook-Ceph),
+    on dérive l'inventaire de la topo active (`render_prod_inventory`/`render_lima_inventory`)
+    dans un TEMPORAIRE, on passe le garde `_assert_inventory_safe` (Python, AVANT ansible —
+    le filet décisif d'isolation banc/prod, ADR 0053), on pose `EXPECTED_TARGET_KIND` pour
+    réarmer l'assert audit-log par-play, on lance, et on nettoie le temp en `finally`.
+
+    Les arguments résiduels (`--limit cp1`, `--tags os`, `--check`, `-e k=v`…) sont passés
+    tels quels à ansible-playbook. Code de sortie = celui d'ansible-playbook.
+    """
+    topo = load_topology(_resolve(args.file))
+    playbook_abs = _resolve_playbook(args.playbook)
+    passthrough = list(getattr(args, "ansible_args", []) or [])
+
+    # Inventaire de la cible. Banc : le fichier réel posé par le banc (target_kind lima).
+    # Prod : on REND l'inventaire de la topo dans un temp (jamais un fichier versionné).
+    tmp_inv: str | None = None
+    if topo.target_kind == "lima":
+        inv_path = _inventory_for(topo)
+        if not os.path.isfile(inv_path):
+            raise _UsageError(
+                f"inventaire banc absent ({inv_path}) — monter le banc d'abord (`nestor up`)"
+            )
+    else:
+        rendered = _render_inventory(topo, "prod", None)
+        fd, tmp_inv = tempfile.mkstemp(prefix="nestor-inv-", suffix=".yaml")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(rendered)
+        os.chmod(tmp_inv, 0o600)
+        inv_path = tmp_inv
+
+    try:
+        # Garde d'isolation (ADR 0053) AVANT ansible : refuse un inventaire qui SSHerait
+        # sur une cible non conforme à l'intention déclarée (topo.target_kind).
+        _assert_inventory_safe(f"nestor ansible ({args.playbook})", inv_path, topo)
+        env = {
+            **os.environ,
+            "EXPECTED_TARGET_KIND": topo.target_kind,
+            "ANSIBLE_CONFIG": os.path.join(_ROOT, "bootstrap", "ansible.cfg"),
+        }
+        proc = subprocess.run(  # noqa: S603 — playbook du dépôt + args opérateur, inventaire sûr
+            ["ansible-playbook", "-i", inv_path, playbook_abs, *passthrough],
+            cwd=os.path.join(_ROOT, "bootstrap"),
+            env=env,
+            check=False,
+        )
+        return proc.returncode
+    finally:
+        if tmp_inv is not None:
+            with contextlib.suppress(OSError):
+                os.remove(tmp_inv)
 
 
 def _kubeconfig_reaches_api(kubeconfig: str) -> bool:
@@ -4182,6 +4251,7 @@ _DISPATCH = {
     # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) : `nestor` maintient des contextes kubectl
     # nommés (posés par `stack select`). Remplaçant ergonomique = `nestor kubectl …` :
     "kubectl": cmd_kubectl,  # kubectl sur la cible de la stack active (ex-`nestor env`)
+    "ansible": cmd_ansible,  # playbook sur la cible active, inventaire DÉRIVÉ (ADR 0098)
     "access": cmd_access,  # accès dev (URLs + secrets) — délègue à access.sh (ADR 0048)
     "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
     "discover": cmd_discover,  # reconstruit un topology.yaml depuis le réel (ADR 0074, inverse de generate)  # noqa: E501
@@ -4419,6 +4489,23 @@ def _build_parser() -> argparse.ArgumentParser:
     # (`nestor kubectl get pods -A`, `nestor kubectl -n monitoring logs …`).
     p_kubectl.add_argument(
         "kubectl_args", nargs=argparse.REMAINDER, help="arguments passés à kubectl"
+    )
+
+    p_ansible = sub.add_parser(
+        "ansible",
+        help="lancer un playbook sur la stack active (inventaire dérivé, ADR 0098)",
+    )
+    p_ansible.add_argument(
+        "-f", "--file", default=None, help="topology.yaml à viser (défaut : stack active)"
+    )
+    p_ansible.add_argument(
+        "playbook", help="playbook (ex. checks.yaml, security/secure.yml — résolu sous bootstrap/)"
+    )
+    # REMAINDER : le playbook vient EN PREMIER, les flags ansible APRÈS
+    # (`nestor ansible checks.yaml --limit cp1 --tags os --check`). Limite connue :
+    # un flag placé AVANT le playbook ne serait pas capturé — le playbook d'abord.
+    p_ansible.add_argument(
+        "ansible_args", nargs=argparse.REMAINDER, help="arguments passés à ansible-playbook"
     )
 
     p_access = sub.add_parser(

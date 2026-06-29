@@ -117,3 +117,4 @@ Format léger inspiré de Michael Nygard :
 | 0095 | [Build applicatif événementiel in-cluster : fabrique d'images et déploiement GitOps zéro-touch](0095-build-applicatif-evenementiel-in-cluster.md) | Proposed           |
 | 0096 | [Graphe de topologie Python figé, vérifié contre Ansible](0096-graphe-topologie-python-verifie-ansible.md)                                        | Accepted           |
 | 0097 | [Moteur de chemin Python ; bash réduit aux artefacts node-side](0097-moteur-chemin-python-bash-artefacts.md)                                      | Accepted           |
+| 0098 | [Source unique d'inventaire : `nestor` dérive l'inventaire, `hosts.yaml` supprimé](0098-source-unique-inventaire-nestor-derive.md)                | Proposed           |
