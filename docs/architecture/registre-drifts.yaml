@@ -1020,30 +1020,36 @@ drifts:
     statut: corrige
 
   - id: L66
-    campagne: 'containerd 2.3.x — banc Lima (VM fraîche ou après reboot)'
+    campagne: 'containerd 2.3.x bundlé par nerdctl-full — banc Lima (sous charge, montage dataops)'
     portee: env
     symptome: >-
-      Sur le banc Lima (VM fraîche OU après reboot), TOUT nouveau pod reste bloqué
-      en ContainerCreating/Init : « FailedCreatePodSandBox: failed to start shim:
-      failed to create TTRPC connection: unsupported protocol: Yunix » (octets
-      parasites \b\x03\x12 devant Yunix).
+      Au banc Lima, sous charge (montage dataops, au moment d'attendre le dagster
+      webserver), ~13 % des nouveaux pods restent bloqués en ContainerCreating/Init :
+      « FailedCreatePodSandBox: failed to start shim: failed to create TTRPC
+      connection: unsupported protocol: \b\x03\x12Yunix:// » (octets protobuf
+      parasites devant ce qui devrait être « unix:// »). NON lié au reboot (hypothèse
+      initiale fausse : VM bootée bien avant le montage, containerd n'avait pas
+      redémarré) — survient à la NÉGOCIATION de nouveaux shims.
     cause: >-
-      Bug CONNU de containerd 2.3.x (vécu aussi Arch/EndeavourOS/Fedora) :
-      containerd 2.3 a changé le transport ttrpc d'abstract unix socket vers
-      normal unix domain socket ; un shim runc compilé contre une ancienne ttrpc
-      ne comprend pas le nouveau format d'adresse → parse foireux. NON corrigé en
-      containerd 2.3.2 (notre version ; son fix #13512 concerne d'autres timeouts
-      RPC). Config containerd standard de notre côté (`containerd config default`
-      + SystemdCgroup), pas notre faute.
+      Cause racine PROUVÉE (et non l'abstract→normal socket supposé d'abord) : le
+      containerd qui sert de runtime k8s n'est PAS le paquet apt containerd.io —
+      c'est celui que `nerdctl-full` (rôle platform-build-images) embarque, extrait
+      dans /usr/local/ et dont il pose le service systemd
+      (/usr/local/lib/systemd/system/containerd.service), masquant le paquet apt.
+      nerdctl-full 2.3.3 embarque containerd 2.3.2, dont le nouveau protocole
+      `BootstrapParams` du shim (introduit en 2.3) partage stdout/stderr : si runc
+      écrit sur stderr au démarrage, les octets POLLUENT l'adresse socket que
+      containerd parse → « Yunix ». Bug de code upstream, PAS réglable par config.toml.
     correctif: >-
-      Palliatif manuel : `systemctl restart containerd` dans la VM +
-      `kubectl delete pod --force` (les pods gardent la réf à l'ancien sandbox).
-      Fix durable DÉCIDÉ : coder un restart containerd post-bootstrap dans le rôle
-      k8s-CRI-install (ADR 0046) — à implémenter+prouver. Recherche web 2026-06-29
-      (issue containerd #13316 proche mais distincte ; ttrpc-rust #115 sur le
-      transport socket).
-    statut: en-cours
-    issue: '#513' # fix durable : restart containerd post-bootstrap (Yunix containerd 2.3.x)
+      nerdctl_version 2.3.3 → 2.2.2 (embarque containerd 2.2.1, antérieur au protocole
+      BootstrapParams, sans le bug) + ses 2 checksums (platform-build-images/defaults).
+      PROUVÉ au banc (ADR 0034) : containerd 2.2.1 installé, pods Dagster recréés →
+      Running en ~20 s SANS restart manuel, aucune erreur Yunix. Palliatif manuel
+      (restart containerd + delete pod --force) plus requis. La piste « restart/drop-in
+      post-bootstrap » était fausse (le bug est au montage à chaud, pas au reboot).
+      À rebumper vers 2.3.x quand containerd corrige le partage stdout/stderr du shim.
+    statut: corrige
+    issue: '#513' # corrigé : nerdctl-full 2.2.2 (containerd 2.2.1), prouvé au banc
 
   # ── Drifts antérieurs à la refonte (postérieurs à L58, d'avant les runs
   #    --engine=python) jamais consignés — L67–L72 ──────────────────────────
