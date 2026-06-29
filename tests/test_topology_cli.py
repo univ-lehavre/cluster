@@ -1754,40 +1754,41 @@ class NextHealthGate(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("PAS saine", err.getvalue())
 
-    def test_gitops_seed_delegates_to_runphases_not_usage_error(self):
-        # Régression : `next` proposait gitops-seed (playbook None) puis _monter_phase
-        # levait « pas un play unitaire » → menu incohérent. Une phase SANS playbook mais
-        # AVEC un arm run-phases.sh doit être DÉLÉGUÉE (bash run-phases.sh <phase>), pas
-        # refusée. On stube subprocess.run pour capter la délégation.
+    def test_gitops_seed_routes_to_python_seed_not_usage_error(self):
+        # `gitops-seed` (playbook None) est une phase DÉLÉGUÉE : `_monter_phase` la route vers
+        # le câblage Python `_launch_seed` (seed.run_seed), PARITÉ `_run_path_engine` (un seul
+        # moteur depuis le retrait du filet bash). Elle ne lève PLUS « pas un play unitaire »
+        # et ne passe PLUS par un arm run-phases.sh. On stube `_launch_seed` (zéro Gitea réel).
         topo = cli.load_topology(_EXAMPLE)
-        captured = {}
+        called = {}
 
-        class _CP:
-            returncode = 0
+        def fake_seed(phase, t, derived):
+            called["phase"] = phase
+            return cli._SeedLaunchResult(ok=True, message="stub")
 
-        def fake_run(argv, **kw):
-            captured["argv"] = argv
-            return _CP()
+        orig_seed = cli._launch_seed
+        cli._launch_seed = fake_seed
+        self.addCleanup(setattr, cli, "_launch_seed", orig_seed)
+        # Aucun subprocess (ni run-phases.sh, ni ansible-runner) ne doit être lancé.
+        orig_run = cli.subprocess.run
 
-        orig = cli.subprocess.run
-        cli.subprocess.run = fake_run
-        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        def _no_subprocess(argv, **kw):
+            raise AssertionError(f"gitops-seed ne doit PAS sheller un subprocess : {argv!r}")
+
+        cli.subprocess.run = _no_subprocess
+        self.addCleanup(setattr, cli.subprocess, "run", orig_run)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             rc = cli._monter_phase(topo, "gitops-seed", {})
         self.assertEqual(rc, 0)
-        # délégué à `bash <run-phases.sh> gitops-seed`, JAMAIS un play ansible-runner.
-        self.assertEqual(captured["argv"][0], "bash")
-        self.assertEqual(captured["argv"][-1], "gitops-seed")
+        self.assertEqual(called["phase"], "gitops-seed")  # routé vers le seed Python
 
     def test_phase_without_playbook_and_without_arm_is_usage_error(self):
-        # garde-fou inverse : une phase sans play unitaire NI arm → erreur d'usage nette.
+        # garde-fou inverse : une phase déléguée sans play unitaire, sans câblage seed NI arm
+        # run-phases.sh (le filet bash a été retiré → `hardening` n'a plus d'arm) → usage net.
         topo = cli.load_topology(_EXAMPLE)
-        orig = cli._has_runphases_arm
-        cli._has_runphases_arm = lambda phase: False
-        self.addCleanup(setattr, cli, "_has_runphases_arm", orig)
         with self.assertRaises(cli._UsageError):
-            cli._monter_phase(topo, "gitops-seed", {})
+            cli._monter_phase(topo, "hardening", {})
 
 
 class Metrics(unittest.TestCase):
@@ -2166,51 +2167,39 @@ class Stack(unittest.TestCase):
 
 
 class UpCommand(unittest.TestCase):
-    """`up` : dérive le chemin → affiche le plan → confirme → délègue à run-phases.sh."""
+    """`up` : dérive le chemin → affiche le plan → confirme → MONTE via le moteur Python
+    `_run_path_engine` (SEUL moteur depuis le retrait du filet bash run-phases.sh)."""
 
-    def _stub_runphases(self, rc=0):
-        # Capture l'appel à run-phases.sh (PAS de vrai montage en test). `self.env`
-        # garde l'environnement passé (pour vérifier NODES_OVERRIDE).
-        # ADR 0083 : `expected_phase_sequence` shelle MAINTENANT le graphe atomique
-        # (rollback-lib.sh via `nestor.layers.subprocess.run`) pour DÉRIVER la séquence.
-        # On n'intercepte donc QUE `run-phases.sh` et on LAISSE PASSER les appels au
-        # graphe (`bash -c '. rollback-lib.sh && …'`) vers le vrai subprocess (local,
-        # déterministe, sans banc) — sinon `_rb` planterait sur un faux retour sans
-        # `.stdout`. On stube les DEUX modules (cli + nestor.layers).
+    def _stub_engine(self, rc=0):
+        # Espionne `_run_path_engine` (le SEUL moteur) : capture (target, seq, stack_name).
+        # Le montage (le moteur) est stubé ; on LAISSE PASSER les appels subprocess au GRAPHE
+        # (rollback-lib.sh) pour que `expected_phase_sequence` dérive la séquence (les sondes
+        # réelles _ready_nodes/_real_vms tapent limactl/kubectl → déniées en CompletedProcess
+        # vide, qu'elles tolèrent : plan annoté « tout à installer », neutre en test).
+        _install_graph_passthrough(self)
         calls = []
-        self.env = {}
-        # VRAI subprocess.run capté AVANT le default-deny du module (sinon `subprocess.run`
-        # est déjà `_deny_run`, qui rendrait un graphe vide).
-        real_run = _REAL_SUBPROCESS_RUN
 
-        def _spy(cmd, *a, **k):
-            argv = cmd if isinstance(cmd, list) else [cmd]
-            if any("run-phases.sh" in str(c) for c in argv):
-                calls.append(cmd)
-                self.env = k.get("env", {})
-                return subprocess.CompletedProcess(args=cmd, returncode=rc)
-            return real_run(cmd, *a, **k)  # laisse tourner le GRAPHE pour de vrai
+        def _spy(topo, target, seq, stack_name, a_appliquer=None):
+            calls.append({"target": target, "seq": list(seq), "stack_name": stack_name})
+            return rc
 
-        # `cli.subprocess` est le MÊME module que `nestor.layers.subprocess` : un seul poser.
-        orig = cli.subprocess.run
-        cli.subprocess.run = _spy
-        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        orig = cli._run_path_engine
+        cli._run_path_engine = _spy
+        self.addCleanup(setattr, cli, "_run_path_engine", orig)
         return calls
 
-    def test_yes_derives_path_and_delegates(self):
-        # Délégation BASH (run-phases.sh) : le défaut moteur est désormais `python` (ADR 0097),
-        # donc on force `--engine=bash` pour tester le FILET de délégation (toujours présent).
-        calls = self._stub_runphases()
-        code, out, _ = _capture(["up", "-f", _EXAMPLE, "--yes", "--engine", "bash"])
+    def test_yes_derives_path_and_mounts_via_engine(self):
+        # `nestor up` dérive le chemin, affiche le plan, puis MONTE via `_run_path_engine`
+        # (un seul moteur). La séquence vient du graphe atomique (ADR 0083).
+        calls = self._stub_engine()
+        code, out, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 0)
         self.assertIn("Couches à monter", out)  # le plan affiché
-        # ADR 0083 : `default_target` rend `layers` (plus de preset dérivé) → délégation
-        # à l'arm GÉNÉRIQUE `run-phases.sh layers <séquence-virgules>`, l'ordre venant du
-        # graphe atomique. socle.example (ceph) dérive up,bootstrap,ceph,sc,datalake,…
-        self.assertEqual(len(calls), 1)
-        self.assertIn("run-phases.sh", " ".join(calls[0]))
-        self.assertEqual(calls[0][-2], "layers")  # arm générique, pas un preset nommé
-        seq = calls[0][-1].split(",")  # séquence complète passée à `layers`
+        self.assertEqual(len(calls), 1)  # le moteur Python appelé une fois
+        # ADR 0083 : `default_target` rend `layers` (plus de preset dérivé), l'ordre venant
+        # du graphe atomique. socle.example (ceph) dérive bootstrap,ceph,sc,datalake,…
+        self.assertEqual(calls[0]["target"], "layers")
+        seq = calls[0]["seq"]
         # _EXAMPLE est `target_kind: prod` → PAS de phase `up` (nœuds baremetal
         # préexistants, ADR 0084) : le socle prod commence à `bootstrap`.
         self.assertNotIn("up", seq)
@@ -2219,55 +2208,35 @@ class UpCommand(unittest.TestCase):
         self.assertIn("datalake", seq)
 
     def test_explicit_target_overrides_derivation(self):
-        calls = self._stub_runphases()
-        code, _, _ = _capture(
-            ["up", "-f", _EXAMPLE, "--target", "atlas-ceph", "--yes", "--engine", "bash"]
-        )
+        calls = self._stub_engine()
+        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--target", "atlas-ceph", "--yes"])
         self.assertEqual(code, 0)
-        self.assertIn("atlas-ceph", calls[0])
+        self.assertEqual(calls[0]["target"], "atlas-ceph")
 
-    def test_passes_nodes_override_from_topology(self):
-        # La TOPOLOGIE pilote les nœuds du banc : up passe NODES_OVERRIDE dérivé.
-        self._stub_runphases()
-        # _EXAMPLE (socle.example) = cp1 control + node1..4 workers. NODES_OVERRIDE = un env
-        # passé à run-phases.sh → délégation BASH (--engine=bash, le moteur python défaut ne
-        # passe pas par cet env).
-        _capture(["up", "-f", _EXAMPLE, "--yes", "--engine", "bash"])
-        override = self.env.get("NODES_OVERRIDE", "")
-        self.assertIn("cp1:control", override)
-        self.assertIn("node1:worker", override)
-
-    def test_single_node_topology_yields_one_node(self):
-        # Une topo 1 nœud → NODES_OVERRIDE à UN seul nœud (la topologie décide).
-        topo_yaml = (
-            "catalog: {topology: solo, profile: base}\n"
-            "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
-        )
-        path = _tmp(topo_yaml)
-        self.addCleanup(os.unlink, path)
-        self._stub_runphases()
-        # délégation bash (NODES_OVERRIDE n'est passé que par le chemin run-phases.sh)
-        _capture(["up", "-f", path, "--yes", "--engine", "bash"])
-        self.assertEqual(self.env.get("NODES_OVERRIDE"), "cp1:control")
+    def test_passes_stack_name_to_engine(self):
+        # Le NOM de la stack active (catalog.topology) est transmis au moteur (clé de
+        # fraîcheur PAR STACK). _EXAMPLE (socle.example) déclare une topologie nommée.
+        calls = self._stub_engine()
+        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertNotEqual(calls[0]["stack_name"], "—")  # une vraie stack, pas le défaut
 
     def test_refuses_without_yes_off_tty(self):
-        calls = self._stub_runphases()
+        calls = self._stub_engine()
         code, _, err = _capture(["up", "-f", _EXAMPLE])  # hors TTY, pas de --yes
         self.assertEqual(code, 2)
-        self.assertEqual(calls, [])  # run-phases.sh JAMAIS appelé
+        self.assertEqual(calls, [])  # le moteur JAMAIS appelé (confirmation refusée)
         self.assertIn("refusé", err)
 
     def test_propagates_mount_failure(self):
-        self._stub_runphases(rc=2)  # run-phases.sh échoue
-        code, _, err = _capture(["up", "-f", _EXAMPLE, "--yes", "--engine", "bash"])
+        self._stub_engine(rc=1)  # le moteur Python échoue
+        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 1)
-        self.assertIn("échec", err)
 
     def test_incoherent_target_is_usage_error(self):
         # ADR 0083 : `atlas` est backend-agnostique (n'est plus incohérent sur ceph). Le
         # vrai cas incohérent reste un preset CEPH-ONLY (`storage-real`) sur une topo
-        # local-path → PlanError → usage (2), avant toute délégation.
+        # local-path → PlanError → usage (2), avant tout montage.
         topo_yaml = (
             "catalog: {topology: lp, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
@@ -2275,7 +2244,7 @@ class UpCommand(unittest.TestCase):
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
-        calls = self._stub_runphases()
+        calls = self._stub_engine()
         code, _, err = _capture(["up", "-f", path, "--target", "storage-real", "--yes"])
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])

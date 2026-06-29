@@ -1,21 +1,21 @@
 """Tests de la FAÇADE du moteur de chemin Python (`nestor.path.run_path`) — LOT 6 (ADR 0097).
 
-Câblage façade exposé derrière le FLAG opt-in `nestor up --engine=python` (cf.
-`scripts/topology.py:_run_path_engine` / `_path_context` / `_provision_via_bash`). Ces
-tests sont PURS (I/O injectée : runner stubé, gates stubées, run-phases.sh espionné) —
-ZÉRO cluster, ZÉRO provisionnement réel (filet de sécurité hérité de test_topology_cli).
+Câblage façade du SEUL moteur de montage (`scripts/topology.py:_run_path_engine` /
+`_path_context` / `_provision_via_bash`) : depuis le retrait du filet bash, `nestor up`
+MONTE TOUJOURS via ce moteur Python. Ces tests sont PURS (I/O injectée : runner stubé,
+gates stubées, run-phases.sh espionné) — ZÉRO cluster, ZÉRO provisionnement réel (filet
+de sécurité hérité de test_topology_cli).
 
 Ils couvrent la LOGIQUE de câblage (le moteur lui-même est testé dans test_path.py) :
   - `_path_context` dérive PathContext de la topo (cp = 1er control, PAS codé en dur) ;
-  - le FLAG route bien (python → run_path ; défaut/absent → run-phases.sh) ;
-  - non-régression : SANS `--engine`, cmd_up délègue EXACTEMENT à run-phases.sh (inchangé) ;
+  - `cmd_up` route vers `_run_path_engine` (seul moteur ; run-phases.sh PAS appelé) ;
   - les callbacks appellent les BONNES briques (launch_phase_idempotent, gate, provision) ;
   - assert_safe REFUSE une cible non-banc (garde d'isolation à chaque phase) ;
   - les hooks e2e (dataops) LÈVENT (stub honnête) → le montage s'arrête net (pas de fallback).
 
 ⚠️ HONNÊTETÉ (ADR 0034) : ces tests prouvent la LOGIQUE de câblage, PAS le montage réel au
-banc. La preuve définitive du chemin `--engine=python` est un run banc mono-nœud du
-mainteneur (cf. `nestor.path.banc_todo`). NE PRÉTENDS JAMAIS l'avoir prouvé ici.
+banc. La preuve définitive du chemin Python est un run banc mono-nœud du mainteneur
+(cf. `nestor.path.banc_todo`). NE PRÉTENDS JAMAIS l'avoir prouvé ici.
 """
 
 import base64
@@ -105,7 +105,7 @@ def _capture(argv):
 
 # Topo BANC mono-nœud (target_kind: lima) : cp1 control+worker, local-path, AVEC une couche
 # applicative (storage-simple) déclarée → la séquence a un play unitaire (storage-simple) APRÈS
-# le socle (up, bootstrap). Le chemin `--engine=python` se TESTE au banc mono-nœud (ADR 0097).
+# le socle (up, bootstrap). Le chemin du moteur Python se TESTE au banc mono-nœud (ADR 0097).
 _LIMA_SOLO = (
     "catalog: {topology: solo}\n"
     "layers: [storage-simple]\n"
@@ -157,8 +157,9 @@ class PathContextDerivation(unittest.TestCase):
         self.assertEqual(ctx.inventory, cli._BENCH_INVENTORY)
 
 
-class FlagRouting(unittest.TestCase):
-    """Le FLAG `--engine` route le montage ; le DÉFAUT (bash) reste run-phases.sh."""
+class EngineRouting(unittest.TestCase):
+    """`cmd_up` MONTE TOUJOURS via le moteur Python `_run_path_engine` — le filet bash
+    `--engine=bash`/run-phases.sh a été RETIRÉ (un seul moteur, ADR 0097)."""
 
     def setUp(self):
         # Garde d'isolation banc : on neutralise pour que cmd_up atteigne le routage (la
@@ -192,7 +193,7 @@ class FlagRouting(unittest.TestCase):
         return calls
 
     def _spy_engine(self):
-        """Espionne `_run_path_engine` (la branche python) : renvoie les appels."""
+        """Espionne `_run_path_engine` (le SEUL moteur) : renvoie les appels."""
         calls = []
 
         def _spy(topo, target, seq, stack_name, a_appliquer=None):
@@ -204,82 +205,32 @@ class FlagRouting(unittest.TestCase):
         self.addCleanup(setattr, cli, "_run_path_engine", orig)
         return calls
 
-    def test_default_no_flag_routes_to_python_engine(self):
-        # DÉFAUT = python (ADR 0097, bascule) : SANS `--engine`, cmd_up route vers le moteur
-        # Python (`_run_path_engine`) et n'appelle PAS run-phases.sh. Le bash reste le FILET
-        # via `--engine=bash` (cf. test suivant).
+    def test_up_routes_to_python_engine_not_run_phases(self):
+        # `nestor up` route vers le moteur Python (`_run_path_engine`) et n'appelle PAS
+        # run-phases.sh pour le montage (le filet bash a été retiré — un seul moteur).
         rp_calls = self._spy_runphases()
         eng_calls = self._spy_engine()
         path = _tmp(_LIMA_SOLO)
         self.addCleanup(os.unlink, path)
         code, _, _ = _capture(["up", "-f", path, "--yes"])
         self.assertEqual(code, 0)
-        self.assertEqual(len(eng_calls), 1)  # moteur python appelé (défaut)
-        self.assertEqual(rp_calls, [])  # run-phases.sh PAS appelé (plus le défaut)
+        self.assertEqual(len(eng_calls), 1)  # moteur python appelé (seul moteur)
+        self.assertEqual(rp_calls, [])  # run-phases.sh PAS appelé pour le montage
 
-    def test_engine_bash_explicit_delegates_to_run_phases(self):
-        # `--engine=bash` explicite = le FILET de délégation run-phases.sh (le défaut est python).
-        rp_calls = self._spy_runphases()
+    def test_engine_receives_derived_sequence(self):
+        # Le moteur reçoit la séquence DÉRIVÉE de la topo (graphe atomique) : topo lima →
+        # commence par `up`, et la layer déclarée (storage-simple) y figure.
+        self._spy_runphases()
         eng_calls = self._spy_engine()
         path = _tmp(_LIMA_SOLO)
         self.addCleanup(os.unlink, path)
-        code, _, _ = _capture(["up", "-f", path, "--yes", "--engine", "bash"])
+        code, _, _ = _capture(["up", "-f", path, "--yes"])
         self.assertEqual(code, 0)
-        self.assertEqual(eng_calls, [])
-        self.assertEqual(len(rp_calls), 1)
-
-    def test_engine_python_routes_to_run_path(self):
-        # `--engine=python` route vers le moteur python ; run-phases.sh PAS appelé (sauf
-        # le graphe, laissé passer). Le moteur reçoit la séquence dérivée.
-        rp_calls = self._spy_runphases()
-        eng_calls = self._spy_engine()
-        path = _tmp(_LIMA_SOLO)
-        self.addCleanup(os.unlink, path)
-        code, _, _ = _capture(["up", "-f", path, "--yes", "--engine", "python"])
-        self.assertEqual(code, 0)
-        self.assertEqual(rp_calls, [])  # run-phases.sh JAMAIS appelé par la branche python
         self.assertEqual(len(eng_calls), 1)
         target, seq, _stack, _a_appliquer = eng_calls[0]
         self.assertEqual(target, "layers")
         self.assertEqual(seq[0], "up")  # topo lima → la séquence commence par `up`
         self.assertIn("storage-simple", seq)  # layer déclarée → couche storage-simple
-
-    def _set_env(self, name, value):
-        # Pose une variable d'env le temps du test, restaurée en cleanup (évite la FUITE
-        # vers les autres tests/modules — _capture restaure le snapshot PRIS À SON ENTRÉE,
-        # qui inclut déjà la variable si on la pose avant lui).
-        saved = os.environ.get(name)
-        os.environ[name] = value
-        self.addCleanup(
-            lambda: (
-                os.environ.__setitem__(name, saved)
-                if saved is not None
-                else os.environ.pop(name, None)
-            )
-        )
-
-    def test_env_nestor_engine_python_routes(self):
-        # Repli env NESTOR_ENGINE=python (sans flag CLI).
-        self._spy_runphases()
-        eng_calls = self._spy_engine()
-        path = _tmp(_LIMA_SOLO)
-        self.addCleanup(os.unlink, path)
-        self._set_env("NESTOR_ENGINE", "python")
-        code, _, _ = _capture(["up", "-f", path, "--yes"])
-        self.assertEqual(code, 0)
-        self.assertEqual(len(eng_calls), 1)
-
-    def test_flag_cli_overrides_env(self):
-        # Le flag CLI PRIME sur l'env : `--engine=bash` + NESTOR_ENGINE=python → bash.
-        rp_calls = self._spy_runphases()
-        eng_calls = self._spy_engine()
-        path = _tmp(_LIMA_SOLO)
-        self.addCleanup(os.unlink, path)
-        self._set_env("NESTOR_ENGINE", "python")
-        code, _, _ = _capture(["up", "-f", path, "--yes", "--engine", "bash"])
-        self.assertEqual(code, 0)
-        self.assertEqual(eng_calls, [])
-        self.assertEqual(len(rp_calls), 1)
 
 
 class CallbacksWireRealBricks(unittest.TestCase):
@@ -422,7 +373,7 @@ class BootstrapCallbackWiring(unittest.TestCase):
         cni_rc=0,
         launch_rc=0,
     ):
-        """Espionne run-phases.sh (inventory/facts/ha-cni) ET runner.launch_phase. Renvoie un
+        """Espionne run-phases.sh (inventory/facts/cni) ET runner.launch_phase. Renvoie un
         dict de listes d'appels pour les assertions. Le GRAPHE (rollback-lib, déterministe)
         passe au vrai subprocess pour que `expected_phase_sequence` dérive la séquence."""
         rp_calls = []
@@ -438,7 +389,7 @@ class BootstrapCallbackWiring(unittest.TestCase):
                     return subprocess.CompletedProcess(argv, facts_rc, stdout=facts_out, stderr="")
                 if arm == "inventory":
                     return subprocess.CompletedProcess(argv, inv_rc, stdout="", stderr="")
-                if arm == "ha-cni":
+                if arm == "cni":
                     return subprocess.CompletedProcess(argv, cni_rc, stdout="", stderr="")
                 return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
             return real(cmd, *a, **k)
@@ -459,21 +410,22 @@ class BootstrapCallbackWiring(unittest.TestCase):
 
     def test_bootstrap_wires_inventory_facts_socle_cni(self):
         # Le câblage complet : inventaire écrit (bash) → faits dérivés (facts) → 6 playbooks
-        # du socle (runner) avec `-e control_plane_ip=<cp_ip dérivé>` → CNI (ha-cni). Topo DUO
-        # (un worker pur) → has_workers=True → join-workers.yaml présent (6 playbooks).
+        # du socle (runner) avec `-e control_plane_ip=<cp_ip dérivé>` → CNI (arm `cni`). Topo
+        # DUO (un worker pur) → has_workers=True → join-workers.yaml présent (6 playbooks).
         spy = self._spy()
         code = _engine(_topo(_LIMA_CP_SECOND), "layers", ["bootstrap"], "duo")
         self.assertEqual(code, 0)
         arms = self._arms(spy["rp"])
-        # Inventaire écrit AVANT les faits, CNI en dernier (ha-cni = CNI + kubeconfig).
-        self.assertEqual(arms, ["inventory", "facts", "ha-cni"])
+        # Inventaire écrit AVANT les faits, CNI en dernier (arm `cni` = CNI + kubeconfig).
+        self.assertEqual(arms, ["inventory", "facts", "cni"])
         # inventory <control_csv> <workers_csv> : cp-b control, node-a worker (dérivés de la topo).
         inv = next(c for c in spy["rp"] if c[2] == "inventory")
         self.assertEqual(inv[3], "cp-b")
         self.assertEqual(inv[4], "node-a")
-        # ha-cni reçoit l'iface dérivée du contrat machine emit_facts (L2_IFACE).
-        cni = next(c for c in spy["rp"] if c[2] == "ha-cni")
-        self.assertEqual(cni[3], "lima0")
+        # L'arm `cni` ne prend AUCUN argument (geste 100 % CNI : le vestige `ha-cni <iface>`
+        # a été renommé `cni`, plus de VIP/iface — exposition L4 NodePort ADR 0092).
+        cni = next(c for c in spy["rp"] if c[2] == "cni")
+        self.assertEqual(len(cni), 3)  # ["bash", run-phases.sh, "cni"] — pas d'argument iface
         # 6 playbooks du socle (has_workers=True), dans l'ordre, avec le cp_ip DÉRIVÉ (pas codé).
         self.assertEqual(
             [c["playbook"] for c in spy["launch"]],
@@ -508,9 +460,9 @@ class BootstrapCallbackWiring(unittest.TestCase):
         spy = self._spy(launch_rc=2)
         code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap", "storage-simple"], "solo")
         self.assertEqual(code, 1)
-        # Le 1er playbook échoue → fail-fast : un seul launch, pas de CNI (ha-cni absent).
+        # Le 1er playbook échoue → fail-fast : un seul launch, pas de CNI (arm `cni` absent).
         self.assertEqual(len(spy["launch"]), 1)
-        self.assertNotIn("ha-cni", self._arms(spy["rp"]))
+        self.assertNotIn("cni", self._arms(spy["rp"]))
 
     def test_bootstrap_facts_failure_stops_net(self):
         # `run-phases.sh facts` échoue (banc non provisionné) → PathError → code 1, AVANT tout
@@ -529,12 +481,12 @@ class BootstrapCallbackWiring(unittest.TestCase):
         self.assertEqual(spy["launch"], [])
 
     def test_cni_failure_stops_net(self):
-        # Les 6 playbooks passent mais la CNI (ha-cni) échoue → BootstrapError → PathError →
+        # Les 6 playbooks passent mais la CNI (arm `cni`) échoue → BootstrapError → PathError →
         # code 1 (le socle n'est pas « monté » sans CNI).
         spy = self._spy(cni_rc=5)
         code = _engine(_topo(_LIMA_SOLO), "layers", ["bootstrap"], "solo")
         self.assertEqual(code, 1)
-        self.assertIn("ha-cni", self._arms(spy["rp"]))
+        self.assertIn("cni", self._arms(spy["rp"]))
 
     def test_up_then_bootstrap_then_layer_chains(self):
         # Le chemin up→bootstrap→couche enchaîne : provision (run-phases.sh up, stub) →
@@ -552,10 +504,10 @@ class BootstrapCallbackWiring(unittest.TestCase):
         self._patch(cli._runner, "launch_phase", _fake_idem)
         code = _engine(_topo(_LIMA_SOLO), "layers", ["up", "bootstrap", "storage-simple"], "solo")
         self.assertEqual(code, 0)
-        # provision (up) puis bootstrap (inventory/facts/ha-cni) ont bien été appelés.
+        # provision (up) puis bootstrap (inventory/facts/cni) ont bien été appelés.
         arms = self._arms(spy["rp"])
         self.assertIn("up", arms)
-        self.assertEqual(arms[arms.index("up") + 1 :], ["inventory", "facts", "ha-cni"])
+        self.assertEqual(arms[arms.index("up") + 1 :], ["inventory", "facts", "cni"])
         # La couche applicative storage-simple a été montée APRÈS le socle. Les playbooks du
         # bootstrap passent AUSSI par launch_phase (même brique depuis la bascule 1-passage) :
         # 5 playbooks socle (checks/cri/kubeadm/control-planes/initialisation — join-workers
@@ -601,8 +553,8 @@ class AssertSafeIsolation(unittest.TestCase):
 
     def test_refusal_via_main_maps_to_code_2(self):
         # Bout-en-bout par main() : la garde top-level de cmd_up (`_assert_bench_target`) LÈVE
-        # → main mappe _UsageError en code 2. Vaut pour le chemin python comme bash (garde
-        # AVANT le routage du flag) — la garde d'isolation s'applique aux DEUX engines.
+        # → main mappe _UsageError en code 2. La garde d'isolation s'applique AVANT le montage
+        # (seul moteur Python depuis le retrait du filet bash).
         def _refuse(action, *_a, **_k):
             raise cli._UsageError(f"REFUS : `{action}` cible non-banc (test)")
 
@@ -611,7 +563,7 @@ class AssertSafeIsolation(unittest.TestCase):
         self._patch(cli, "_real_vms", lambda *_a, **_k: [])
         path = _tmp(_LIMA_SOLO)
         self.addCleanup(os.unlink, path)
-        code, _, err = _capture(["up", "-f", path, "--yes", "--engine", "python"])
+        code, _, err = _capture(["up", "-f", path, "--yes"])
         self.assertEqual(code, 2)
         self.assertIn("REFUS", err)
 

@@ -284,16 +284,16 @@ def _run_amont(phase: str, *, provision, bootstrap, steps: list[PathStep]) -> No
 # Lima non réconcilié ici — preuve IMPOSSIBLE dans cette session, NE PAS prétendre
 # l'avoir faite) :
 _BANC_TODO = (
-    # 1. CÂBLAGE FAÇADE — FAIT (derrière le FLAG opt-in `nestor up --engine=python`,
-    #    `topology._run_path_engine` ; le DÉFAUT reste run-phases.sh, invariant 4) :
+    # 1. CÂBLAGE FAÇADE — FAIT (`topology._run_path_engine`, SEUL moteur depuis le retrait
+    #    du filet bash : `nestor up` MONTE TOUJOURS via run_path) :
     #      PathContext → `topology._path_context` (cp=1er control, kubeconfig_local/inventory
     #                    = chemins banc, repo=racine, nodes) — PUR, testé ;
     #      launch   → runner.launch_phase_idempotent + extravars_for + e2e_hooks_for (LÈVENT) ;
     #      gate     → topology._wait_layer_healthy (signal _LAYER_SIGNAL/graph) ;
     #      assert_safe → topology._assert_bench_target (+ _assert_inventory_safe par-play) ;
     #      provision('up') → STUB `run-phases.sh up` (artefact node-side, §5.b) ;
-    #    RESTE : la PREUVE banc du chemin python (run mono-nœud `--engine=python`).
-    "preuve banc du moteur python (nestor up --engine=python, mono-nœud) — reste à faire",
+    #    RESTE : la PREUVE banc du chemin python (run mono-nœud).
+    "preuve banc du moteur python (nestor up, mono-nœud) — reste à faire",
     # 2. PROVISIONING RÉEL (§5.b) : le callback `provision('up')` POUSSE aujourd'hui
     #    `run-phases.sh up` (STUB documenté, `topology._provision_via_bash` — limactl reste
     #    bash, ADR 0049). LOT 8 : les RESSOURCES VM (cpus/memory/disk) viennent du YAML
@@ -301,21 +301,15 @@ _BANC_TODO = (
     #    de la transition. RESTE : câbler `lima_render_node(<valeurs>)` directement (bash
     #    garde le RENDU, Python décide les VALEURS) + write_inventory — à prouver au banc.
     "provisioning Python direct (lima_render_node + write_inventory) — à prouver au banc",
-    # 2.b BOOTSTRAP en --engine=python : le callback `bootstrap` LÈVE aujourd'hui
-    #    (transport cp_ip/iface + CNI/fetch_kubeconfig non prouvés au banc). Le moteur
-    #    `bootstrap.run_bootstrap` est porté+testé ; RESTE le câblage transport (rappel
-    #    ha-cni, dérivation Lima vivant) — à câbler+prouver au banc.
-    "câblage transport bootstrap en --engine=python (cp_ip/iface, CNI) — à prouver au banc",
-    # 3. BASCULE DU DÉFAUT cmd_up/cmd_next sur run_path (retrait subprocess run-phases.sh).
-    #    Le flag `--engine=python` est COEXISTENCE (run_path à côté, opt-in) ; basculer le
-    #    DÉFAUT vient APRÈS la preuve banc (plan invariant 4). Le grep sens-unique
-    #    `grep -rn 'uv run python\|topology.py' bench/lima/` doit alors rendre 0 :
-    #    retirer le rappel `bootstrap-seq` (:508).
-    "bascule du DÉFAUT cmd_up/cmd_next sur run_path (retrait run-phases.sh) — après preuve banc",
-    # 3.c CONSIGNATION runs-history (#216) en --engine=python : le callback `record` est None
-    #    (STUB) — `metro_record_run` (bash) agrège durées + métriques metrology.sh PENDANT le
-    #    run, qu'un append Python ne reproduit pas byte-stable (history.py:20). À câbler+prouver.
-    "consignation runs-history (record) en --engine=python — à câbler+prouver au banc",
+    # 2.b BOOTSTRAP (socle k8s) : le callback `bootstrap` tente le vrai montage mais son
+    #    transport (cp_ip/iface dérivés du Lima vivant + CNI/fetch_kubeconfig via l'arm `cni`)
+    #    n'est pas prouvé au banc. Le moteur `bootstrap.run_bootstrap` est porté+testé ; RESTE
+    #    le câblage transport (rappel `cni`, dérivation Lima vivant) — à câbler+prouver au banc.
+    "câblage transport bootstrap (cp_ip/iface, CNI) — à prouver au banc",
+    # 3. CONSIGNATION runs-history (#216) : le callback `record` est None (STUB) —
+    #    l'agrégation des durées + métriques metrology.sh PENDANT le run (byte-stable,
+    #    history.py:20) reste à porter côté Python. À câbler+prouver au banc.
+    "consignation runs-history (record) côté Python — à câbler+prouver au banc",
     # 4. RUN BANC from-scratch consigné (bench/lima/RESULTS.md) + rejeu changed=0
     #    sur LES DEUX topologies (banc local-path PUIS dirqual Ceph, invariants 1-2).
     "run banc from-scratch + rejeu changed=0 (banc PUIS prod) — PREUVE DÉFINITIVE, reste à faire",

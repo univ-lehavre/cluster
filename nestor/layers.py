@@ -152,10 +152,10 @@ def resolve_layers(declared: list[str], backend: str = "local-path") -> list[str
             ph = comp
         if ph and ph in _QUEUE_PHASES and ph not in result:
             result.append(ph)
-    # Le STOCKAGE précède toute couche applicative (convention de montage des arms :
-    # storage AVANT metrics/monitoring/apps — même quand metrics n'en dépend pas).
-    # Partition STABLE (préserve l'ordre topo dans chaque groupe), pas un re-tri →
-    # reproduit l'ordre figé des arms (test_parity) sans toucher aux poids du graphe.
+    # Le STOCKAGE précède toute couche applicative (convention de montage : storage
+    # AVANT metrics/monitoring/apps — même quand metrics n'en dépend pas). Partition
+    # STABLE (préserve l'ordre topo dans chaque groupe), pas un re-tri → ordre de
+    # montage déterministe sans toucher aux poids du graphe.
     storage = [p for p in result if p in _STORAGE_PHASES]
     rest = [p for p in result if p not in _STORAGE_PHASES]
     return storage + rest
