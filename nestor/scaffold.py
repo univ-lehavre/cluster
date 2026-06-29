@@ -162,7 +162,7 @@ def catalog_entry(name: str) -> str:
     (banc générique). On normalise donc le suffixe :
     - `socle`        → topologies/socle.yaml
     - `socle.example`→ topologies/socle.example.yaml
-    - `ha-3cp.example.yaml` (suffixe complet) → topologies/ha-3cp.example.yaml
+    - `layers.example.yaml` (suffixe complet) → topologies/layers.example.yaml
 
     Garde-fou conservé : refus d'une traversée de chemin (`/`, `\\`, `..`). L'EXISTENCE
     réelle du fichier est vérifiée par la façade (I/O), pas ici.

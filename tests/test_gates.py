@@ -12,12 +12,9 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from nestor.gates import (  # noqa: E402
-    GateError,
-    gate_etcd,
     gate_nodes_ready,
     gate_osds_up,
     gate_pvc_bound,
-    gate_vip,
 )
 
 _NOSLEEP = lambda _: None  # noqa: E731 — sleep no-op pour les tests
@@ -76,42 +73,6 @@ class OsdsUp(unittest.TestCase):
     def test_timeout_if_missing(self):
         r = gate_osds_up(3, osd_up_count=lambda: 2, retries=2, sleep=_NOSLEEP)
         self.assertFalse(r.ok)
-
-
-# ── Gates HA `ha-3cp` (RAISE-on-failure) — migrées de l'ex-nestor/ha.py vers gates.py
-#    avec la fusion. Contrat distinct des gates d'infra : elles LÈVENT GateError (la
-#    promotion HA est fail-fast), au lieu de rendre un GateResult.
-
-
-class GateVip(unittest.TestCase):
-    def test_returns_when_vip_responds(self):
-        # Aucune levée si la VIP répond (rend None, pas d'exception).
-        r = gate_vip("10.0.0.40", "cp1", vip_responds=lambda *_a: True, sleep=_NOSLEEP)
-        self.assertIsNone(r)
-
-    def test_raises_if_vip_never_responds(self):
-        with self.assertRaises(GateError):
-            gate_vip("10.0.0.40", "cp1", vip_responds=lambda *_a: False, retries=2, sleep=_NOSLEEP)
-
-
-class GateEtcd(unittest.TestCase):
-    def _healthy(self, n):
-        return lambda _cp: "\n".join("x is healthy" for _ in range(n))
-
-    def test_returns_on_healthy_quorum(self):
-        self.assertIsNone(gate_etcd("cp1", 3, etcd_output=self._healthy(3), sleep=_NOSLEEP))
-
-    def test_raises_on_degraded_quorum(self):
-        # Un endpoint unhealthy = quorum dégradé → fail FRANC (ne pas promouvoir).
-        with self.assertRaises(GateError):
-            gate_etcd(
-                "cp1", 3, etcd_output=lambda _cp: "a is healthy\nb is unhealthy", sleep=_NOSLEEP
-            )
-
-    def test_raises_on_timeout_when_skip(self):
-        # Sortie vide (skip) jamais résolue → timeout → GateError.
-        with self.assertRaises(GateError):
-            gate_etcd("cp1", 3, etcd_output=lambda _cp: "", retries=2, sleep=_NOSLEEP)
 
 
 if __name__ == "__main__":

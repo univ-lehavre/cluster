@@ -63,7 +63,7 @@ def _deny_run(argv, *a, **k):
         raise AssertionError(
             f"TEST NON BLINDÉ : appel subprocess RÉEL de provisionnement intercepté — {flat!r}. "
             "Le test doit stuber cli.subprocess.run (et toutes les closures internes "
-            "_runphases/run_cni/set_inventory de cmd_ha_3cp/cmd_bootstrap_seq)."
+            "_runphases/run_cni de cmd_bootstrap_seq)."
         )
     # kubectl get / config view (lecture) : neutralisé en CompletedProcess vide (déterminisme).
     return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")

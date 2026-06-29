@@ -157,7 +157,8 @@ _BENCH_INVENTORY = os.path.join(_ROOT, "bench", "lima", ".work", "inventory.yaml
 # bash agissait sur l'hôte aussi : le fichier n'est pas dans le pod gitea).
 _SEED_SAMPLE_DIR = os.path.join(_ROOT, "bench", "lima", "atlas-workflow-sample")
 # Borne l'attente du scan réel (preview/up) sur limactl/kubectl : un cluster injoignable ou
-# un démon Lima bloqué ne doit JAMAIS figer le refresh (leçon du timeout ha_probes._vm_exec).
+# un démon Lima bloqué ne doit JAMAIS figer le refresh (un `limactl shell`/SSH peut pendre
+# indéfiniment sans borne — sous-process qui ne rend jamais la main, constaté au banc).
 _REFRESH_TIMEOUT_S = 8
 
 
@@ -2309,8 +2310,8 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
 # `_assert_bench_target`, `_assert_inventory_safe`, `_runner`, `_kubectl`, `_inventory_for`).
 # Un module `nestor/facade.py` devrait les ré-importer depuis `scripts/topology.py` — qui
 # n'est PAS un module de paquet (dossier `scripts/` sans `__init__`, chargé par chemin) →
-# import bancal/circulaire. Les deux PRÉCÉDENTS du dépôt (`cmd_ha_3cp`, `cmd_bootstrap_seq`)
-# construisent DÉJÀ leurs callbacks réels en closures ICI, à côté de l'I/O qu'ils enveloppent.
+# import bancal/circulaire. Le PRÉCÉDENT du dépôt (`cmd_bootstrap_seq`) construit DÉJÀ
+# ses callbacks réels en closures ICI, à côté de l'I/O qu'ils enveloppent.
 # On suit ce moule : `nestor.path` reste PUR (logique d'orchestration testée stubée), la
 # façade ICI branche les callbacks sur le réel (runner/kubectl/limactl). La construction de
 # `PathContext` (PURE, dérivée de la topo) est isolée dans `_path_context` → testable sans I/O.
@@ -3082,7 +3083,7 @@ def _run_path_engine(
     """Monte le chemin `target` via le moteur Python `nestor.path.run_path` (FLAG opt-in).
 
     Câble les callbacks ABSTRAITS du moteur sur le RÉEL (runner/kubectl/limactl), sur le
-    moule de `cmd_ha_3cp`/`cmd_bootstrap_seq` (closures à côté de l'I/O). FAIL-FAST : toute
+    moule de `cmd_bootstrap_seq` (closures à côté de l'I/O). FAIL-FAST : toute
     PathError/IsolationRefused remonte (mappée en code 1) — AUCUN fallback bash (ADR 0046).
 
     `a_appliquer` (issu de `compute_plan_state` = le RÉEL) RESTREINT la séquence montée aux
@@ -3100,8 +3101,8 @@ def _run_path_engine(
       se prouve par le rejeu du chemin entier), `-e` restreints par `phases.extravars_for`.
     - `gate(phase)` : santé post-montage routée par `phases.gate_kind_for` (→ _wait_layer_healthy).
     - `provision('up')` : STUB → `run-phases.sh up` (artefact node-side irréductible, §5.b).
-    - `bootstrap`/`ha` : réutilisent `_bootstrap.run_bootstrap`/`_path.run_ha_3cp` (déjà portés
-      ailleurs) — STUBÉS ici tant que le câblage transport n'est pas prouvé au banc (§5.b/§2.b)."""
+    - `bootstrap` : réutilise `_bootstrap.run_bootstrap` (déjà porté ailleurs) — le câblage
+      transport (cp_ip/iface, CNI) reste à prouver au banc (§5.b)."""
     from nestor import phases as _phases
 
     ctx = _path_context(topo)
@@ -3288,14 +3289,6 @@ def _run_path_engine(
         # (KUBECONFIG_LOCAL == ctx.kubeconfig_local) et que le forward API 127.0.0.1:6443
         # est joignable. Le format byte-stable de l'inventaire est déjà couvert (bats).
 
-    def ha(_phase: str) -> int:
-        # STUB §2.b (LOT 9) : `_path.run_ha_3cp` est porté+testé, mais le câblage du 2e geste
-        # `fetch_kubeconfig` (transport) reste à couvrir au banc avant de retirer le pont ha-cni.
-        raise _path.PathError(
-            "phase amont `ha` (--engine=python) : câblage transport NON prouvé au banc "
-            "(run_ha_3cp + fetch_kubeconfig) — _BANC : à câbler+prouver (ADR 0097 §2.b)"
-        )
-
     # Le moteur SAUTE les phases déjà `done` : on monte uniquement `a_appliquer` (le RÉEL,
     # compute_plan_state), dans l'ORDRE de `seq`. None → toute la séquence (rétrocompat/tests).
     monter = [p for p in seq if p in a_appliquer] if a_appliquer is not None else list(seq)
@@ -3314,7 +3307,6 @@ def _run_path_engine(
             assert_safe=assert_safe,
             provision=provision,
             bootstrap=bootstrap,
-            ha=ha,
             # record : la consignation runs-history (#216) reste l'apanage de
             # `metro_record_run` (bash, en fin de run-phases.sh) — elle agrège les durées
             # ET les métriques échantillonnées par metrology.sh PENDANT le run, qu'un append
@@ -3370,8 +3362,8 @@ def cmd_up(args: argparse.Namespace) -> int:
     # ADR 0083 : l'ordre vient TOUJOURS de `seq` (expected_phase_sequence → graphe
     # atomique). `cmd_up` choisit seulement par quel ARM bash l'exécuter :
     #   - HA (topo.is_ha_control_plane) : socle d'amorçage non réductible à des layers
-    #     (kube-vip + join etcd) → arm `ha-3cp` (run-phases.sh inchangé, orchestré par
-    #     nestor/path.py:run_ha_3cp). La queue applicative éventuelle suit l'arm `layers`.
+    #     (kube-vip + join etcd) → arm `ha-3cp` (run-phases.sh inchangé). La queue
+    #     applicative éventuelle suit l'arm `layers`.
     #   - `--target <preset>` explicite : arm nommé (rétrocompat CLI/scénarios).
     #   - sinon (défaut `layers`) : arm GÉNÉRIQUE `layers <seq>` (Python décide l'ordre,
     #     bash exécute — fini le preset dérivé, plus de 2e source de vérité).
@@ -3698,109 +3690,11 @@ def cmd_next(args: argparse.Namespace) -> int:
     return _monter_phase(topo, phase, run_params)
 
 
-def cmd_ha_3cp(args: argparse.Namespace) -> int:
-    """Orchestre le montage HA `ha-3cp` (ADR 0047/0055, #250) — la partie ANSIBLE.
-
-    Les VM (limactl) et la CNI restent à run-phases.sh (orchestration de CLI, bash,
-    ADR 0049) ; cette commande reçoit `--cp-ip/--vip/--vip-iface` déjà dérivés du
-    banc, câble `path.run_ha_3cp` au RÉEL : `launch` → runner.launch_phase (le MÊME
-    montage que `next --apply`), gates → limactl/kubectl, `run_cni` → un rappel vers
-    run-phases.sh. La logique (séquence, super-admin→admin, gates etcd) est testée
-    sans banc (tests/test_path.py) ; ce câblage est la seule I/O réelle.
-    """
-    _assert_bench_target("ha-3cp")
-    import time
-
-    private_data_dir = os.path.join(_ROOT, "bootstrap")
-    # L'inventaire du banc est généré par run-phases.sh dans son WORKDIR (chemin
-    # ABSOLU passé via --inventory) — pas dans bootstrap/. On l'utilise tel quel ;
-    # un chemin relatif est résolu depuis bootstrap/ (compat usage hors banc).
-    inventory = (
-        args.inventory
-        if os.path.isabs(args.inventory)
-        else os.path.join(private_data_dir, args.inventory)
-    )
-    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
-    if not os.path.exists(inventory):
-        raise _UsageError(
-            f"inventaire absent : {inventory} (généré par run-phases.sh avant la délégation)"
-        )
-    kubeconfig = os.environ.get("KUBECONFIG")
-
-    def launch(playbook: str, extravars: dict, limit: str | None = None):
-        # playbook = 'kube-vip.yaml' → relatif à private_data_dir/<project> ;
-        # bootstrap/*.yaml sont à la racine du private_data_dir.
-        return _runner.launch_phase(
-            playbook,
-            extravars,
-            private_data_dir,
-            inventory,
-            ansible_config=ansible_cfg,
-            kubeconfig=kubeconfig,
-            target_kind="lima",
-            limit=limit,
-        )
-
-    def _runphases(*cmd: str) -> int:
-        """Rappel d'un sous-commande de run-phases.sh (bash garde VM/CNI/inventaire,
-        ADR 0049). Renvoie le code de sortie."""
-        return subprocess.run(  # noqa: S603 — chemin codé, arguments contrôlés
-            ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
-            check=False,
-        ).returncode
-
-    def set_inventory(control_hosts: list[str]) -> None:
-        # L'écriture d'inventaire reste du bash (write_inventory, format byte-stable).
-        # On réécrit l'inventaire avec les CP membres (primaire en tête) avant un join.
-        rc = _runphases("ha-inventory", ",".join(control_hosts))
-        if rc != 0:
-            raise _path.HaError(f"réécriture de l'inventaire (control={control_hosts}) en échec")
-
-    # run_cni : la CNI reste portée par run-phases.sh (bash). On la rappelle via la
-    # sous-commande dédiée `ha-cni <vip-iface>` (cf. dispatch). Le Gateway s'expose en
-    # hostNetwork (ADR 0071) → plus de préfixe LB-IPAM à passer.
-    def run_cni():
-        rc = _runphases("ha-cni", args.vip_iface)
-        if rc != 0:
-            raise _path.HaError(f"CNI (run-phases.sh ha-cni) en échec (rc={rc})")
-
-    def ready_count() -> int:
-        out = subprocess.run(  # noqa: S603 — kubectl, pas d'entrée shell
-            ["kubectl", "get", "nodes", "--no-headers"],
-            check=False,
-            capture_output=True,
-            text=True,
-            env={**os.environ, **({"KUBECONFIG": kubeconfig} if kubeconfig else {})},
-        )
-        return sum(1 for ln in out.stdout.splitlines() if " Ready " in f" {ln} ")
-
-    nodes = args.nodes.split(",")
-    print(f"→ ha-3cp : {len(nodes)} CP derrière la VIP {args.vip} (Ansible via Python/runner)")
-    try:
-        result = _path.run_ha_3cp(
-            nodes,
-            args.cp_ip,
-            args.vip,
-            args.vip_iface,
-            launch=launch,
-            run_cni=run_cni,
-            set_inventory=set_inventory,
-            ready_count=ready_count,
-            sleep=time.sleep,
-        )
-    except _runner.RunnerUnavailable as exc:
-        raise _UsageError(str(exc)) from exc
-    for step in result.steps:
-        mark = "✓" if step.ok else "✗"
-        print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
-    return 0 if result.built else 1
-
-
 def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
     """Orchestre le socle k8s (`bootstrap`) — la partie ANSIBLE (interne, ADR 0063).
 
     Migration de bootstrap_node_sequence vers Python : lance les playbooks du socle
-    (checks→…→join-workers) via runner.launch_phase (le MÊME montage que ha-3cp), avec
+    (checks→…→join-workers) via runner.launch_phase, avec
     `-e control_plane_ip=<cp_ip>`. `join-workers` est SAUTÉ si l'inventaire n'a aucun
     worker (control unique). L'inventaire, la dérivation de cp_ip/iface, la CNI
     (Cilium dans la VM) et le kubeconfig restent à run-phases.sh (briques bash, ADR
@@ -4326,7 +4220,6 @@ _DISPATCH = {
     # Groupes noun-verb (annexe rangée) : artefacts dérivés/constatés + épreuves.
     "artifact": cmd_artifact,
     "test": cmd_test,
-    "ha-3cp": cmd_ha_3cp,  # interne (routée à part dans main, hors menu)
     "bootstrap-seq": cmd_bootstrap_seq,  # interne : socle k8s en Python (migration)
 }
 
@@ -4793,23 +4686,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="sauter la confirmation interactive (requis hors TTY pour détruire)",
     )
 
-    # ha-3cp : commande INTERNE (appelée par run-phases.sh avec --cp-ip/--vip dérivés
-    return ap
-
-
-def _build_ha_parser() -> argparse.ArgumentParser:
-    """Parser DÉDIÉ à la commande interne `ha-3cp` (hors du menu public).
-
-    ha-3cp est appelée par run-phases.sh avec --cp-ip/--vip dérivés du banc — ce
-    n'est pas un verbe du menu. On la garde HORS du parser principal (sinon argparse
-    l'expose dans le --help et la liste des choix). Routée à part dans main() ; sera
-    absorbée par `up` (inversion de frontière, ADR 0063)."""
-    ap = argparse.ArgumentParser(prog="topology ha-3cp")
-    ap.add_argument("--nodes", default="cp1,cp2,cp3", help="CP, le 1er = primaire (csv)")
-    ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
-    ap.add_argument("--vip", required=True, help="VIP de l'API (kube-vip)")
-    ap.add_argument("--vip-iface", required=True, dest="vip_iface", help="interface L2 de la VIP")
-    ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
     return ap
 
 
@@ -4818,7 +4694,7 @@ def _build_bootstrap_parser() -> argparse.ArgumentParser:
 
     Appelée par run-phases.sh:phase_bootstrap avec --cp-ip/--l2-iface/--inventory
     dérivés du banc — orchestre les 6 playbooks du socle en Python (migration de
-    bootstrap_node_sequence). Interne, routée à part dans main() comme ha-3cp."""
+    bootstrap_node_sequence). Interne, routée à part dans main()."""
     ap = argparse.ArgumentParser(prog="topology bootstrap-seq")
     ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
     ap.add_argument("--l2-iface", required=True, dest="l2_iface", help="interface L2 (LB-IPAM/CNI)")
@@ -4829,7 +4705,6 @@ def _build_bootstrap_parser() -> argparse.ArgumentParser:
 # Commandes INTERNES (hors menu) : nom → (builder de parser dédié). Routées à part
 # dans main() pour ne PAS polluer le --help / la liste des choix du menu public.
 _INTERNAL_PARSERS = {
-    "ha-3cp": _build_ha_parser,
     "bootstrap-seq": _build_bootstrap_parser,
 }
 

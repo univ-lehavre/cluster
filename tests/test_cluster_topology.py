@@ -215,33 +215,9 @@ class Exposition(unittest.TestCase):
             topology_from_dict(_base(exposition={"mode": "bogus"}))
 
 
-class HaThreeCpExample(unittest.TestCase):
-    """La topologie ha-3cp déclarée (hyperconvergé, local-path) est valide et
-    expose la mécanique HA attendue (#250, ADR 0055/0056)."""
-
-    def setUp(self):
-        self.topo = load_topology(os.path.join(_ROOT, "topologies", "ha-3cp.example.yaml"))
-
-    def test_three_hyperconverged_control_planes(self):
-        # 3 CP hyperconvergés → 3 control, 0 worker pur (ils schedulent, ADR 0007).
-        self.assertEqual(self.topo.control_nodes, ["cp1", "cp2", "cp3"])
-        self.assertEqual(self.topo.worker_nodes, [])
-        self.assertTrue(self.topo.is_ha_control_plane)
-
-    def test_vip_declared_kube_vip_arp(self):
-        lb = self.topo.network.get("control_plane_lb")
-        self.assertEqual(lb.get("mode"), "kube-vip-arp")
-
-    def test_local_path_storage_ha_orthogonal(self):
-        # HA ⊥ stockage (#250) : la topologie HA se prouve en local-path, pas Ceph.
-        self.assertEqual(self.topo.storage.get("backend"), "local-path")
-
-    def test_status_is_target_not_built(self):
-        # Honnêteté (ADR 0052/0030) : `cible` tant qu'aucun run banc ne l'a prouvé.
-        self.assertEqual(self.topo.catalog.get("status"), "cible")
-
-    def test_lima_target(self):
-        self.assertEqual(self.topo.target_kind, "lima")
+# (Classe HaThreeCpExample retirée : la topologie ha-3cp est abandonnée 2026-06-29 —
+# ADR 0055 Superseded by 0097, topologies/ha-3cp.example.yaml supprimée. La HA multi-CP se
+# reprend si de nouvelles ressources permettent un banc multi-nœud.)
 
 
 class ByteExactInvariant(unittest.TestCase):

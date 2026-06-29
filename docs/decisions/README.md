@@ -74,7 +74,7 @@ Format léger inspiré de Michael Nygard :
 | 0052 | [Reproductibilité des résultats (principe-chapeau)](0052-reproductibilite-des-resultats.md)                                                       | Accepted           |
 | 0053 | [Isolation multi-cible : banc Lima et prod sur le même poste](0053-isolation-multi-cible-banc-prod.md)                                            | Accepted           |
 | 0054 | [Rollback par phase sur le banc (désinstallation ciblée, jetable)](0054-rollback-par-phase-banc.md)                                               | Accepted           |
-| 0055 | [`ha-3cp` hyperconvergé : 3 control planes sur 4 nœuds, promotion in-place](0055-ha-3cp-hyperconverge-promotion-in-place.md)                      | Accepted           |
+| 0055 | [`ha-3cp` hyperconvergé : 3 control planes sur 4 nœuds, promotion in-place](0055-ha-3cp-hyperconverge-promotion-in-place.md)                      | Superseded by 0097 |
 | 0056 | [Modèle déclaratif unifié des topologies (un fichier décrit, Ansible converge)](0056-modele-declaratif-topologies.md)                             | Accepted           |
 | 0057 | [Gouvernance documentaire : un ADR décide, un plan met en œuvre, une issue exécute](0057-gouvernance-documentaire-adr-plan-issue.md)              | Accepted           |
 | 0058 | [Doctrine de l'audit : une grille permanente, des passages datés](0058-doctrine-audit-grille-passages.md)                                         | Accepted           |
