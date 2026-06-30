@@ -85,9 +85,9 @@ class PurgeRunnerEnv(unittest.TestCase):
         env = os.path.join(pdd, "env")
         os.makedirs(env)
         # Résidu d'un run HA : extravars avec la VIP.
-        with open(os.path.join(env, "extravars"), "w") as f:
+        with open(os.path.join(env, "extravars"), "w", encoding="utf-8") as f:
             f.write('{"control_plane_host_ip": "192.168.104.40"}')
-        with open(os.path.join(env, "cmdline"), "w") as f:
+        with open(os.path.join(env, "cmdline"), "w", encoding="utf-8") as f:
             f.write("--syntax-check")
         runner._purge_runner_env(pdd)
         self.assertFalse(os.path.exists(os.path.join(env, "extravars")))
@@ -110,7 +110,7 @@ class PurgeRunnerEnv(unittest.TestCase):
         env = os.path.join(pdd, "env")
         os.makedirs(env)
         residual = os.path.join(env, "extravars")
-        with open(residual, "w") as f:
+        with open(residual, "w", encoding="utf-8") as f:
             f.write('{"vip": "old"}')
         orig = runner._runner_run
         runner._runner_run = lambda **k: _FakeRun(0, "successful")
