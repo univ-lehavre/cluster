@@ -3590,11 +3590,11 @@ def _run_path_engine(
                 assert_safe=assert_safe,
                 provision=provision,
                 bootstrap=bootstrap,
-                # record : la consignation runs-history (#216) reste l'apanage de
-                # `metro_record_run` (bash, en fin de run-phases.sh) — elle agrège les durées
-                # ET les métriques échantillonnées par metrology.sh PENDANT le run, qu'un append
-                # Python ne reproduit pas byte-stable (history.py:20 — l'append est bash). STUB
-                # documenté (None) : le moteur Python ne consigne pas encore (à câbler, §5.b).
+                # record : la consignation runs-history (#216) — agrégation des durées par
+                # phase + métriques Prometheus échantillonnées PENDANT le run. C'était le geste
+                # de `metro_record_run`/`metro_sample_prometheus` (metrology.sh, RETIRÉ ADR 0101).
+                # STUB documenté (None) : le moteur Python ne consigne pas encore (à câbler+
+                # prouver au banc, §5.b) ; en attendant l'append se fait par commit `chore(bench)`.
                 record=None,
             )
         except _runner.RunnerUnavailable as exc:
