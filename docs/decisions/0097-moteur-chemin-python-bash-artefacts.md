@@ -119,26 +119,26 @@ reste appelée pour le kubeconfig et la circularité résiduelle subsiste.
 
 #### 2.c PORTÉS EN PYTHON — avec effort, depuis le classement
 
-| Fichier (bash)                                                               | Lignes | Cible Python                                                                    | Effort       |
-| ---------------------------------------------------------------------------- | -----: | ------------------------------------------------------------------------------- | ------------ |
-| [`bench/lima/run-phases.sh`](../../bench/lima/run-phases.sh)                 |   1903 | `nestor/path.py` (cœur du chantier)                                             | **élevé**    |
-| [`bench/lima/rollback-lib.sh`](../../bench/lima/rollback-lib.sh) (pur)       |   ~600 | `nestor/graph.py` ([ADR 0096](0096-graphe-topologie-python-verifie-ansible.md)) | moyen        |
-| `rollback-lib.sh` (orch. kubectl/ssh)                                        |   ~150 | subprocess kubectl                                                              | moyen        |
-| [`bootstrap/state.sh`](../../bootstrap/state.sh)                             |    868 | orchestration audit (kubectl/ssh)                                               | moyen        |
-| [`bootstrap/seed-app-of-apps.sh`](../../bootstrap/seed-app-of-apps.sh)       |    595 | `nestor/seed.py` (garde **prod** `assert_prod_target`)                          | faible→moyen |
-| [`bench/lima/gitea-init.sh`](../../bench/lima/gitea-init.sh)                 |    207 | `nestor/seed.py` (garde **banc** `_assert_bench_target`)                        | moyen        |
-| [`bench/lima/metrology.sh`](../../bench/lima/metrology.sh) (pur)             |   ~150 | pytest (verdict/parsing)                                                        | faible       |
-| `lib.sh` (orch. `lima_*`, `write_inventory`)                                 |   ~230 | provisioning Python                                                             | moyen        |
-| [`bootstrap/first-access.sh`](../../bootstrap/first-access.sh)               |    130 | paramiko                                                                        | faible       |
-| [`bench/lima/check-freshness.sh`](../../bench/lima/check-freshness.sh)       |    129 | garde-fou Python                                                                | faible       |
-| [`bench/lima/access.sh`](../../bench/lima/access.sh)                         |    275 | mixte (port-forward reste subprocess)                                           | faible       |
-| [`bench/lima/env.sh`](../../bench/lima/env.sh)                               |    104 | présentation contexte                                                           | faible       |
-| [`bootstrap/security/report.sh`](../../bootstrap/security/report.sh)         |    190 | paramiko (lecture seule)                                                        | faible       |
-| [`bootstrap/lib/health-classify.sh`](../../bootstrap/lib/health-classify.sh) |    282 | `HealthClassifier` (pytest 1:1)                                                 | faible       |
-| [`bootstrap/lib/state-classify.sh`](../../bootstrap/lib/state-classify.sh)   |     91 | pytest 1:1                                                                      | faible       |
-| `*-assert.sh` (gitops / dataops / ui / bootstrap-fault)                      |   ~340 | `HealthClassifier` (pytest)                                                     | faible       |
-| [`scripts/audit-image-digests.sh`](../../scripts/audit-image-digests.sh)     |     86 | SDK registre Python                                                             | faible       |
-| [`bootstrap/lib/ssh-report.sh`](../../bootstrap/lib/ssh-report.sh)           |     40 | paramiko (transport SSH)                                                        | faible       |
+| Fichier (bash)                                                                                                   | Lignes | Cible Python                                                                    | Effort       |
+| ---------------------------------------------------------------------------------------------------------------- | -----: | ------------------------------------------------------------------------------- | ------------ |
+| [`bench/lima/run-phases.sh`](../../bench/lima/run-phases.sh)                                                     |   1903 | `nestor/path.py` (cœur du chantier)                                             | **élevé**    |
+| [`bench/lima/rollback-lib.sh`](../../bench/lima/rollback-lib.sh) (pur)                                           |   ~600 | `nestor/graph.py` ([ADR 0096](0096-graphe-topologie-python-verifie-ansible.md)) | moyen        |
+| `rollback-lib.sh` (orch. kubectl/ssh)                                                                            |   ~150 | subprocess kubectl                                                              | moyen        |
+| [`bootstrap/state.sh`](../../bootstrap/state.sh)                                                                 |    868 | orchestration audit (kubectl/ssh)                                               | moyen        |
+| [`bootstrap/seed-app-of-apps.sh`](../../bootstrap/seed-app-of-apps.sh)                                           |    595 | `nestor/seed.py` (garde **prod** `assert_prod_target`)                          | faible→moyen |
+| [`bench/lima/gitea-init.sh`](https://github.com/univ-lehavre/cluster/blob/b522133b7cea/bench/lima/gitea-init.sh) |    207 | `nestor/seed.py` (garde **banc** `_assert_bench_target`)                        | moyen        |
+| [`bench/lima/metrology.sh`](../../bench/lima/metrology.sh) (pur)                                                 |   ~150 | pytest (verdict/parsing)                                                        | faible       |
+| `lib.sh` (orch. `lima_*`, `write_inventory`)                                                                     |   ~230 | provisioning Python                                                             | moyen        |
+| [`bootstrap/first-access.sh`](../../bootstrap/first-access.sh)                                                   |    130 | paramiko                                                                        | faible       |
+| [`bench/lima/check-freshness.sh`](../../bench/lima/check-freshness.sh)                                           |    129 | garde-fou Python                                                                | faible       |
+| [`bench/lima/access.sh`](../../bench/lima/access.sh)                                                             |    275 | mixte (port-forward reste subprocess)                                           | faible       |
+| [`bench/lima/env.sh`](../../bench/lima/env.sh)                                                                   |    104 | présentation contexte                                                           | faible       |
+| [`bootstrap/security/report.sh`](../../bootstrap/security/report.sh)                                             |    190 | paramiko (lecture seule)                                                        | faible       |
+| [`bootstrap/lib/health-classify.sh`](../../bootstrap/lib/health-classify.sh)                                     |    282 | `HealthClassifier` (pytest 1:1)                                                 | faible       |
+| [`bootstrap/lib/state-classify.sh`](../../bootstrap/lib/state-classify.sh)                                       |     91 | pytest 1:1                                                                      | faible       |
+| `*-assert.sh` (gitops / dataops / ui / bootstrap-fault)                                                          |   ~340 | `HealthClassifier` (pytest)                                                     | faible       |
+| [`scripts/audit-image-digests.sh`](../../scripts/audit-image-digests.sh)                                         |     86 | SDK registre Python                                                             | faible       |
+| [`bootstrap/lib/ssh-report.sh`](../../bootstrap/lib/ssh-report.sh)                                               |     40 | paramiko (transport SSH)                                                        | faible       |
 
 **RÉSERVE — des phases « triviales » qui ne le sont PAS.** `phase_dataops`
 (`run-phases.sh` :1002) n'est **pas** un simple `run_ansible_phase <playbook>` :

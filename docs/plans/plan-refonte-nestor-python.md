@@ -281,9 +281,9 @@ recalculent `done`/`observed`/`a_appliquer` :
   Mettre à jour le menu d'aide + retirer
   [`bench/lima/env.sh`](../../bench/lima/env.sh).
 - **Faire (seed)** : porter `nestor/seed.py` —
-  [`gitea-init.sh`](../../bench/lima/gitea-init.sh) (207 l.) +
-  [`seed-app-of-apps.sh`](../../bootstrap/seed-app-of-apps.sh) (595 l.).
-  **Garder les DEUX gardes opposés** : `_assert_bench_target` (banc) **vs**
+  [`gitea-init.sh`](https://github.com/univ-lehavre/cluster/blob/b522133b7cea/bench/lima/gitea-init.sh)
+  (207 l.) + [`seed-app-of-apps.sh`](../../bootstrap/seed-app-of-apps.sh) (595
+  l.). **Garder les DEUX gardes opposés** : `_assert_bench_target` (banc) **vs**
   `assert_prod_target` (prod, défaut `~/.kube/<topologie>.config`). Un module
   mal gardé taperait dirqual.
 - **Preuve** : montage piloté **uniquement** par le YAML (aucune var d'env hors

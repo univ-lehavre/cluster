@@ -115,14 +115,14 @@ dans le repo Gitea pour que le déploiement référence
   seulement sur l'entrée `citation`) écrit ce digest dans Gitea via la
   **Contents API** (create-or-update **idempotent**), en réutilisant le patron
   `push_gitea_file` de
-  [`bench/lima/gitea-init.sh`](../../bench/lima/gitea-init.sh) (lit le `sha`
-  existant pour une MAJ, **vérifie** la présence de `"commit"` dans la réponse).
-  En Ansible, l'équivalent est `kubernetes.core.k8s_exec` du pod gitea + `curl`
-  localhost:3000 (piège DNS FQDN : **jamais** le FQDN `*.svc.cluster.local`,
-  toujours `localhost` dans le pod — cf. en-tête de `seed-app-of-apps.sh`), OU
-  un appel délégué au seed (cf. étape 3). **Recommandé** : factoriser le
-  write-back dans une tâche/rôle bash appelé, pour partager **un seul** patron
-  Contents API avec le seed.
+  [`bench/lima/gitea-init.sh`](https://github.com/univ-lehavre/cluster/blob/b522133b7cea/bench/lima/gitea-init.sh)
+  (lit le `sha` existant pour une MAJ, **vérifie** la présence de `"commit"`
+  dans la réponse). En Ansible, l'équivalent est `kubernetes.core.k8s_exec` du
+  pod gitea + `curl` localhost:3000 (piège DNS FQDN : **jamais** le FQDN
+  `*.svc.cluster.local`, toujours `localhost` dans le pod — cf. en-tête de
+  `seed-app-of-apps.sh`), OU un appel délégué au seed (cf. étape 3).
+  **Recommandé** : factoriser le write-back dans une tâche/rôle bash appelé,
+  pour partager **un seul** patron Contents API avec le seed.
 - **Cible du write-back — à trancher (DÉCISION).** L'ADR 0095 §1.a dit « écrit
   dans `cluster/apps` ». Or la référence d'image **réelle** vit dans l'**overlay
   prod kustomize** du code atlas

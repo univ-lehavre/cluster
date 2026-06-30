@@ -11,13 +11,13 @@
 # du scénario 29 ; ici l'intention est « GitOps déploie une code-location fonctionnelle ».
 #
 # Pré-requis : socle GitOps (Gitea + Argo CD) + infra DataOps + init du dépôt
-# (bench/lima/gitea-init.sh) — c.-à-d. un banc monté par `run-phases.sh atlas`
-# PUIS la phase d'init Gitea. SKIP NEUTRE (exit 0) si l'un manque, sauf
-# STRICT_GITOPS=1 qui fait alors ÉCHOUER (calque STRICT_MON/STRICT_OL).
+# (phase `gitops-seed`, portée par nestor/seed.py) — c.-à-d. un banc monté avec la
+# chaîne gitops. SKIP NEUTRE (exit 0) si l'un manque, sauf STRICT_GITOPS=1 qui fait
+# alors ÉCHOUER (calque STRICT_MON/STRICT_OL).
 #
 # Variables :
 #   STRICT_GITOPS=1   échoue (au lieu de skip) si la chaîne GitOps n'est pas prête
-#   GITEA_NS / ARGOCD_NS / GITEA_ORG / GITEA_REPO   (mêmes défauts que gitea-init.sh)
+#   GITEA_NS / ARGOCD_NS / GITEA_ORG / GITEA_REPO   (mêmes défauts que le seed gitops)
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -44,7 +44,8 @@ skip_or_fail() {
         exit 1
     fi
     log "skip — $1"
-    log "  Monter d'abord : run-phases.sh atlas puis bench/lima/gitea-init.sh"
+    log "  Monter d'abord le banc avec la chaîne gitops (nestor up — la phase gitops-seed"
+    log "  initialise Gitea, portée par nestor/seed.py)."
     exit 0
 }
 

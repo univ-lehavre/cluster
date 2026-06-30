@@ -59,7 +59,7 @@ bench/lima/run-phases.sh down       # détruire le banc
 - Harnais du banc : [`bench/lima/`](../bench/lima/) · validations :
   [`bench/lima/RESULTS.md`](../bench/lima/RESULTS.md)
 - Init du dépôt Gitea (org/repo + webhook) :
-  [`bench/lima/gitea-init.sh`](../bench/lima/gitea-init.sh)
+  [`bench/lima/gitea-init.sh`](https://github.com/univ-lehavre/cluster/blob/b522133b7cea/bench/lima/gitea-init.sh)
 
 ## Décisions qui vous concernent (ADR)
 
