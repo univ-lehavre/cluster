@@ -94,10 +94,12 @@ inerte, jamais cibler `localhost` ni un parc réel).
 
 ## Alternatives écartées
 
-- **Régénérer `hosts.yaml` dans `.work/`** (gitignoré, dérivé par un hook) :
-  garde un fichier inventaire **pointable** → **déplace** le vecteur
-  d'invocation parallèle au lieu de l'**éteindre**. Rejeté : ne traite pas la
-  cause de l'incident.
+- **Régénérer l'inventaire dans un `.work/` éphémère** (gitignoré, dérivé) :
+  garde un fichier inventaire **à chemin stable et devinable** (`ls`) pendant
+  tout un montage (20–40 min) → **déplace** le vecteur d'invocation parallèle au
+  lieu de l'**éteindre**, et ne couvrirait que le montage (1 des 6 sites prod).
+  Rejeté au profit du `mkstemp` par consommateur (cf. § Mise en œuvre
+  incrémentale, point 3) : anonyme, éphémère, uniforme, _moins_ de surface.
 - **`hosts.yaml` lecture-seule régénéré en hook** : même faille (fichier
   pointable) + complexité d'un hook de cohérence.
 - **Statu quo** (édition manuelle de `hosts.yaml`) : a **produit** l'incident.
@@ -108,18 +110,37 @@ Cet ADR est livré **par étapes** (le statut reste `Proposed` tant que la bascu
 n'est pas complète et prouvée) :
 
 1. **Fait** — la commande `nestor ansible <playbook>` (dérive l'inventaire dans
-   un temporaire, garde `_assert_inventory_safe`, cleanup) ; additive,
-   `hosts.yaml` reste en place.
-2. **À faire** — bascule des consommateurs (`ansible.cfg` → `.example`,
-   `Justfile` → `nestor ansible`, suggestions `state.sh`, RUNBOOK) puis
-   **suppression de `hosts.yaml`** (et de son suivi git — il est à la fois
-   `.gitignore` ET tracké).
-3. **Point d'architecture à trancher d'abord** — le **moteur** `run_path`
-   (montage prod) lit l'inventaire via `_path_context`, documenté **PUR**
-   (aucune I/O, ADR 0097 §5.a), et `PathContext.inventory` est consommé
-   **après** la construction du contexte. Un inventaire prod dérivé **éphémère**
-   (temp + cleanup) y est incompatible : il déborde la durée d'un `with` et
-   casse la pureté de `_path_context`. Résoudre ce couplage (porter le cycle de
-   vie de l'inventaire dans le moteur, ou dériver dans un `.work/` éphémère pour
-   le seul moteur) est le **prérequis** de l'étape 2 côté montage. À cadrer
-   avant la bascule.
+   un temporaire `mkstemp` `0o600`, garde `_assert_inventory_safe`, cleanup en
+   `finally`) ; additive, `hosts.yaml` reste en place.
+2. **À faire** — généraliser le pattern temporaire aux 5 autres consommateurs
+   prod de l'inventaire (cf. point 3), **supprimer `hosts.yaml`** (et son suivi
+   git — il est à la fois `.gitignore` ET tracké), puis basculer la doc/config
+   (`ansible.cfg` → `*.example`, `Justfile` → `nestor ansible`, suggestions
+   `state.sh`, RUNBOOK).
+3. **Couplage moteur ↔ inventaire — tranché** : le **moteur** `run_path` lit
+   l'inventaire via `_path_context`, documenté **PUR** (aucune I/O, ADR 0097
+   §5.a) ; `PathContext.inventory` est consommé **après** la construction, par
+   des closures (`assert_safe`, `launch`) actives tout au long du montage —
+   l'inventaire doit donc **vivre pendant tout le run**. La résolution **ne pose
+   PAS de fichier `.work/` prod** (chemin stable et devinable pendant 20–40 min
+   de montage → rouvrirait partiellement le vecteur d'invocation parallèle ; et
+   ne couvrirait qu'1 des 6 sites). Elle **généralise le pattern déjà mergé de
+   `cmd_ansible`** : un contextmanager `_prod_inventory(topo)`
+   (`render_prod_inventory` → `mkstemp` `0o600` → `yield` →
+   `finally os.remove`). Chaque consommateur prod l'enroule :
+   `cmd_up`/`_run_path_engine` ouvre le `with` autour de **tout** le montage (le
+   temp vit le run entier, nettoyé même sur erreur) et passe le chemin à
+   `_path_context` **en paramètre** — qui reste **pur** (il reçoit un chemin,
+   n'écrit rien) ; `cmd_next`, `cmd_discover` (`--cp`, `--node-side`) et la
+   repatriation kubeconfig enroulent leur geste court. `_inventory_for` cesse de
+   servir la prod (la branche lima — `bench/lima/.work/inventory.yaml` posé par
+   le provisioning bash — est **inchangée**).
+
+   **Sécurité** — un `mkstemp` (`/tmp/nestor-inv-XXXXXX`, anonyme, supprimé en
+   `finally`, jamais sous `bootstrap/`, jamais nommé dans un RUNBOOK/Justfile)
+   n'est **pas** le `hosts.yaml` de l'incident (persistant, à la racine
+   documentée, chemin stable, pointé par `ansible.cfg`/Justfile). C'est
+   _strictement moins_ de surface qu'un `.work/` stable. Le garde `target_kind`
+   (porté par `render_prod_inventory`) reste armé dans les deux sens
+   (`_assert_inventory_safe` + assert `audit-log`), même sur une invocation
+   manuelle.
