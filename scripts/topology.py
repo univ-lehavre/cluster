@@ -73,6 +73,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 
@@ -234,6 +235,59 @@ def cmd_kubectl(args: argparse.Namespace) -> int:
     return proc.returncode
 
 
+def _resolve_playbook(name: str) -> str:
+    """Chemin absolu d'un playbook : accepte `checks.yaml` (→ bootstrap/checks.yaml)
+    ou un chemin déjà relatif au dépôt (`bootstrap/checks.yaml`, `bootstrap/security/secure.yml`).
+    `_UsageError` (code 2) si introuvable — AVANT de dériver le moindre inventaire."""
+    for candidate in (name, os.path.join("bootstrap", name)):
+        path = os.path.join(_ROOT, candidate)
+        if os.path.isfile(path):
+            return path
+    raise _UsageError(f"playbook introuvable : {name} (ni {name} ni bootstrap/{name})")
+
+
+def cmd_ansible(args: argparse.Namespace) -> int:
+    """`nestor ansible <playbook> [args ansible…]` : lance un playbook sur la STACK ACTIVE
+    avec un inventaire DÉRIVÉ de la topologie — jamais un inventaire statique pointable.
+
+    Source unique d'inventaire (ADR 0098) : `bootstrap/hosts.yaml` n'existe plus. Au lieu de
+    `ansible-playbook -i bootstrap/hosts.yaml <play>` (le vecteur de l'incident Rook-Ceph),
+    on dérive l'inventaire de la topo active (`render_prod_inventory`/`render_lima_inventory`)
+    dans un TEMPORAIRE, on passe le garde `_assert_inventory_safe` (Python, AVANT ansible —
+    le filet décisif d'isolation banc/prod, ADR 0053), on pose `EXPECTED_TARGET_KIND` pour
+    réarmer l'assert audit-log par-play, on lance, et on nettoie le temp en `finally`.
+
+    Les arguments résiduels (`--limit cp1`, `--tags os`, `--check`, `-e k=v`…) sont passés
+    tels quels à ansible-playbook. Code de sortie = celui d'ansible-playbook.
+    """
+    topo = load_topology(_resolve(args.file))
+    playbook_abs = _resolve_playbook(args.playbook)
+    passthrough = list(getattr(args, "ansible_args", []) or [])
+
+    # Inventaire DÉRIVÉ de la cible active (`_inventory_for` : temp éphémère côté prod,
+    # fichier réel côté banc) — jamais un `hosts.yaml` statique (ADR 0098).
+    with _inventory_for(topo) as inv_path:
+        if topo.target_kind == "lima" and not os.path.isfile(inv_path):
+            raise _UsageError(
+                f"inventaire banc absent ({inv_path}) — monter le banc d'abord (`nestor up`)"
+            )
+        # Garde d'isolation (ADR 0053) AVANT ansible : refuse un inventaire qui SSHerait
+        # sur une cible non conforme à l'intention déclarée (topo.target_kind).
+        _assert_inventory_safe(f"nestor ansible ({args.playbook})", inv_path, topo)
+        env = {
+            **os.environ,
+            "EXPECTED_TARGET_KIND": topo.target_kind,
+            "ANSIBLE_CONFIG": os.path.join(_ROOT, "bootstrap", "ansible.cfg"),
+        }
+        proc = subprocess.run(  # noqa: S603 — playbook du dépôt + args opérateur, inventaire sûr
+            ["ansible-playbook", "-i", inv_path, playbook_abs, *passthrough],
+            cwd=os.path.join(_ROOT, "bootstrap"),
+            env=env,
+            check=False,
+        )
+        return proc.returncode
+
+
 def _kubeconfig_reaches_api(kubeconfig: str) -> bool:
     """`True` si ce kubeconfig joint RÉELLEMENT l'API (pas juste un fichier présent).
 
@@ -308,18 +362,37 @@ def _render_inventory(topo, kind: str, lima_home: str | None) -> str:
     return render_prod_inventory(topo)
 
 
-def _inventory_for(topo: Topology) -> str:
-    """Chemin de l'inventaire Ansible de la TOPOLOGIE active (ADR 0053).
+@contextlib.contextmanager
+def _inventory_for(topo: Topology):
+    """Gestionnaire de contexte qui YIELD le chemin de l'inventaire de la TOPOLOGIE
+    active (ADR 0053), DÉRIVÉ et éphémère côté prod (ADR 0098).
 
-    Le cœur de l'isolation : un montage `next` vise l'inventaire de SA cible —
-    `bench/lima/.work/inventory.yaml` (target_kind: lima, généré par le banc) pour une
-    topo lima, `bootstrap/hosts.yaml` (prod) sinon. Sans ça, `next` utilisait TOUJOURS
-    l'inventaire prod codé en dur → un montage banc SSHait sur la prod (faille
-    constatée). La garde `_assert_inventory_safe` reste le filet ; ICI on choisit
-    d'emblée le BON inventaire."""
+    Le cœur de l'isolation : un montage vise l'inventaire de SA cible —
+    `bench/lima/.work/inventory.yaml` (target_kind: lima, posé par le provisioning banc)
+    pour une topo lima ; pour la prod, un TEMPORAIRE `mkstemp` (`0o600`) rendu depuis la
+    topo (`render_prod_inventory`) et supprimé en sortie. Plus de `bootstrap/hosts.yaml`
+    statique pointable (ADR 0098 : source unique d'inventaire ; le fichier persistant
+    était le vecteur de l'incident Rook-Ceph). Sans ce choix d'inventaire, un montage
+    SSHait TOUJOURS sur la prod codée en dur (faille constatée). La garde
+    `_assert_inventory_safe` reste le filet en aval.
+
+    Usage : `with _inventory_for(topo) as inv_path: …`. Le banc rend un chemin réel
+    (non supprimé) ; la prod un temp anonyme supprimé en `finally`. Le temp prod doit
+    vivre toute la durée du geste (montage entier pour `cmd_up`) → enrouler le `with`
+    autour de TOUT le geste, pas juste de l'appel ansible."""
     if topo.target_kind == "lima":
-        return _BENCH_INVENTORY
-    return os.path.join(_ROOT, "bootstrap", "hosts.yaml")
+        yield _BENCH_INVENTORY
+        return
+    rendered = _render_inventory(topo, "prod", None)
+    fd, tmp = tempfile.mkstemp(prefix="nestor-inv-", suffix=".yaml")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(rendered)
+    os.chmod(tmp, 0o600)
+    try:
+        yield tmp
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
 
 
 class _UsageError(Exception):
@@ -1550,8 +1623,8 @@ def _assert_inventory_safe(action: str, inventory_path: str, topo: Topology) -> 
             f"sûre — {raison} (ADR 0053). Risque de MUTER la mauvaise cible (la PROD).\n"
             "  • Banc : utiliser l'inventaire Lima (target_kind: lima) — il est généré "
             "par le montage du banc (`bench/lima/run-phases.sh up`).\n"
-            "  • Régénérer l'inventaire de la stack active : "
-            "`nestor artifact generate -o bootstrap/hosts.yaml`."
+            "  • Prod : lancer le geste via `nestor ansible <playbook>`, qui dérive "
+            "l'inventaire de la stack active (ADR 0098 — plus de `hosts.yaml` à régénérer)."
         )
 
 
@@ -1749,19 +1822,19 @@ def cmd_discover(args: argparse.Namespace) -> int:
     control-plane (via node_exec) et l'écrit (`--kubeconfig-out`, défaut le KUBECONFIG actif)
     — résout le chicken-and-egg (plus besoin d'un kubeconfig préalable)."""
     if args.cp:
-        inv = _inventory_for(load_topology(_resolve(args.file)))
         out_path = (
             args.kubeconfig_out
             or os.environ.get("KUBECONFIG")
             or os.path.join(os.path.expanduser("~"), ".kube", "config")
         )
-        _fetch_kubeconfig(
-            args.cp,
-            inventory_path=inv,
-            server=args.server,
-            out_path=out_path,
-            context_name=args.name,
-        )
+        with _inventory_for(load_topology(_resolve(args.file))) as inv:
+            _fetch_kubeconfig(
+                args.cp,
+                inventory_path=inv,
+                server=args.server,
+                out_path=out_path,
+                context_name=args.name,
+            )
         os.environ["KUBECONFIG"] = out_path  # les sondes suivantes l'utilisent
     if not _ready_nodes():
         raise _UsageError(
@@ -1816,22 +1889,22 @@ def cmd_discover(args: argparse.Namespace) -> int:
     # n'altère pas le YAML) : la forme dans le topology.yaml sera figée une fois validée
     # sur un vrai nœud (banc en cours de stabilisation).
     if getattr(args, "node_side", False):
-        inv = _inventory_for(load_topology(_resolve(args.file)))
-        print("\nNode-side (hors API k8s, ADR 0081) :", file=sys.stderr)
-        for n in result.topology.get("nodes", []):
-            name = n.get("name")
-            if not name:
-                continue
-            ns = _discover_nodeside(name, inventory_path=inv)
-            if ns is None:
-                print(f"  {name} : injoignable (node_exec)", file=sys.stderr)
-                continue
-            disks = ", ".join(f"{d.name}({d.size})" for d in ns.disks) or "—"
-            print(
-                f"  {name} : CRI={ns.cri or '?'} · CNI={ns.cni or '?'} · "
-                f"durcissement={ns.hardening or '?'} · disques={disks}",
-                file=sys.stderr,
-            )
+        with _inventory_for(load_topology(_resolve(args.file))) as inv:
+            print("\nNode-side (hors API k8s, ADR 0081) :", file=sys.stderr)
+            for n in result.topology.get("nodes", []):
+                name = n.get("name")
+                if not name:
+                    continue
+                ns = _discover_nodeside(name, inventory_path=inv)
+                if ns is None:
+                    print(f"  {name} : injoignable (node_exec)", file=sys.stderr)
+                    continue
+                disks = ", ".join(f"{d.name}({d.size})" for d in ns.disks) or "—"
+                print(
+                    f"  {name} : CRI={ns.cri or '?'} · CNI={ns.cni or '?'} · "
+                    f"durcissement={ns.hardening or '?'} · disques={disks}",
+                    file=sys.stderr,
+                )
     return 0
 
 
@@ -2011,12 +2084,13 @@ def _offer_kubeconfig_repatriation_to(topo: Topology, target: str, *, no_input: 
         no_input=no_input,
     )
     try:
-        _fetch_kubeconfig(
-            cp,
-            inventory_path=_inventory_for(topo),
-            server=server,
-            out_path=os.path.expanduser(target),
-        )
+        with _inventory_for(topo) as inv:
+            _fetch_kubeconfig(
+                cp,
+                inventory_path=inv,
+                server=server,
+                out_path=os.path.expanduser(target),
+            )
         print(f"✓ kubeconfig rapatrié dans `{target}` (depuis `{cp}`).")
     except _UsageError as exc:
         _warn(f"rapatriement échoué : {exc}. La commande reste informative (état réel vide).")
@@ -2323,7 +2397,7 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _path_context(topo: Topology) -> _path.PathContext:
+def _path_context(topo: Topology, inventory: str) -> _path.PathContext:
     """Construit `PathContext` depuis la TOPOLOGIE (PUR — aucune I/O, ADR 0097 §5.a).
 
     Remplace les globales bash de run-phases.sh (CP:83 / API_PORT:90 / KUBECONFIG_LOCAL:148
@@ -2331,9 +2405,10 @@ def _path_context(topo: Topology) -> _path.PathContext:
     - `cp` : 1er nœud `control` (run-phases.sh:83-87 : 1er `:control` de NODES, sinon 1er
       nœud). DÉRIVÉ, jamais codé en dur (`cp1`).
     - `api_port` : 6443 (= run-phases.sh:90 `API_PORT`).
-    - `kubeconfig_local` / `inventory` : chemins du BANC Lima, IDENTIQUES à
-      run-phases.sh (`KUBECONFIG_LOCAL`/`INVENTORY` = `<WORKDIR>/kubeconfig` /
-      `<WORKDIR>/inventory.yaml`). Réutilise `_BENCH_KUBECONFIG`/`_inventory_for`.
+    - `kubeconfig_local` : chemin du BANC Lima (`KUBECONFIG_LOCAL` = `<WORKDIR>/kubeconfig`).
+    - `inventory` : passé PAR L'APPELANT (le chemin dérivé du `with _inventory_for(topo)`,
+      ADR 0098) — `_path_context` reste PUR, il n'écrit ni ne supprime rien ; l'appelant
+      (`cmd_up`) possède le cycle de vie du temporaire prod.
     - `repo` : racine du dépôt (= `REPO` de lib.sh) — pour résoudre les playbooks.
     - `nodes` : tuple des nœuds attendus Ready (compte du gate socle `nodes_ready_all`)."""
     controls = topo.control_nodes
@@ -2343,7 +2418,7 @@ def _path_context(topo: Topology) -> _path.PathContext:
         api_port=6443,
         kubeconfig_local=_BENCH_KUBECONFIG,
         repo=os.path.abspath(_ROOT),
-        inventory=_inventory_for(topo),
+        inventory=inventory,
         nodes=tuple(n.name for n in topo.nodes),
     )
 
@@ -2367,7 +2442,9 @@ def _provision_via_bash(topo: Topology, stack_name: str) -> int:
     # CP → on passe SES ressources. `run-phases.sh:117/124/125` lit VM_CPUS/VM_MEMORY/VM_DISK
     # (n'écrase PAS un défaut si déjà posé) ; on les pose DEPUIS la topo le temps de la
     # transition (le câblage direct `lima_render_node(<valeurs>)` reste à faire+prouver au banc).
-    ctx = _path_context(topo)
+    # Ici on ne lit que `ctx.cp` (nom du nœud), pas l'inventaire → pas besoin de
+    # matérialiser un temp prod (inventory="").
+    ctx = _path_context(topo, "")
     if ctx.cp:
         res = topo.node_resources(ctx.cp)
         env = {
@@ -3106,234 +3183,240 @@ def _run_path_engine(
       transport (cp_ip/iface, CNI) reste à prouver au banc (§5.b)."""
     from nestor import phases as _phases
 
-    ctx = _path_context(topo)
-    private_data_dir = os.path.join(_ROOT, "bootstrap")
-    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
-    derived = derive_run_params(topo)
+    # Inventaire DÉRIVÉ de la cible (ADR 0098) : pour la prod un temp `mkstemp`
+    # éphémère qui vit TOUT le montage (les closures `assert_safe`/`launch` lisent
+    # `ctx.inventory` jusqu'au bout), nettoyé en sortie ; banc = fichier réel.
+    with _inventory_for(topo) as _inv:
+        ctx = _path_context(topo, _inv)
+        private_data_dir = os.path.join(_ROOT, "bootstrap")
+        ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
+        derived = derive_run_params(topo)
 
-    def assert_safe(phase: str) -> None:
-        # INVARIANT DE BOUCLE (ADR 0097 §5.c) : garde d'isolation AVANT CHAQUE phase. La
-        # garde gère l'échappatoire KUBECONFIG (ADR 0065 — elle rend tôt si exporté). Pour
-        # une phase à play unitaire (Ansible SSH/exec), on valide AUSSI l'inventaire.
-        _assert_bench_target(f"nestor up ({phase})", topo)
-        if _phases.has_phase_plan(phase) and _phases.phase_plan(phase).playbook is not None:
-            _assert_inventory_safe(f"nestor up ({phase})", ctx.inventory, topo)
+        def assert_safe(phase: str) -> None:
+            # INVARIANT DE BOUCLE (ADR 0097 §5.c) : garde d'isolation AVANT CHAQUE phase. La
+            # garde gère l'échappatoire KUBECONFIG (ADR 0065 — elle rend tôt si exporté). Pour
+            # une phase à play unitaire (Ansible SSH/exec), on valide AUSSI l'inventaire.
+            _assert_bench_target(f"nestor up ({phase})", topo)
+            if _phases.has_phase_plan(phase) and _phases.phase_plan(phase).playbook is not None:
+                _assert_inventory_safe(f"nestor up ({phase})", ctx.inventory, topo)
 
-    def launch(phase: str):
-        # Montage d'UNE phase (UN SEUL passage + gate de santé) — PARITÉ run-phases.sh, qui
-        # lance le playbook une fois puis gate (pas de double-passage `changed=0`). Choix
-        # assumé : certaines phases buildent une image à TAG MUTABLE (`force_rebuild=true`,
-        # portal/mlflow) → un rejeu est LÉGITIMEMENT `changed` (rebuild voulu). Exiger
-        # `changed=0` par phase rendait un faux « idempotence cassée » sur ces builds. L'idem-
-        # potence se prouve par le REJEU du CHEMIN entier (`nestor up` 2× → « rien à appliquer »,
-        # ADR 0052), pas par un double-passage par play. Les `-e` sont RESTREINTS aux clés de
-        # la phase (parité). Les hooks e2e (dataops) sont joués APRÈS succès du play.
-        plan = _phases.phase_plan(phase)
-        # PHASE DÉLÉGUÉE (playbook is None) : ce N'EST PAS un play Ansible mais une étape de
-        # DONNÉES portée par `nestor/seed.py` (gitops-seed → gitea-init.sh). On NE fait donc
-        # PAS `os.path.join(_ROOT, None)` (TypeError au montage) : on route vers le câblage
-        # seed (run_seed banc, garde _assert_bench_target). Voir `_launch_seed`.
-        if plan.playbook is None:
-            return _launch_seed(phase, topo, derived)
-        playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
-        extravars = _phases.extravars_for(phase, derived)
-        print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
-        # KUBECONFIG du play : le kubeconfig BANC rapatrié par bootstrap (ctx.kubeconfig_local
-        # → bench/lima/.work/kubeconfig, server: 127.0.0.1:6443 — le forward de l'API). En
-        # FROM-SCRATCH, os.environ['KUBECONFIG'] est VIDE au démarrage (le banc n'existe pas
-        # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
-        # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
-        # passe le kubeconfig du contexte, qui existe dès que bootstrap l'a rapatrié. Un
-        # KUBECONFIG opérateur explicite (banc déjà monté) reste prioritaire.
-        result = _runner.launch_phase(
-            playbook,
-            extravars,
-            private_data_dir,
-            ctx.inventory,
-            ansible_config=ansible_cfg,
-            kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
-            target_kind=topo.target_kind,
-        )
-        # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy). On ne les joue
-        # QUE si le montage a réussi (un hook après un play KO n'a pas de sens). `RunResult`
-        # (un passage) n'a pas `.ok` (propre à IdempotenceResult) : succès = rc==0.
-        # On route CHAQUE hook (par NOM) vers son IMPLÉMENTATION RÉELLE de façade
-        # (`_E2E_HOOK_IMPL`, I/O kubectl) si elle existe, sinon vers le STUB du registre
-        # (`phases.E2E_HOOKS`, qui LÈVE E2EHookStubbed). Aujourd'hui :
-        #   - `dataops_chain_emit_and_verify` → CÂBLÉ (`_chain_emit_and_verify_banc`) ;
-        #   - `dataops_egress_internet_check` → STUB (lève — hors périmètre, à câbler au banc).
-        if result.rc == 0:
-            for name in _phases.phase_plan(phase).e2e_hooks:
-                impl = _e2e_hook_impl(name) or _phases.E2E_HOOKS[name]
-                impl()  # CÂBLÉ : tente le vrai geste (lève sur échec) ; STUB : lève E2EHookStubbed
-        return result
-
-    def gate(phase: str) -> bool:
-        # Santé post-montage routée par la NATURE de la gate (phases.gate_kind_for) :
-        # ready-replicas / cr-phase (CR Rook Ceph) / presence → _wait_layer_healthy (qui lit
-        # graph.LAYER_SIGNAL, source unique, et applique le bon critère readyReplicas/phase/
-        # présence). `none` (phase sans maillon discriminant) → _wait_layer_healthy rend True.
-        return _wait_layer_healthy(phase)
-
-    def provision(_phase: str) -> int:
-        return _provision_via_bash(topo, stack_name)
-
-    def _runphases(*cmd: str) -> subprocess.CompletedProcess:
-        # Rappel d'une sous-commande run-phases.sh (bash garde VM/CNI/inventaire/facts,
-        # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) —
-        # le bash en dérive le MÊME CP/NODES/WORKDIR que `provision` (un seul WORKDIR
-        # `.work` ⇒ inventaire/kubeconfig partagés avec PathContext).
-        return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
-            ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
-            check=False,
-            env=_runphases_env(topo, stack_name),
-            capture_output=True,
-            text=True,
-        )
-
-    def bootstrap(_phase: str) -> int:
-        # CÂBLAGE TRANSPORT du socle k8s+CNI (LOT 6, ADR 0097 §5.b). Même MOULE que
-        # `cmd_bootstrap_seq` (déjà éprouvé) : Python orchestre la séquence Ansible via
-        # `_bootstrap.run_bootstrap` (logique PURE testée), la façade branche l'I/O réelle
-        # sur les briques bash IRRÉDUCTIBLES (limactl/CNI/kubeconfig, ADR 0049). À la
-        # différence de `cmd_bootstrap_seq` qui RECEVAIT cp_ip/iface/inventaire déjà dérivés
-        # par `phase_bootstrap` (bash), ICI la façade les dérive elle-même du Lima vivant.
-
-        # 1. INVENTAIRE : `phase_up` (provision) NE l'écrit PAS (write_inventory vit dans
-        # `phase_bootstrap`). On le pose donc via l'arm bash `inventory <control> [workers]`
-        # (write_inventory byte-stable, ADR 0049) — control = nœuds `control`, workers = le
-        # reste. La DÉCISION (qui est control/worker) vient de la TOPO ; bash REND le format.
-        control_csv = ",".join(topo.control_nodes)
-        workers_csv = ",".join(topo.worker_nodes)
-        inv = _runphases("inventory", control_csv, *([workers_csv] if workers_csv else []))
-        if inv.returncode != 0:
-            raise _path.PathError(
-                f"socle (bootstrap) : écriture de l'inventaire (run-phases.sh inventory) "
-                f"en échec (rc={inv.returncode}) — {inv.stderr.strip()}"
-            )
-
-        # 2. cp_ip / iface DÉRIVÉS DU LIMA VIVANT via le contrat machine `emit_facts`
-        # (run-phases.sh facts ⇒ `CP_IP=…\nL2_IFACE=…`, byte-stable, ADR 0049/0056). Le bash
-        # garde la dérivation (vm_uservv2_ip/iface = limactl shell, artefact node-side) ;
-        # Python CONSOMME les faits, ne pilote pas limactl. cp_ip = advertiseAddress du CP.
-        facts = _runphases("facts")
-        if facts.returncode != 0:
-            raise _path.PathError(
-                f"socle (bootstrap) : dérivation des faits du banc (run-phases.sh facts) "
-                f"en échec (rc={facts.returncode}) — {facts.stderr.strip()}"
-            )
-        parsed = dict(
-            ln.split("=", 1)
-            for ln in facts.stdout.splitlines()
-            if "=" in ln and not ln.startswith("#")
-        )
-        cp_ip = parsed.get("CP_IP", "")
-        # NB : `L2_IFACE` n'est plus consommé ici — l'arm `cni` (ex `ha-cni <iface>`) ne
-        # prend plus d'argument iface (geste 100 % CNI, exposition L4 NodePort ADR 0092).
-        if not cp_ip:
-            raise _path.PathError(
-                "socle (bootstrap) : `CP_IP` absent des faits du banc (banc provisionné ? "
-                f"sortie={facts.stdout.strip()!r})"
-            )
-
-        # 3. CALLBACK launch : montage d'UN playbook du socle (checks→…→join-workers) via
-        # runner.launch_phase (le MÊME montage qu'`ha-3cp`/`cmd_bootstrap_seq`). Les 6
-        # playbooks du socle sont à la racine de `private_data_dir` (bootstrap/), résolus
-        # par leur nom (checks.yaml…). `-e control_plane_ip=<cp_ip>` (bootstrap_extravars).
-        def launch_socle(playbook: str, extravars: dict):
-            return _runner.launch_phase(
+        def launch(phase: str):
+            # Montage d'UNE phase (UN SEUL passage + gate de santé) — PARITÉ run-phases.sh, qui
+            # lance le playbook une fois puis gate (pas de double-passage `changed=0`). Choix
+            # assumé : certaines phases buildent une image à TAG MUTABLE (`force_rebuild=true`,
+            # portal/mlflow) → un rejeu est LÉGITIMEMENT `changed` (rebuild voulu). Exiger
+            # `changed=0` par phase rendait un faux « idempotence cassée » sur ces builds. L'idem-
+            # potence se prouve par le REJEU du CHEMIN entier (`nestor up` 2× → « rien à faire »,
+            # ADR 0052), pas par un double-passage par play. Les `-e` sont RESTREINTS aux clés de
+            # la phase (parité). Les hooks e2e (dataops) sont joués APRÈS succès du play.
+            plan = _phases.phase_plan(phase)
+            # PHASE DÉLÉGUÉE (playbook is None) : ce N'EST PAS un play Ansible mais une étape de
+            # DONNÉES portée par `nestor/seed.py` (gitops-seed → gitea-init.sh). On NE fait donc
+            # PAS `os.path.join(_ROOT, None)` (TypeError au montage) : on route vers le câblage
+            # seed (run_seed banc, garde _assert_bench_target). Voir `_launch_seed`.
+            if plan.playbook is None:
+                return _launch_seed(phase, topo, derived)
+            playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
+            extravars = _phases.extravars_for(phase, derived)
+            print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
+            # KUBECONFIG du play : le kubeconfig BANC rapatrié par bootstrap (ctx.kubeconfig_local
+            # → bench/lima/.work/kubeconfig, server: 127.0.0.1:6443 — le forward de l'API). En
+            # FROM-SCRATCH, os.environ['KUBECONFIG'] est VIDE au démarrage (le banc n'existe pas
+            # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
+            # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
+            # passe le kubeconfig du contexte, qui existe dès que bootstrap l'a rapatrié. Un
+            # KUBECONFIG opérateur explicite (banc déjà monté) reste prioritaire.
+            result = _runner.launch_phase(
                 playbook,
                 extravars,
                 private_data_dir,
                 ctx.inventory,
                 ansible_config=ansible_cfg,
-                # Cohérence avec le callback `launch` : en from-scratch KUBECONFIG est vide au
-                # démarrage → repli sur le kubeconfig banc rapatrié (ctx.kubeconfig_local).
                 kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
                 target_kind=topo.target_kind,
             )
+            # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy). On ne les joue
+            # QUE si le montage a réussi (un hook après un play KO n'a pas de sens). `RunResult`
+            # (un passage) n'a pas `.ok` (propre à IdempotenceResult) : succès = rc==0.
+            # On route CHAQUE hook (par NOM) vers son IMPLÉMENTATION RÉELLE de façade
+            # (`_E2E_HOOK_IMPL`, I/O kubectl) si elle existe, sinon vers le STUB du registre
+            # (`phases.E2E_HOOKS`, qui LÈVE E2EHookStubbed). Aujourd'hui :
+            #   - `dataops_chain_emit_and_verify` → CÂBLÉ (`_chain_emit_and_verify_banc`) ;
+            #   - `dataops_egress_internet_check` → STUB (lève — hors périmètre, à câbler au banc).
+            if result.rc == 0:
+                for name in _phases.phase_plan(phase).e2e_hooks:
+                    impl = _e2e_hook_impl(name) or _phases.E2E_HOOKS[name]
+                    impl()  # CÂBLÉ : tente le geste (lève si KO) ; STUB : lève E2EHookStubbed
+            return result
 
-        # 4. CALLBACK run_cni : la CNI (Cilium dans la VM) reste un artefact bash (ADR 0049).
-        # On POUSSE l'arm `cni` — qui pose Cilium ET fetch le kubeconfig du CP
-        # (admin.conf sed-rewrite vers KUBECONFIG_LOCAL == ctx.kubeconfig_local). Python
-        # pousse, consomme un rc, ne lit pas la logique CNI/kubeconfig. Le fetch_kubeconfig
-        # est donc COUVERT par ce même geste (pas de 2e rappel séparé). Le geste est 100 %
-        # CNI (le vestige HA `ha-cni <iface>` a été renommé `cni`, plus d'argument iface).
-        def run_cni() -> int:
-            return _runphases("cni").returncode
+        def gate(phase: str) -> bool:
+            # Santé post-montage routée par la NATURE de la gate (phases.gate_kind_for) :
+            # ready-replicas / cr-phase (CR Rook Ceph) / presence → _wait_layer_healthy (qui lit
+            # graph.LAYER_SIGNAL, source unique, et applique le bon critère readyReplicas/phase/
+            # présence). `none` (phase sans maillon discriminant) → _wait_layer_healthy rend True.
+            return _wait_layer_healthy(phase)
 
-        # 5. has_workers : DÉRIVÉ DE LA TOPO (le moteur connaît la topologie) — un control
-        # unique sans worker OMET join-workers.yaml (cf. _bootstrap.bootstrap_playbooks).
-        has_workers = bool(topo.worker_nodes)
-        n_pb = len(_bootstrap.bootstrap_playbooks(has_workers=has_workers))
-        print(f"→ bootstrap : socle k8s ({n_pb} playbooks via runner, CP {ctx.cp} {cp_ip})…")
+        def provision(_phase: str) -> int:
+            return _provision_via_bash(topo, stack_name)
+
+        def _runphases(*cmd: str) -> subprocess.CompletedProcess:
+            # Rappel d'une sous-commande run-phases.sh (bash garde VM/CNI/inventaire/facts,
+            # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) —
+            # le bash en dérive le MÊME CP/NODES/WORKDIR que `provision` (un seul WORKDIR
+            # `.work` ⇒ inventaire/kubeconfig partagés avec PathContext).
+            return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
+                ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
+                check=False,
+                env=_runphases_env(topo, stack_name),
+                capture_output=True,
+                text=True,
+            )
+
+        def bootstrap(_phase: str) -> int:
+            # CÂBLAGE TRANSPORT du socle k8s+CNI (LOT 6, ADR 0097 §5.b). Même MOULE que
+            # `cmd_bootstrap_seq` (déjà éprouvé) : Python orchestre la séquence Ansible via
+            # `_bootstrap.run_bootstrap` (logique PURE testée), la façade branche l'I/O réelle
+            # sur les briques bash IRRÉDUCTIBLES (limactl/CNI/kubeconfig, ADR 0049). À la
+            # différence de `cmd_bootstrap_seq` qui RECEVAIT cp_ip/iface/inventaire déjà dérivés
+            # par `phase_bootstrap` (bash), ICI la façade les dérive elle-même du Lima vivant.
+
+            # 1. INVENTAIRE : `phase_up` (provision) NE l'écrit PAS (write_inventory vit dans
+            # `phase_bootstrap`). On le pose donc via l'arm bash `inventory <control> [workers]`
+            # (write_inventory byte-stable, ADR 0049) — control = nœuds `control`, workers = le
+            # reste. La DÉCISION (qui est control/worker) vient de la TOPO ; bash REND le format.
+            control_csv = ",".join(topo.control_nodes)
+            workers_csv = ",".join(topo.worker_nodes)
+            inv = _runphases("inventory", control_csv, *([workers_csv] if workers_csv else []))
+            if inv.returncode != 0:
+                raise _path.PathError(
+                    f"socle (bootstrap) : écriture de l'inventaire (run-phases.sh inventory) "
+                    f"en échec (rc={inv.returncode}) — {inv.stderr.strip()}"
+                )
+
+            # 2. cp_ip / iface DÉRIVÉS DU LIMA VIVANT via le contrat machine `emit_facts`
+            # (run-phases.sh facts ⇒ `CP_IP=…\nL2_IFACE=…`, byte-stable, ADR 0049/0056). Le bash
+            # garde la dérivation (vm_uservv2_ip/iface = limactl shell, artefact node-side) ;
+            # Python CONSOMME les faits, ne pilote pas limactl. cp_ip = advertiseAddress du CP.
+            facts = _runphases("facts")
+            if facts.returncode != 0:
+                raise _path.PathError(
+                    f"socle (bootstrap) : dérivation des faits du banc (run-phases.sh facts) "
+                    f"en échec (rc={facts.returncode}) — {facts.stderr.strip()}"
+                )
+            parsed = dict(
+                ln.split("=", 1)
+                for ln in facts.stdout.splitlines()
+                if "=" in ln and not ln.startswith("#")
+            )
+            cp_ip = parsed.get("CP_IP", "")
+            # NB : `L2_IFACE` n'est plus consommé ici — l'arm `cni` (ex `ha-cni <iface>`) ne
+            # prend plus d'argument iface (geste 100 % CNI, exposition L4 NodePort ADR 0092).
+            if not cp_ip:
+                raise _path.PathError(
+                    "socle (bootstrap) : `CP_IP` absent des faits du banc (banc provisionné ? "
+                    f"sortie={facts.stdout.strip()!r})"
+                )
+
+            # 3. CALLBACK launch : montage d'UN playbook du socle (checks→…→join-workers) via
+            # runner.launch_phase (le MÊME montage qu'`ha-3cp`/`cmd_bootstrap_seq`). Les 6
+            # playbooks du socle sont à la racine de `private_data_dir` (bootstrap/), résolus
+            # par leur nom (checks.yaml…). `-e control_plane_ip=<cp_ip>` (bootstrap_extravars).
+            def launch_socle(playbook: str, extravars: dict):
+                return _runner.launch_phase(
+                    playbook,
+                    extravars,
+                    private_data_dir,
+                    ctx.inventory,
+                    ansible_config=ansible_cfg,
+                    # Cohérence avec le callback `launch` : en from-scratch KUBECONFIG est vide au
+                    # démarrage → repli sur le kubeconfig banc rapatrié (ctx.kubeconfig_local).
+                    kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
+                    target_kind=topo.target_kind,
+                )
+
+            # 4. CALLBACK run_cni : la CNI (Cilium dans la VM) reste un artefact bash (ADR 0049).
+            # On POUSSE l'arm `cni` — qui pose Cilium ET fetch le kubeconfig du CP
+            # (admin.conf sed-rewrite vers KUBECONFIG_LOCAL == ctx.kubeconfig_local). Python
+            # pousse, consomme un rc, ne lit pas la logique CNI/kubeconfig. Le fetch_kubeconfig
+            # est donc COUVERT par ce même geste (pas de 2e rappel séparé). Le geste est 100 %
+            # CNI (le vestige HA `ha-cni <iface>` a été renommé `cni`, plus d'argument iface).
+            def run_cni() -> int:
+                return _runphases("cni").returncode
+
+            # 5. has_workers : DÉRIVÉ DE LA TOPO (le moteur connaît la topologie) — un control
+            # unique sans worker OMET join-workers.yaml (cf. _bootstrap.bootstrap_playbooks).
+            has_workers = bool(topo.worker_nodes)
+            n_pb = len(_bootstrap.bootstrap_playbooks(has_workers=has_workers))
+            print(f"→ bootstrap : socle k8s ({n_pb} playbooks via runner, CP {ctx.cp} {cp_ip})…")
+            try:
+                result = _bootstrap.run_bootstrap(
+                    cp_ip,
+                    launch=launch_socle,
+                    run_cni=run_cni,
+                    has_workers=has_workers,
+                )
+            except _runner.RunnerUnavailable as exc:
+                raise _UsageError(str(exc)) from exc
+            except _bootstrap.BootstrapError as exc:
+                # FAIL-FAST (ADR 0046) : un échec du socle remonte en PathError → arrêt net,
+                # AUCUN fallback bash, AUCUNE couche applicative montée après.
+                raise _path.PathError(f"socle (bootstrap) : {exc}") from exc
+            for step in result.steps:
+                mark = "✓" if step.ok else "✗"
+                print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
+            return 0 if result.built else 1
+            # _BANC (ADR 0097 §5.b) : la façade TENTE désormais le vrai montage (inventaire +
+            # facts + 6 playbooks + cni). Restent à VALIDER au banc mono-nœud (le mainteneur,
+            # corriger-le-code-pas-l-état) : (a) que `run-phases.sh facts` rend bien CP_IP non
+            # vide APRÈS `provision` (VM démarrée, IP user-v2 posée) ; (b) que l'arm `cni`
+            # écrit le kubeconfig à l'emplacement EXACT attendu par les couches suivantes
+            # (KUBECONFIG_LOCAL == ctx.kubeconfig_local) et que le forward API 127.0.0.1:6443
+            # est joignable. Le format byte-stable de l'inventaire est déjà couvert (bats).
+
+        # Le moteur SAUTE les phases déjà `done` : on monte uniquement `a_appliquer` (le RÉEL,
+        # compute_plan_state), dans l'ORDRE de `seq`. None → toute la séquence (rétrocompat/tests).
+        monter = [p for p in seq if p in a_appliquer] if a_appliquer is not None else list(seq)
+        if a_appliquer is not None and not monter:
+            print("→ moteur Python : rien à monter (tout est déjà à-jour, état réel).")
+            return 0
+
+        print(
+            f"→ moteur Python (run_path) : chemin `{target}` ({len(monter)} phase(s)), CP {ctx.cp}."
+        )
         try:
-            result = _bootstrap.run_bootstrap(
-                cp_ip,
-                launch=launch_socle,
-                run_cni=run_cni,
-                has_workers=has_workers,
+            result = _path.run_path(
+                topo,
+                target,
+                sequence=lambda _t, _g: list(monter),
+                launch=launch,
+                gate=gate,
+                assert_safe=assert_safe,
+                provision=provision,
+                bootstrap=bootstrap,
+                # record : la consignation runs-history (#216) reste l'apanage de
+                # `metro_record_run` (bash, en fin de run-phases.sh) — elle agrège les durées
+                # ET les métriques échantillonnées par metrology.sh PENDANT le run, qu'un append
+                # Python ne reproduit pas byte-stable (history.py:20 — l'append est bash). STUB
+                # documenté (None) : le moteur Python ne consigne pas encore (à câbler, §5.b).
+                record=None,
             )
         except _runner.RunnerUnavailable as exc:
             raise _UsageError(str(exc)) from exc
-        except _bootstrap.BootstrapError as exc:
-            # FAIL-FAST (ADR 0046) : un échec du socle remonte en PathError → arrêt net,
-            # AUCUN fallback bash, AUCUNE couche applicative montée après.
-            raise _path.PathError(f"socle (bootstrap) : {exc}") from exc
+        except _path.IsolationRefused as exc:
+            # REFUS d'isolation = garde de sécurité, pas un échec de montage → code usage (2).
+            raise _UsageError(str(exc)) from exc
+        except _phases.E2EHookStubbed as exc:
+            # Hook e2e non câblé : honnêteté (ne pas verdir à tort) → on ARRÊTE NET (ADR 0034).
+            print(f"  ✗ _BANC : hook e2e à câbler — {exc}", file=sys.stderr)
+            return 1
+        except _path.PathError as exc:
+            # FAIL-FAST : montage KO → on relève le verdict (jamais de fallback bash, ADR 0046).
+            print(f"  ✗ {exc}", file=sys.stderr)
+            return 1
         for step in result.steps:
             mark = "✓" if step.ok else "✗"
             print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
         return 0 if result.built else 1
-        # _BANC (ADR 0097 §5.b) : la façade TENTE désormais le vrai montage (inventaire +
-        # facts + 6 playbooks + cni). Restent à VALIDER au banc mono-nœud (le mainteneur,
-        # corriger-le-code-pas-l-état) : (a) que `run-phases.sh facts` rend bien CP_IP non
-        # vide APRÈS `provision` (VM démarrée, IP user-v2 posée) ; (b) que l'arm `cni`
-        # écrit le kubeconfig à l'emplacement EXACT attendu par les couches suivantes
-        # (KUBECONFIG_LOCAL == ctx.kubeconfig_local) et que le forward API 127.0.0.1:6443
-        # est joignable. Le format byte-stable de l'inventaire est déjà couvert (bats).
-
-    # Le moteur SAUTE les phases déjà `done` : on monte uniquement `a_appliquer` (le RÉEL,
-    # compute_plan_state), dans l'ORDRE de `seq`. None → toute la séquence (rétrocompat/tests).
-    monter = [p for p in seq if p in a_appliquer] if a_appliquer is not None else list(seq)
-    if a_appliquer is not None and not monter:
-        print("→ moteur Python : rien à monter (tout est déjà à-jour, état réel).")
-        return 0
-
-    print(f"→ moteur Python (run_path) : chemin `{target}` ({len(monter)} phase(s)), CP {ctx.cp}.")
-    try:
-        result = _path.run_path(
-            topo,
-            target,
-            sequence=lambda _t, _g: list(monter),
-            launch=launch,
-            gate=gate,
-            assert_safe=assert_safe,
-            provision=provision,
-            bootstrap=bootstrap,
-            # record : la consignation runs-history (#216) reste l'apanage de
-            # `metro_record_run` (bash, en fin de run-phases.sh) — elle agrège les durées
-            # ET les métriques échantillonnées par metrology.sh PENDANT le run, qu'un append
-            # Python ne reproduit pas byte-stable (history.py:20 — l'append est bash). STUB
-            # documenté (None) : le moteur Python ne consigne pas encore (à câbler au banc, §5.b).
-            record=None,
-        )
-    except _runner.RunnerUnavailable as exc:
-        raise _UsageError(str(exc)) from exc
-    except _path.IsolationRefused as exc:
-        # REFUS d'isolation = garde de sécurité, pas un échec de montage → code usage (2).
-        raise _UsageError(str(exc)) from exc
-    except _phases.E2EHookStubbed as exc:
-        # Hook e2e non câblé : honnêteté (ne pas verdir à tort) → on ARRÊTE NET (ADR 0034).
-        print(f"  ✗ _BANC : hook e2e à câbler — {exc}", file=sys.stderr)
-        return 1
-    except _path.PathError as exc:
-        # FAIL-FAST : montage KO → on relève le verdict (jamais de fallback bash, ADR 0046).
-        print(f"  ✗ {exc}", file=sys.stderr)
-        return 1
-    for step in result.steps:
-        mark = "✓" if step.ok else "✗"
-        print(f"  {mark} {step.name}{f' — {step.detail}' if step.detail else ''}")
-    return 0 if result.built else 1
 
 
 def cmd_up(args: argparse.Namespace) -> int:
@@ -3481,64 +3564,60 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
     # Inventaire de la TOPOLOGIE active (ADR 0053) : banc Lima pour une topo lima, prod
     # sinon. PLUS de chemin prod codé en dur — c'est ce qui faisait SSHer `next` (topo
     # banc) sur la prod. La garde _assert_inventory_safe reste le filet en aval.
-    inventory = _inventory_for(topo)
-    ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
-    # L'inventaire réel est gitignoré (ADR 0023) — sans lui, ansible-runner
-    # prendrait le chemin pour un nom d'hôte (erreur cryptique). On l'arrête net.
-    if not os.path.exists(inventory):
-        rel = os.path.relpath(inventory, _ROOT)
-        if topo.target_kind == "lima":
+    # Inventaire DÉRIVÉ de la cible (ADR 0098) : temp prod éphémère / fichier banc.
+    with _inventory_for(topo) as inventory:
+        ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
+        # Côté prod l'inventaire dérivé existe TOUJOURS (`_inventory_for` vient de le
+        # rendre). Côté banc, le `.work/inventory.yaml` peut manquer (banc non monté) →
+        # sans lui ansible-runner prendrait le chemin pour un nom d'hôte. On l'arrête net.
+        if not os.path.exists(inventory):
+            rel = os.path.relpath(inventory, _ROOT)
             raise _UsageError(
                 f"inventaire du banc absent : {rel} — monter le banc d'abord "
                 "(`bench/lima/run-phases.sh up`, qui génère l'inventaire Lima)"
             )
-        raise _UsageError(
-            f"inventaire absent : {rel} "
-            "— le générer (`nestor artifact generate -o bootstrap/hosts.yaml`) "
-            "ou le copier depuis bootstrap/hosts.example.yaml"
-        )
-    _assert_bench_target(f"nestor next ({phase})")
-    # Garde de CIBLE ANSIBLE (ADR 0053) : valide que l'INVENTAIRE vise la topologie
-    # voulue AVANT de lancer ansible-runner. _assert_bench_target ne couvre que le
-    # KUBECONFIG ; un play `hosts: cloud` SSHe sur les nœuds de l'inventaire (chemin
-    # disjoint). Sans ça, un banc KUBECONFIG + un inventaire prod mute la PROD.
-    _assert_inventory_safe(f"nestor next ({phase})", inventory, topo)
-    playbook = os.path.relpath(os.path.join(_ROOT, playbook_rel), private_data_dir)
-    print(f"→ lancement de {phase} ({playbook_rel}) via ansible-runner…")
-    try:
-        result = _runner.launch_phase(
-            playbook,
-            run_params,
-            private_data_dir,
-            inventory,
-            ansible_config=ansible_cfg,
-            # KUBECONFIG vient de l'environnement du poste (config locale de
-            # l'opérateur, comme run-phases.sh/lib.sh) ; transmis explicitement
-            # plutôt que laissé ambiant dans le sous-processus runner.
-            kubeconfig=os.environ.get("KUBECONFIG"),
-            target_kind=topo.target_kind,
-        )
-    except _runner.RunnerUnavailable as exc:
-        raise _UsageError(str(exc)) from exc
-    print(f"  rc={result.rc} status={result.status}")
-    if result.rc != 0:
-        return 1
-    # Gate de SANTÉ active (#355) : un play `rc=0` ne prouve pas que la couche est SAINE
-    # (Loki peut ne jamais devenir Ready — panne vécue). On attend (borné) que le dernier
-    # maillon devienne Ready ; sinon on rend rc≠0 (« montée mais pas saine ») plutôt qu'un
-    # faux succès. Phase sans signal connu → pas de gate (True).
-    if phase in _LAYER_SIGNAL:
-        kind, name, ns, _ = _LAYER_SIGNAL[phase]
-        print(f"→ attente que `{phase}` soit sain ({kind}/{name})…")
-        if not _wait_layer_healthy(phase):
-            print(
-                f"couche `{phase}` montée mais PAS saine ({kind}/{name} pas Ready) — "
-                "voir les pods/événements ; ré-essayer `nestor next` une fois la cause levée.",
-                file=sys.stderr,
+        _assert_bench_target(f"nestor next ({phase})")
+        # Garde de CIBLE ANSIBLE (ADR 0053) : valide que l'INVENTAIRE vise la topologie
+        # voulue AVANT de lancer ansible-runner. _assert_bench_target ne couvre que le
+        # KUBECONFIG ; un play `hosts: cloud` SSHe sur les nœuds de l'inventaire (chemin
+        # disjoint). Sans ça, un banc KUBECONFIG + un inventaire prod mute la PROD.
+        _assert_inventory_safe(f"nestor next ({phase})", inventory, topo)
+        playbook = os.path.relpath(os.path.join(_ROOT, playbook_rel), private_data_dir)
+        print(f"→ lancement de {phase} ({playbook_rel}) via ansible-runner…")
+        try:
+            result = _runner.launch_phase(
+                playbook,
+                run_params,
+                private_data_dir,
+                inventory,
+                ansible_config=ansible_cfg,
+                # KUBECONFIG vient de l'environnement du poste (config locale de
+                # l'opérateur, comme run-phases.sh/lib.sh) ; transmis explicitement
+                # plutôt que laissé ambiant dans le sous-processus runner.
+                kubeconfig=os.environ.get("KUBECONFIG"),
+                target_kind=topo.target_kind,
             )
+        except _runner.RunnerUnavailable as exc:
+            raise _UsageError(str(exc)) from exc
+        print(f"  rc={result.rc} status={result.status}")
+        if result.rc != 0:
             return 1
-        print(f"✓ `{phase}` sain.")
-    return 0
+        # Gate de SANTÉ active (#355) : un play `rc=0` ne prouve pas que la couche est SAINE
+        # (Loki peut ne jamais devenir Ready — panne vécue). On attend (borné) que le dernier
+        # maillon devienne Ready ; sinon on rend rc≠0 (« montée mais pas saine ») plutôt qu'un
+        # faux succès. Phase sans signal connu → pas de gate (True).
+        if phase in _LAYER_SIGNAL:
+            kind, name, ns, _ = _LAYER_SIGNAL[phase]
+            print(f"→ attente que `{phase}` soit sain ({kind}/{name})…")
+            if not _wait_layer_healthy(phase):
+                print(
+                    f"couche `{phase}` montée mais PAS saine ({kind}/{name} pas Ready) — "
+                    "voir les pods/événements ; ré-essayer `nestor next` une fois la cause levée.",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"✓ `{phase}` sain.")
+        return 0
 
 
 def cmd_next(args: argparse.Namespace) -> int:
@@ -4182,6 +4261,7 @@ _DISPATCH = {
     # `env` SUPPRIMÉE (LOT 8, ADR 0097 §3) : `nestor` maintient des contextes kubectl
     # nommés (posés par `stack select`). Remplaçant ergonomique = `nestor kubectl …` :
     "kubectl": cmd_kubectl,  # kubectl sur la cible de la stack active (ex-`nestor env`)
+    "ansible": cmd_ansible,  # playbook sur la cible active, inventaire DÉRIVÉ (ADR 0098)
     "access": cmd_access,  # accès dev (URLs + secrets) — délègue à access.sh (ADR 0048)
     "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
     "discover": cmd_discover,  # reconstruit un topology.yaml depuis le réel (ADR 0074, inverse de generate)  # noqa: E501
@@ -4419,6 +4499,23 @@ def _build_parser() -> argparse.ArgumentParser:
     # (`nestor kubectl get pods -A`, `nestor kubectl -n monitoring logs …`).
     p_kubectl.add_argument(
         "kubectl_args", nargs=argparse.REMAINDER, help="arguments passés à kubectl"
+    )
+
+    p_ansible = sub.add_parser(
+        "ansible",
+        help="lancer un playbook sur la stack active (inventaire dérivé, ADR 0098)",
+    )
+    p_ansible.add_argument(
+        "-f", "--file", default=None, help="topology.yaml à viser (défaut : stack active)"
+    )
+    p_ansible.add_argument(
+        "playbook", help="playbook (ex. checks.yaml, security/secure.yml — résolu sous bootstrap/)"
+    )
+    # REMAINDER : le playbook vient EN PREMIER, les flags ansible APRÈS
+    # (`nestor ansible checks.yaml --limit cp1 --tags os --check`). Limite connue :
+    # un flag placé AVANT le playbook ne serait pas capturé — le playbook d'abord.
+    p_ansible.add_argument(
+        "ansible_args", nargs=argparse.REMAINDER, help="arguments passés à ansible-playbook"
     )
 
     p_access = sub.add_parser(
@@ -4663,7 +4760,12 @@ def _build_bootstrap_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="topology bootstrap-seq")
     ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
     ap.add_argument("--l2-iface", required=True, dest="l2_iface", help="interface L2 (LB-IPAM/CNI)")
-    ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
+    # L'appelant (run-phases.sh:phase_bootstrap) passe TOUJOURS --inventory explicite
+    # (l'inventaire Lima dérivé du banc). Le défaut pointe le `.example` inerte (ADR 0098 :
+    # plus de hosts.yaml statique) — un filet, jamais une cible réelle.
+    ap.add_argument(
+        "--inventory", default="hosts.example.yaml", help="inventaire (relatif à bootstrap/)"
+    )
     return ap
 
 

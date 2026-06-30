@@ -13,10 +13,10 @@ l'opérateur Rook 1.19 (Ceph Tentacle 20.2.1).
 > up) :
 >
 > ```bash
-> ansible-playbook -i ./hosts.yaml ../../bootstrap/ceph-checks.yaml        # pré-vol (lvm2, disques)
-> ansible-playbook -i ./hosts.yaml ../../bootstrap/ceph-cluster.yaml       # operator + CephCluster + toolbox
-> ansible-playbook -i ./hosts.yaml ../../bootstrap/ceph-storageclasses.yaml # SC bloc/CephFS + default
-> ansible-playbook -i ./hosts.yaml ../../bootstrap/ceph-datalake.yaml      # CephObjectStore RGW (S3)
+> nestor ansible ceph-checks.yaml         # pré-vol (lvm2, disques)
+> nestor ansible ceph-cluster.yaml        # operator + CephCluster + toolbox
+> nestor ansible ceph-storageclasses.yaml # SC bloc/CephFS + default
+> nestor ansible ceph-datalake.yaml       # CephObjectStore RGW (S3)
 > ```
 >
 > Sur le banc, c'est `bench/lima/run-phases.sh ceph|sc|datalake` qui les joue
@@ -59,7 +59,7 @@ rook-discover-7psxb                   1/1     Running   0          53s
 > échouer tard et obscurément (drift L6) :
 >
 > ```bash
-> ansible-playbook -i ./hosts.yaml ../../bootstrap/ceph-checks.yaml
+> nestor ansible ceph-checks.yaml
 > # Parc différent du matériel cible (ADR 0008/0009) ? surcharger :
 > #   -e ceph_block_device=nvme0n1 -e ceph_min_hdd=8 -e 'ceph_data_device_glob=/dev/sd[a-h]'
 > ```

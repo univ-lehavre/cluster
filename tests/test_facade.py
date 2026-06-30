@@ -135,24 +135,26 @@ class PathContextDerivation(unittest.TestCase):
 
     def test_cp_is_first_control_not_hardcoded(self):
         # cp = 1er nœud `control`, même s'il n'est PAS le 1er nœud déclaré (jamais `cp1` codé).
-        ctx = cli._path_context(_topo(_LIMA_CP_SECOND))
+        # `_path_context` reçoit l'inventaire EN PARAMÈTRE (ADR 0098) — il reste pur.
+        ctx = cli._path_context(_topo(_LIMA_CP_SECOND), cli._BENCH_INVENTORY)
         self.assertEqual(ctx.cp, "cp-b")
 
     def test_cp_solo(self):
-        ctx = cli._path_context(_topo(_LIMA_SOLO))
+        ctx = cli._path_context(_topo(_LIMA_SOLO), cli._BENCH_INVENTORY)
         self.assertEqual(ctx.cp, "cp1")
 
     def test_api_port_and_repo_and_nodes(self):
-        ctx = cli._path_context(_topo(_LIMA_CP_SECOND))
+        ctx = cli._path_context(_topo(_LIMA_CP_SECOND), cli._BENCH_INVENTORY)
         self.assertEqual(ctx.api_port, 6443)
         # repo = racine ABSOLUE du dépôt (pour résoudre les playbooks).
         self.assertTrue(os.path.isabs(ctx.repo))
         # nodes = tuple des nœuds attendus Ready (ordre déclaré).
         self.assertEqual(ctx.nodes, ("node-a", "cp-b"))
 
-    def test_kubeconfig_local_and_inventory_are_bench_paths(self):
-        # IDENTIQUES à run-phases.sh (KUBECONFIG_LOCAL / INVENTORY du banc Lima).
-        ctx = cli._path_context(_topo(_LIMA_SOLO))
+    def test_inventory_is_passed_through_kubeconfig_local_is_bench(self):
+        # `inventory` est le chemin PASSÉ par l'appelant (ADR 0098 : dérivé du `with
+        # _inventory_for`) ; `kubeconfig_local` reste le chemin banc figé.
+        ctx = cli._path_context(_topo(_LIMA_SOLO), cli._BENCH_INVENTORY)
         self.assertEqual(ctx.kubeconfig_local, cli._BENCH_KUBECONFIG)
         self.assertEqual(ctx.inventory, cli._BENCH_INVENTORY)
 

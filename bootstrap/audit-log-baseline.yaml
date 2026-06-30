@@ -7,7 +7,7 @@
 # couche 0 de `bootstrap/state.sh` (qui sinon signale 'audit-log absent').
 #
 # Usage :
-#   ansible-playbook -i hosts.yaml audit-log-baseline.yaml
+#   nestor ansible audit-log-baseline.yaml
 #
 # Idempotent : peut être rejoué sans effet de bord (chaque run ajoute
 # juste une ligne supplémentaire).

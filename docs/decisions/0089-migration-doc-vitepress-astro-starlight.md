@@ -2,9 +2,11 @@
 
 ## Statut
 
-Proposed (2026-06-21) — mise en œuvre **incrémentale** suivie par
-[`plan-migration-astro-starlight.md`](../plans/plan-migration-astro-starlight.md).
-VitePress reste en place tant que la bascule n'est pas complète.
+Accepted (proposé le 2026-06-21) — migration **livrée** : le site est servi par
+Astro Starlight (`package.json` : `astro build`, `@astrojs/starlight` ;
+`docs/astro.config.mjs`), VitePress retiré. Mise en œuvre suivie par
+[`plan-migration-astro-starlight.md`](../plans/plan-migration-astro-starlight.md)
+(Achevé).
 
 S'inspire de
 l'[ADR 0036 d'atlas](https://univ-lehavre.github.io/atlas/decisions/0036-migration-vitepress-astro-starlight/)

@@ -538,6 +538,94 @@ class Kubectl(unittest.TestCase):
         self.assertNotIn(".work/kubeconfig", seen["kc"])
 
 
+class Ansible(unittest.TestCase):
+    """`nestor ansible <playbook>` : playbook sur la stack active, inventaire DÉRIVÉ de la
+    topologie (ADR 0098 — `hosts.yaml` supprimé, plus de fichier inventaire pointable)."""
+
+    _PROD_TOPO = (
+        "catalog: {topology: dirqual}\n"
+        "nodes:\n"
+        "  - {name: dirqual1, roles: [control, worker]}\n"
+        "  - {name: dirqual2, roles: [worker]}\n"
+        "storage: {backend: ceph}\ntarget_kind: prod\n"
+    )
+
+    def _topo_file(self, body: str) -> str:
+        fd, path = tempfile.mkstemp(suffix=".yaml")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(body)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_prod_derive_l_inventaire_de_la_topo_dans_un_temp(self):
+        # `nestor ansible checks.yaml` sur une topo prod → l'inventaire passé à
+        # ansible-playbook est un TEMP dérivé (contient les nœuds réels dirqual*), JAMAIS
+        # bootstrap/hosts.yaml. Et il porte EXPECTED_TARGET_KIND=prod (réarme l'audit-log).
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            seen["env"] = dict(k.get("env") or {})
+            # capture le contenu de l'inventaire AVANT le cleanup (finally).
+            inv = argv[argv.index("-i") + 1]
+            with open(inv, encoding="utf-8") as f:
+                seen["inv_body"] = f.read()
+            seen["inv_path"] = inv
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["ansible", "-f", self._topo_file(self._PROD_TOPO), "checks.yaml"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["argv"][0], "ansible-playbook")
+        self.assertIn("dirqual1", seen["inv_body"])  # nœuds RÉELS dérivés de la topo
+        self.assertIn("target_kind: prod", seen["inv_body"])  # garde préservée
+        self.assertNotIn("hosts.yaml", seen["inv_path"])  # PAS le fichier statique
+        self.assertEqual(seen["env"].get("EXPECTED_TARGET_KIND"), "prod")
+        # le temp est nettoyé après l'exécution (finally).
+        self.assertFalse(os.path.exists(seen["inv_path"]))
+
+    def test_passthrough_des_args_ansible(self):
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            cli.main(
+                [
+                    "ansible",
+                    "-f",
+                    self._topo_file(self._PROD_TOPO),
+                    "checks.yaml",
+                    "--limit",
+                    "dirqual1",
+                    "--check",
+                ]
+            )
+        # les args ansible suivent le playbook, transmis verbatim.
+        self.assertIn("--limit", seen["argv"])
+        self.assertIn("dirqual1", seen["argv"])
+        self.assertIn("--check", seen["argv"])
+
+    def test_retourne_le_code_d_ansible(self):
+        def _fake_run(argv, *a, **k):
+            return subprocess.CompletedProcess(args=argv, returncode=2)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["ansible", "-f", self._topo_file(self._PROD_TOPO), "checks.yaml"])
+        self.assertEqual(code, 2)
+
+    def test_playbook_introuvable_est_une_erreur_d_usage(self):
+        # Un playbook inexistant échoue AVANT de dériver le moindre inventaire (code 2).
+        def _fail_run(*a, **k):  # ne doit jamais être appelé
+            raise AssertionError("ansible-playbook ne doit pas être lancé")
+
+        with mock.patch.object(cli.subprocess, "run", _fail_run):
+            code = cli.main(["ansible", "-f", self._topo_file(self._PROD_TOPO), "nexiste-pas.yaml"])
+        self.assertEqual(code, 2)  # _UsageError
+
+
 class Preview(unittest.TestCase):
     """`preview` : LA vue complète VOULU + RÉEL + PLAN (absorbe status + refresh)."""
 
@@ -1071,21 +1159,24 @@ runs:
         self.assertEqual(len(calls), 1)  # UNE couche montée, pas la séquence
         self.assertTrue(calls[0][0].endswith(".yaml"))
 
-    def test_without_inventory_is_usage_error(self):
-        # `up` sans bootstrap/hosts.yaml → erreur d'usage claire (code 2).
-        inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
-        if os.path.exists(inv):
-            self.skipTest("bootstrap/hosts.yaml présent localement — cas testé en CI")
+    def test_bench_without_inventory_is_usage_error(self):
+        # Topo BANC (lima) sans `.work/inventory.yaml` → erreur d'usage claire (code 2).
+        # NB : côté PROD ce cas n'existe plus (ADR 0098 : l'inventaire est dérivé dans un
+        # temp à la volée, jamais absent). Seul le banc, dont l'inventaire est posé par le
+        # provisioning, peut manquer son fichier (banc non monté).
+        if os.path.exists(cli._BENCH_INVENTORY):
+            self.skipTest("inventaire banc présent localement — cas testé en CI")
         orig = cli._runner.launch_phase
         cli._runner.launch_phase = lambda *a, **k: None
         self.addCleanup(setattr, cli._runner, "launch_phase", orig)
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
+        lima = _example_as_lima(self)
         code, _, err = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--yes"]
+            ["next", "-f", lima, "--target", "cluster-dataops", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 2)
-        self.assertIn("inventaire absent", err)
+        self.assertIn("inventaire du banc absent", err)
 
     def test_propagates_failure_rc(self):
         from nestor.runner import RunResult

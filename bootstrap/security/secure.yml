@@ -6,17 +6,17 @@
 # à rien. L'utilisateur choisit explicitement la couche qu'il veut
 # activer ; voir IMPLICATIONS.md pour le détail.
 #
-# Menu (à lancer depuis `bootstrap/security/`) :
-#   ansible-playbook -i ../hosts.yaml secure.yml --tags os         # mises à jour auto
-#   ansible-playbook -i ../hosts.yaml secure.yml --tags alert      # mail root
-#   ansible-playbook -i ../hosts.yaml secure.yml --tags audit      # auditd
-#   ansible-playbook -i ../hosts.yaml secure.yml --tags detection  # fail2ban
-#   ansible-playbook -i ../hosts.yaml secure.yml --tags smart      # smartd (SMART disques)
-#   ansible-playbook -i ../hosts.yaml secure.yml --tags ufw        # ⚠️ APRÈS bootstrap K8s
-#   ansible-playbook -i ../hosts.yaml secure.yml --tags upgrade    # apt full-upgrade + reboot
+# Menu (chemin du playbook relatif au dépôt) :
+#   nestor ansible security/secure.yml --tags os         # mises à jour auto
+#   nestor ansible security/secure.yml --tags alert      # mail root
+#   nestor ansible security/secure.yml --tags audit      # auditd
+#   nestor ansible security/secure.yml --tags detection  # fail2ban
+#   nestor ansible security/secure.yml --tags smart      # smartd (SMART disques)
+#   nestor ansible security/secure.yml --tags ufw        # ⚠️ APRÈS bootstrap K8s
+#   nestor ansible security/secure.yml --tags upgrade    # apt full-upgrade + reboot
 #
 # Pour tout activer en un coup (déconseillé sans avoir lu IMPLICATIONS.md) :
-#   ansible-playbook -i ../hosts.yaml secure.yml \
+#   nestor ansible security/secure.yml \
 #     --tags os,alert,audit,detection
 
 - name: Paramétrage du playbook

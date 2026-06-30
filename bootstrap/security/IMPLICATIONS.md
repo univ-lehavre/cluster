@@ -34,41 +34,43 @@ Vue d'ensemble :
 
 ## Menu — commandes prêtes à copier-coller
 
-À lancer depuis `bootstrap/security/` :
+`nestor ansible` résout le playbook (`security/secure.yml`, chemin relatif au
+dépôt) et dérive l'inventaire de la topologie active — depuis la racine du
+dépôt, plus de `-i` :
 
 ```bash
 # 1. Mises à jour automatiques + expiration mot de passe (recommandé en 1er)
-ansible-playbook -i ../hosts.yaml secure.yml --tags os
+nestor ansible security/secure.yml --tags os
 
 # 2. Mail root redirigé (présuppose MAIL_ROOT_REDIRECT dans .env)
-ansible-playbook -i ../hosts.yaml secure.yml --tags alert
+nestor ansible security/secure.yml --tags alert
 
 # 3. Journal d'audit (auditd + règles Florian Roth)
-ansible-playbook -i ../hosts.yaml secure.yml --tags audit
+nestor ansible security/secure.yml --tags audit
 
 # 4. Détection / anti-brute-force SSH
-ansible-playbook -i ../hosts.yaml secure.yml --tags detection
+nestor ansible security/secure.yml --tags detection
 
 # 4 bis. Surveillance SMART des disques (alerte mail sur le NVMe block.db ; cf. ADR 0008)
-ansible-playbook -i ../hosts.yaml secure.yml --tags smart
+nestor ansible security/secure.yml --tags smart
 
 # Le durcissement sshd et le dépôt des clés sont assurés UNIQUEMENT par
 # bootstrap/first-access.sh (les anciens tags sshd/ssh-keys ont été retirés).
 
 # Tout faire d'un coup (sauf upgrade et ufw, plus risqués)
-ansible-playbook -i ../hosts.yaml secure.yml --tags os,alert,audit,detection
+nestor ansible security/secure.yml --tags os,alert,audit,detection
 
 # Rattrapage CVE — un nœud à la fois (peut redémarrer)
-ansible-playbook -i ../hosts.yaml secure.yml --tags upgrade
+nestor ansible security/secure.yml --tags upgrade
 
 # Pare-feu — UNIQUEMENT après que K8s + Cilium + Ceph soient opérationnels
-ansible-playbook -i ../hosts.yaml secure.yml --tags ufw
+nestor ansible security/secure.yml --tags ufw
 ```
 
 Limiter à un nœud (utile pour expérimenter) :
 
 ```bash
-ansible-playbook -i ../hosts.yaml secure.yml --tags os --limit cp1
+nestor ansible security/secure.yml --tags os --limit cp1
 ```
 
 Tableau de bord :

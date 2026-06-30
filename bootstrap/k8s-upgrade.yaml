@@ -2,10 +2,10 @@
 # Upgrade Kubernetes in-place, séquencé (audit P5 #18 / ADR 0015).
 #
 # Usage :
-#   ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+#   nestor ansible k8s-upgrade.yaml \
 #     -e k8s_upgrade_version=1.34.9
 #   # Montée de mineure (bascule aussi le dépôt apt) :
-#   ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+#   nestor ansible k8s-upgrade.yaml \
 #     -e k8s_upgrade_version=1.35.0 -e k8s_upgrade_repo_minor=v1.35
 #
 # Ordre imposé par kubeadm :

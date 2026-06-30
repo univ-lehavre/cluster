@@ -6,6 +6,7 @@ banc `lima` sur un inventaire prod → REFUS) et les cas sûrs. Valeurs généri
 """
 
 import os
+import re
 import sys
 import unittest
 
@@ -176,6 +177,101 @@ class ResolveNodeTarget(unittest.TestCase):
     def test_unknown_node_raises(self):
         with self.assertRaises(IsolationError):
             resolve_node_target(_PROD_INV, "ghost")
+
+
+class NoStaticHostsYaml(unittest.TestCase):
+    """Garde-fou anti-régression (ADR 0098) : `bootstrap/hosts.yaml` n'a plus d'existence
+    persistante — l'inventaire est DÉRIVÉ de la topologie active (`nestor ansible`). Aucun
+    code/config ne doit réintroduire le vecteur de l'incident Rook-Ceph : un
+    `ansible-playbook -i …/hosts.yaml` ou `inventory = …/hosts.yaml`. Les commentaires/docs
+    qui EXPLIQUENT l'incident (ADR, docstrings) sont autorisés — on ne scanne que les gestes
+    EXÉCUTABLES."""
+
+    _ROOT = os.path.join(os.path.dirname(__file__), "..")
+    # Fichiers de CODE/CONFIG exécutables (pas la doc/ADR qui décrivent l'incident).
+    _SCANNED = (
+        "scripts/topology.py",
+        "scripts/nestor-exec",
+        "bootstrap/ansible.cfg",
+        "Justfile",  # supprimé : sa réapparition avec -i hosts.yaml doit échouer
+    )
+    # Motifs INTERDITS : une invocation/config qui POINTE un hosts.yaml réel.
+    _FORBIDDEN = (
+        re.compile(r"ansible-playbook\s+-i\s+\S*hosts\.yaml"),
+        re.compile(r"^\s*inventory\s*=\s*\S*hosts\.yaml", re.MULTILINE),
+        re.compile(r'default\s*=\s*["\']\S*hosts\.yaml["\']'),  # défaut d'argparse
+    )
+
+    @staticmethod
+    def _executable_lines(path):
+        """Rend le texte du fichier en NEUTRALISANT commentaires et chaînes/docstrings —
+        pour ne scanner que le code EXÉCUTABLE. Les docstrings ADR qui CITENT le vecteur
+        (`… -i bootstrap/hosts.yaml …` à titre pédagogique) ne doivent pas être des
+        offenders. Pour un .py : tokenize (vire COMMENT + STRING). Sinon : vire les lignes
+        commentaire `#` (suffit pour ansible.cfg/Justfile/nestor-exec)."""
+        if path.endswith(".py"):
+            import io
+            import tokenize
+
+            kept = []
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+            try:
+                for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+                    if tok.type in (tokenize.COMMENT, tokenize.STRING):
+                        continue
+                    if tok.string.strip():
+                        kept.append((tok.start[0], tok.string))
+                return kept  # liste de (ligne, lexème) — sans commentaires ni chaînes
+            except tokenize.TokenError:
+                pass
+        # non-python : lignes hors commentaire `#`
+        out = []
+        with open(path, encoding="utf-8") as f:
+            for i, raw in enumerate(f, 1):
+                code = raw.split("#", 1)[0]
+                if code.strip():
+                    out.append((i, code))
+        return out
+
+    def test_no_executable_pointing_to_static_hosts_yaml(self):
+        offenders = []
+        for rel in self._SCANNED:
+            path = os.path.join(self._ROOT, rel)
+            if not os.path.exists(path):
+                continue  # ex. Justfile supprimé — OK
+            for line_no, fragment in self._executable_lines(path):
+                if "hosts.example.yaml" in fragment:
+                    continue  # golden INERTE autorisé (filet ansible.cfg)
+                if any(pat.search(fragment) for pat in self._FORBIDDEN):
+                    offenders.append(f"{rel}:{line_no} → {fragment.strip()}")
+        self.assertEqual(
+            offenders,
+            [],
+            "Vecteur `-i hosts.yaml` réintroduit (ADR 0098 : passer par `nestor ansible`) :\n"
+            + "\n".join(offenders),
+        )
+
+    def test_no_scanned_bash_script_reads_hosts_yaml(self):
+        # Aucun script bash de tooling ne doit LIRE bootstrap/hosts.yaml (ex. ex-`env.sh`
+        # détectait la prod ainsi — supprimé). On scanne les .sh d'orchestration.
+        bash_dirs = (os.path.join(self._ROOT, "bench", "lima"),)
+        offenders = []
+        pat = re.compile(r"(?<!example\.)\bhosts\.yaml\b")
+        for d in bash_dirs:
+            for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+                if not name.endswith(".sh"):
+                    continue
+                with open(os.path.join(d, name), encoding="utf-8") as f:
+                    for i, raw in enumerate(f, 1):
+                        line = raw.split("#", 1)[0]  # ignore les commentaires
+                        if "hosts.example.yaml" in line:
+                            continue
+                        if pat.search(line):
+                            offenders.append(f"bench/lima/{name}:{i} → {line.strip()}")
+        self.assertEqual(
+            offenders, [], "Script bash lisant hosts.yaml (ADR 0098) :\n" + "\n".join(offenders)
+        )
 
 
 if __name__ == "__main__":

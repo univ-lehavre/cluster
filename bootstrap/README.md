@@ -38,15 +38,15 @@ tableau regroupe les playbooks par rôle, il ne prescrit pas la séquence.
 
 ### Installation (socle k8s)
 
-| Fichier                                                                                                  | Rôle                                                                                |
-| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [`hosts.example.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/hosts.example.yaml)   | Modèle d'inventaire générique (le `hosts.yaml` réel n'est pas versionné — ADR 0023) |
-| [`checks.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/checks.yaml)                 | Vérifications préalables                                                            |
-| [`cri.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/cri.yaml)                       | Installation de la runtime conteneur                                                |
-| [`kubeadm.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/kubeadm.yaml)               | Installation des paquets kubeadm/kubelet/kubectl                                    |
-| [`control-planes.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/control-planes.yaml) | Configuration des nœuds control plane                                               |
-| [`initialisation.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/initialisation.yaml) | Initialisation du cluster avec `kubeadm init`                                       |
-| [`cni.sh`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/cni.sh)                           | Installation du CNI Cilium (à lancer sur le control plane)                          |
+| Fichier                                                                                                  | Rôle                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`hosts.example.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/hosts.example.yaml)   | Modèle d'inventaire générique (l'inventaire réel est dérivé de la topologie active par `nestor ansible`, plus de `hosts.yaml` persistant — ADR 0098) |
+| [`checks.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/checks.yaml)                 | Vérifications préalables                                                                                                                             |
+| [`cri.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/cri.yaml)                       | Installation de la runtime conteneur                                                                                                                 |
+| [`kubeadm.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/kubeadm.yaml)               | Installation des paquets kubeadm/kubelet/kubectl                                                                                                     |
+| [`control-planes.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/control-planes.yaml) | Configuration des nœuds control plane                                                                                                                |
+| [`initialisation.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/initialisation.yaml) | Initialisation du cluster avec `kubeadm init`                                                                                                        |
+| [`cni.sh`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/cni.sh)                           | Installation du CNI Cilium (à lancer sur le control plane)                                                                                           |
 
 ### Extension HA / join
 

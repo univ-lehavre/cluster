@@ -9,7 +9,7 @@
 #
 # RPO réel = fréquence à laquelle ce playbook est lancé (voir RUNBOOK). À
 # planifier côté admin (cron/launchd) — ex. toutes les 6 h :
-#   0 */6 * * * cd <repo>/bootstrap && ansible-playbook -i hosts.yaml etcd-fetch.yaml
+#   0 */6 * * * cd <repo> && nestor ansible etcd-fetch.yaml
 #
 # ⚠️ Les snapshots contiennent TOUS les Secrets du cluster (etcd non chiffré,
 # cf. ADR 0014). La destination locale `etcd-snapshots/` est gitignorée et doit
@@ -38,7 +38,7 @@
         fail_msg: >-
           Aucun snapshot dans /var/lib/etcd-backups sur {{ inventory_hostname }}.
           Le rôle etcd-backup est-il appliqué et son timer actif ?
-          (ansible-playbook -i ./hosts.yaml ./etcd-backup.yaml)
+          (nestor ansible etcd-backup.yaml)
 
     - name: Rapatrier le snapshot vers le poste de contrôle (hors-nœud)
       ansible.builtin.fetch:

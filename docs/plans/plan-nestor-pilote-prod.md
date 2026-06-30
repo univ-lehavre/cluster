@@ -123,3 +123,21 @@ dans la vue outils + l'aide `preview`. Mettre à jour le RUNBOOK (nestor sait
   anti-mutation (étape 4) ; mutation prod **hors scope**.
 - **Confusion état polymorphe** → doc explicite + messages `preview` clairs.
 - **Mauvais kubeconfig prod** → cible **nommée et vérifiée**, jamais implicite.
+
+## Suivi
+
+| Étape                                         | État       |
+| --------------------------------------------- | ---------- |
+| 0. Un kubeconfig par stack, hors dépôt        | ✅ achevée |
+| 1. Champ `kubeconfig:` + résolution sûre      | ✅ achevée |
+| 1bis. Confirmation interactive + rapatriement | ✅ achevée |
+| 2. État réel polymorphe selon `target_kind`   | ✅ achevée |
+| 3. Couches présentes déduites du réel K8s     | ✅ achevée |
+| 4. Garde-fou anti-mutation (test d'isolation) | ✅ achevée |
+| 5. Doc                                        | ✅ achevée |
+
+**Issues rattachées** : —. La lecture-seule de la prod est livrée
+(`nestor preview`/ `kubectl` sur stack `dirqual`, garde
+`_assert_inventory_safe`). Le plan reste **Actif** : nestor évolue vers la
+MUTATION encadrée de la prod (ex. `nestor ansible <playbook>`, ADR 0098),
+prolongement naturel de ce pilotage.

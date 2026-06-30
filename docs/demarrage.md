@@ -57,16 +57,16 @@ pas. Les sections avancées sont signalées.
 
 2. **Installer le cluster.** Suivre la séquence de référence pas à pas :
    [`bootstrap/RUNBOOK.md`](../bootstrap/RUNBOOK.md) — préparation OS,
-   `kubeadm`, CNI Cilium, jonction des workers. Raccourcis :
-   [`Justfile`](../Justfile) (`just` pour la liste).
+   `kubeadm`, CNI Cilium, jonction des workers. Chaque playbook se lance via
+   `nestor ansible <playbook>` (inventaire dérivé de la topologie, ADR 0098).
 3. **Déployer le stockage.**
    [`storage/ceph/RUNBOOK.md`](../storage/ceph/RUNBOOK.md) — opérateur Rook,
    `CephCluster`, StorageClasses. À faire une fois les nœuds `Ready`.
 4. **Déployer les services et applications.** Registry, dashboard
    ([`platform/`](../platform/)), RStudio et exemples ([`apps/`](../apps/),
    [`storage/ceph/wordpress/`](../storage/ceph/wordpress/)).
-5. **Exploiter au quotidien.** Vérifier l'état (`just state` ou
-   [`bootstrap/state.sh`](../bootstrap/state.sh)), sauvegarder etcd
+5. **Exploiter au quotidien.** Vérifier l'état
+   ([`bootstrap/state.sh`](../bootstrap/state.sh)), sauvegarder etcd
    ([`etcd-backup`](../bootstrap/etcd-backup.yaml) + copie hors-nœud
    [`etcd-fetch`](../bootstrap/etcd-fetch.yaml)), monter de version
    ([`k8s-upgrade`](../bootstrap/k8s-upgrade.yaml)), surveiller (`kubectl top`
@@ -87,11 +87,11 @@ pas. Les sections avancées sont signalées.
 - **L'état d'avancement** se lit dans les plans de mise en œuvre
   ([`docs/plans/`](plans/), ADR 0057) et les passages d'audit datés
   ([`docs/audit/`](audit/), ADR 0058) ; l'état **live** du cluster vient de
-  `just state` (ou [`bootstrap/state.sh`](../bootstrap/state.sh)).
+  [`bootstrap/state.sh`](../bootstrap/state.sh).
 
 ## Si quelque chose ne va pas
 
-- `just state` (ou `bootstrap/state.sh`) affiche le **drift** par couche et
-  propose la prochaine étape.
+- `bootstrap/state.sh` affiche le **drift** par couche et propose la prochaine
+  étape.
 - Une **faille de sécurité** ? Ne pas ouvrir d'issue publique — suivre
   [SECURITY.md](../SECURITY.md).

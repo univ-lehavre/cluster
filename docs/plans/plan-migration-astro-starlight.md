@@ -2,12 +2,14 @@
 
 ## État
 
-> **État : Brouillon** (2026-06-21) · **Fonde :
+> **État : Achevé** (migration livrée — le site est servi par Astro Starlight :
+> `package.json` (`astro build`, `@astrojs/starlight`), `docs/astro.config.mjs`,
+> VitePress retiré). · **Fonde :
 > [ADR 0089](../decisions/0089-migration-doc-vitepress-astro-starlight.md)**
-> (Proposed) · **S'inspire de** l'ADR 0036 d'atlas (mêmes patterns).
+> (Accepted) · **S'inspire de** l'ADR 0036 d'atlas (mêmes patterns).
 >
-> Mise en œuvre **incrémentale, plusieurs PR**, chacune verte. VitePress reste
-> fonctionnel jusqu'à la bascule finale (étape 6).
+> Mise en œuvre **incrémentale, plusieurs PR**, chacune verte. VitePress est
+> resté fonctionnel jusqu'à la bascule finale (étape 6), désormais faite.
 
 ## Objectif
 
@@ -109,3 +111,18 @@ vert, site live identique, **`pnpm audit` sans les 5 GHSA**, check Scorecard
   `lychee` conservé jusqu'à l'étape 6.
 - **Colocation** → prouvée dès l'étape 1 (POC) avant tout volume.
 - **Big-bang** → exclu : 6 étapes, VitePress vivant jusqu'au bout.
+
+## Suivi
+
+| Étape                                  | État       |
+| -------------------------------------- | ---------- |
+| 1. POC config Astro                    | ✅ achevée |
+| 2. Contenu `docs/`                     | ✅ achevée |
+| 3. Colocation README/RUNBOOK           | ✅ achevée |
+| 4. Sidebar + nav + i18n                | ✅ achevée |
+| 5. Garde-fous Python                   | ✅ achevée |
+| 6. Bascule workflow + suppr. VitePress | ✅ achevée |
+
+**Issues rattachées** : aucune. Migration **livrée** — le site est servi par
+Astro Starlight (`pnpm docs:build` + `starlight-links-validator` bloquant),
+VitePress retiré. Le plan reste versionné comme trace.

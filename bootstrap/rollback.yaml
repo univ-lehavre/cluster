@@ -4,7 +4,7 @@
 # bootstrap depuis zéro sur le banc, ou pour préparer le terrain avant un
 # rebuild OS. Exige `-e confirm=yes`.
 #
-#   ansible-playbook -i hosts.yaml rollback.yaml -e confirm=yes --limit cp1
+#   nestor ansible rollback.yaml -e confirm=yes --limit cp1
 #
 # Hors périmètre : first-access.sh (sshd drop-in), secure.yml (hardening
 # opt-in), disques Ceph (cf. storage/ceph/cleanup.sh), partitionnement.
