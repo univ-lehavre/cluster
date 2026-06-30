@@ -172,7 +172,7 @@ for h in "${reachable[@]}"; do
     last_line=$(ssh_q "$h" 'sudo -n tail -n 1 /var/log/cluster-bootstrap.log 2>/dev/null' || true)
     if [ -z "$last_line" ]; then
         mark fail "$h : aucune trace de playbook (audit-log absent)" \
-                  "ansible-playbook -i bootstrap/hosts.yaml bootstrap/audit-log-baseline.yaml --limit $h"
+                  "nestor ansible audit-log-baseline.yaml --limit $h"
         continue
     fi
     last_ts=$(awk '{print $1}' <<<"$last_line")
@@ -285,12 +285,12 @@ for h in "${reachable[@]}"; do
                     mark ok "$h : postfix relaie vers un smarthost (relayhost posé, #131)"
                 else
                     mark fail "$h : postfix actif SANS relayhost — alertes non relayées (#131)" \
-                              "(définir MAIL_SMARTHOST puis : cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags alert --limit $h)"
+                              "(définir MAIL_SMARTHOST puis : nestor ansible security/secure.yml --tags alert --limit $h)"
                 fi
             fi
         elif ssh_ok "$h" "systemctl list-unit-files --no-legend $svc.service | grep -q ."; then
             mark fail "$h : $svc installé mais inactif" \
-                      "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags $local_tag --limit $h)"
+                      "nestor ansible security/secure.yml --tags $local_tag --limit $h"
         else
             mark skip "$h : $svc non installé — opt-in : --tags $local_tag (voir IMPLICATIONS.md)"
         fi
@@ -307,11 +307,11 @@ for h in "${reachable[@]}"; do
             mark ok "$h : ufw actif avec règles cluster (couche ufw)"
         else
             mark fail "$h : ufw actif SANS règle inter-nœuds — risque de coupure cluster" \
-                      "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags ufw --limit $h)"
+                      "nestor ansible security/secure.yml --tags ufw --limit $h"
         fi
     elif ssh_ok "$h" "command -v ufw >/dev/null"; then
         mark fail "$h : ufw installé mais inactif" \
-                  "(cd bootstrap/security && ansible-playbook -i ../hosts.yaml secure.yml --tags ufw --limit $h)"
+                  "nestor ansible security/secure.yml --tags ufw --limit $h"
     else
         mark skip "$h : ufw non installé — opt-in : --tags ufw APRÈS bootstrap K8s (voir IMPLICATIONS.md)"
     fi
@@ -350,7 +350,7 @@ for h in "${reachable[@]}"; do
             mark ok "$h : containerd + SystemdCgroup=true"
         else
             mark fail "$h : containerd actif mais SystemdCgroup pas forcé" \
-                      "ansible-playbook -i bootstrap/hosts.yaml bootstrap/cri.yaml --limit $h"
+                      "nestor ansible cri.yaml --limit $h"
         fi
     else
         mark skip "$h : containerd non installé (cri.yaml à jouer)"

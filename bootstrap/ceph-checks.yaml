@@ -9,7 +9,7 @@
 # clairement — et on installe lvm2 (idempotent).
 #
 # Usage (prod, après bootstrap k8s, avant storage/ceph/cluster.yaml) :
-#   ansible-playbook -i ./hosts.yaml ./ceph-checks.yaml
+#   nestor ansible ceph-checks.yaml
 # Surcharges éventuelles (parc différent du matériel cible ADR 0008/0009) :
 #   -e ceph_block_device=nvme0n1 -e ceph_min_hdd=8 -e 'ceph_data_device_glob=/dev/sd[a-h]'
 #   -e ceph_storage_hosts_group=workers   # si le control-plane n'a pas d'OSD

@@ -314,21 +314,23 @@ cp .env-example .env && $EDITOR .env       # MAIL_ROOT_REDIRECT, HOST_USER, …
 set -a; source .env; set +a
 ```
 
-**Menu** — chaque commande active une seule couche (et seulement celle-là) :
+**Menu** — chaque commande active une seule couche (et seulement celle-là).
+`nestor ansible` résout le playbook (`security/secure.yml`, chemin relatif au
+dépôt) et dérive l'inventaire de la topologie active — plus de `-i` :
 
 ```bash
-ansible-playbook -i ../hosts.yaml secure.yml --tags os          # mises à jour auto + expiration mot de passe
-ansible-playbook -i ../hosts.yaml secure.yml --tags alert       # postfix + redirection mail root
-ansible-playbook -i ../hosts.yaml secure.yml --tags audit       # auditd + règles
-ansible-playbook -i ../hosts.yaml secure.yml --tags detection   # fail2ban (anti-brute-force SSH)
-ansible-playbook -i ../hosts.yaml secure.yml --tags upgrade     # apt full-upgrade + reboot (serial:1) — opérationnel
-ansible-playbook -i ../hosts.yaml secure.yml --tags ufw         # APRÈS bootstrap K8s — cf. ports
+nestor ansible security/secure.yml --tags os          # mises à jour auto + expiration mot de passe
+nestor ansible security/secure.yml --tags alert       # postfix + redirection mail root
+nestor ansible security/secure.yml --tags audit       # auditd + règles
+nestor ansible security/secure.yml --tags detection   # fail2ban (anti-brute-force SSH)
+nestor ansible security/secure.yml --tags upgrade     # apt full-upgrade + reboot (serial:1) — opérationnel
+nestor ansible security/secure.yml --tags ufw         # APRÈS bootstrap K8s — cf. ports
 ```
 
 Tout faire d'un coup (sauf upgrade et ufw) :
 
 ```bash
-ansible-playbook -i ../hosts.yaml secure.yml --tags os,alert,audit,detection
+nestor ansible security/secure.yml --tags os,alert,audit,detection
 ```
 
 **Voir ce qui est en place** — tableau de bord agrégé par hôte :
@@ -365,45 +367,35 @@ par le rôle Ansible `k8s-pre-install` du présent dépôt (`checks.yaml`).
 
 ### CNI
 
-L'inventaire réel (`bootstrap/hosts.yaml`) n'est **pas versionné** : c'est une
-spécificité de déploiement
-([ADR 0023](/cluster/docs/decisions/0023-plateforme-exemple-generique/)). Copiez
-le modèle générique versionné puis renseignez vos nœuds :
+L'inventaire n'a **plus d'existence persistante** : il est **dérivé de la
+topologie active** à chaque commande `nestor ansible` (source unique
+d'inventaire,
+[ADR 0098](/cluster/docs/decisions/0098-source-unique-inventaire-nestor-derive/))
+— fini le `bootstrap/hosts.yaml` à créer/éditer. L'opérateur déclare ses nœuds
+dans une `topology.yaml` locale (config de déploiement gitignorée,
+[ADR 0023](/cluster/docs/decisions/0023-plateforme-exemple-generique/)) : copier
+un modèle générique versionné du catalogue (p. ex.
+[`topologies/socle.example.yaml`](https://github.com/univ-lehavre/cluster/blob/main/topologies/socle.example.yaml),
+le profil prod générique) puis renseigner ses noms/IP réels.
 
 ```bash
-cp bootstrap/hosts.example.yaml bootstrap/hosts.yaml
-# puis éditer bootstrap/hosts.yaml avec les noms/IP réels
+# activer une topologie (symlink gitignoré) à partir d'un modèle du catalogue
+cp topologies/socle.example.yaml topologies/prod.yaml   # puis éditer noms/IP
+ln -sf topologies/prod.yaml topology.yaml
 ```
 
-Le modèle
-([`hosts.example.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/hosts.example.yaml))
-a la forme :
-
-```yaml
-cloud:
-  children:
-    control:
-    workers:
-
-control:
-  hosts:
-    cp1:
-
-workers:
-  hosts:
-    node1:
-    node2:
-```
-
-Ensuite, exécutez les playbooks Ansible pour installer Kubernetes.
+`nestor ansible <playbook>` résout alors le playbook sous `bootstrap/` et dérive
+l'inventaire de cette topologie à la volée (temporaire éphémère, jamais un
+fichier statique pointable — ADR 0098). Exécutez les playbooks Ansible pour
+installer Kubernetes :
 
 ```bash
-ansible-playbook -i ./hosts.yaml ./os-upgrade.yaml
-ansible-playbook -i ./hosts.yaml ./checks.yaml
-ansible-playbook -i ./hosts.yaml ./cri.yaml
-ansible-playbook -i ./hosts.yaml ./kubeadm.yaml
-ansible-playbook -i ./hosts.yaml ./control-planes.yaml
-ansible-playbook -i ./hosts.yaml ./initialisation.yaml
+nestor ansible os-upgrade.yaml
+nestor ansible checks.yaml
+nestor ansible cri.yaml
+nestor ansible kubeadm.yaml
+nestor ansible control-planes.yaml
+nestor ansible initialisation.yaml
 ```
 
 Déplacez le fichier `cni.sh` sur le control plane (control1).
@@ -460,7 +452,7 @@ du pool LB-IPAM reste **TODO** (arbitrage admin réseau, ADR 0020).
 ### Join workers to cluster
 
 ```bash
-ansible-playbook -i ./hosts.yaml ./join-workers.yaml
+nestor ansible join-workers.yaml
 ```
 
 ### Installation de la connexion en local
@@ -603,8 +595,7 @@ state.sh signale un drift sur la couche 0. Pour matérialiser « état initial
 reconnu après le fait » sans rejouer tout le bootstrap :
 
 ```bash
-cd bootstrap
-ansible-playbook -i hosts.yaml audit-log-baseline.yaml
+nestor ansible audit-log-baseline.yaml
 ```
 
 [`audit-log-baseline.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/audit-log-baseline.yaml)
@@ -672,7 +663,7 @@ done
 ### Mise à jour des systèmes d’exploitation
 
 ```bash
-ansible-playbook -i ./hosts.yaml ./os-upgrade.yaml
+nestor ansible os-upgrade.yaml
 ```
 
 ### Mise à jour de Kubernetes (upgrade in-place — ADR 0015)
@@ -685,11 +676,11 @@ Cilium/Rook/Ceph
 
 ```bash
 # Patch (1.34.x → 1.34.y) :
-ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+nestor ansible k8s-upgrade.yaml \
   -e k8s_upgrade_version=1.34.9
 
 # Mineure (1.34 → 1.35) : bascule aussi le dépôt apt vers la mineure cible.
-ansible-playbook -i ./hosts.yaml ./k8s-upgrade.yaml \
+nestor ansible k8s-upgrade.yaml \
   -e k8s_upgrade_version=1.35.0 -e k8s_upgrade_repo_minor=v1.35
 ```
 
@@ -716,7 +707,7 @@ jusqu'à restauration. Mitigations :
    :
 
    ```bash
-   ansible-playbook -i ./hosts.yaml ./etcd-backup.yaml
+   nestor ansible etcd-backup.yaml
    ```
 
    Pose un script `/usr/local/sbin/etcd-snapshot.sh` + un timer systemd
@@ -736,7 +727,7 @@ jusqu'à restauration. Mitigations :
    le **poste de contrôle** (dossier `etcd-snapshots/`, gitignoré) :
 
    ```bash
-   ansible-playbook -i ./hosts.yaml ./etcd-fetch.yaml
+   nestor ansible etcd-fetch.yaml
    ```
 
    **RPO** = fréquence de ce fetch. Recommandé : le planifier côté admin (cron /

@@ -57,6 +57,18 @@ ces axes, pas une valeur unique.
 | **Exposition**   | `exposition.mode` | `nodeport` · `gateway` · `none`   | Le cluster est-il **connecté à internet** (publiquement exposé) ? | codé (ADR 0092) |
 | **Architecture** | `catalog.arch`    | `arm64` · `x86`                   | Quelle arche d'images / de build ?                                | déclaratif      |
 
+**Ce qui N'EST PAS un axe — les invariants du dépôt.** Tout n'est pas variable.
+L'**OS des nœuds est FIXÉ** : **Debian GNU/Linux** (les rôles `bootstrap/`
+épinglent le dépôt Docker `download.docker.com/linux/debian`, `python3-debian`,
+la matrice de versions ADR 0006 vise Debian 13). Ce n'est **pas** un champ de
+topologie — aucune topologie ne « choisit son OS ». Le distinguer des axes évite
+de sur-paramétrer : un axe est une dimension qu'une topologie fait
+**réellement** varier (terrain, criticité, exposition, archi) ; un invariant
+(l'OS, le CRI containerd, le CNI Cilium, Kubernetes lui-même) est une **brique
+que le dépôt propose** (ADR 0023), pas un paramètre d'instance. Si l'OS devenait
+un jour variable (autre distro), ce serait un nouvel axe à acter par ADR — pas
+avant.
+
 Lecture concrète (topologies existantes) :
 
 | Topologie               | terrain     | criticité | exposition | démontre…                             |

@@ -45,8 +45,8 @@ gate Ready :
 ```bash
 # banc : layer du chemin `atlas` (topologies/banc.yaml) ; ou phase dédiée :
 bench/lima/run-phases.sh portal
-# prod : le playbook contre l'inventaire réel
-ansible-playbook -i bootstrap/hosts.yaml bootstrap/portal.yaml -e dataops_k8s_host=localhost
+# prod : le playbook contre l'inventaire dérivé de la topologie active
+nestor ansible portal.yaml -e dataops_k8s_host=localhost
 ```
 
 > **Tag mutable** : l'image `registry:80/portal:dev` a un tag mutable (le
