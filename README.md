@@ -46,26 +46,25 @@ publiée automatiquement depuis `main` par
 | **installer le cluster** (pas à pas)    | [`bootstrap/RUNBOOK.md`](bootstrap/RUNBOOK.md) — la séquence de référence                                                        |
 | **brancher mon code / mon app**         | [`docs/se-brancher.md`](docs/se-brancher.md) — endpoints des briques · [`docs/dev-atlas.md`](docs/dev-atlas.md) (dev applicatif) |
 | **opérer Ceph** (storage)               | [`storage/ceph/RUNBOOK.md`](storage/ceph/RUNBOOK.md)                                                                             |
-| **voir les raccourcis de commandes**    | [`Justfile`](Justfile) — `just` pour la liste (nomme l'existant)                                                                 |
-| **vérifier l'état du cluster**          | `just state` (ou [`bootstrap/state.sh`](bootstrap/state.sh))                                                                     |
-| **tester avant la prod**                | [`bench/`](bench/) — banc Lima ; `just bench all`                                                                                |
+| **vérifier l'état du cluster**          | [`bootstrap/state.sh`](bootstrap/state.sh)                                                                                       |
+| **tester avant la prod**                | [`bench/`](bench/) — banc Lima ; `bench/lima/run-phases.sh`                                                                      |
 | **comprendre les choix d'architecture** | [`docs/decisions/`](docs/decisions/) (ADR)                                                                                       |
 | **suivre l'avancement**                 | [`docs/plans/`](docs/plans/) (mise en œuvre) · [`docs/audit/`](docs/audit/) (passages datés)                                     |
 
-> **Trois points d'entrée, trois rôles** (pas de concurrence) :
+> **Deux points d'entrée, deux rôles** (pas de concurrence) :
 >
 > - **`nestor`** — l'outil **déclaratif** recommandé pour piloter une topologie
->   (`nestor up`/`preview`/`stack select`), façade conviviale décrite dans
+>   (`nestor up`/`preview`/`stack select`, et `nestor ansible <playbook>` pour
+>   un geste de bootstrap prod), façade conviviale décrite dans
 >   [`docs/outils.md`](docs/outils.md)
 >   ([ADR 0056](docs/decisions/0056-modele-declaratif-topologies.md)).
 > - **`bench/lima/run-phases.sh`** — le **harnais de banc** par chemin nommé
 >   codé (la _gate_ de validation E2E,
 >   [ADR 0045](docs/decisions/0045-chemins-installation-banc-couches.md)) ;
 >   jamais enchaîné à la main.
-> - **[`Justfile`](Justfile)** — de simples **raccourcis découvrables**
->   (`just lint`, `just state`, `just bench ceph`), **pas** un orchestrateur.
 >
-> L'ordre d'installation **canonique** reste décrit dans le RUNBOOK.
+> Les contrôles qualité passent par `pnpm lint`/`pnpm format` (identiques à la
+> CI). L'ordre d'installation **canonique** reste décrit dans le RUNBOOK.
 
 ## Structure
 

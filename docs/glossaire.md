@@ -358,14 +358,6 @@ petits fichiers) séparément du code, pour l'injecter dans des pods sans
 reconstruire l'image. Le pendant pour les données sensibles est le **Secret**
 (chiffré au repos, manipulé à part).
 
-### Justfile
-
-Le fichier lu par l'outil [`just`](https://github.com/casey/just) : un **carnet
-de raccourcis** de commandes courantes (`just lint`, `just state`,
-`just bench ceph`). Il **nomme l'existant** pour le rendre découvrable — ce
-**n'est pas** un orchestrateur : l'ordre d'installation canonique reste décrit
-dans le RUNBOOK.
-
 ### Drift (dérive)
 
 Un écart entre ce que la documentation/le code prétend et ce que la réalité fait

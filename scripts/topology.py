@@ -1623,8 +1623,8 @@ def _assert_inventory_safe(action: str, inventory_path: str, topo: Topology) -> 
             f"sûre — {raison} (ADR 0053). Risque de MUTER la mauvaise cible (la PROD).\n"
             "  • Banc : utiliser l'inventaire Lima (target_kind: lima) — il est généré "
             "par le montage du banc (`bench/lima/run-phases.sh up`).\n"
-            "  • Régénérer l'inventaire de la stack active : "
-            "`nestor artifact generate -o bootstrap/hosts.yaml`."
+            "  • Prod : lancer le geste via `nestor ansible <playbook>`, qui dérive "
+            "l'inventaire de la stack active (ADR 0098 — plus de `hosts.yaml` à régénérer)."
         )
 
 
@@ -4760,7 +4760,12 @@ def _build_bootstrap_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="topology bootstrap-seq")
     ap.add_argument("--cp-ip", required=True, dest="cp_ip", help="IP réelle du CP primaire")
     ap.add_argument("--l2-iface", required=True, dest="l2_iface", help="interface L2 (LB-IPAM/CNI)")
-    ap.add_argument("--inventory", default="hosts.yaml", help="inventaire (relatif à bootstrap/)")
+    # L'appelant (run-phases.sh:phase_bootstrap) passe TOUJOURS --inventory explicite
+    # (l'inventaire Lima dérivé du banc). Le défaut pointe le `.example` inerte (ADR 0098 :
+    # plus de hosts.yaml statique) — un filet, jamais une cible réelle.
+    ap.add_argument(
+        "--inventory", default="hosts.example.yaml", help="inventaire (relatif à bootstrap/)"
+    )
     return ap
 
 
