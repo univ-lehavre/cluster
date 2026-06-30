@@ -24,10 +24,33 @@ structurant (OpenSSF Scorecard, recalculé en continu) est mis en avant SOUS LE
 TITRE ; les autres sont regroupés par famille dans la section « Conformité » plus
 bas. -->
 
-Manifests, playbooks et runbooks pour déployer et opérer un cluster Kubernetes
-de recherche : installation, stockage distribué, applications de calcul et
-services transverses. Pour le **récit complet** (néophyte, de bout en bout),
-lire le [**manifeste**](docs/manifeste.md).
+Ce dépôt est de l'**Infrastructure-as-Code** : une infrastructure entièrement
+décrite par du code versionné. Son cœur est une **déclaration unique** — un
+`topology.yaml` qui décrit nœuds, réseau, stockage et briques data — dont tout
+le reste se dérive
+([ADR 0056](docs/decisions/0056-modele-declaratif-topologies.md)). Il en sort
+**deux produits** :
+
+- **`nestor`** — l'outil déclaratif qui lit la topologie et **dérive puis
+  converge** le cluster (`nestor up`, `preview`, `stack select`…) ;
+- **un cluster Kubernetes data fonctionnel** — multi-nœuds, hyperconvergé, dont
+  les **17 briques** ([`platform/`](platform/)) s'activent par **profil
+  cumulatif à 4 niveaux** (`base ⊂ store ⊂ obs ⊂ dataops`) : stockage distribué
+  Rook-Ceph, orchestration Dagster, lineage Marquez, base managée
+  CloudNative-PG, observabilité Prometheus/Loki, GitOps Argo CD…
+
+Le dépôt n'est pas l'infrastructure d'un déploiement particulier mais un
+**catalogue de topologies** réutilisables : plusieurs déclarées, une seule
+activée par déploiement
+([ADR 0023](docs/decisions/0023-plateforme-exemple-generique.md)).
+
+`cluster` est le **socle** ; l'**applicatif vit dans le dépôt jumeau
+[`atlas`](https://github.com/univ-lehavre/atlas)**. Les deux sont reliés par un
+**contrat d'interface explicite**
+([ADR 0043](docs/decisions/0043-contrat-interface-cluster-atlas.md)) — `atlas`
+publie des images immuables, `cluster` les réconcilie et lui fournit ses briques
+(stockage, base managée, orchestration, MLflow). Pour le **récit complet**
+(néophyte, de bout en bout), lire le [**manifeste**](docs/manifeste.md).
 
 📖 **Documentation en ligne** :
 [univ-lehavre.github.io/cluster](https://univ-lehavre.github.io/cluster/) —
@@ -38,6 +61,37 @@ publiée automatiquement depuis `main` par
 > PVC, erasure coding, quorum…) sont définis en langage simple dans le
 > [**glossaire**](docs/glossaire.md) — à garder ouvert à côté en lisant les
 > runbooks.
+
+## Démarrage rapide
+
+Prérequis : [Node.js](https://nodejs.org) et [pnpm](https://pnpm.io) (outillage
+qualité du dépôt), [uv](https://docs.astral.sh/uv/) (scripts de gouvernance et
+lint Python), et [Lima](https://lima-vm.io/) pour le banc d'essai. Pour
+**déployer ou opérer** un cluster, suivre le
+[`bootstrap/RUNBOOK.md`](bootstrap/RUNBOOK.md) ; ce dépôt ne « se lance » pas
+comme une application — il décrit une infrastructure.
+
+Pour travailler **sur le dépôt** (contribuer, valider en local à l'identique de
+la CI) :
+
+```bash
+pnpm install   # outillage Node + installe les hooks Lefthook
+pnpm lint      # tous les contrôles qualité (format, yaml, shell, k8s, ansible, python…)
+pnpm format    # applique le formatage (prettier + ruff format)
+pnpm docs:build  # construit le site Astro (échoue sur lien mort)
+```
+
+Pour **piloter une topologie** ou **valider de bout en bout**, deux points
+d'entrée nommés (détaillés sous le tableau « Par où commencer ») :
+
+```bash
+nestor up                          # déploie la topologie sélectionnée (façade déclarative)
+bench/lima/run-phases.sh <chemin>  # monte le banc Lima par un chemin codé (gate E2E)
+```
+
+Pour contribuer (branche, commits, revue, merge), le point d'entrée canonique
+est [CONTRIBUTING.md](CONTRIBUTING.md) ; l'ordre d'installation **canonique** du
+cluster reste décrit dans le [`bootstrap/RUNBOOK.md`](bootstrap/RUNBOOK.md).
 
 ## Par où commencer
 
@@ -51,64 +105,294 @@ publiée automatiquement depuis `main` par
 | **comprendre les choix d'architecture** | [`docs/decisions/`](docs/decisions/) (ADR)                                                                                       |
 | **suivre l'avancement**                 | [`docs/plans/`](docs/plans/) (mise en œuvre) · [`docs/audit/`](docs/audit/) (passages datés)                                     |
 
-> **Deux points d'entrée, deux rôles** (pas de concurrence) :
->
-> - **`nestor`** — l'outil **déclaratif** recommandé pour piloter une topologie
->   (`nestor up`/`preview`/`stack select`, et `nestor ansible <playbook>` pour
->   un geste de bootstrap prod), façade conviviale décrite dans
->   [`docs/outils.md`](docs/outils.md)
->   ([ADR 0056](docs/decisions/0056-modele-declaratif-topologies.md)).
-> - **`bench/lima/run-phases.sh`** — le **harnais de banc** par chemin nommé
->   codé (la _gate_ de validation E2E,
->   [ADR 0045](docs/decisions/0045-chemins-installation-banc-couches.md)) ;
->   jamais enchaîné à la main.
->
-> Les contrôles qualité passent par `pnpm lint`/`pnpm format` (identiques à la
-> CI). L'ordre d'installation **canonique** reste décrit dans le RUNBOOK.
+Deux points d'entrée, deux rôles complémentaires (pas concurrents). **`nestor`**
+est l'outil déclaratif recommandé pour piloter une topologie
+(`nestor up`/`preview`/`stack select`, et `nestor ansible <playbook>` pour un
+geste de bootstrap prod) ; c'est une fonction shell à sourcer décrite dans
+[`docs/outils.md`](docs/outils.md)
+([ADR 0056](docs/decisions/0056-modele-declaratif-topologies.md)).
+**`bench/lima/run-phases.sh`** est le harnais de banc par chemin nommé codé — la
+_gate_ de validation E2E
+([ADR 0045](docs/decisions/0045-chemins-installation-banc-couches.md)), jamais
+enchaîné à la main. L'ordre d'installation **canonique** du cluster reste décrit
+dans le [`bootstrap/RUNBOOK.md`](bootstrap/RUNBOOK.md).
 
 ## Structure
 
-| Dossier                          | Rôle                                                                 |
-| -------------------------------- | -------------------------------------------------------------------- |
-| [`bootstrap/`](bootstrap/)       | Installation initiale de Kubernetes (Ansible)                        |
-| [`storage/ceph/`](storage/ceph/) | Stockage distribué (Rook-Ceph)                                       |
-| [`platform/`](platform/)         | Services transverses (dashboard, registry, metrics, NetworkPolicies) |
-| [`apps/`](apps/)                 | Charges applicatives (RStudio)                                       |
-| [`bench/`](bench/)               | Banc Lima + scénarios reproductibles                                 |
-| [`docs/`](docs/)                 | Glossaire, démarrage, ADR, audit (site Astro Starlight)              |
+**Une responsabilité par dossier**, du provisioning de la machine jusqu'à la
+gouvernance — c'est ce qui rend le dépôt lisible pour un nouveau contributeur.
+
+| Dossier                          | Rôle                                                                 | Brique / règle                                           |
+| -------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
+| [`bootstrap/`](bootstrap/)       | Installation initiale de Kubernetes (Ansible)                        | kubeadm durci ; idempotence prouvée (`changed=0`)        |
+| [`storage/ceph/`](storage/ceph/) | Stockage distribué (Rook-Ceph)                                       | Bundles vendored épinglés par digest d'index multi-arch  |
+| [`platform/`](platform/)         | Services transverses (dashboard, registry, metrics, NetworkPolicies) | Manifestes validés `kubeconform` + `trivy` (IaC)         |
+| [`apps/`](apps/)                 | Charges applicatives (RStudio)                                       | Charge consommatrice ; ne porte aucun service transverse |
+| [`bench/`](bench/)               | Banc Lima + scénarios reproductibles                                 | Monté par chemin nommé codé, jamais à la main (ADR 0045) |
+| [`docs/`](docs/)                 | Glossaire, démarrage, ADR, audit (site Astro Starlight)              | Lien mort = build rouge ; conventions auto-vérifiées     |
+
+Ces conventions sont vérifiées en CI : `pnpm check:gouvernance`
+(ADR↔plans↔drifts), `pnpm lint:contract` (contrat d'interface `cluster`↔`atlas`)
+et `pnpm lint:topology` (cohérence des topologies déclarées). Détail des choix
+d'architecture : [`docs/decisions/`](docs/decisions/) (ADR).
 
 ## Qualité — garde-fous en place
 
-À chaque étape, des contrôles automatiques empêchent qu'une régression atteigne
-la prod :
+Le dépôt est outillé pour que chaque modification passe un ensemble cohérent de
+garde-fous, à la fois sur la machine du contributeur (via les _hooks Git_, des
+scripts déclenchés automatiquement par Git) et sur les serveurs d'intégration
+continue (via GitHub Actions), jusqu'au cluster en production. **12
+vérifications sont requises** avant qu'une PR ne puisse fusionner.
 
-- **Avant le commit** : hooks Lefthook (prettier, yamllint, shellcheck) + sujet
-  de commit Conventional Commits + interdiction d'email dans le message.
-- **Avant le push** : tout le dépôt revalidé (`kubeconform`, `ansible-lint`,
-  `shellcheck` complet, prettier complet) + interdiction de push direct sur
-  `main`.
-- **En CI GitHub Actions** : 12 checks requis avant merge (formats, lint,
-  `kubeconform`, `ansible-lint`, `trivy`, `jscpd` ≤ 5 % duplication…) ; la
-  validation des liens de la doc est bloquante au build Astro
-  (`starlight-links-validator`).
-- **Sur les serveurs** : [`bootstrap/state.sh`](bootstrap/state.sh) (7 couches
-  de drift detection) +
-  [`bootstrap/security/report.sh`](bootstrap/security/report.sh) (visibilité
-  hardening) + audit-log par nœud + sauvegarde etcd + rollback scripté.
-- **Avant la prod** : banc d'essai Lima ([`bench/lima/`](bench/lima/)) qui
-  exerce Phase 1-5 + DataOps sur 3 VMs Debian 13 avec disques Ceph.
+### Cohérence du code
+
+- **Prettier** (formateur automatique) sur YAML, Markdown et JSON, vérifié à
+  chaque commit et en CI.
+- **yamllint** (analyseur YAML) et **ShellCheck** (analyseur de scripts shell) —
+  zéro avertissement toléré ; la couverture shell s'étend au-delà des `*.sh` (le
+  wrapper `nestor.sh`, les templates `.sh.j2`, les scripts Perl par `perl -c`).
+- **ansible-lint** sur les **34 rôles** Ansible de [`bootstrap/`](bootstrap/),
+  **ruff** (analyseur + formateur) sur le périmètre Python.
+- **Conventional Commits** appliqué par **commitlint** sur **toute la plage**
+  d'une PR (pas seulement le titre, vu la stratégie merge-commit,
+  [ADR 0037](docs/decisions/0037-strategie-merge-commit.md)) ; sujet en
+  minuscules, **adresse e-mail interdite** dans le message.
+
+### Validation des manifestes
+
+- **kubeconform** (validateur de schémas Kubernetes) en mode `-strict`, contre
+  les schémas officiels **+ le catalogue de CRDs** (Rook-Ceph, cert-manager,
+  CloudNative-PG…) — un manifeste invalide ne franchit pas le push.
+- **Trivy** (scanner de vulnérabilités IaC) — **bloquant sur HIGH/CRITICAL** ;
+  le RBAC inhérent aux bundles upstream est allowlisté par chemin dans
+  [`.trivyignore.yaml`](.trivyignore.yaml), avec justification.
+- **Images épinglées par digest d'index multi-arch** (ADR 0006) : aucune image
+  par tag mouvant, le banc étant arm64.
+
+### Tests
+
+- **`nestor` (le moteur déclaratif)** — **981 tests** Python (`unittest`, 39
+  fichiers sous [`tests/`](tests/)) couvrant **95 % des 2 287 lignes** des 32
+  modules de [`nestor/`](nestor/) ; la moitié des modules sont à **100 %**. La
+  couverture est **mesurée en CI** avec un plancher bloquant
+  (`coverage --fail-under=90`), recalculé à chaque PR — jamais un chiffre figé.
+  Les fonctions pures sont en plus exercées par **property-based testing**
+  (Hypothesis,
+  [ADR 0087](docs/decisions/0087-property-based-testing-nestor.md)).
+- **Scripts bash** — **248 cas de tests `bats`** répartis en **10 suites**
+  ([`bench/unit/`](bench/unit/)), exécutés à chaque `pre-push` et en CI ; tout
+  script shell passe par ailleurs ShellCheck, **zéro avertissement**.
+- **End-to-end** — **34 scénarios E2E reproductibles** au banc Lima : Phases 1 à
+  5 + DataOps sur 3 VMs Debian 13 avec disques Ceph, **_from scratch_** (depuis
+  le code seul, [ADR 0034](docs/decisions/0034-validation-e2e-from-scratch.md)).
+- **Idempotence prouvée** : un rôle n'est validé que si son rejeu donne
+  `changed=0`
+  ([ADR 0052](docs/decisions/0052-reproductibilite-des-resultats.md)).
+
+### Audits structurels
+
+- **jscpd** (détecteur de duplication) — seuil ≤ 5 %, **duplication shell tenue
+  à 0 %**.
+- **check_md_orphans** — aucune page de documentation orpheline (toute page est
+  atteignable, [ADR 0029](docs/decisions/0029-markdown-atteignable-doc.md)).
+- La cohérence **structurelle** du dépôt (ADR ↔ plans ↔ drifts, contrat
+  d'interface, déclaratif byte-à-byte) fait l'objet d'une discipline propre,
+  détaillée dans la section [**Gouvernance**](#gouvernance) ci-dessous.
+
+### Hooks Git locaux
+
+[Lefthook](https://github.com/evilmartians/lefthook) (orchestrateur de hooks
+Git) bloque en local ce qui échouerait de toute façon en CI — **jamais
+contournable** (`--no-verify`, `LEFTHOOK=0` interdits) :
+
+- **pre-commit** : Prettier, yamllint, ShellCheck sur les fichiers indexés.
+- **commit-msg** : commitlint + rejet des e-mails.
+- **pre-push** : **interdiction de push direct sur `main`**, puis suite complète
+  (kubeconform, ansible-lint, `bats`, jscpd, ShellCheck/Prettier sur les
+  fichiers du push).
+
+### Drift detection & opérabilité
+
+- [`bootstrap/state.sh`](bootstrap/state.sh) compare l'état réel à l'état
+  déclaré sur **7 couches** (_drift detection_) ;
+  [`bootstrap/security/report.sh`](bootstrap/security/report.sh) donne la
+  visibilité sur le durcissement (_hardening_).
+- Complétés par un **audit-log par nœud**, une **sauvegarde etcd** (RPO borné)
+  et un **rollback scripté**.
 
 Inventaire complet et détaillé : [SAFEGUARDS.md](SAFEGUARDS.md). Comment
-contribuer / outillage local : [CONTRIBUTING.md](CONTRIBUTING.md).
+contribuer (branche, commits, revue, merge) et outiller sa machine :
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Le dépôt en chiffres
+## Culture d'ingénierie
 
-La gouvernance est **mesurée**, pas seulement déclarée. Chaque décision est
-tracée (ADR), chaque écart de run est indexé (drift), chaque convention est
-auto-vérifiée
-([ADR 0060](docs/decisions/0060-audit-conventions-gouvernance.md)), et la
-duplication shell est tenue à **0 %** (seuil `jscpd` ≤ 5 %). La vitrine
-consolidée, pour juger en 5 min : [docs/preuves.md](docs/preuves.md).
+Au-delà des garde-fous transverses, le dépôt **nomme** les cultures d'ingénierie
+qu'il incarne — chacune ancrée dans des décisions d'architecture (_ADR_,
+_Architecture Decision Record_, dans [`docs/decisions/`](docs/decisions/)), pas
+seulement déclarée, et **honnête sur les manques** : ce qui est en place, ce qui
+est en construction, ce qui est sciemment écarté
+([ADR 0062](docs/decisions/0062-cultures-ingenierie.md)) : **4 cultures en
+place**, 2 en construction, le reste sciemment écarté. L'**IaC est le cœur** —
+les trois autres cultures en place (GitOps, DataOps, DevSecOps) en sont les
+facettes, pas des piliers parallèles. Chaque affirmation ci-dessous **pointe
+vers sa preuve** (la décision, le manifeste, le test) sans la recopier. Le récit
+complet, néophyte et de bout en bout, vit dans le
+[**manifeste**](docs/manifeste.md).
+
+### IaC — le cœur : une déclaration unique, deux produits
+
+_IaC_ (_Infrastructure-as-Code_) : toute l'infrastructure est décrite par du
+code versionné, rejouable et prouvé reproductible. Une **source de vérité
+unique** — le `topology.yaml` — décrit nœuds, réseau, stockage et briques data ;
+tout le reste (inventaire Ansible, variables de profil, table de nœuds Lima) en
+est **dérivé** par un générateur **sans état**, et Ansible reste le moteur de
+**convergence**
+([ADR 0056](docs/decisions/0056-modele-declaratif-topologies.md)).
+
+- **Catalogue de topologies** : plusieurs infra déclarées, une seule activée par
+  déploiement, sur valeurs d'exemple génériques — le dépôt n'est pas
+  l'infrastructure d'un déploiement particulier
+  ([ADR 0023](docs/decisions/0023-plateforme-exemple-generique.md)).
+- **Deux produits dérivés de la déclaration** : **`nestor`**, l'outil qui lit la
+  topologie et converge le cluster (`nestor up`/`preview`/`stack select`,
+  [`docs/outils.md`](docs/outils.md)), et **un cluster Kubernetes data
+  fonctionnel**, hyperconvergé, dont les briques s'activent par profil cumulatif
+  (`base ⊂ store ⊂ obs ⊂ dataops`).
+- **Idempotence prouvée** : un rôle Ansible n'est correct que si son rejeu donne
+  `changed=0` — un résultat n'a de valeur que **reproductible depuis le code
+  seul** ([ADR 0052](docs/decisions/0052-reproductibilite-des-resultats.md)).
+- **Provisioning de la couche machine** déclaré avec **OpenTofu** pour le
+  terrain cloud (décidé ; bancs locaux Lima/Vagrant inchangés)
+  ([ADR 0032](docs/decisions/0032-opentofu-provisioning-cloud.md)).
+
+### GitOps — le dépôt Git est la source de vérité
+
+_GitOps_ : tout passe par Git et une _pull request_ (PR, proposition de
+modification revue avant fusion), rien à la main sur les serveurs. Aucune
+modification n'atteint `main` autrement que par une PR revue et verte en CI, et
+le déploiement lui-même se pilote par ce qui est écrit dans Git.
+
+- **Tout par PR, jamais en direct.** Commits et push directs sur `main` sont
+  mécaniquement refusés (hooks Lefthook, _jamais_ contournables) ; `main`
+  n'accepte que des **merge commits** — l'historique fin de chaque PR est
+  préservé ([ADR 0037](docs/decisions/0037-strategie-merge-commit.md)).
+- **Réconciliation déclarative** par **Argo CD** + **Gitea** air-gapped : l'état
+  cible est dans Git, l'opérateur converge le cluster vers cet état
+  ([ADR 0022](docs/decisions/0022-argocd-gitops-applicatif.md)).
+- **Le déploiement suit Git, pas l'inverse.** `cluster` et l'applicatif
+  [`atlas`](https://github.com/univ-lehavre/atlas) sont deux dépôts au **contrat
+  d'interface explicite** : `atlas` publie des images immuables identifiées par
+  empreinte (_digest_), `cluster` les réconcilie — jamais de tag `latest`
+  ([ADR 0043](docs/decisions/0043-contrat-interface-cluster-atlas.md),
+  [ADR 0044](docs/decisions/0044-topologie-deploiement-banc-atlas.md)).
+
+### DataOps — les données comme du code, contrôlées par contrat
+
+_DataOps_ : appliquer au traitement de données la même discipline qu'au code —
+orchestration déclarative, transformations versionnées, qualité vérifiée à
+chaque étape, résultats reproductibles. La plateforme de données est fournie par
+le socle et consommée par l'applicatif au travers d'un contrat d'interface
+explicite.
+
+- **Orchestration déclarative** avec [Dagster](https://dagster.io/), déployée
+  par Ansible sur la plateforme
+  ([ADR 0026](docs/decisions/0026-orchestration-dagster.md),
+  [ADR 0033](docs/decisions/0033-orchestration-ansible-platform-dataops.md)).
+- **Traçabilité de bout en bout** : lineage
+  [OpenLineage](https://openlineage.io/) →
+  [Marquez](https://marquezproject.ai/), **sans donnée personnelle** (noms
+  techniques uniquement)
+  ([ADR 0028](docs/decisions/0028-orchestration-openlineage-marquez.md)).
+- **Complétude gouvernée** : la chaîne DataOps est tenue complète par un audit
+  de gouvernance dédié, et son interface avec l'applicatif est contractuelle
+  ([ADR 0041](docs/decisions/0041-gouvernance-completude-dataops.md),
+  [ADR 0043](docs/decisions/0043-contrat-interface-cluster-atlas.md)).
+
+### DevSecOps — la sécurité câblée dans la chaîne
+
+_DevSecOps_ : intégrer la sécurité dans la chaîne plutôt qu'en étape finale —
+chaîne d'approvisionnement vérifiée, durcissement par défaut, analyse continue.
+Chaque maillon, de l'image épinglée au cluster en marche, porte sa garantie.
+
+- **Chaîne d'approvisionnement épinglée** : images par **digest d'index
+  multi-arch**, actions GitHub par **SHA**, secrets jamais versionnés
+  ([ADR 0006](docs/decisions/0006-matrice-de-versions-et-politique-de-bump.md)).
+- **Durcissement par défaut** : `kubeadm` durci, PSA + audit-policy, **etcd
+  chiffré**, réseau Cilium verrouillé
+  ([ADR 0014](docs/decisions/0014-durcissement-kubeadm-init.md),
+  [ADR 0019](docs/decisions/0019-durcissement-reseau-cilium.md)).
+- **Analyse continue** : `trivy` (IaC, bloquant HIGH/CRITICAL), `gitleaks`
+  (secrets), `CodeQL` (SAST), score **OpenSSF Scorecard** recalculé en continu.
+
+### Platform Engineering — _en construction_
+
+_Platform Engineering_ : offrir aux équipes des **paved roads** (chemins
+balisés) self-service plutôt que de la configuration sur mesure. Les fondations
+sont posées, le cœur self-service est partiel.
+
+- **Acquis** : le **catalogue de topologies** réutilisables
+  ([ADR 0023](docs/decisions/0023-plateforme-exemple-generique.md)), le
+  **contrat plateforme↔consommateur** machine-lisible (3 artefacts sous
+  [`contract/`](contract/),
+  [ADR 0043](docs/decisions/0043-contrat-interface-cluster-atlas.md)), et un
+  amorçage self-service : `nestor stack new` (assistant qui écrit un
+  `topology.yaml` minimal valide) et `nestor next` (le « que faire ensuite » qui
+  monte la couche suivante d'après le graphe de dépendances réel).
+- **Manque** : le portail in-cluster ([`platform/portal/`](platform/portal/),
+  [ADR 0091](docs/decisions/0091-portail-acces-ui.md)) — sa logique de
+  rapprochement contrat↔état existe en code, son service n'est pas encore
+  déployé. D'où **en construction**, pas acquis.
+
+### MLOps — _socle posé, usages à venir_
+
+_MLOps_ : exploiter des modèles avec la rigueur du logiciel — expériences
+tracées, modèles versionnés, artefacts persistés. Le **socle est en place** ;
+les cas d'usage relèvent de l'applicatif.
+
+- **Serveur MLflow déployé** (tracking + registry + artefact store) par le rôle
+  Ansible `platform-mlflow`, **livré vide** — exactement comme Dagster et
+  Marquez ([ADR 0082](docs/decisions/0082-suivi-modeles-mlflow.md)). Backend sur
+  la base managée CloudNative-PG dédiée, artefacts sur S3 (Ceph/SeaweedFS),
+  câblé dans le graphe `nestor` et dans la layer `atlas`
+  ([ADR 0083](docs/decisions/0083-layers-source-unique-de-l-ordre.md)).
+- **À venir** : le **code ML qui logge ses runs vit côté
+  [`atlas`](https://github.com/univ-lehavre/atlas)** (l'applicatif), pas dans le
+  socle ; côté `cluster`, restent la validation au banc et l'observation des
+  métriques MLflow. Le socle fournit la capacité ; l'usage est l'affaire du
+  consommateur.
+
+### FinOps — _efficience amorcée, coût € écarté_
+
+_FinOps_ : piloter la consommation des ressources. Seule sa **moitié
+efficience** s'applique ici ; le volet **coût €** est sciemment hors périmètre.
+
+- **Amorcé (efficience / capacité)** : observabilité **kube-prometheus-stack**
+  (Prometheus/Grafana/Alertmanager) + **metrics-server**
+  ([ADR 0016](docs/decisions/0016-observabilite.md)) ; **métrologie de banc**
+  ([`nestor/metrics.py`](nestor/metrics.py)) qui mesure `cpu_core_s`,
+  `ram_peak_mib`, `ram_mean_mib` par run et les indexe ; gestion de **capacité
+  Ceph** (seuils nearfull/full).
+- **Écarté (coût €)** : pas de dimension monétaire — l'infra est **bare-metal
+  non facturée à l'usage** et **mono-tenant** : chargeback et refacturation
+  n'ont pas de sens tant que ce contexte ne change pas (la topologie cloud ARM,
+  si elle est buildée, rouvrira la question)
+  ([ADR 0062](docs/decisions/0062-cultures-ingenierie.md)).
+
+> **SRE** est par ailleurs **partiel** (drift detection, fraîcheur des preuves,
+> sauvegarde etcd et rollback existent ; manquent SLO/SLI et error budgets
+> formels). Le _pourquoi_ de chaque frontière — en place / en construction /
+> partiel / écarté — est tracé dans
+> l'[ADR 0062](docs/decisions/0062-cultures-ingenierie.md).
+
+## Gouvernance
+
+La gouvernance n'est pas qu'une discipline d'auteur : elle est **mesurée,
+outillée et auto-vérifiée**, comme le code. Chaque décision est tracée (ADR),
+chaque écart de run est indexé (drift), chaque convention est auto-vérifiée
+([ADR 0060](docs/decisions/0060-audit-conventions-gouvernance.md)). Les chiffres
+ci-dessous ne sont **pas saisis à la main** mais **recalculés par un script** et
+comparés en CI ; tout écart fait rougir le build. La vitrine consolidée, pour
+juger en 5 min : [docs/preuves.md](docs/preuves.md).
 
 <!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
 
@@ -119,19 +403,89 @@ consolidée, pour juger en 5 min : [docs/preuves.md](docs/preuves.md).
 
 <!-- STATS:FIN -->
 
-> Régénérer ce bloc : `pnpm check:gouvernance --stats`. Le respect des
-> conventions est vérifié chaque semaine (workflow `conventions-freshness`, non
-> bloquant).
+_Bloc régénéré par `pnpm check:gouvernance --stats`. L'avancement détaillé est
+suivi par [**milestones**](https://github.com/univ-lehavre/cluster/milestones)
+et dans [`docs/plans/`](docs/plans/) ; contribuer :
+[CONTRIBUTING.md](CONTRIBUTING.md) ; signaler une vulnérabilité :
+[SECURITY.md](SECURITY.md)._
+
+### Décisions tracées (ADR)
+
+Toute décision structurante passe par un **ADR** (_Architecture Decision
+Record_, format Nygard léger), jamais par une note dans un TODO. Le corpus
+**chiffré ci-dessus** est indexé chronologiquement dans
+[`docs/decisions/README.md`](docs/decisions/), et chaque affirmation de ce
+README **pointe vers l'ADR qui la fonde**.
+
+### Écarts de run indexés (drifts)
+
+Un _drift_ est un **écart révélé par un run de bout en bout** que le lint ne
+voyait pas : il est consigné, daté et corrigé dans le code (jamais à la main sur
+l'état, [ADR 0046](docs/decisions/0046-corriger-le-code-pas-l-etat.md)). Le
+registre
+[`docs/architecture/registre-drifts.yaml`](docs/architecture/registre-drifts.yaml)
+compte **73 entrées** (symptôme, cause, correctif, statut, issue) ; sa page
+publiée est **régénérée et comparée en CI** (`render_drifts --check`).
+
+### Contrat d'interface `cluster` ↔ `atlas`
+
+La frontière avec l'applicatif [`atlas`](https://github.com/univ-lehavre/atlas)
+est un **contrat machine-lisible** : **3 artefacts** sous
+[`contract/`](contract/) (endpoints des services, storage-classes par profil,
+namespaces & conventions de secrets). `pnpm lint:contract` vérifie en CI que ce
+contrat reste **aligné sur ce que `platform/` expose réellement**
+([ADR 0043](docs/decisions/0043-contrat-interface-cluster-atlas.md)).
+
+### Auto-vérification continue
+
+- **`check_gouvernance`**
+  ([ADR 0060](docs/decisions/0060-audit-conventions-gouvernance.md)) vérifie la
+  cohérence **ADR ↔ plans ↔ drifts ↔ issues**, la complétude des index, la
+  **fraîcheur des traces** (dernier passage d'audit < 180 j) et régénère le bloc
+  de stats.
+- **`check_topology`** valide le modèle déclaratif et prouve que les artefacts
+  dérivés d'un `topology.yaml` sont **byte-identiques** à l'attendu.
+- **`check_md_orphans`** garantit qu'aucune page de doc n'est orpheline.
+- Deux **workflows de fraîcheur** non bloquants ouvrent une issue dédiée en cas
+  de dérive : `conventions-freshness` (hebdomadaire) et `bench-freshness`
+  (quotidien, preuves de banc).
+
+### Passages d'audit datés
+
+La gouvernance se relit elle-même : **12 passages d'audit** datés sous
+[`docs/audit/`](docs/audit/) (convention `AAAA-MM-JJ-thème.md`), figés — un
+constat passé n'est pas réécrit (honnêteté des traces). La vitrine consolidée,
+pour juger en 5 min : [docs/preuves.md](docs/preuves.md).
+
+## Documentation
+
+[![Documentation](https://img.shields.io/badge/docs-univ--lehavre.github.io%2Fcluster-blue.svg)](https://univ-lehavre.github.io/cluster/)
+
+La documentation est publiée sur
+**[univ-lehavre.github.io/cluster](https://univ-lehavre.github.io/cluster/)**
+(sources dans [`docs/`](docs/), construites avec Astro Starlight) :
+
+- [Manifeste](docs/manifeste.md) — le récit complet, de bout en bout, pour un
+  public néophyte
+- [Glossaire](docs/glossaire.md) — définitions des termes techniques (etcd, OSD,
+  PVC, erasure coding, quorum…) en langage simple
+- [Démarrage & outils](docs/demarrage.md) — installer le cluster, piloter une
+  topologie avec `nestor`
+- [Se brancher](docs/se-brancher.md) — endpoints des briques, brancher son code
+  et ses applications
+- [Décisions d'architecture](docs/decisions/) — pourquoi chaque choix (ADR)
+- [Vitrine des preuves](docs/preuves.md) — juger la gouvernance du dépôt en 5
+  min
 
 ## Conformité
 
-Les badges sous le titre ne sont pas décoratifs : chacun reflète un état **vrai
-et vérifiable** (recalculé en continu, ou fait stable), groupé par famille pour
-dire **quelles cultures** le dépôt revendique
-([ADR 0080](docs/decisions/0080-notations-et-badges-readme.md)). Le plus
-structurant —
+Les badges ne sont pas décoratifs : chacun reflète un état **vrai et
+vérifiable** (recalculé en continu, ou fait stable). Le plus structurant —
 [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/univ-lehavre/cluster),
-santé supply-chain notée /10 — est mis en avant seul, en tête.
+santé supply-chain notée /10 — est mis en avant **sous le titre**, seul.
+Regroupés ci-dessous par famille, les autres disent **quelles familles de
+qualité le dépôt revendique** — un badge n'est posé que s'il est honnête
+([ADR 0080](docs/decisions/0080-notations-et-badges-readme.md)).
 
 ### Identité & licence
 
@@ -158,12 +512,14 @@ généré automatiquement à chaque release.
 
 Aucune régression n'atteint `main` sans passer les contrôles : chaque PR doit
 satisfaire **12 checks requis** (formats, lint, `kubeconform`, `ansible-lint`,
-`trivy`, `jscpd`, tests…) avant merge. Le badge reflète l'état réel du workflow
-`ci.yml` sur `main`. Détail des garde-fous : section
+`trivy`, `jscpd`, tests…) avant merge. Le badge **CI** reflète l'état réel du
+workflow `ci.yml` sur `main` ; l'analyse de sécurité **CodeQL** (SAST) s'exécute
+sur le périmètre Python du dépôt. Détail des garde-fous : section
 [« Qualité — garde-fous en place »](#qualité--garde-fous-en-place) ci-dessus et
 [SAFEGUARDS.md](SAFEGUARDS.md).
 
 [![CI](https://github.com/univ-lehavre/cluster/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/univ-lehavre/cluster/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/univ-lehavre/cluster/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/univ-lehavre/cluster/actions/workflows/codeql.yml)
 
 ### Sécurité & supply-chain
 

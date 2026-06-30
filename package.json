@@ -28,6 +28,7 @@
     "check:gouvernance": "uv run python scripts/check_gouvernance.py",
     "test:shell": "bats bench/unit/",
     "test:python": "uv run python -m unittest discover -s tests",
+    "test:python:cov": "uv run coverage run -m unittest discover -s tests && uv run coverage report",
     "lint": "pnpm format:check && pnpm lint:yaml && pnpm lint:shell && pnpm lint:k8s && pnpm lint:ansible && pnpm lint:dup && pnpm lint:python && pnpm lint:docs-orphans && pnpm lint:stats && pnpm lint:drifts && pnpm lint:contract && pnpm lint:topology && pnpm lint:topology-drift && pnpm test:shell && pnpm test:python",
     "docs:prepare": "uv run python scripts/migrate_docs_to_astro.py --content-only",
     "docs:dev": "pnpm docs:prepare && astro dev --root docs",

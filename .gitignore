@@ -74,6 +74,9 @@ bench/**/.work/
 docs/dist/
 docs/.astro/
 
+# Résidu de cache de l'ancien moteur VitePress (migré vers Astro Starlight)
+docs/.vitepress/
+
 # Ansible runtime cache
 .ansible/
 
@@ -106,3 +109,4 @@ apps/redcap/source/
 
 # Copie générée de docs/ par migrate_docs_to_astro.py (--content-only, ADR 0089)
 docs/src/content/docs/docs/
+.coverage
