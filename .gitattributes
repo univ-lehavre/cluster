@@ -1,0 +1,25 @@
+# Normalisation des fins de ligne — ADR 0100 (périmètre OS).
+#
+# Les scripts du dépôt ont un shebang `#!/usr/bin/env bash` et s'exécutent sur
+# des nœuds Linux (banc Lima / prod) ou un poste de contrôle Unix. Un checkout
+# côté Windows (ou `core.autocrlf=true`, défaut de Git for Windows) qui les
+# convertirait en CRLF produit `#!/usr/bin/env bash\r` → `/usr/bin/env: 'bash\r':
+# No such file or directory`. `eol=lf` garantit LF DANS le dépôt quel que soit
+# le poste, indépendamment de la config Git locale du contributeur.
+
+# Tout fichier texte détecté par Git : normalisé en LF dans le dépôt.
+* text=auto eol=lf
+
+# Binaires : jamais de conversion de fin de ligne (évite la corruption).
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.gz   binary
+*.tar  binary
+*.zip  binary
+*.woff  binary
+*.woff2 binary
