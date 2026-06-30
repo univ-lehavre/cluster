@@ -1649,17 +1649,28 @@ def _access_secret(namespace: str, name: str, key: str) -> str:
 
 
 def _access_print_secrets() -> None:
-    """Affiche les secrets/tokens regroupés (un seul écran ; lus des Secrets du cluster)."""
+    """Affiche les secrets/tokens regroupés (un seul écran ; lus des Secrets du cluster).
+
+    AFFICHER les identifiants EST la fonction de `access` (outil de dev local, banc-only,
+    ADR 0048) : l'opérateur veut les credentials pour se connecter aux UI. Comportement
+    repris à l'identique de l'ex-`access.sh` (`print_secrets`). Le clear-text vers stdout
+    interactif est VOULU, pas une fuite — CodeQL `py/clear-text-logging` est ici un faux
+    positif fonctionnel (alerte dismissée « by design »)."""
     print("\nSecrets & tokens (lus des Secrets du cluster — ne pas partager)")
     for label, ns, secret, user_key, pwd_key in _access.SECRET_ROWS:
         pwd = _access_secret(ns, secret, pwd_key)
         user = _access_secret(ns, secret, user_key) if user_key else "admin"
-        print(f"    {label:<11} {user} / {pwd}")
+        print(f"    {label:<11} {user} / {pwd}")  # affichage des credentials VOULU (cf. docstring)
 
 
 def _access_generate_env() -> None:
     """Génère `atlas/.env.cluster.local` (gitignoré) consommable par atlas, si le dépôt
-    voisin existe. Réutilise `access.env_content` (pur) pour le rendu exact."""
+    voisin existe. Réutilise `access.env_content` (pur) pour le rendu exact.
+
+    ÉCRIRE les credentials dans le `.env` EST la fonction de `access` (« git push et ça
+    marche », ADR 0048) — comme l'ex-`access.sh` (`generate_env`). Le fichier est
+    gitignoré côté atlas (jamais commité). Le clear-text storage est VOULU — CodeQL
+    `py/clear-text-storage` est ici un faux positif fonctionnel (alerte dismissée)."""
     atlas_dir = os.path.abspath(os.path.join(_ROOT, "..", "atlas"))
     if not os.path.isdir(atlas_dir):
         _warn(f"dépôt atlas absent ({atlas_dir}) — .env non généré")
