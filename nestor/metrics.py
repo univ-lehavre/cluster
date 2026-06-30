@@ -1,10 +1,12 @@
 """Exposition des métriques DÉJÀ consignées (P6, ADR 0056 §8.8).
 
-L'outil **LIT et EXPOSE** les métriques que `bench/lima/metrology.sh` échantillonne
-et écrit dans `runs-history.yaml` (durée totale, durées par phase, `cpu_core_s`,
-`ram_peak_mib`, `ram_mean_mib`) — il **ne les réinvente pas** et n'en mesure
-aucune de neuf (mesurer = le banc, via metrology.sh). Module PUR : il met en forme
-des `Run` déjà chargés (history.py), aucune I/O.
+L'outil **LIT et EXPOSE** les métriques écrites dans `runs-history.yaml` (durée
+totale, durées par phase, `cpu_core_s`, `ram_peak_mib`, `ram_mean_mib`) — il **ne
+les réinvente pas** et n'en mesure aucune de neuf (l'échantillonnage Prometheus +
+l'append d'un run sont un geste du BANC, historiquement `metrology.sh` ; ce script
+a été retiré, ADR 0101 — l'auto-consignation Python reste à câbler, cf. le STUB
+`record` de `path.py`). Module PUR : il met en forme des `Run` déjà chargés
+(history.py), aucune I/O.
 """
 
 from __future__ import annotations
@@ -52,7 +54,7 @@ def metrics_of(run: Run) -> RunMetrics:
 
 
 def _fmt_dur(seconds: int | None) -> str:
-    """Durée lisible `<m>m<ss>s` (parité metro_fmt_dur). `?` si absente."""
+    """Durée lisible `<m>m<ss>s` (parité metro_fmt_dur, ex-metrology.sh). `?` si absente."""
     if seconds is None:
         return "?"
     return f"{seconds // 60}m{seconds % 60:02d}s"

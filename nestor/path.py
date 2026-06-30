@@ -156,8 +156,9 @@ def run_path(
       pas câblé (§5.b) — la façade peut y router un rappel transport.
     - `bootstrap(phase) -> int` : monte le socle k8s+CNI (`bootstrap` ; rc 0 = ok)
       (façade → `nestor.bootstrap.run_bootstrap`, déjà porté).
-    - `record(result) -> None` : consigne le run from-scratch (façade →
-      `metro_record_run`/historique, parité `record_full_run`). Optionnel.
+    - `record(result) -> None` : consigne le run from-scratch dans l'historique
+      (geste ex-`metro_record_run`, metrology.sh retiré ADR 0101 — à câbler en
+      Python). Optionnel (None = STUB ; append manuel par commit en attendant).
     - `sleep` : inutilisé ici (signature homogène avec les autres moteurs ; les
       attentes vivent dans `gate`). Réservé.
 
