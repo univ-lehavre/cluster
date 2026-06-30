@@ -28,7 +28,7 @@ pas par `resolve_layers`. Ici on ordonne la QUEUE applicative.
 from __future__ import annotations
 
 from nestor import graph
-from nestor.model import TopologyError
+from nestor.errors import TopologyError
 
 # Alias de profil → phases qu'il apporte (projection de PROFILE_BRICKS, ADR 0039/0068).
 # `store` se projette en `storage`, jeton ABSTRAIT que le graphe atomique résout par

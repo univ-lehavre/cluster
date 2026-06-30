@@ -18,7 +18,12 @@ tests/test_nestor.py (ADR 0017).
 
 from __future__ import annotations
 
-from nestor.model import Topology, TopologyError
+from typing import TYPE_CHECKING
+
+from nestor.errors import TopologyError
+
+if TYPE_CHECKING:  # `Topology` n'est utilisé qu'en annotation (différée) → pas de cycle
+    from nestor.model import Topology
 
 # ── Inclusion cumulative des profils (ADR 0039) ─────────────────────────────
 # Chaque profil inclut les précédents. L'ordre EST le graphe de dépendances de

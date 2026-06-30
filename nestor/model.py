@@ -13,10 +13,10 @@ from typing import Any
 
 import yaml
 
-
-class TopologyError(ValueError):
-    """topology.yaml invalide (champ manquant, rôle inconnu, incohérence)."""
-
+# `TopologyError` est défini dans le module-feuille `errors` (sans dépendance) et
+# ré-exporté ici : `layers`/`profile` l'importent sans tirer `model` (casse le cycle
+# py/cyclic-import). `from nestor.model import TopologyError` reste valide.
+from nestor.errors import TopologyError
 
 VALID_ROLES = {"control", "worker", "storage"}
 # `target_kind` = la CRITICITÉ (la garde d'isolation, ADR 0099) : `bench` (parc jetable,
