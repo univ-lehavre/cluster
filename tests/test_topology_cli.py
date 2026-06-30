@@ -126,14 +126,14 @@ _EXAMPLE = os.path.join(_ROOT, "topologies", "socle.example.yaml")
 
 
 def _example_as_lima(test):
-    """Copie temporaire de _EXAMPLE forcée en `target_kind: lima` (nettoyée en cleanup).
+    """Copie temporaire de _EXAMPLE forcée en `target_kind: bench` (nettoyée en cleanup).
 
     Les tests du comportement BANC (créer les VMs `up`, warning d'alignement shell,
     délégation `run-phases.sh up`) doivent viser une topo lima : depuis ADR 0084, une
     topo prod n'a plus la phase `up` ni le warning banc. _EXAMPLE est prod → on en dérive
     une variante lima pour ces cas."""
     with open(_EXAMPLE, encoding="utf-8") as f:
-        body = f.read().replace("target_kind: prod", "target_kind: lima")
+        body = f.read().replace("target_kind: prod", "target_kind: bench")
     path = _tmp(body)
     test.addCleanup(os.unlink, path)
     return path
@@ -232,9 +232,9 @@ class Generate(unittest.TestCase):
 
     def test_lima_inventory_matches_facade(self):
         topo = load_topology(_EXAMPLE)
-        # l'exemple est prod ; on force --kind lima avec un HOME fixe.
+        # l'exemple est prod ; on force --kind bench avec un HOME fixe.
         code, out, _ = _capture(
-            ["artifact", "generate", "-f", _EXAMPLE, "--kind", "lima", "--lima-home", "/H"]
+            ["artifact", "generate", "-f", _EXAMPLE, "--kind", "bench", "--lima-home", "/H"]
         )
         self.assertEqual(code, 0)
         self.assertEqual(out, render_lima_inventory(topo, "/H"))
@@ -291,7 +291,7 @@ class Diff(unittest.TestCase):
 
     def test_lima_requires_against(self):
         # pas de golden Lima versionné → --against obligatoire (code 2 sans).
-        code, _, err = _capture(["artifact", "diff", "-f", _EXAMPLE, "--kind", "lima"])
+        code, _, err = _capture(["artifact", "diff", "-f", _EXAMPLE, "--kind", "bench"])
         self.assertEqual(code, 2)
         self.assertIn("usage", err)
 
@@ -449,7 +449,7 @@ class Kubectl(unittest.TestCase):
         "catalog: {topology: banc}\n"
         "layers: [storage-simple]\n"
         "nodes:\n  - {name: node1, roles: [control, worker]}\n"
-        "storage: {backend: local-path}\ntarget_kind: lima\n"
+        "storage: {backend: local-path}\ntarget_kind: bench\n"
     )
 
     def _topo_file(self) -> str:
@@ -748,7 +748,7 @@ runs:
         topo_yaml = (
             "catalog: {topology: hc, profile: base}\n"
             "nodes:\n  - {name: node1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
+            "storage: {backend: local-path}\ntarget_kind: bench\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -761,7 +761,7 @@ runs:
         topo_yaml = (
             "catalog: {topology: b, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: lima\n"  # backend déclaré mais inactif en base
+            "storage: {backend: ceph}\ntarget_kind: bench\n"  # backend déclaré mais inactif en base
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -776,7 +776,7 @@ runs:
         topo_yaml = (
             "catalog: {topology: d, profile: dataops}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: lima\n"
+            "storage: {backend: ceph}\ntarget_kind: bench\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -938,7 +938,7 @@ runs:
         topo_yaml = (
             "catalog: {topology: lp, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
+            "storage: {backend: local-path}\ntarget_kind: bench\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -956,7 +956,7 @@ runs:
         topo = _tmp(
             "catalog: {topology: t}\n"
             "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
+            "storage: {backend: local-path}\ntarget_kind: bench\n"
         )
         self.addCleanup(os.unlink, topo)
         cli._ready_nodes = lambda *_a: ["node1"]  # cluster joignable → on sonde les SC
@@ -974,7 +974,7 @@ runs:
         topo = _tmp(
             "catalog: {topology: t}\n"
             "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
+            "storage: {backend: local-path}\ntarget_kind: bench\n"
         )
         self.addCleanup(os.unlink, topo)
         cli._ready_nodes = lambda *_a: []  # cluster down
@@ -1290,7 +1290,7 @@ nodes:
   - {name: node2, roles: [worker]}
 storage:
   backend: local-path
-target_kind: lima
+target_kind: bench
 """
 
     def setUp(self):
@@ -1389,7 +1389,7 @@ class NextInventoryGuard(unittest.TestCase):
     """Garde de CIBLE ANSIBLE (ADR 0053) : `next` visant le banc REFUSE un inventaire
     prod AVANT de lancer ansible-runner. Régression de la faille `next dataops` → prod."""
 
-    # Topo banc (target_kind=lima) visant une couche applicative (dataops local-path).
+    # Topo banc (target_kind=bench) visant une couche applicative (dataops local-path).
     _TOPO_LIMA = """\
 catalog:
   topology: banc
@@ -1399,7 +1399,7 @@ nodes:
   - {name: node2, roles: [worker]}
 storage:
   backend: local-path
-target_kind: lima
+target_kind: bench
 """
     # Inventaire PROD résiduel (le cas exact de la faille) : target_kind prod, hôtes
     # génériques cp1/node1 + IP d'exemple 10.0.0.0/22 (ADR 0023).
@@ -1478,11 +1478,11 @@ workers:
         self.assertEqual(self.launched, [])  # ansible-runner JAMAIS lancé sur la prod
 
     def test_lima_topo_uses_bench_inventory(self):
-        # CŒUR du fix : une topo lima vise l'inventaire BANC (target_kind: lima), pas
+        # CŒUR du fix : une topo lima vise l'inventaire BANC (target_kind: bench), pas
         # le prod codé en dur. Ici l'inventaire banc est PROPRE → la garde passe et
         # ansible-runner est lancé sur le BANC (inventaire = _BENCH_INVENTORY).
         clean_banc_inv = (
-            "cloud:\n  vars:\n    target_kind: lima\n"
+            "cloud:\n  vars:\n    target_kind: bench\n"
             "control:\n  hosts:\n    node1: {ansible_host: lima-node1}\n"
             "workers:\n  hosts:\n    node2: {ansible_host: lima-node2}\n"
         )
@@ -1514,7 +1514,7 @@ nodes:
   - {name: node2, roles: [worker]}
 storage:
   backend: local-path
-target_kind: lima
+target_kind: bench
 """
     # Socle local-path fait (up+bootstrap), rien d'autre → le menu doit proposer
     # storage-simple (défaut) ET metrics-server.
@@ -1563,7 +1563,7 @@ runs:
         orig_safe = cli._assert_inventory_safe
         cli._assert_inventory_safe = lambda *a, **k: None
         self.addCleanup(setattr, cli, "_assert_inventory_safe", orig_safe)
-        # Les topos de NextMenu sont `target_kind: lima` → `_inventory_for` renvoie
+        # Les topos de NextMenu sont `target_kind: bench` → `_inventory_for` renvoie
         # l'inventaire BANC (`_BENCH_INVENTORY`), pas bootstrap/hosts.yaml. On garantit
         # sa présence (absent en CI où le banc n'existe pas) — créé puis retiré, en
         # sauvegardant un éventuel inventaire banc réel (poste dev).
@@ -1918,7 +1918,7 @@ runs:
         topo = _tmp(
             "catalog: {topology: multi-node-3, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: lima\n"
+            "storage: {backend: ceph}\ntarget_kind: bench\n"
         )
         self.addCleanup(os.unlink, topo)
         code, out, _ = _capture(["artifact", "metrics", "--history", hist, "-f", topo])
@@ -1936,7 +1936,7 @@ runs:
         topo = _tmp(
             "catalog: {topology: absente, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: lima\n"
+            "storage: {backend: ceph}\ntarget_kind: bench\n"
         )
         self.addCleanup(os.unlink, topo)
         code, out, _ = _capture(["artifact", "metrics", "--history", hist, "-f", topo])
@@ -2103,7 +2103,7 @@ class Stack(unittest.TestCase):
         name = "zz-test-ctx-ha"
         target = self._catalog(name)
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
-        answers = "base\nlocal-path\nlocal\nlima\n3\n0\nkube-vip-arp\nn\n"
+        answers = "base\nlocal-path\nlocal\nbench\n3\n0\nkube-vip-arp\nn\n"
         with (
             contextlib.redirect_stdout(io.StringIO()),
             contextlib.redirect_stderr(io.StringIO()),
@@ -2331,7 +2331,7 @@ class UpCommand(unittest.TestCase):
         topo_yaml = (
             "catalog: {topology: lp, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: lima\n"
+            "storage: {backend: local-path}\ntarget_kind: bench\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -2703,7 +2703,7 @@ nodes:
       - worker
 storage:
   backend: local-path
-target_kind: lima
+target_kind: bench
 """
 
     # Couches du profil dataops résolues en phases (== ce que resolve_layers rend).
@@ -2793,7 +2793,7 @@ target_kind: lima
         "catalog: {topology: banc, profile: dataops}\n"
         "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
         "layers: [metrics-server, monitoring]\n"
-        "storage: {backend: local-path}\ntarget_kind: lima\n"
+        "storage: {backend: local-path}\ntarget_kind: bench\n"
     )
 
     def test_prune_removes_absent_layer(self):
@@ -3178,7 +3178,7 @@ class NodeExec(unittest.TestCase):
 
     _LIMA_INV = (
         "cloud:\n"
-        "  vars:\n    ansible_user: lima\n    target_kind: lima\n"
+        "  vars:\n    ansible_user: lima\n    target_kind: bench\n"
         "control:\n  hosts:\n    node1:\n      ansible_host: lima-node1\n"
     )
     _PROD_INV = (
@@ -3238,7 +3238,7 @@ class FetchKubeconfig(unittest.TestCase):
         "    context:\n      cluster: kubernetes\n      user: kubernetes-admin\n"
         "current-context: kubernetes-admin@kubernetes\n"
     )
-    _INV = "cloud:\n  vars:\n    target_kind: lima\ncontrol:\n  hosts:\n    node1: {}\n"
+    _INV = "cloud:\n  vars:\n    target_kind: bench\ncontrol:\n  hosts:\n    node1: {}\n"
 
     def test_fetches_rewrites_and_writes(self):
         inv = _tmp(self._INV)
@@ -3287,7 +3287,7 @@ class FetchKubeconfig(unittest.TestCase):
 class DiscoverNodeside(unittest.TestCase):
     """ADR 0081 étape 3 : _discover_nodeside sonde le node-side via node_exec (sans nœud)."""
 
-    _INV = "cloud:\n  vars:\n    target_kind: lima\ncontrol:\n  hosts:\n    node1: {}\n"
+    _INV = "cloud:\n  vars:\n    target_kind: bench\ncontrol:\n  hosts:\n    node1: {}\n"
 
     def _stub_probes(self, table):
         # table: argv-clé (1er mot après 'sh -c' ou la commande) → stdout. None = injoignable.

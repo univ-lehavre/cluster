@@ -103,14 +103,14 @@ def _capture(argv):
     return code, out.getvalue(), err.getvalue()
 
 
-# Topo BANC mono-nœud (target_kind: lima) : cp1 control+worker, local-path, AVEC une couche
+# Topo BANC mono-nœud (target_kind: bench) : cp1 control+worker, local-path, AVEC une couche
 # applicative (storage-simple) déclarée → la séquence a un play unitaire (storage-simple) APRÈS
 # le socle (up, bootstrap). Le chemin du moteur Python se TESTE au banc mono-nœud (ADR 0097).
 _LIMA_SOLO = (
     "catalog: {topology: solo}\n"
     "layers: [storage-simple]\n"
     "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-    "storage: {backend: local-path}\ntarget_kind: lima\n"
+    "storage: {backend: local-path}\ntarget_kind: bench\n"
 )
 
 # Topo BANC à DEUX nœuds (cp choisi PARMI eux) : node-a worker, cp-b control. Sert à
@@ -120,7 +120,7 @@ _LIMA_CP_SECOND = (
     "nodes:\n"
     "  - {name: node-a, roles: [worker]}\n"
     "  - {name: cp-b, roles: [control, worker]}\n"
-    "storage: {backend: local-path}\ntarget_kind: lima\n"
+    "storage: {backend: local-path}\ntarget_kind: bench\n"
 )
 
 

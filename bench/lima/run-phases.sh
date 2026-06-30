@@ -30,9 +30,9 @@
 set -euo pipefail
 
 # Intention de cible (ADR 0053 (c)) : ce script ne pilote QUE le banc Lima. On
-# déclare l'intention `lima` pour TOUS les ansible-playbook lancés d'ici → le
+# déclare l'intention `bench` pour TOUS les ansible-playbook lancés d'ici → le
 # garde-fou du rôle audit-log refuse un inventaire prod passé par erreur.
-export EXPECTED_TARGET_KIND=lima
+export EXPECTED_TARGET_KIND=bench
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=bench/lima/lib.sh

@@ -55,10 +55,10 @@ class LaunchPhase(unittest.TestCase):
             "/d/inv",
             ansible_config="/d/project/bootstrap/ansible.cfg",
             kubeconfig="/home/u/.kube/config",
-            target_kind="lima",
+            target_kind="bench",
         )
         env = self.calls[0]["envvars"]
-        self.assertEqual(env["EXPECTED_TARGET_KIND"], "lima")
+        self.assertEqual(env["EXPECTED_TARGET_KIND"], "bench")
         self.assertEqual(env["ANSIBLE_CONFIG"], "/d/project/bootstrap/ansible.cfg")
         self.assertEqual(env["KUBECONFIG"], "/home/u/.kube/config")
 

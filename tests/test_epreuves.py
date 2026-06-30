@@ -76,7 +76,7 @@ class Catalogue(unittest.TestCase):
         # celle qui, sans la caducité, la rendrait jouable.
         caducs = {e.num for e in EPREUVES if e.statut == "caduc"}
         self.assertEqual(caducs, {"03", "04", "19", "30"})
-        for kind in ("prod", "lima"):
+        for kind in ("prod", "bench"):
             for backend in ("ceph", "local-path"):
                 jouables, _ = filter_epreuves(_topo(kind=kind, backend=backend))
                 nums_j = {e.num for e in jouables}
@@ -123,8 +123,8 @@ class Filtrage(unittest.TestCase):
         self.assertTrue({"03", "05", "14", "19"}.issubset(nums_ex))
 
     def test_offensif_autorise_sur_banc_jetable(self):
-        # En target_kind=lima (banc), les offensifs ne sont PLUS exclus pour ce motif.
-        jouables, _ = filter_epreuves(_topo(kind="lima"))
+        # En target_kind=bench (banc), les offensifs ne sont PLUS exclus pour ce motif.
+        jouables, _ = filter_epreuves(_topo(kind="bench"))
         nums = {e.num for e in jouables}
         self.assertIn("20", nums)  # chaos kill pods, agnostique → jouable sur banc
         self.assertIn("21", nums)

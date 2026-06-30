@@ -67,7 +67,7 @@ hardening:
 #   memory: 8GiB
 #   disk: 20GiB
 
-# ─── target_kind : garde-fou d'intention (ADR 0053) — prod | lima
+# ─── target_kind : garde-fou d'intention (ADR 0053) — prod | bench
 target_kind: prod
 
 # ─── kubeconfig : cible de LECTURE déclarée (ADR 0090). Le chemin du kubeconfig

@@ -47,4 +47,4 @@ nodes:
 storage:
   backend: local-path
 
-target_kind: lima # lima (banc) | prod — garde-fou de cible (ADR 0053)
+target_kind: bench # bench (banc) | prod — garde-fou de cible (ADR 0053)

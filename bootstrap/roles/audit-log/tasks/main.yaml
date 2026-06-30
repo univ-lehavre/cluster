@@ -18,7 +18,7 @@
 # distingue. On vérifie ICI, en pre_tasks et AVANT toute tâche distante, que la
 # topologie ciblée correspond à l'intention de l'invocation : EXPECTED_TARGET_KIND
 # (défaut `prod` — une invocation nue du RUNBOOK exige un inventaire prod ; le
-# banc préfixe EXPECTED_TARGET_KIND=lima). Un mauvais `-i` échoue alors
+# banc préfixe EXPECTED_TARGET_KIND=bench). Un mauvais `-i` échoue alors
 # immédiatement, zéro tâche mutante (au lieu d'un faux-résultat silencieux,
 # ADR 0052). delegate_to localhost + run_once : un seul check côté poste, pas de
 # SSH ; changed_when:false (lecture). Les playbooks `localhost` (plateforme :
@@ -37,7 +37,7 @@
       target_kind={{ target_kind | default('(absent)') }} mais l'intention est
       {{ lookup('env', 'EXPECTED_TARGET_KIND') | default('prod', true) }}.
       Vérifier le `-i` : prod = bootstrap/hosts.yaml (target_kind: prod) ; banc =
-      bench/lima/.work/inventory.yaml (target_kind: lima, EXPECTED_TARGET_KIND=lima).
+      bench/lima/.work/inventory.yaml (target_kind: bench, EXPECTED_TARGET_KIND=bench).
     success_msg: >-
       Cible confirmée : target_kind={{ target_kind | default('(localhost)') }}.
     quiet: true

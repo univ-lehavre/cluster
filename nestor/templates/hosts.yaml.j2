@@ -18,7 +18,7 @@ cloud:
     workers:
   vars:
     # Marqueur de TOPOLOGIE (ADR 0053 (c)) : distingue cet inventaire prod du banc
-    # Lima (qui émet `target_kind: lima`). Le rôle audit-log, importé en pre_tasks,
+    # Lima (qui émet `target_kind: bench`). Le rôle audit-log, importé en pre_tasks,
     # refuse de muter un parc dont le `target_kind` ne correspond pas à l'intention
     # (EXPECTED_TARGET_KIND, défaut `prod`) → un mauvais `-i` échoue AVANT toute
     # tâche distante, au lieu d'un faux-résultat silencieux. Valeur générique (ADR 0023).
