@@ -108,13 +108,13 @@ Format léger inspiré de Michael Nygard :
 | 0086 | [Code-location jouet du socle : pipeline Dagster minimal branché en permanence](0086-code-location-jouet-du-socle.md)                             | Accepted           |
 | 0087 | [Property-based testing des fonctions pures de `nestor` (Hypothesis)](0087-property-based-testing-nestor.md)                                      | Accepted           |
 | 0088 | [Signer les releases : tarball source + cosign keyless + provenance SLSA](0088-signature-releases-cosign-slsa.md)                                 | Accepted           |
-| 0089 | [Migration de la documentation : VitePress → Astro Starlight](0089-migration-doc-vitepress-astro-starlight.md)                                    | Proposed           |
-| 0090 | [`nestor` lit l'état réel d'un cluster prod (état = K8s, pas VMs)](0090-nestor-pilote-la-prod.md)                                                 | Proposed           |
+| 0089 | [Migration de la documentation : VitePress → Astro Starlight](0089-migration-doc-vitepress-astro-starlight.md)                                    | Accepted           |
+| 0090 | [`nestor` lit l'état réel d'un cluster prod (état = K8s, pas VMs)](0090-nestor-pilote-la-prod.md)                                                 | Accepted           |
 | 0091 | [Portail d'accès aux UI de la plateforme](0091-portail-acces-ui.md)                                                                               | Accepted           |
 | 0092 | [Exposition des UI par `hostPort`/`NodePort` L4 (zéro DNS)](0092-exposition-hostport-l4.md)                                                       | Accepted           |
 | 0093 | [Cache partagé des flux atlas servi par CloudNativePG (pas de Redis)](0093-cache-flux-cnpg.md)                                                    | Accepted           |
 | 0094 | [Frontière de déploiement applicatif : qui orchestre, qui fournit (cluster ↔ atlas)](0094-frontiere-deploiement-applicatif.md)                    | Proposed           |
-| 0095 | [Build applicatif événementiel in-cluster : fabrique d'images et déploiement GitOps zéro-touch](0095-build-applicatif-evenementiel-in-cluster.md) | Proposed           |
+| 0095 | [Build applicatif événementiel in-cluster : fabrique d'images et déploiement GitOps zéro-touch](0095-build-applicatif-evenementiel-in-cluster.md) | Accepted           |
 | 0096 | [Graphe de topologie Python figé, vérifié contre Ansible](0096-graphe-topologie-python-verifie-ansible.md)                                        | Accepted           |
 | 0097 | [Moteur de chemin Python ; bash réduit aux artefacts node-side](0097-moteur-chemin-python-bash-artefacts.md)                                      | Accepted           |
 | 0098 | [Source unique d'inventaire : `nestor` dérive l'inventaire, `hosts.yaml` supprimé](0098-source-unique-inventaire-nestor-derive.md)                | Proposed           |
