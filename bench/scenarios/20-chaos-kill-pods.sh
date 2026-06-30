@@ -121,7 +121,8 @@ pick() {
 
 total_killed=0
 for r in $(seq 1 "$ROUNDS"); do
-    mapfile -t victims < <(list_targets | pick "$KILL_N")
+    declare -a victims=()
+    read_lines victims < <(list_targets | pick "$KILL_N")
     [ "${#victims[@]}" -gt 0 ] || { log "  tour $r : aucun pod tuable (SAFE exclut tout ?)"; continue; }
     log "[chaos] tour $r/$ROUNDS — kill : ${victims[*]}"
     for v in "${victims[@]}"; do

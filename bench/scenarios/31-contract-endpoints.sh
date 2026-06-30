@@ -64,7 +64,8 @@ probe_endpoint() {
 }
 
 log "Contrat cluster→atlas : ${CONTRACT}"
-mapfile -t ids < <(yq -r '.endpoints[].id' "${CONTRACT}")
+declare -a ids=()
+read_lines ids < <(yq -r '.endpoints[].id' "${CONTRACT}")
 log "  ${#ids[@]} endpoints déclarés au contrat"
 
 present=0 absent=0 responding=0 mute=0
