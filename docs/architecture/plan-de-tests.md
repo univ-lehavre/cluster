@@ -117,7 +117,8 @@ phase `dataops` a posé l'infra (orchestrateurs vides). Étapes (chacune un gate
 Le contenu poussé (workflow jouet d'exemple générique) vit dans
 [`bench/lima/atlas-workflow-sample/`](../../bench/lima/atlas-workflow-sample/) ;
 l'init du dépôt Gitea est faite par la phase `gitops-seed`
-([`bench/lima/gitea-init.sh`](../../bench/lima/gitea-init.sh)). Implémentation :
+([`bench/lima/gitea-init.sh`](https://github.com/univ-lehavre/cluster/blob/b522133b7cea/bench/lima/gitea-init.sh)).
+Implémentation :
 [issue #231](https://github.com/univ-lehavre/cluster/issues/231).
 
 ## Couverture par profil de banc — ce que le banc `atlas` ne peut pas jouer

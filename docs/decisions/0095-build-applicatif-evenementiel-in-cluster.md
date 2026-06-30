@@ -118,8 +118,8 @@ a Internet au bootstrap, est **idempotent** (`changed=0` prouvé) et déjà épr
 — mais on le **rend GitOps-compatible** : après `build`+`push`, le rôle **lit le
 digest** de l'image (`nerdctl`/`buildkit manifest inspect`) et l'**écrit dans le
 repo Gitea `cluster/apps`** (patron `push_gitea_file` de
-[`bench/lima/gitea-init.sh`](../../bench/lima/gitea-init.sh), create-or-update
-idempotent). Argo CD déploie alors **par digest figé** (§2).
+[`bench/lima/gitea-init.sh`](https://github.com/univ-lehavre/cluster/blob/b522133b7cea/bench/lima/gitea-init.sh),
+create-or-update idempotent). Argo CD déploie alors **par digest figé** (§2).
 
 Résultat : **« zéro geste manuel » côté déploiement atteint immédiatement**,
 sans rien de neuf et risqué (ni buildkit-in-pod, ni Argo Events, ni egress build

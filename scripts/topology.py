@@ -113,6 +113,7 @@ from nestor import (  # noqa: E402
     suggest_next,
     verdict_for_run,
 )
+from nestor import access as _access  # noqa: E402
 from nestor import bootstrap as _bootstrap  # noqa: E402
 from nestor import discover as _discover  # noqa: E402
 from nestor import graph as _graph  # noqa: E402
@@ -1454,30 +1455,150 @@ def _pose_named_context(topo: Topology, stack: str) -> None:
 
 
 def cmd_access(args: argparse.Namespace) -> int:
-    """`access` : ouvre l'accès développeur au banc (URLs + secrets) — délègue à access.sh.
+    """`access` : ouvre l'accès développeur au banc (URLs + secrets + `.env` atlas).
 
-    Façade fine (ADR 0049/0017) : l'orchestration (Gateways, forwards SSH, /etc/hosts
-    `*.cluster.lan`, secrets/tokens LUS du cluster, `.env` atlas) vit dans
-    `bench/lima/access.sh` (ADR 0048), du bash irréductible (limactl/ssh). On délègue
-    via l'arm `run-phases.sh access`, en passant les options telles quelles
-    (`--stop` / `--print-hosts` / `--no-hosts`). Code 0/1 = celui de access.sh ; 2 si
-    le banc n'a pas de kubeconfig (socle non monté)."""
+    Porté de `bench/lima/access.sh` (ADR 0101) : la DÉCISION pure (port hôte par UI,
+    lignes URL/`.env`, UI exposées du contrat) vit dans `nestor/access.py` (testé) ; ICI
+    l'I/O — lit le contrat, ouvre un `kubectl port-forward` par UI exposée (BANC : réseau
+    Lima isolé du Mac, ADR 0092), lit les Secrets, génère `atlas/.env.cluster.local`. Plus
+    de double subprocess vers run-phases.sh. `--stop` tue les port-forward. Banc-only (la
+    garde refuse la prod). Code 2 si le banc n'a pas de kubeconfig (socle non monté)."""
     _assert_bench_target("nestor access")
-    # Reconstruit les flags d'access.sh depuis les options parsées (un set fixe, sûr).
-    flags = [
-        flag
-        for flag, on in (
-            ("--stop", args.stop),
-            ("--print-hosts", args.print_hosts),
-            ("--no-hosts", args.no_hosts),
+    if args.stop:
+        return _access_stop_forwards()
+    kubeconfig = _bench_kubeconfig()
+    if not os.path.isfile(kubeconfig):
+        _warn(f"kubeconfig banc absent ({kubeconfig}) — monter le banc d'abord (`nestor up`).")
+        return 2
+    with open(os.path.join(_ROOT, "contract", "endpoints.example.yaml"), encoding="utf-8") as f:
+        uis = _access.exposed_uis(f.read())
+    node_ip = _access_node_internal_ip()
+    if not node_ip:
+        _warn("pas d'IP nœud control-plane (banc démarré ?).")
+        return 1
+    _access_open_forwards_and_print(uis, node_ip)
+    _access_print_secrets()
+    _access_generate_env()
+    print("\nPrêt. Travaillez dans atlas/ ; `git push` (Gitea → Argo CD réconcilie).")
+    print("Pour tout arrêter : `nestor access --stop`")
+    return 0
+
+
+def _access_stop_forwards() -> int:
+    """Tue les `kubectl port-forward` ouverts par `nestor access` (équiv. `pkill`)."""
+    proc = subprocess.run(  # noqa: S603 — motif fixe, lecture seule
+        ["pkill", "-f", "kubectl.*port-forward"], check=False
+    )
+    if proc.returncode == 0:
+        print("✓ kubectl port-forwards arrêtés")
+    else:
+        _warn("aucun kubectl port-forward actif")
+    return 0
+
+
+def _access_node_internal_ip() -> str:
+    """InternalIP d'un nœud control-plane Ready (vide si introuvable). Au banc c'est l'IP
+    interne non routable depuis le Mac (d'où le port-forward) ; le rappel prod l'affiche."""
+    out = _kubectl(
+        "get",
+        "nodes",
+        "-l",
+        "node-role.kubernetes.io/control-plane",
+        "-o",
+        'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}',
+    )
+    return out.stdout.strip() if out and out.returncode == 0 else ""
+
+
+def _access_node_port_of(namespace: str, service: str) -> str:
+    """nodePort RÉEL du Service NodePort `<service>-nodeport` (vide si absent)."""
+    out = _kubectl(
+        "-n",
+        namespace,
+        "get",
+        "svc",
+        f"{service}-nodeport",
+        "-o",
+        "jsonpath={.spec.ports[0].nodePort}",
+    )
+    return out.stdout.strip() if out and out.returncode == 0 else ""
+
+
+def _access_open_forward(lport: int, namespace: str, service: str, port: str) -> None:
+    """Ouvre un `kubectl port-forward 127.0.0.1:<lport> → svc/<service>-nodeport:<port>` en
+    arrière-plan (détaché : `start_new_session` + flux fermés, sinon un pipe en aval reste
+    bloqué). BANC : le réseau Lima est isolé du Mac (ADR 0092 — pas de forward SSH/Gateway)."""
+    subprocess.run(  # noqa: S603 — nettoyage d'un éventuel forward résiduel sur ce port
+        ["pkill", "-f", f"kubectl.*port-forward.*127.0.0.1:{lport}:"], check=False
+    )
+    with open(os.devnull, "wb") as devnull:
+        subprocess.Popen(  # noqa: S603 — argv contrôlé ; détaché volontairement (banc)
+            [
+                "kubectl",
+                "--kubeconfig",
+                _bench_kubeconfig(),
+                "-n",
+                namespace,
+                "port-forward",
+                f"svc/{service}-nodeport",
+                f"127.0.0.1:{lport}:{port}",
+            ],
+            stdin=devnull,
+            stdout=devnull,
+            stderr=devnull,
+            start_new_session=True,
         )
-        if on
-    ]
-    runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
-    return subprocess.run(  # noqa: S603 — chemin codé, flags d'un set fixe
-        ["bash", runphases, "access", *flags],
-        check=False,
-    ).returncode
+
+
+def _access_open_forwards_and_print(uis: list, node_ip: str) -> None:
+    """Pour chaque UI exposée : ouvre le port-forward banc (BASE+index) + imprime l'URL
+    cliquable (banc) et le rappel d'accès direct prod. Index déterministe (uis triées)."""
+    print("UI exposées en L4 NodePort (HTTP clair, réseau privé — ADR 0092/0003).")
+    print("  Au BANC : http://127.0.0.1:<port> (port-forward kubectl). En PROD : accès")
+    print("  DIRECT http://<IP-nœud>:<nodePort> (aucun forward).")
+    for i, ui in enumerate(uis):
+        nodeport = _access_node_port_of(ui.namespace, ui.service)
+        if not nodeport:
+            _warn(f"{ui.namespace}/{ui.service} : nodePort introuvable — UI ignorée")
+            continue
+        lport = _access.host_port_for(i)
+        _access_open_forward(lport, ui.namespace, ui.service, nodeport)
+        print(
+            f"  ✓ {ui.namespace}/{ui.service} → http://127.0.0.1:{lport} "
+            f"(prod : http://{node_ip}:{nodeport})"
+        )
+        print(_access.url_line(ui.layer, f"http://127.0.0.1:{lport}", ui.auth), end="")
+
+
+def _access_secret(namespace: str, name: str, key: str) -> str:
+    """Lit une clé d'un Secret (base64 → clair). Vide si le Secret/la clé manquent."""
+    out = _kubectl("-n", namespace, "get", "secret", name, "-o", f"jsonpath={{.data.{key}}}")
+    return _b64decode(out.stdout.strip()) if out and out.returncode == 0 and out.stdout else ""
+
+
+def _access_print_secrets() -> None:
+    """Affiche les secrets/tokens regroupés (un seul écran ; lus des Secrets du cluster)."""
+    print("\nSecrets & tokens (lus des Secrets du cluster — ne pas partager)")
+    for label, ns, secret, user_key, pwd_key in _access.SECRET_ROWS:
+        pwd = _access_secret(ns, secret, pwd_key)
+        user = _access_secret(ns, secret, user_key) if user_key else "admin"
+        print(f"    {label:<11} {user} / {pwd}")
+
+
+def _access_generate_env() -> None:
+    """Génère `atlas/.env.cluster.local` (gitignoré) consommable par atlas, si le dépôt
+    voisin existe. Réutilise `access.env_content` (pur) pour le rendu exact."""
+    atlas_dir = os.path.abspath(os.path.join(_ROOT, "..", "atlas"))
+    if not os.path.isdir(atlas_dir):
+        _warn(f"dépôt atlas absent ({atlas_dir}) — .env non généré")
+        return
+    out_path = os.path.join(atlas_dir, ".env.cluster.local")
+    pg_user = _access_secret("postgres", "pg-role-pgvector", "username")
+    pg_pwd = _access_secret("postgres", "pg-role-pgvector", "password")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(_access.env_content(pg_user, pg_pwd))
+    print(f"\n✓ {os.path.basename(out_path)} généré (PG, OpenLineage, registry)")
+    _warn("Vérifier qu'il est bien ignoré par git côté atlas (/.env.cluster.local).")
 
 
 def _kubectl(*args: str, timeout: int = _REFRESH_TIMEOUT_S):
@@ -4526,16 +4647,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "access",
         help="ouvrir l'accès dev : URLs des services + identifiants (--stop pour fermer)",
     )
-    # Options déclarées explicitement (apparaissent dans `nestor access --help` ;
-    # argparse.REMAINDER ne capture pas les `--flags` en tête — limite connue).
-    p_access.add_argument("--stop", action="store_true", help="ferme les forwards SSH ouverts")
     p_access.add_argument(
-        "--print-hosts", action="store_true", help="imprime le bloc /etc/hosts à coller"
-    )
-    p_access.add_argument(
-        "--no-hosts",
-        action="store_true",
-        help="ne touche pas /etc/hosts (forwards + secrets seuls)",
+        "--stop", action="store_true", help="ferme les kubectl port-forward ouverts"
     )
 
     p_scale = sub.add_parser(

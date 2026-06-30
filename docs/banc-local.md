@@ -33,10 +33,10 @@ bench/lima/run-phases.sh atlas
 ```
 
 La dernière phase, **`gitops-seed`**
-([`bench/lima/gitea-init.sh`](../bench/lima/gitea-init.sh)), initialise le dépôt
-Gitea du banc : elle crée l'organisation `atlas` + le dépôt `workflows`, y
-pousse un **workflow jouet**, pose le **webhook** Gitea → Argo CD et
-l'`Application` `atlas-workflows`. À partir de là, tout `push` sur ce dépôt
+([`bench/lima/gitea-init.sh`](https://github.com/univ-lehavre/cluster/blob/b522133b7cea/bench/lima/gitea-init.sh)),
+initialise le dépôt Gitea du banc : elle crée l'organisation `atlas` + le dépôt
+`workflows`, y pousse un **workflow jouet**, pose le **webhook** Gitea → Argo CD
+et l'`Application` `atlas-workflows`. À partir de là, tout `push` sur ce dépôt
 déclenche une réconciliation. État du banc et UIs disponibles :
 
 ```bash

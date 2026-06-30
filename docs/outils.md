@@ -103,11 +103,11 @@ Le banc Lima est l'environnement de validation e2e
 
 ## Accès développeur
 
-| Pour…                                                                                         | Commande                                                                    | Détails                                               |
-| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Rendre le banc consommable depuis l'hôte (URLs `*.cluster.lan` cliquables + secrets + `.env`) | `bench/lima/access.sh`                                                      | [ADR 0048](decisions/0048-acces-local-developpeur.md) |
-| Premier accès SSH à des nœuds Debian fraîchement installés (poule/œuf avant Ansible)          | `bootstrap/first-access.sh`                                                 | prérequis d'Ansible                                   |
-| Identifiants / gestion du dashboard Kubernetes                                                | `platform/k8s-dashboard/manage.sh`, `platform/k8s-dashboard/credentials.sh` |                                                       |
+| Pour…                                                                                  | Commande                                                                    | Détails                                                                                                          |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Rendre le banc consommable depuis l'hôte (URLs NodePort cliquables + secrets + `.env`) | `nestor access` (`--stop` pour fermer)                                      | [ADR 0048](decisions/0048-acces-local-developpeur.md)/[0101](decisions/0101-migration-zone-grise-bash-python.md) |
+| Premier accès SSH à des nœuds Debian fraîchement installés (poule/œuf avant Ansible)   | `bootstrap/first-access.sh`                                                 | prérequis d'Ansible                                                                                              |
+| Identifiants / gestion du dashboard Kubernetes                                         | `platform/k8s-dashboard/manage.sh`, `platform/k8s-dashboard/credentials.sh` |                                                                                                                  |
 
 ## Diagnostic & reporting (lecture seule)
 

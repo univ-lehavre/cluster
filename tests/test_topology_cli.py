@@ -2404,44 +2404,44 @@ class Destroy(unittest.TestCase):
 
 
 class Access(unittest.TestCase):
-    """`access` : délègue à run-phases.sh access (access.sh). Pas de vrai banc en test."""
+    """`access` : accès dev NATIF Python (ADR 0101 — ex-access.sh) : port-forward des UI
+    exposées + secrets + `.env` atlas, via `_kubectl`. Pas de vrai banc en test (stub)."""
 
-    def _stub(self, *, bench=True, rc=0):
-        calls = []
+    def test_stop_kills_port_forwards(self):
+        # `--stop` lance un `pkill kubectl.*port-forward` et n'ouvre rien.
+        seen = {}
 
         def _spy(cmd, *a, **k):
-            calls.append(cmd)
-            return subprocess.CompletedProcess(args=cmd, returncode=rc)
+            seen["argv"] = list(cmd)
+            return subprocess.CompletedProcess(args=cmd, returncode=0)
 
-        orig_run, orig_exists = cli.subprocess.run, cli.os.path.exists
-        cli.subprocess.run = _spy
-        # bench présent ⇒ le garde-fou kubeconfig passe ; absent ⇒ il lève.
-        cli.os.path.exists = lambda p: bench if p == cli._BENCH_KUBECONFIG else orig_exists(p)
-        self.addCleanup(setattr, cli.subprocess, "run", orig_run)
-        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
-        return calls
-
-    def test_delegates_to_access_arm_with_options(self):
-        calls = self._stub()
-        code, _, _ = _capture(["access", "--print-hosts"])
+        with mock.patch.object(cli.subprocess, "run", _spy):
+            code, out, _ = _capture(["access", "--stop"])
         self.assertEqual(code, 0)
-        # run-phases.sh access --print-hosts (le flag est reconstruit et transmis).
-        self.assertIn("access", calls[0])
-        self.assertIn("--print-hosts", calls[0])
-        self.assertNotIn("--stop", calls[0])  # seuls les flags posés sont transmis
+        self.assertEqual(seen["argv"][0], "pkill")
+        self.assertIn("kubectl.*port-forward", " ".join(seen["argv"]))
+        self.assertIn("arrêtés", out)
 
-    def test_propagates_access_exit_code(self):
-        self._stub(rc=2)
-        code, _, _ = _capture(["access", "--stop"])
+    def test_returns_2_when_bench_kubeconfig_absent(self):
+        # Banc non monté (kubeconfig absent) → code 2, message clair, rien lancé.
+        with (
+            mock.patch.object(cli, "_bench_kubeconfig", lambda *a, **k: "/nope/kubeconfig"),
+            mock.patch.object(cli.os.path, "isfile", lambda p: False),
+        ):
+            code, _, err = _capture(["access"])
         self.assertEqual(code, 2)
+        self.assertIn("kubeconfig banc absent", err)
 
     def test_refuses_without_bench(self):
         # La garde d'isolation (neutralisée par défaut dans setUpModule) est RÉACTIVÉE
-        # ici pour vérifier qu'access refuse quand le banc est absent ET le contexte
-        # ne vise pas le banc (ADR 0053). Pas de KUBECONFIG exporté, pas de banc.
-        self._stub(bench=False)
+        # ici : access refuse quand le banc est absent ET le contexte ne vise pas le banc
+        # (ADR 0053). La garde lève AVANT toute I/O kubectl (1re ligne de cmd_access).
+        # On force le banc ABSENT (le kubeconfig banc peut exister sur la machine de dev).
+        orig_exists = cli.os.path.exists
         cli._assert_bench_target = _REAL_ASSERT_BENCH
+        cli.os.path.exists = lambda p: False if p == cli._BENCH_KUBECONFIG else orig_exists(p)
         self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
+        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
         orig_ctx = cli._context_targets_bench
         cli._context_targets_bench = lambda: False
         self.addCleanup(setattr, cli, "_context_targets_bench", orig_ctx)

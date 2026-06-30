@@ -21,7 +21,7 @@
 # TOUS les endpoints du contrat soient présents+répondants (CI sur banc complet).
 # Le scénario lui-même SKIPpe (exit 0) si AUCUN endpoint n'est présent (cluster nu).
 #
-# Pré-requis : kubectl + yq (déjà utilisé par bench/lima/access.sh sur ce contrat).
+# Pré-requis : kubectl + yq (pour lire le contrat des endpoints exposés).
 # Variables :
 #   STRICT_CONTRACT=1   échoue si un endpoint du contrat est absent ou muet
 #   CONTRACT            (défaut contract/endpoints.example.yaml) — fichier lu
