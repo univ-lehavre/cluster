@@ -28,7 +28,10 @@ def _env() -> Environment:
         keep_trailing_newline=True,
         trim_blocks=True,
         lstrip_blocks=True,
-        autoescape=False,
+        # autoescape=False VOULU : on rend des inventaires YAML Ansible byte-exacts,
+        # JAMAIS du HTML — l'auto-échappement transformerait `<`/`&`/`"` en entités
+        # HTML et corromprait le YAML produit. Aucun contexte web (pas de risque XSS).
+        autoescape=False,  # noqa: S701 — sortie YAML, pas HTML (cf. commentaire)
     )
 
 

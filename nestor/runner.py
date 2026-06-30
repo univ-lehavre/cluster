@@ -42,7 +42,7 @@ def _purge_runner_env(private_data_dir: str) -> None:
         try:
             os.remove(path)
         except FileNotFoundError:
-            pass
+            pass  # déjà absent = l'état voulu (nettoyage idempotent), rien à faire
         except OSError:  # pragma: no cover - droits/FS ; on ne bloque pas le run
             pass
 
