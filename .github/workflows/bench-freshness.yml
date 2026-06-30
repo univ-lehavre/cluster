@@ -30,17 +30,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          enable-cache: true
+      - run: uv sync
 
       - name: Vérifier la fraîcheur du dernier run de banc
         id: check
         env:
           SEUIL_JOURS: ${{ github.event.inputs.seuil_jours || '7' }}
-        # On capture le code de sortie (0 frais / 1 périmé / 2 aucune preuve)
-        # sans faire échouer l'étape ici : le verdict est posté en sortie pour
-        # piloter l'ouverture d'issue, puis l'étape finale matérialise l'échec.
+        # Verdict porté en Python natif (`artifact check-freshness`, ADR 0101 — ex
+        # check-freshness.sh). On capture le code de sortie (0 frais / 1 périmé / 2
+        # aucune preuve) sans faire échouer l'étape ici : le verdict est posté en
+        # sortie pour piloter l'ouverture d'issue, puis l'étape finale matérialise
+        # l'échec.
         run: |
           set +e
-          out=$(bash bench/lima/check-freshness.sh 2>&1); rc=$?
+          out=$(uv run python scripts/topology.py artifact check-freshness \
+            --seuil-jours "${SEUIL_JOURS}" 2>&1); rc=$?
           echo "$out"
           {
             echo "rc=$rc"

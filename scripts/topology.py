@@ -129,9 +129,15 @@ from nestor import scale as _scale  # noqa: E402
 from nestor import seed as _seed  # noqa: E402
 from nestor import smoke as _smoke  # noqa: E402
 from nestor.history import (  # noqa: E402
+    FRESHNESS_OBLIGATOIRES,
+    FRESHNESS_OPTIONNELS,
+    SEUIL_GLOBAL_DEFAUT,
+    Run,
+    date_from_log_name,
     last_run_for_target,
     last_run_for_topology,
     latest_run,
+    path_freshness,
 )
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -143,6 +149,7 @@ _DEFAULT_TOPOLOGY = os.path.join(_ROOT, "topology.yaml")
 _EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "socle.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
 _RUNS_HISTORY = os.path.join(_ROOT, "bench", "lima", "runs-history.yaml")
+_RUNS_DIR = os.path.join(_ROOT, "bench", "lima", "runs")
 # Kubeconfig du banc Lima, écrit par run-phases.sh (KUBECONFIG_LOCAL = WORKDIR/kubeconfig).
 # `preview` lit l'état RÉEL du cluster via kubectl ; sans KUBECONFIG exporté, il retombe
 # ICI (sinon il interroge ~/.kube/config — pas le banc — et voit 0 nœud Ready alors que
@@ -1414,6 +1421,71 @@ def cmd_runs(args: argparse.Namespace) -> int:
         print(f"  {msg}")
         print("  (les entrées ne portent pas encore de chemin `target` — verdict global)")
     return 0
+
+
+def _freshness_fallback(runs: list, now: int, seuil_global: int) -> int:
+    """Repli GLOBAL (ADR 0042 §4) : pas d'historique exploitable → on lit la date du
+    log le plus récent sous `runs/<date>-*.log` et on applique le seuil global. Codes :
+    0 frais, 1 périmé, 2 aucune preuve. I/O fichier ICI (la dérivation de date est pure)."""
+    last_iso = None
+    if os.path.isdir(_RUNS_DIR):
+        logs = sorted(f for f in os.listdir(_RUNS_DIR) if f.endswith(".log"))
+        if logs:
+            last_iso = date_from_log_name(logs[-1])
+    if last_iso is None:
+        print("::warning::Aucune preuve de banc trouvée (ni runs-history.yaml ni runs/*.log).")
+        print("Aucun run consigné — lancer `nestor up` (chemin atlas) et committer la preuve.")
+        return 2
+    # Réutilise path_freshness via un Run synthétique (date seule) sur le chemin global.
+    etat, _ = path_freshness(Run(id="repli", date=last_iso), "global", now)
+    age_msg = f"dernier log {last_iso} / seuil {seuil_global} j"
+    if etat == "frais":
+        print(f"Repli (pas d'historique) : {age_msg}\n✓ Preuve de banc fraîche (repli log).")
+        return 0
+    print(f"::warning::Preuve de banc périmée (repli, {age_msg}).")
+    return 1
+
+
+def cmd_check_freshness(args: argparse.Namespace) -> int:
+    """`check-freshness` : verdict BLOQUANT de fraîcheur des preuves de banc, PAR CHEMIN
+    (ex-`check-freshness.sh`, ADR 0042 §2 / 0045 §6). Porté en Python natif (ADR 0101) :
+    la décision pure (seuil/âge/verdict par chemin, repli log) vit dans `history.py` ;
+    ICI l'orchestration — boucle les chemins OBLIGATOIRES (un périmé → échec) et
+    OPTIONNELS (warn-only), repli global si l'historique manque.
+
+    Read-only (jamais de réécriture d'historique — honnêteté des Runs, ADR 0023). Codes :
+    0 = chemins obligatoires frais ; 1 = au moins un périmé ; 2 = aucune preuve du tout.
+    Appelé par le cron `bench-freshness.yml`, jamais en pre-push (non bloquant côté PR)."""
+    history = args.history or _RUNS_HISTORY
+    now = int(dt.datetime.now(tz=dt.UTC).timestamp())
+    seuil_global = args.seuil_jours or SEUIL_GLOBAL_DEFAUT
+    # Repli si aucun historique exploitable : fichier absent OU aucune entrée datée
+    # (ADR 0042 §4). load_runs lève sur fichier absent → on garde une liste vide.
+    runs = load_runs(history) if os.path.isfile(history) else []
+    if not any(r.date for r in runs):
+        return _freshness_fallback(runs, now, seuil_global)
+
+    print("Fraîcheur des preuves de banc — par chemin (ADR 0045 §6) :")
+    perimes: list[str] = []
+    for target in FRESHNESS_OBLIGATOIRES:
+        etat, ligne = path_freshness(last_run_for_target(runs, target), target, now)
+        print(ligne)
+        if etat != "frais":
+            perimes.append(target)
+    for target in FRESHNESS_OPTIONNELS:
+        etat, ligne = path_freshness(last_run_for_target(runs, target), target, now)
+        print(ligne)
+        if etat == "perime":
+            print(f"    ({target} périmé : avertissement seulement, non bloquant)")
+
+    if not perimes:
+        print("✓ Chemins obligatoires frais.")
+        return 0
+    print(
+        f"::warning::Preuve de banc périmée pour : {' '.join(perimes)} — "
+        "relancer ce(s) chemin(s) et committer le run."
+    )
+    return 1
 
 
 def _run_for_target(runs, target: str | None):
@@ -4368,6 +4440,7 @@ _ARTIFACT_DISPATCH = {
     "diff": cmd_diff,
     "runs": cmd_runs,
     "metrics": cmd_metrics,
+    "check-freshness": cmd_check_freshness,
 }
 
 # Verbes du groupe `test` : épreuves jouables + réversibilité (scenarios = ex-epreuves).
@@ -4379,7 +4452,7 @@ _TEST_DISPATCH = {
 
 
 def cmd_artifact(args: argparse.Namespace) -> int:
-    """Routeur du groupe `artifact` (generate | status | diff | runs | metrics)."""
+    """Routeur du groupe `artifact` (generate | diff | runs | metrics | check-freshness)."""
     return _ARTIFACT_DISPATCH[args.artifact_cmd](args)
 
 
@@ -4398,7 +4471,7 @@ _DISPATCH = {
     # nommés (posés par `stack select`). Remplaçant ergonomique = `nestor kubectl …` :
     "kubectl": cmd_kubectl,  # kubectl sur la cible de la stack active (ex-`nestor env`)
     "ansible": cmd_ansible,  # playbook sur la cible active, inventaire DÉRIVÉ (ADR 0098)
-    "access": cmd_access,  # accès dev (URLs + secrets) — délègue à access.sh (ADR 0048)
+    "access": cmd_access,  # accès dev natif (URLs NodePort + secrets + .env) — ADR 0048/0101
     "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
     "discover": cmd_discover,  # reconstruit un topology.yaml depuis le réel (ADR 0074, inverse de generate)  # noqa: E501
     "refresh": cmd_refresh,  # réaligne la topo active sur le réel voulu (ADR 0076, fusion + confirmation)  # noqa: E501
@@ -4607,6 +4680,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_runs.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
+    )
+
+    p_fresh = artifact_sub.add_parser(
+        "check-freshness",
+        help="verdict BLOQUANT de fraîcheur par chemin (cron CI ; 0 frais / 1 périmé / 2 vide)",
+    )
+    p_fresh.add_argument(
+        "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
+    )
+    p_fresh.add_argument(
+        "--seuil-jours",
+        type=int,
+        default=None,
+        help="seuil global du repli sans historique (défaut : 7)",
     )
 
     p_prev = sub.add_parser(

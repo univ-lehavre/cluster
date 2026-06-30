@@ -16,12 +16,15 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from nestor.history import (  # noqa: E402
+    Run,
     age_days,
+    date_from_log_name,
     freshness_verdict,
     last_run_for_target,
     last_run_for_topology,
     latest_run,
     load_runs,
+    path_freshness,
     seuil_for_target,
     verdict_for_run,
 )
@@ -208,6 +211,61 @@ class Verdict(unittest.TestCase):
         etat, msg = verdict_for_run(run, "atlas", now)
         self.assertEqual(etat, "perime")
         self.assertIn("pas de run frais", msg)
+
+
+class DateFromLogName(unittest.TestCase):
+    """Repli ADR 0042 §4 : date ISO extraite d'un nom de log `runs/<date>-*.log`."""
+
+    def test_extrait_la_date_prefixe(self):
+        self.assertEqual(
+            date_from_log_name("2026-06-08-monitoring-ceph.log"), "2026-06-08T00:00:00Z"
+        )
+
+    def test_chemin_complet_aussi(self):
+        self.assertEqual(
+            date_from_log_name("bench/lima/runs/2026-01-15-dataops.log"), "2026-01-15T00:00:00Z"
+        )
+
+    def test_prefixe_non_date_renvoie_none(self):
+        self.assertIsNone(date_from_log_name("rapport-final.log"))
+        self.assertIsNone(date_from_log_name("2026-13-99-mauvaise-date.log"))  # mois/jour invalide
+
+    def test_nom_trop_court_renvoie_none(self):
+        self.assertIsNone(date_from_log_name("x.log"))
+
+
+class PathFreshness(unittest.TestCase):
+    """Verdict par chemin (ex-evaluer_chemin de check-freshness.sh) : frais/perime/absent."""
+
+    def _run(self, date):
+        return Run(id="r", date=date)
+
+    def test_frais_sous_le_seuil(self):
+        # atlas, seuil 7 j ; run d'il y a 3 j.
+        now = int(dt.datetime(2026, 1, 10, tzinfo=dt.UTC).timestamp())
+        etat, ligne = path_freshness(self._run("2026-01-07T00:00:00Z"), "atlas", now)
+        self.assertEqual(etat, "frais")
+        self.assertIn("✓ atlas", ligne)
+        self.assertIn("≤ 7 j", ligne)
+
+    def test_perime_au_dela_du_seuil(self):
+        # atlas, seuil 7 j ; run d'il y a 30 j.
+        now = int(dt.datetime(2026, 2, 1, tzinfo=dt.UTC).timestamp())
+        etat, ligne = path_freshness(self._run("2026-01-01T00:00:00Z"), "atlas", now)
+        self.assertEqual(etat, "perime")
+        self.assertIn("✗ atlas", ligne)
+        self.assertIn("PÉRIMÉ", ligne)
+
+    def test_absent_sans_run(self):
+        etat, ligne = path_freshness(None, "storage-real", 0)
+        self.assertEqual(etat, "absent")
+        self.assertIn("aucun run consigné", ligne)
+        self.assertIn("seuil 30 j", ligne)  # storage-real
+
+    def test_absent_date_illisible(self):
+        etat, ligne = path_freshness(self._run("pas-une-date"), "atlas", 0)
+        self.assertEqual(etat, "absent")
+        self.assertIn("illisible", ligne)
 
 
 if __name__ == "__main__":
