@@ -76,7 +76,7 @@ from nestor.prod_target import (
     needs_repatriation,
     resolve_kubeconfig,
 )
-from nestor.profile import consumes_storage, derive_run_params
+from nestor.profile import ceph_wipe_env, consumes_storage, derive_run_params
 from nestor.refresh import RefreshState, classify_refresh
 from nestor.roundtrip import (
     RemoveResult,
@@ -113,6 +113,7 @@ __all__ = [
     "render_prod_inventory",
     "render_lima_inventory",
     "derive_run_params",
+    "ceph_wipe_env",
     "consumes_storage",
     "Epreuve",
     "EPREUVES",

@@ -21,6 +21,7 @@ from nestor.model import (  # noqa: E402
     topology_from_dict,
 )
 from nestor.profile import (  # noqa: E402
+    ceph_wipe_env,
     consumes_storage,
     derive_osd_expected,
     derive_run_params,
@@ -414,6 +415,32 @@ class OsdDerivation(unittest.TestCase):
         # prod générique : pas de disks_per_node → None (le rôle/hosts.yaml décide).
         topo = topology_from_dict(_base(storage={"backend": "ceph"}))
         self.assertIsNone(derive_osd_expected(topo))
+
+
+class CephWipeEnv(unittest.TestCase):
+    """ceph_wipe_env : env du wipe node-side Ceph DÉRIVÉ de la topo (ex-phase_rollback)."""
+
+    def test_defauts_banc_lima_quand_non_declare(self):
+        # topo sans bloc ceph: → défauts banc Lima (virtio-blk vd*).
+        env = ceph_wipe_env(topology_from_dict(_base()))
+        self.assertEqual(env["NVME_BLOCK_DEVICE"], "/dev/vde")
+        self.assertEqual(env["DATA_DEVICE_GLOB"], "/dev/vd[b-d]")
+        self.assertEqual(
+            env["SKIP_REBOOT"], "1"
+        )  # un rollback ne reboote pas (re-montage derrière)
+
+    def test_devices_prod_declares_priment(self):
+        # prod : la topo DÉCLARE ceph.{nvme_block_device,data_device_glob} → dérivés, pas codés.
+        topo = topology_from_dict(
+            _base(ceph={"nvme_block_device": "/dev/nvme1n1", "data_device_glob": "/dev/sd[b-z]"})
+        )
+        env = ceph_wipe_env(topo)
+        self.assertEqual(env["NVME_BLOCK_DEVICE"], "/dev/nvme1n1")
+        self.assertEqual(env["DATA_DEVICE_GLOB"], "/dev/sd[b-z]")
+
+    def test_skip_reboot_desactivable(self):
+        env = ceph_wipe_env(topology_from_dict(_base()), skip_reboot=False)
+        self.assertNotIn("SKIP_REBOOT", env)
 
 
 class VmResources(unittest.TestCase):

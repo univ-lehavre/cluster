@@ -3133,28 +3133,23 @@ class Remove(unittest.TestCase):
         self.assertEqual(called_table, [])  # PAS la table
         self.assertIn("supprimée par découverte", out)
 
-    def test_default_routes_to_table_when_nodeside(self):
-        # une clôture AVEC node-side (ceph : disques) route vers la TABLE par défaut — la
-        # découverte ne couvre pas encore le node-side (étape ultérieure).
-        called_table = []
+    def test_ceph_routes_to_discovery_with_nodeside(self):
+        # ADR 0101 : `ceph` (node-side disques) route désormais vers la DÉCOUVERTE — qui
+        # couvre AUSSI le wipe node-side (cleanup.sh poussé par _node_exec_script), plus de
+        # table. On vérifie que la découverte est appelée ET que le node-side est tenté.
+        called_discovery = []
 
-        def fake(phase, *, backend, allow_full, assume_yes):
-            called_table.append(phase)
-            from nestor.roundtrip import RemoveResult, RoundtripStep
+        def fake_disco(phase, *, full, assume_yes, topo=None, inventory_path=None):
+            called_discovery.append((phase, topo is not None, inventory_path is not None))
+            return 0
 
-            return RemoveResult(
-                phase=phase, layers=[phase], steps=[RoundtripStep("supprimer", True)]
-            )
-
-        orig_rm = cli._roundtrip.run_remove
-        cli._roundtrip.run_remove = fake
-        self.addCleanup(setattr, cli._roundtrip, "run_remove", orig_rm)
-        orig_ns = cli._roundtrip.closure_has_nodeside
-        cli._roundtrip.closure_has_nodeside = lambda phase: True
-        self.addCleanup(setattr, cli._roundtrip, "closure_has_nodeside", orig_ns)
+        orig = cli._remove_by_discovery
+        cli._remove_by_discovery = fake_disco
+        self.addCleanup(setattr, cli, "_remove_by_discovery", orig)
         code, _, _ = _capture(["remove", "-f", _EXAMPLE, "--phase", "ceph", "--full", "--yes"])
         self.assertEqual(code, 0)
-        self.assertEqual(called_table, ["ceph"])  # chemin TABLE pris
+        # découverte appelée pour ceph, AVEC topo + inventaire (requis pour le node-side).
+        self.assertEqual(called_discovery, [("ceph", True, True)])
 
     def test_discover_finalizes_owned_namespaces(self):
         # la découverte finalise les ns possédés (ce qui manquait au chemin table : ns wedgé).
@@ -3276,6 +3271,90 @@ class NodeExec(unittest.TestCase):
         self.addCleanup(os.unlink, path)
         with self.assertRaises(cli._UsageError):
             cli._node_exec("ghost", ["hostname"], inventory_path=path)
+
+    def test_exec_script_pushes_stdin_with_sudo_env(self):
+        # _node_exec_script : `sudo env K=V bash -s` + le script en stdin (input=).
+        captured = {}
+
+        class _CP:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, **kw):
+            captured["cmd"] = cmd
+            captured["input"] = kw.get("input")
+            return _CP()
+
+        orig = cli.subprocess.run
+        cli.subprocess.run = fake_run
+        self.addCleanup(setattr, cli.subprocess, "run", orig)
+        inv = _tmp(self._LIMA_INV)
+        self.addCleanup(os.unlink, inv)
+        script = _tmp("echo wipe\n")
+        self.addCleanup(os.unlink, script)
+        cli._node_exec_script(
+            "node1", script, inventory_path=inv, env={"NVME_BLOCK_DEVICE": "/dev/vde"}
+        )
+        cmd = captured["cmd"]
+        self.assertEqual(cmd[:3], ["limactl", "shell", "node1"])
+        # argv = … -- sudo env NVME_BLOCK_DEVICE=/dev/vde bash -s
+        self.assertIn("sudo", cmd)
+        self.assertIn("env", cmd)
+        self.assertIn("NVME_BLOCK_DEVICE=/dev/vde", cmd)
+        self.assertEqual(cmd[-2:], ["bash", "-s"])
+        self.assertEqual(captured["input"], "echo wipe\n")  # script poussé EN STDIN
+
+
+class RollbackNodeSideCeph(unittest.TestCase):
+    """ADR 0101 : wipe node-side Ceph (ex-phase_rollback) — boucle nœuds, lance cleanup.sh."""
+
+    def _ceph_topo(self):
+        return load_topology(os.path.join(_ROOT, "topologies", "ceph.yaml"))
+
+    def test_skips_when_phase_has_no_nodeside(self):
+        # une phase SANS node-side (gitops) → aucun nœud touché, liste d'échecs vide.
+        echecs = cli._rollback_node_side_ceph("gitops", self._ceph_topo(), inventory_path="/x")
+        self.assertEqual(echecs, [])
+
+    def test_wipes_each_node_on_ceph(self):
+        # ceph → cleanup.sh poussé sur CHAQUE nœud ; tout OK → aucun échec.
+        calls = []
+
+        class _CP:
+            returncode = 0
+
+        def fake_script(node, script, *, inventory_path, env, **kw):
+            calls.append(node)
+            return _CP()
+
+        orig = cli._node_exec_script
+        cli._node_exec_script = fake_script
+        self.addCleanup(setattr, cli, "_node_exec_script", orig)
+        echecs = cli._rollback_node_side_ceph("ceph", self._ceph_topo(), inventory_path="/x")
+        self.assertEqual(echecs, [])
+        self.assertEqual(set(calls), {"node1", "node2", "node3"})  # les 3 nœuds wipés
+
+    def test_collects_node_failures(self):
+        # un nœud injoignable (None) ou rc≠0 → listé en échec (résidu disque possible).
+        class _Fail:
+            returncode = 1
+
+        class _Ok:
+            returncode = 0
+
+        def fake_script(node, script, *, inventory_path, env, **kw):
+            if node == "node2":
+                return None  # injoignable
+            if node == "node3":
+                return _Fail()  # rc≠0
+            return _Ok()
+
+        orig = cli._node_exec_script
+        cli._node_exec_script = fake_script
+        self.addCleanup(setattr, cli, "_node_exec_script", orig)
+        echecs = cli._rollback_node_side_ceph("ceph", self._ceph_topo(), inventory_path="/x")
+        self.assertEqual(set(echecs), {"node2", "node3"})  # node1 OK, node2 injoignable, node3 rc≠0
 
 
 class FetchKubeconfig(unittest.TestCase):
