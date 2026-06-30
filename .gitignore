@@ -106,3 +106,4 @@ apps/redcap/source/
 
 # Copie générée de docs/ par migrate_docs_to_astro.py (--content-only, ADR 0089)
 docs/src/content/docs/docs/
+.coverage
