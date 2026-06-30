@@ -20,7 +20,6 @@
 #   bench/lima/run-phases.sh facts          # contrat machine : imprime CP_IP/L2_IFACE (+ VIP si HA)
 #   bench/lima/run-phases.sh cni            # pose Cilium (L4 NodePort) + fetch kubeconfig banc
 #   bench/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
-#   bench/lima/run-phases.sh access [...]   # accès dev (URLs NodePort + secrets + .env atlas, ADR 0048)
 #   bench/lima/run-phases.sh down [vm…]     # détruit les VMs + disques nommés
 #   BANC_JETABLE=1 bench/lima/run-phases.sh rollback <phase>  # défait UNE phase (ns+CRD+node-side) pour la re-tester (ADR 0054) — DESTRUCTIF
 #
@@ -224,16 +223,6 @@ phase_up() {
     done
 }
 
-# ── Phase access — accès développeur (URLs cliquables + secrets + .env atlas) ──
-# Délègue à access.sh (#232, ADR 0048) : pose les Gateways des UI, ouvre un
-# forward SSH par Gateway, /etc/hosts *.cluster.lan, regroupe les secrets et
-# génère ../atlas/.env.cluster.local. C'est l'étape qui rend le banc consommable
-# depuis l'hôte (« git push et ça marche »). Args transmis (--no-hosts, --stop…).
-phase_access() {
-    preflight
-    [ -f "${KUBECONFIG_LOCAL}" ] || die "kubeconfig absent — lancer 'run-phases.sh atlas' d'abord"
-    "${HERE}/access.sh" "$@"
-}
 
 # ── Down — détruit VMs + disques nommés ──────────────────────────────────────
 # phase_down [vm…] — détruit les VMs nommées (+ leurs disques). Sans argument :
@@ -312,7 +301,6 @@ emit_facts() {
 # bash `layers`/phases applicatives a été retiré).
 case "${1:-}" in
     up) time_phase up phase_up ;;
-    access) phase_access "${@:2}" ;;
     kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc ;;
     # cni : rappel interne du moteur Python (la CNI reste bash, ADR 0049). Pose Cilium
     # (L4 NodePort) + fetch le kubeconfig banc. Aucun argument (geste 100 % CNI : le
