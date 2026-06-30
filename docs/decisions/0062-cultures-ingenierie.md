@@ -141,3 +141,37 @@ transverse « Par culture »** qui matérialise ce classement.
 - **Fondre ce classement dans l'ADR 0061.** Écarté : 0061 décide la **posture
   d'adoption** (comment on adopte une pratique) ; 0062 classe les **cultures
   adoptées** (ce qu'on revendique). Deux sujets distincts, deux ADR.
+
+## Amendement (2026-06-30) — MLOps : socle posé, le « à venir » se précise
+
+Le classement initial (2026-06-13) rangeait **MLOps** parmi les cultures **à
+venir**, en notant « aucun composant ML déployé aujourd'hui ». Cette ligne est
+**dépassée** : le **socle MLOps est désormais posé**. Précision — **sans rien
+retirer** de l'analyse ci-dessus (le cap MLOps reste une direction, pas une
+culture pleinement « en place ») :
+
+- **Le serveur MLflow est déployé** (tracking + registre de modèles + artefact
+  store), par le rôle Ansible `platform-mlflow`
+  ([ADR 0082](0082-suivi-modeles-mlflow.md)), **livré vide** — exactement comme
+  Dagster et Marquez le sont (ADR 0026). Backend sur la base managée CNPG
+  dédiée, artefacts sur S3 (RGW/SeaweedFS, ADR 0036). Le composant est **câblé
+  dans le graphe `nestor`** (`role=platform-mlflow`, deps CNPG + S3 + registry,
+  signal de readiness sur le Deployment `mlflow`) et dans la **layer `atlas`**
+  ([ADR 0083](0083-layers-source-unique-de-l-ordre.md)) : il est donc
+  **activable par une topologie**, pas un manifeste mort.
+
+- **Ce qui reste « à venir » n'est plus l'infrastructure mais l'usage** : le
+  **code ML qui logge ses runs vit côté [`atlas`](../README.md)** (l'applicatif,
+  Phase 2+), pas dans le socle. Côté `cluster` subsistent la **validation au
+  banc** (prouver le serveur Ready depuis le code seul) et l'**observation des
+  métriques MLflow**.
+
+**Classement révisé** : MLOps est reclassé de **« à venir »** vers **« socle en
+place, usages applicatifs à venir »** — une nuance proche du **partiel**, mais
+distincte : ici l'infrastructure est complète, c'est le _consommateur_ qui
+manque (alors qu'un « partiel » comme SRE a, lui, des mécanismes incomplets).
+Les **quatre cultures pleinement en place** restent inchangées (IaC, GitOps,
+DataOps, DevSecOps) : MLOps n'y entre pas tant qu'un usage ML réel n'est pas
+exercé et prouvé. Le tableau « Cultures EN CONSTRUCTION » ci-dessus se lit
+désormais avec cette précision pour MLflow ; **Platform Engineering** reste,
+lui, en construction (portail self-service non encore déployé).
