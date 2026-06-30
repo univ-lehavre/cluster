@@ -1,6 +1,14 @@
 - name: Mise à jour du système d'exploitation
   hosts: all
   serial: 1
+  pre_tasks:
+    # Garde de cible (ADR 0053) : full-upgrade + reboot du parc (hosts: all) → vérifier
+    # que l'inventaire vise la topologie attendue (EXPECTED_TARGET_KIND) AVANT de muter.
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: security/upgrade.yml
   tasks:
     - name: Mise à jour du système d'exploitation
       ansible.builtin.include_role:

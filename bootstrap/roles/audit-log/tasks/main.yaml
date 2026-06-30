@@ -36,8 +36,9 @@
       Cible Ansible INCOHÉRENTE : l'inventaire déclare
       target_kind={{ target_kind | default('(absent)') }} mais l'intention est
       {{ lookup('env', 'EXPECTED_TARGET_KIND') | default('prod', true) }}.
-      Vérifier le `-i` : prod = bootstrap/hosts.yaml (target_kind: prod) ; banc =
-      bench/lima/.work/inventory.yaml (target_kind: bench, EXPECTED_TARGET_KIND=bench).
+      Lancer le geste via `nestor ansible <playbook>` (l'inventaire est dérivé de la
+      topologie active, ADR 0098) ; banc = bench/lima/.work/inventory.yaml
+      (target_kind: bench, EXPECTED_TARGET_KIND=bench).
     success_msg: >-
       Cible confirmée : target_kind={{ target_kind | default('(localhost)') }}.
     quiet: true
