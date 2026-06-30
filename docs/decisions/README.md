@@ -120,3 +120,4 @@ Format léger inspiré de Michael Nygard :
 | 0098 | [Source unique d'inventaire : `nestor` dérive l'inventaire, `hosts.yaml` supprimé](0098-source-unique-inventaire-nestor-derive.md)                | Proposed           |
 | 0099 | [Les axes du modèle de topologie : terrain, criticité, exposition, archi](0099-axes-du-modele-topologie.md)                                       | Proposed           |
 | 0100 | [Périmètre OS & architecture : poste Unix, nœuds Linux, Windows → WSL](0100-perimetre-os-poste-et-noeuds.md)                                      | Accepted           |
+| 0101 | [Migration de la zone grise bash → Python (`bench/lima/` confort)](0101-migration-zone-grise-bash-python.md)                                      | Proposed           |
