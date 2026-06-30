@@ -66,29 +66,25 @@ attendent une **liste d'hôtes** ou un **kubeconfig**. Or, par conception
 ([ADR 0023](decisions/0023-plateforme-exemple-generique.md)), le dépôt **ne
 contient pas** tes vrais hôtes : ils vivent en config locale **gitignorée**.
 
-| Tu cherches…             | Où ça vit                                                                    |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| Hôtes **prod**           | `bootstrap/hosts.yaml` (gitignoré ; copié de `bootstrap/hosts.example.yaml`) |
-| Hôtes **banc Lima**      | les VMs réelles — `limactl list` (noms `cp1`, `node1`…)                      |
-| `kubeconfig` du **banc** | `bench/lima/.work/kubeconfig` (généré par `run-phases.sh`)                   |
+| Tu cherches…             | Où ça vit                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| Hôtes **prod**           | la `topology.yaml` active (nœuds + rôles) — l'inventaire en est DÉRIVÉ (ADR 0098) |
+| Hôtes **banc Lima**      | les VMs réelles — `limactl list` (noms `cp1`, `node1`…)                           |
+| `kubeconfig` du **banc** | `bench/lima/.work/kubeconfig` (généré par `run-phases.sh`)                        |
 
-**Le plus simple — laisse `env.sh` dériver ton contexte et t'imprimer les
-commandes exactes à copier** (hôtes courants + invocation `state.sh` par nœud),
-sans rien deviner :
+**Le plus simple — `nestor` dérive ton contexte de la stack active.** Plus
+besoin d'un helper qui devine la cible : la stack sélectionnée
+(`nestor stack select <topo>`) porte la topologie, et les commandes la visent
+directement.
 
-```bash
-bench/lima/env.sh                    # auto-détecte (banc Lima ou prod)
-```
+> Pour **piloter `kubectl`** : `nestor kubectl <args…>` lance kubectl sur la
+> cible SÛRE de la stack active (banc ou prod, jamais `~/.kube/config` par
+> accident — ADR 0053/0090). Plus de `eval "$(… export)"` ni de variable d'env à
+> manipuler. Pour **voir le contexte** (VOULU + RÉEL + PLAN) : `nestor preview`.
 
-> Pour **brancher `kubectl`**, plus de `eval "$(env.sh export)"` :
-> `nestor stack select <topo>` pose un **contexte kubectl nommé**, puis
-> `kubectl --context <topo> …` (mécanisme standard k8s, sans variable d'env —
-> ADR 0097 §3).
-
-Exemple de ce qu'il imprime sur un banc Lima à 3 nœuds :
-l'`USER_REMOTE=lima SSH_OPTS='-F ~/.lima/cp1/ssh.config' bootstrap/state.sh cp1`
-prêt à coller, pour chaque nœud. En prod, il lit `bootstrap/hosts.yaml` et te
-donne `bootstrap/state.sh <tes-nœuds>`.
+Pour le diagnostic node-side, `bootstrap/state.sh <nœuds>` reste l'outil (drift
+par couche). Les nœuds se lisent de la topologie active (au banc : les VMs Lima
+; en prod : les nœuds déclarés dans la `topology.yaml`).
 
 ## Monter et piloter un banc de test (local)
 
@@ -118,14 +114,14 @@ Le banc Lima est l'environnement de validation e2e
 Ansible **converge** l'état ; il ne **reporte** pas. Le diagnostic vit donc en
 shell ([ADR 0049](decisions/0049-doctrine-choix-outil-par-action.md)).
 
-| Pour…                                                                 | Commande                              | Détails                                                                                                             |
-| --------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Dériver ton contexte** (hôtes courants + commandes prêtes à copier) | `bench/lima/env.sh`                   | banc Lima ou prod ; voir « Prérequis & contexte » ci-dessus                                                         |
-| État des **nœuds + composantes cluster** (drift + prochaine étape)    | `bootstrap/state.sh <hôte…>`          | SSH + kubectl ; hôtes **requis** (cf. `env.sh`) ; verdicts purs testés (`state-classify.sh` + `health-classify.sh`) |
-| Tableau de bord du **durcissement** (preuves observables par hôte)    | `bootstrap/security/report.sh`        | [bootstrap/security/](../bootstrap/security/README.md)                                                              |
-| Vérifier l'**épinglage des images** par digest d'index multi-arch     | `scripts/audit-image-digests.sh`      | invariant [ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)                                    |
-| Vérifier la **fraîcheur des preuves** de banc (par chemin)            | `bench/lima/check-freshness.sh`       | [ADR 0042](decisions/0042-fraicheur-preuves-banc.md)                                                                |
-| Détecter les pages Markdown **orphelines**                            | `python3 scripts/check_md_orphans.py` | [ADR 0029](decisions/0029-markdown-atteignable-doc.md)                                                              |
+| Pour…                                                              | Commande                              | Détails                                                                                                |
+| ------------------------------------------------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Piloter `kubectl`** sur la cible sûre de la stack active         | `nestor kubectl <args…>`              | banc ou prod, jamais `~/.kube/config` par accident (ADR 0053/0090)                                     |
+| État des **nœuds + composantes cluster** (drift + prochaine étape) | `bootstrap/state.sh <hôte…>`          | SSH + kubectl ; hôtes pris en args ; verdicts purs testés (`state-classify.sh` + `health-classify.sh`) |
+| Tableau de bord du **durcissement** (preuves observables par hôte) | `bootstrap/security/report.sh`        | [bootstrap/security/](../bootstrap/security/README.md)                                                 |
+| Vérifier l'**épinglage des images** par digest d'index multi-arch  | `scripts/audit-image-digests.sh`      | invariant [ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md)                       |
+| Vérifier la **fraîcheur des preuves** de banc (par chemin)         | `bench/lima/check-freshness.sh`       | [ADR 0042](decisions/0042-fraicheur-preuves-banc.md)                                                   |
+| Détecter les pages Markdown **orphelines**                         | `python3 scripts/check_md_orphans.py` | [ADR 0029](decisions/0029-markdown-atteignable-doc.md)                                                 |
 
 > **Garde-fou de cible (`EXPECT_CLUSTER`)** — les couches **cluster** de
 > `state.sh` (Cilium, Rook-Ceph, StorageClasses, plateforme) auditent le

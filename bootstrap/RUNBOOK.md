@@ -485,8 +485,9 @@ rm -f /tmp/cluster-prod.config
 >   `kubectl config use-context cluster-banc` (ou `default`) ;
 > - viser la prod TOUJOURS **explicitement** :
 >   `kubectl --context kubernetes-admin@cluster-prod get …` ;
-> - ou, pour une session prod assumée, `eval "$(bench/lima/env.sh export)"` côté
->   banc et un `export KUBECONFIG=…` côté prod — jamais le contexte par défaut.
+> - ou, plus simple, `nestor kubectl <args…>` : il vise la cible SÛRE de la
+>   stack active (banc ou prod selon la sélection), jamais le contexte par
+>   défaut.
 
 #### `nestor` et la lecture de la prod (ADR 0090)
 
