@@ -420,7 +420,7 @@ runs:
 
     def test_reads_history_always_zero(self):
         # 'runs' est informatif : code 0 même si un chemin est périmé (le verdict
-        # bloquant de CI reste check-freshness.sh, non dupliqué).
+        # bloquant de CI reste `artifact check-freshness`, non dupliqué).
         hist = _tmp(self._HIST)
         self.addCleanup(os.unlink, hist)
         code, out, _ = _capture(["artifact", "runs", "--history", hist])
@@ -440,6 +440,57 @@ runs:
         code, _, err = _capture(["artifact", "runs", "--history", "/nope/runs.yaml"])
         self.assertEqual(code, 1)
         self.assertIn("erreur", err)
+
+
+class CheckFreshness(unittest.TestCase):
+    """`artifact check-freshness` (ex-check-freshness.sh) : verdict BLOQUANT par chemin.
+    Codes : 0 frais / 1 périmé / 2 aucune preuve (cron CI, ADR 0042/0045)."""
+
+    def _hist_with_fresh_atlas(self):
+        # atlas + storage-real datés d'AUJOURD'HUI → sous les seuils (7 j / 30 j).
+        today = dt.datetime.now(tz=dt.UTC).date().isoformat()
+        return f"""\
+runs:
+  - id: a
+    date: {today}T00:00:00Z
+    profil: ceph
+    topologie: multi-node-3
+    target: atlas
+  - id: s
+    date: {today}T00:00:00Z
+    profil: local-path
+    topologie: multi-node-3
+    target: storage-real
+"""
+
+    def test_fresh_obligatoires_zero(self):
+        hist = _tmp(self._hist_with_fresh_atlas())
+        self.addCleanup(os.unlink, hist)
+        code, out, _ = _capture(["artifact", "check-freshness", "--history", hist])
+        self.assertEqual(code, 0)
+        self.assertIn("Chemins obligatoires frais", out)
+
+    def test_perime_returns_1(self):
+        # atlas daté de 2026-01-01, largement au-delà du seuil 7 j (now = réel).
+        hist = _tmp(
+            "runs:\n  - id: old\n    date: 2026-01-01T00:00:00Z\n"
+            "    profil: ceph\n    topologie: multi-node-3\n    target: atlas\n"
+        )
+        self.addCleanup(os.unlink, hist)
+        code, out, _ = _capture(["artifact", "check-freshness", "--history", hist])
+        self.assertEqual(code, 1)
+        self.assertIn("::warning::", out)
+        self.assertIn("atlas", out)
+
+    def test_no_history_no_logs_returns_2(self):
+        # Historique absent ET pas de runs/ accessible (on pointe _RUNS_DIR ailleurs
+        # via un cwd neutre n'est pas possible : _RUNS_DIR est codé). On vérifie au
+        # moins le code 2 quand le repli ne trouve aucun log — via un history vide ET
+        # un _RUNS_DIR temporaire (mock).
+        with mock.patch.object(cli, "_RUNS_DIR", "/nope/runs/xyz"):
+            code, out, _ = _capture(["artifact", "check-freshness", "--history", "/nope/h.yaml"])
+        self.assertEqual(code, 2)
+        self.assertIn("Aucune preuve de banc", out)
 
 
 class Kubectl(unittest.TestCase):

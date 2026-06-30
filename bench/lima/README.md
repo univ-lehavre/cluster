@@ -133,15 +133,16 @@ Le banc s'instrumente lui-même (`metrology.sh`) — pas de saisie manuelle.
   **preuve**
   ([ADR 0034](/cluster/docs/decisions/0034-validation-e2e-from-scratch/)), le
   cache n'étant qu'un accélérateur d'itération.
-- **Fraîcheur** : `bench/lima/check-freshness.sh` (seuil `SEUIL_JOURS`,
-  défaut 7) lit la date du dernier run et sort en échec si elle est périmée. Le
-  workflow cron `.github/workflows/bench-freshness.yml` l'exécute 1×/jour et
+- **Fraîcheur** : `nestor artifact check-freshness` (porté en Python, ADR 0101 —
+  ex `check-freshness.sh` ; seuil `--seuil-jours`, défaut 7) lit la date du
+  dernier run par chemin et sort en échec si un chemin obligatoire est périmé.
+  Le workflow cron `.github/workflows/bench-freshness.yml` l'exécute 1×/jour et
   ouvre une issue de rappel — **non bloquant** pour les PR (ADR 0042).
 
 ```bash
 NO_CACHE=1 bench/lima/run-phases.sh storage-real      # run-preuve from-scratch (ADR 0034)
 bench/lima/run-phases.sh status                       # dont le dernier run consigné
-SEUIL_JOURS=7 bench/lima/check-freshness.sh           # garde-fou fraîcheur (local)
+nestor artifact check-freshness                       # garde-fou fraîcheur (local)
 ```
 
 ## Run DataOps complet (validation #173)
