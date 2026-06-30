@@ -20,7 +20,7 @@ badges** (ADR 0080 : n'afficher/poursuivre que ce qui mesure du vrai).
 ## Gold — hors d'atteinte (5 MUST irréductibles)
 
 Gold exige, en **MUST** (pas SHOULD), des critères incompatibles avec un projet
-d'IaC **mono-mainteneur assumé** ([CODEOWNERS](../../CODEOWNERS),
+d'IaC **mono-mainteneur assumé** ([CODEOWNERS](../../.github/CODEOWNERS),
 [SAFEGUARDS.md](../../SAFEGUARDS.md) : 0 review requise, auto-merge
 release-please) :
 
