@@ -21,6 +21,18 @@
 
 - name: Paramétrage du playbook
   hosts: all
+  pre_tasks:
+    # Garde de cible (ADR 0053) : ce playbook DURCIT le parc (hosts: all, SSH distant) →
+    # vérifier que l'inventaire vise la topologie attendue (EXPECTED_TARGET_KIND) AVANT
+    # toute mutation. Le rôle vit dans bootstrap/roles/ (résolu via roles_path), distinct
+    # des rôles security/roles/ de ce playbook. `tags: always` → la garde tourne quel que
+    # soit le tag de durcissement choisi.
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: security/secure.yml
+      tags: always
   roles:
     - role: settings
       tags: always
@@ -29,6 +41,14 @@
   hosts: all
   become: true
   serial: 1
+  pre_tasks:
+    # Garde de cible (ADR 0053) — un play par garde (convention join-workers).
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: security/secure.yml
+      tags: always
   tasks:
     - name: Apt full-upgrade et reboot si nécessaire
       ansible.builtin.import_role:
@@ -41,6 +61,14 @@
 - name: Durcissement (toutes couches en opt-in)
   hosts: all
   become: true
+  pre_tasks:
+    # Garde de cible (ADR 0053) — un play par garde (convention join-workers).
+    - name: Audit-log — record playbook execution
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: security/secure.yml
+      tags: always
   tasks:
     - name: OS — comptes admin + unattended-upgrades
       ansible.builtin.import_role:
