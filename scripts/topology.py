@@ -516,7 +516,7 @@ def _activate_symlink(target_rel: str) -> None:
     link = os.path.join(_ROOT, "topology.yaml")
     if os.path.islink(link) or os.path.exists(link):
         os.unlink(link)
-    os.symlink(target_rel, link)
+    os.symlink(target_rel, link)  # poste Unix (macOS/Linux) — symlink natif, ADR 0100
 
 
 def cmd_stack_new(args: argparse.Namespace) -> int:
@@ -1699,7 +1699,7 @@ def _fetch_kubeconfig(
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(rewritten)
-    os.chmod(out_path, 0o600)
+    os.chmod(out_path, 0o600)  # POSIX : kubeconfig = secret, rw owner seul (poste Unix, ADR 0100)
     print(f"✓ kubeconfig rapatrié de `{node}` → {out_path} (endpoint {server})")
 
 

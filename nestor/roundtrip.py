@@ -40,6 +40,7 @@ Aucun cluster en CI ; la preuve réelle passe par un run de banc (ADR 0034/0052)
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -163,12 +164,19 @@ def _signal_present(signal: list[str], *, api=None) -> list[str]:
 
 
 def _kubectl_present(line: str) -> bool:
-    """True si la ressource ciblée existe (`kubectl get <line> --ignore-not-found -o name`)."""
+    """True si la ressource ciblée existe (`kubectl get <line> --ignore-not-found -o name`).
+
+    `line` est une ligne au format kubectl issue de rollback-lib (ex.
+    `-n rook-ceph cephobjectstore.ceph.rook.io datalake`) : on la découpe en
+    arguments avec `shlex.split` et on appelle `kubectl` DIRECTEMENT — pas de
+    `bash -c` (supprime la dépendance au shell et le `2>/dev/null` non portable ;
+    `stderr=DEVNULL` fait le même office, cf. ADR 0098)."""
     try:
-        out = subprocess.run(  # noqa: S603 — ligne issue de rollback-lib
-            ["bash", "-c", f"kubectl get {line} --ignore-not-found -o name 2>/dev/null"],
+        out = subprocess.run(  # noqa: S603 — argv issu de rollback-lib, pas d'entrée shell
+            ["kubectl", "get", *shlex.split(line), "--ignore-not-found", "-o", "name"],
             check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
         )
     except OSError:

@@ -38,12 +38,17 @@ Pourquoi Lima
 
 ## Pré-requis poste
 
-| Outil   | Version  | Installation           |
-| ------- | -------- | ---------------------- |
-| Lima    | ≥ 2.0    | `brew install lima`    |
-| Ansible | ≥ 2.20.5 | `brew install ansible` |
-| kubectl | —        | `brew install kubectl` |
-| python3 | —        | (préinstallé macOS)    |
+Poste de contrôle = **macOS** (Apple Silicon) **ou Linux** ; Windows → **WSL2**
+([ADR 0100](/cluster/docs/decisions/0100-perimetre-os-poste-et-noeuds/)). Les
+commandes ci-dessous sont en `brew` (macOS) ; sur Linux, équivalents `apt` /
+binaires.
+
+| Outil   | Version  | Installation                              |
+| ------- | -------- | ----------------------------------------- |
+| Lima    | ≥ 2.0    | `brew install lima`                       |
+| Ansible | ≥ 2.20.5 | `brew install ansible`                    |
+| kubectl | —        | `brew install kubectl`                    |
+| python3 | —        | (préinstallé macOS ; `python3` sur Linux) |
 
 **RAM consommée** : 3 × 12 GiB ≈ **36 GiB** par défaut (`VM_MEMORY` 12 GiB/VM,
 marge OK sur un hôte 48 GiB pour macOS). Surchargeable via `VM_MEMORY` ; le
