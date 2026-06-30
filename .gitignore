@@ -74,6 +74,9 @@ bench/**/.work/
 docs/dist/
 docs/.astro/
 
+# Résidu de cache de l'ancien moteur VitePress (migré vers Astro Starlight)
+docs/.vitepress/
+
 # Ansible runtime cache
 .ansible/
 
