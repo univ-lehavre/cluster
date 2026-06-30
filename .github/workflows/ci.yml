@@ -189,9 +189,17 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - name: shellcheck (Homebrew, présent sur le runner macOS)
+      - name: Outils Homebrew (shellcheck + bash récent) — absents/anciens sur le runner
+        # Le runner macOS n'a pas shellcheck, et son /bin/bash est en 3.2 (sans
+        # `local -A`/`mapfile`). Un VRAI poste macOS utilise le bash Homebrew via
+        # `#!/usr/bin/env bash` (ADR 0100) : on installe bash + on le met en tête
+        # du PATH pour que bats source les libs avec bash ≥ 5, comme en réel.
+        run: |
+          brew install shellcheck bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+      - name: shellcheck sur macOS (BSD find/xargs)
         run: pnpm lint:shell
-      - name: tests shell (bats) sur macOS arm64
+      - name: tests shell (bats) sur macOS arm64 — bash Homebrew du PATH
         run: pnpm test:shell
       - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:
