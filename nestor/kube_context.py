@@ -76,16 +76,16 @@ def context_plan(
 ) -> ContextPlan:
     """Décide le contexte à poser pour la topologie `name` (PUR, LOT 8).
 
-    - PROD (`target_kind != "lima"`) : la cible est le `kubeconfig:` DÉCLARÉ (ADR 0090).
+    - PROD (`target_kind != "bench"`) : la cible est le `kubeconfig:` DÉCLARÉ (ADR 0090).
       Absent → `ContextError` (on ne devine pas une cible prod ; `stack select` complète
       déjà le champ). `~` est expansé.
-    - BANC (`target_kind == "lima"`) : la cible est le kubeconfig du banc Lima
+    - BANC (`target_kind == "bench"`) : la cible est le kubeconfig du banc Lima
       (`bench_kubeconfig`, écrit par le montage). On ne vérifie PAS son existence ici
       (logique pure) — l'I/O `apply_context` le fera.
 
     Les noms cluster/user dérivent du nom de la topologie (uniques, parité
     `nestor.kubeconfig._rename_identifiers`)."""
-    if target_kind == "lima":
+    if target_kind == "bench":
         source = bench_kubeconfig
     elif kubeconfig:
         source = os.path.expanduser(kubeconfig)

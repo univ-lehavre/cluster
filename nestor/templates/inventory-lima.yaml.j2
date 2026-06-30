@@ -5,7 +5,7 @@ cloud:
     workers:
   vars:
     ansible_user: lima
-    target_kind: lima
+    target_kind: bench
 control:
   hosts:
 {% for vm in control_nodes %}    {{ vm }}:

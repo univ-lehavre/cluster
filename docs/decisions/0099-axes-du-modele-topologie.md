@@ -60,7 +60,9 @@ ces axes, pas une valeur unique.
 **Ce qui N'EST PAS un axe — les invariants du dépôt.** Tout n'est pas variable.
 L'**OS des nœuds est FIXÉ** : **Debian GNU/Linux** (les rôles `bootstrap/`
 épinglent le dépôt Docker `download.docker.com/linux/debian`, `python3-debian`,
-la matrice de versions ADR 0006 vise Debian 13). Ce n'est **pas** un champ de
+la matrice de versions ADR 0006 vise Debian 13). Le périmètre OS complet (poste
+de contrôle Unix, nœuds Linux, Windows → WSL) est acté par
+[0100](0100-perimetre-os-poste-et-noeuds.md). Ce n'est **pas** un champ de
 topologie — aucune topologie ne « choisit son OS ». Le distinguer des axes évite
 de sur-paramétrer : un axe est une dimension qu'une topologie fait
 **réellement** varier (terrain, criticité, exposition, archi) ; un invariant
@@ -91,18 +93,27 @@ Conséquences directes :
   bare-metal reste « jetable » (à protéger comme tel), une prod cloud reste «
   réelle ».
 
-## Évolution proposée (hors de cet ADR — à décider/implémenter séparément)
+## Renommage `lima` → `bench` (fait)
 
-`target_kind: lima` est **mal nommé** : il dit l'**outil** (Lima/limactl), pas
-la **criticité** qu'il porte, et il est **redondant** avec `terrain: local`. Le
-renommer **`lima` → `bench`** (en gardant `prod`) alignerait le champ sur sa
-sémantique réelle (sûreté), symétriquement, indépendamment de l'infra. Pièges
-identifiés à traiter lors de l'implémentation : le **transport** `lima`
-(`isolation.py` : `limactl shell`) est un concept distinct **à conserver** ; le
-**banc en place** (`bench/lima/.work/inventory.yaml`) porte `target_kind: lima`
-et devrait être régénéré ; le **golden byte-exact** `hosts.example.yaml`
-(`target_kind: prod`) n'est pas touché. ~43 lignes de code (`== "lima"`) + 9 ADR
-mentionnent le champ. Cadré ici, **non décidé** : à ouvrir en son temps.
+L'ancien `target_kind: lima` était **mal nommé** : il disait l'**outil**
+(Lima/limactl), pas la **criticité** qu'il porte, et il était **redondant** avec
+`terrain: local`. **Renommé `lima` → `bench`** (parc jetable ; `prod` inchangé)
+: `VALID_TARGET_KINDS = {bench, prod}`. Le champ nomme désormais sa sémantique
+réelle — la sûreté — indépendamment de l'infra.
+
+**Resté DISTINCT et conservé** (le point délicat) : le **transport** `lima`
+(`isolation.py` : `limactl shell` — l'outil de connexion au banc) est un concept
+à part ; sa condition lit maintenant `target_kind == "bench"` mais le transport
+garde le nom `"lima"`. De même `ansible_user: lima` (utilisateur de la VM), les
+chemins `bench/lima/`, les hostnames `lima-<vm>`. Le **golden** prod
+`hosts.example.yaml` (`target_kind: prod`) n'a pas bougé.
+
+**Migré** : comparaisons code (profile/kube_context/plan/topology/portal),
+défauts (runner/scaffold), générateur (template `inventory-lima.j2` +
+`write_inventory` bash), `EXPECTED_TARGET_KIND=bench` (`run-phases.sh`),
+l'argument `--kind` de `artifact generate/diff`, les topologies `.example` et
+les tests. Un banc déjà monté (`bench/lima/.work/inventory.yaml` portant `lima`)
+doit être **régénéré** (`nestor up`) pour redevenir conforme à la garde.
 
 ## Alternatives écartées
 

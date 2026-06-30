@@ -36,11 +36,11 @@ _PROD_INV = {
     "control_host": {"hosts": {"localhost": {"ansible_connection": "local"}}},
 }
 
-# Inventaire BANC Lima : mêmes groupes, target_kind lima, hôtes locaux (port-forward).
+# Inventaire BANC Lima : mêmes groupes, target_kind bench, hôtes locaux (port-forward).
 _BANC_INV = {
     "cloud": {
         "children": {"control": None, "workers": None},
-        "vars": {"target_kind": "lima"},
+        "vars": {"target_kind": "bench"},
     },
     "control": {"hosts": {"node1": {"ansible_host": "127.0.0.1"}}},
     "workers": {"hosts": {"node2": {"ansible_host": "127.0.0.1"}}},
@@ -52,7 +52,7 @@ class TheBreach(unittest.TestCase):
     """Le scénario exact qui a frappé la prod : intention banc sur inventaire prod."""
 
     def test_lima_intent_on_prod_inventory_is_refused(self):
-        ok, raison = classify_inventory_target(_PROD_INV, "lima")
+        ok, raison = classify_inventory_target(_PROD_INV, "bench")
         self.assertFalse(ok)  # REFUS — c'est ce qui aurait stoppé `next dataops`
         self.assertIn("prod", raison)
         self.assertIn("cp1", raison)  # nomme les hôtes prod menacés
@@ -67,31 +67,31 @@ class SafeCases(unittest.TestCase):
     def test_lima_intent_on_banc_inventory_is_allowed(self):
         # Banc Lima : hôtes en port-forward localhost (127.0.0.1) → règle « local » :
         # aucun SSH distant possible → sûr (peu importe le marqueur).
-        ok, raison = classify_inventory_target(_BANC_INV, "lima")
+        ok, raison = classify_inventory_target(_BANC_INV, "bench")
         self.assertTrue(ok)
         self.assertIn("local", raison)
 
     def test_lima_marker_concordant_with_remote_lima_hosts(self):
-        # Banc avec hôtes distants NON locaux mais target_kind=lima concordant → sûr
+        # Banc avec hôtes distants NON locaux mais target_kind=bench concordant → sûr
         # (cas d'un banc Lima exposant des IP non-127 ; le marqueur tranche).
         inv = {
             "cloud": {
-                "vars": {"target_kind": "lima"},
+                "vars": {"target_kind": "bench"},
                 "hosts": {"vm1": {"ansible_host": "10.0.0.5"}},
             }
         }
-        ok, raison = classify_inventory_target(inv, "lima")
+        ok, raison = classify_inventory_target(inv, "bench")
         self.assertTrue(ok)
         self.assertIn("concordant", raison)
 
     def test_local_only_inventory_always_safe(self):
         # Que des hôtes locaux → aucun SSH possible → sûr quelle que soit l'intention.
         inv = {"control_host": {"hosts": {"localhost": {"ansible_connection": "local"}}}}
-        self.assertTrue(classify_inventory_target(inv, "lima")[0])
+        self.assertTrue(classify_inventory_target(inv, "bench")[0])
         self.assertTrue(classify_inventory_target(inv, "prod")[0])
 
     def test_empty_inventory_is_safe(self):
-        self.assertTrue(classify_inventory_target({}, "lima")[0])
+        self.assertTrue(classify_inventory_target({}, "bench")[0])
 
 
 class FailClosed(unittest.TestCase):
@@ -99,13 +99,13 @@ class FailClosed(unittest.TestCase):
 
     def test_no_marker_with_remote_hosts_is_refused(self):
         inv = {"cloud": {"hosts": {"somehost": {"ansible_host": "192.0.2.9"}}}}
-        ok, raison = classify_inventory_target(inv, "lima")
+        ok, raison = classify_inventory_target(inv, "bench")
         self.assertFalse(ok)
         self.assertIn("SANS marqueur", raison)
 
     def test_marker_mismatch_is_refused(self):
-        # target_kind=prod mais intention lima → refus même si on tentait un montage banc.
-        ok, _ = classify_inventory_target(_PROD_INV, "lima")
+        # target_kind=prod mais intention bench → refus même si on tentait un montage banc.
+        ok, _ = classify_inventory_target(_PROD_INV, "bench")
         self.assertFalse(ok)
 
     def test_host_by_name_not_ip_still_detected(self):
@@ -116,7 +116,7 @@ class FailClosed(unittest.TestCase):
                 "hosts": {"prodbox": {}},
             }
         }
-        self.assertFalse(classify_inventory_target(inv, "lima")[0])
+        self.assertFalse(classify_inventory_target(inv, "bench")[0])
 
 
 # Inventaire BANC réel (forme générée par write_inventory) : ansible_host lima-<vm> +
@@ -124,7 +124,7 @@ class FailClosed(unittest.TestCase):
 _BANC_GEN_INV = {
     "cloud": {
         "children": {"control": None, "workers": None},
-        "vars": {"ansible_user": "lima", "target_kind": "lima"},
+        "vars": {"ansible_user": "lima", "target_kind": "bench"},
     },
     "control": {
         "hosts": {

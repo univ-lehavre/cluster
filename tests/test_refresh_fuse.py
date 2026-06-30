@@ -38,7 +38,7 @@ nodes:
       - worker
 storage:
   backend: local-path
-target_kind: lima
+target_kind: bench
 """
 
 

@@ -134,7 +134,7 @@ class Validation(unittest.TestCase):
                 {"name": "cp3", "roles": ["control", "worker"]},
             ],
             network={"control_plane_lb": lb},
-            target_kind="lima",
+            target_kind="bench",
         )
 
     def test_lb_unknown_mode_rejected(self):
@@ -174,7 +174,7 @@ class Exposition(unittest.TestCase):
     def test_default_lima_is_nodeport(self):
         # ADR 0092 : le L4 sur le port du nœud est reproductible partout (banc Lima comme
         # VM publique), donc défaut GLOBAL `nodeport` — plus de défaut gateway par terrain.
-        t = topology_from_dict(_base(target_kind="lima"))
+        t = topology_from_dict(_base(target_kind="bench"))
         self.assertEqual(t.exposition_mode, "nodeport")
 
     def test_default_prod_is_nodeport(self):
@@ -254,7 +254,7 @@ class LimaInventoryByteExact(unittest.TestCase):
                     {"name": "node1", "roles": ["worker"]},
                     {"name": "node2", "roles": ["worker"]},
                 ],
-                target_kind="lima",
+                target_kind="bench",
             )
         )
         expected = (
@@ -265,7 +265,7 @@ class LimaInventoryByteExact(unittest.TestCase):
             "    workers:\n"
             "  vars:\n"
             "    ansible_user: lima\n"
-            "    target_kind: lima\n"
+            "    target_kind: bench\n"
             "control:\n"
             "  hosts:\n"
             "    cp1:\n"
@@ -288,7 +288,7 @@ class LimaInventoryByteExact(unittest.TestCase):
 
     def test_single_cp_no_worker_emits_empty_hosts(self):
         topo = topology_from_dict(
-            _base(nodes=[{"name": "cp1", "roles": ["control"]}], target_kind="lima")
+            _base(nodes=[{"name": "cp1", "roles": ["control"]}], target_kind="bench")
         )
         out = render_lima_inventory(topo, self.HOME)
         # le cas workers-vide doit émettre EXACTEMENT `  hosts: {}` (write_inventory)

@@ -154,15 +154,17 @@ def _find_host_attrs(inventory: dict, node: str) -> dict | None:
 def resolve_node_target(inventory: dict, node: str) -> NodeTarget:
     """Résout `node` → `NodeTarget` depuis l'inventaire (PUR, ADR 0081).
 
-    Le transport est DÉRIVÉ du `target_kind` de l'inventaire : `lima` → `limactl shell`
-    (le banc n'utilise pas SSH brut), sinon `ssh` direct. Coordonnées prises sur l'hôte
-    (`ansible_host`/`ansible_user`/`ansible_ssh_common_args`) ; `user` remonte en repli des
-    vars du groupe `cloud`/`all` (où l'inventaire pose `ansible_user`). Lève `IsolationError`
-    si le nœud est absent (fail-closed : on ne devine pas une cible)."""
+    Le transport est DÉRIVÉ du `target_kind` de l'inventaire : `bench` → `limactl shell`
+    (le banc Lima n'utilise pas SSH brut), sinon `ssh` direct. NB : le transport garde le
+    nom `"lima"` (c'est l'outil limactl), DISTINCT du `target_kind` `bench` (la criticité,
+    ADR 0099). Coordonnées prises sur l'hôte (`ansible_host`/`ansible_user`/
+    `ansible_ssh_common_args`) ; `user` remonte en repli des vars du groupe `cloud`/`all`
+    (où l'inventaire pose `ansible_user`). Lève `IsolationError` si le nœud est absent
+    (fail-closed : on ne devine pas une cible)."""
     attrs = _find_host_attrs(inventory, node)
     if attrs is None:
         raise IsolationError(f"nœud `{node}` absent de l'inventaire")
-    transport = "lima" if _inventory_target_kind(inventory) == "lima" else "ssh"
+    transport = "lima" if _inventory_target_kind(inventory) == "bench" else "ssh"
     user = attrs.get("ansible_user") or _group_var(inventory, "ansible_user")
     # En LIMA, `limactl shell` attend le NOM D'INSTANCE = le nom logique du nœud (`node1`).
     # `ansible_host` (ex. `lima-node1`) est le hostname SSH résolu par ~/.lima/<vm>/ssh.config,

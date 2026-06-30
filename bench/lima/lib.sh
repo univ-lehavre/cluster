@@ -218,9 +218,10 @@ write_inventory() {
         # seule (via ssh.config) ne la peuple PAS. On la pose donc explicitement,
         # comme l'inventaire Vagrant pose `ansible_user: debian`.
         echo "    ansible_user: lima"
-        # Marqueur de topologie (ADR 0053 (c)) : le banc déclare `lima` ; l'assert
-        # du rôle audit-log refuse de tourner si l'intention attendue diffère.
-        echo "    target_kind: lima"
+        # Marqueur de CRITICITÉ (ADR 0053 (c) / 0099) : le banc déclare `bench` (parc
+        # jetable) ; l'assert du rôle audit-log refuse de tourner si l'intention diffère.
+        # NB : `ansible_user: lima` reste l'utilisateur de la VM Lima (l'outil), distinct.
+        echo "    target_kind: bench"
         echo "control:"
         echo "  hosts:"
         local vm ssh_cfg

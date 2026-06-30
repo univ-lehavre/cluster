@@ -19,7 +19,12 @@ class TopologyError(ValueError):
 
 
 VALID_ROLES = {"control", "worker", "storage"}
-VALID_TARGET_KINDS = {"prod", "lima"}
+# `target_kind` = la CRITICITÉ (la garde d'isolation, ADR 0099) : `bench` (parc jetable,
+# on peut tout casser) | `prod` (parc réel, mutation encadrée). NE PAS confondre avec la
+# TECHNO d'infra (`catalog.terrain` : local/cloud/baremetal) ni avec le TRANSPORT de
+# connexion (`lima`=limactl / `ssh`, dérivé en aval). `bench` a remplacé l'ancien `lima`
+# (qui nommait l'outil, pas la sûreté).
+VALID_TARGET_KINDS = {"prod", "bench"}
 # Modes du point d'entrée HA devant les CP (ADR 0047/0055). kube-vip-arp =
 # bare-metal/local (pod statique, annonce ARP) ; kube-vip-lb = via LB-IPAM ;
 # external = LB fourni par le terrain (cloud, ADR 0040).

@@ -21,7 +21,7 @@ from nestor import portal
 CONTRACT_PATH = os.environ.get(
     "PORTAL_CONTRACT", "/etc/portal/endpoints.yaml"
 )  # monté/embarqué : le contrat versionné
-TARGET_IS_PROD = os.environ.get("PORTAL_TARGET", "prod") != "lima"
+TARGET_IS_PROD = os.environ.get("PORTAL_TARGET", "prod") != "bench"
 
 
 class PortalUnavailable(RuntimeError):

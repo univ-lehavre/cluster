@@ -61,7 +61,7 @@ class BuildTopologyDict(unittest.TestCase):
             "profile": "base",
             "backend": "local-path",
             "terrain": "local",
-            "target_kind": "lima",
+            "target_kind": "bench",
             "control_planes": "1",
             "workers": "2",
         }

@@ -28,8 +28,8 @@ VALID_PROFILES = ["base", "store", "obs", "dataops"]
 VALID_BACKENDS = ["local-path", "ceph"]
 # Terrain (catalog ADR 0039/0040) — métadonnée de catalogue.
 VALID_TERRAINS = ["local", "cloud", "baremetal"]
-# Cible d'exécution (model.VALID_TARGET_KINDS).
-VALID_TARGET_KINDS = ["lima", "prod"]
+# Cible d'exécution = criticité (model.VALID_TARGET_KINDS).
+VALID_TARGET_KINDS = ["bench", "prod"]
 # Mode du load-balancer de control-plane si HA (model.VALID_LB_MODES).
 VALID_LB_MODES = ["kube-vip-arp", "kube-vip-lb", "external"]
 
@@ -88,9 +88,9 @@ QUESTIONS = [
     Question(
         "target_kind",
         "Cible d'exécution",
-        "lima",
+        "bench",
         VALID_TARGET_KINDS,
-        "lima (banc) ou prod (inventaire SSH réel)",
+        "bench (banc jetable) ou prod (parc réel)",
     ),
     Question(
         "control_planes",
@@ -217,7 +217,7 @@ def build_topology_dict(name: str, answers: dict[str, str]) -> dict:
     backend = _check_choice(answers.get("backend", "local-path"), VALID_BACKENDS, "backend")
     terrain = _check_choice(answers.get("terrain", "local"), VALID_TERRAINS, "terrain")
     target_kind = _check_choice(
-        answers.get("target_kind", "lima"), VALID_TARGET_KINDS, "target_kind"
+        answers.get("target_kind", "bench"), VALID_TARGET_KINDS, "target_kind"
     )
     n_cp = _as_positive_int(answers.get("control_planes", "1"), "control_planes")
     n_workers = _as_positive_int(answers.get("workers", "2"), "workers")

@@ -22,7 +22,7 @@ nodes:
     roles: [control, worker]
 storage:
   backend: local-path
-target_kind: lima
+target_kind: bench
 # Ressources de la VM Lima (LOT 8, ADR 0097 §3 — remplace les env VM_CPUS/VM_MEMORY/
 # VM_DISK). Bloc GLOBAL (défaut tous nœuds) ; un node peut surcharger via
 # `nodes[].resources`. Ces valeurs ne pilotent réellement la VM qu'avec le moteur

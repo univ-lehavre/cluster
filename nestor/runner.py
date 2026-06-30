@@ -133,7 +133,7 @@ def launch_phase(
     *,
     ansible_config: str | None = None,
     kubeconfig: str | None = None,
-    target_kind: str = "lima",
+    target_kind: str = "bench",
     limit: str | None = None,
 ) -> RunResult:
     """Lance UN playbook via ansible-runner ; renvoie (rc, status).
@@ -181,7 +181,7 @@ def launch_phase_idempotent(
     *,
     ansible_config: str | None = None,
     kubeconfig: str | None = None,
-    target_kind: str = "lima",
+    target_kind: str = "bench",
     limit: str | None = None,
 ) -> IdempotenceResult:
     """Lance un playbook puis le REJOUE pour PROUVER l'idempotence (ADR 0052).

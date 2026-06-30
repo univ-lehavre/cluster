@@ -25,7 +25,7 @@ def _topo(**over):
     d = {
         "catalog": {"topology": "t"},
         "nodes": [{"name": "n1", "roles": ["control", "worker"]}],
-        "target_kind": "lima",
+        "target_kind": "bench",
     }
     d.update(over)
     return topology_from_dict(d)

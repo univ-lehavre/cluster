@@ -39,7 +39,7 @@ def _topo(profile="dataops", backend="ceph", hardening=None, nodes=None):
         "catalog": {"topology": "t", "profile": profile},
         "nodes": nodes,
         "storage": {"backend": backend},
-        "target_kind": "lima",
+        "target_kind": "bench",
     }
     if hardening:
         d["hardening"] = hardening
@@ -168,7 +168,7 @@ class TargetValidation(unittest.TestCase):
                 "layers": layers,
                 "nodes": [{"name": "cp1", "roles": ["control", "worker"]}],
                 "storage": {"backend": backend},
-                "target_kind": "lima",
+                "target_kind": "bench",
             }
         )
 
@@ -230,7 +230,7 @@ class TargetValidation(unittest.TestCase):
                 ],
                 "network": {"control_plane_lb": {"mode": "kube-vip-arp"}},
                 "storage": {"backend": "local-path"},
-                "target_kind": "lima",
+                "target_kind": "bench",
             }
         )
 
@@ -256,7 +256,7 @@ class TargetValidation(unittest.TestCase):
                 ],
                 "network": {"control_plane_lb": {"mode": "kube-vip-arp"}},
                 "storage": {"backend": "ceph"},
-                "target_kind": "lima",
+                "target_kind": "bench",
             }
         )
         with self.assertRaises(PlanError):

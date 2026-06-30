@@ -29,8 +29,8 @@ Usage — cycle de vie (top-level, calque Pulumi) :
   uv run python scripts/topology.py next [--target …]        (appliquer la couche suivante)
   uv run python scripts/topology.py destroy [--yes]          (calque pulumi destroy)
 Usage — artefacts (dériver/constater, groupe `artifact`) :
-  uv run python scripts/topology.py artifact generate [--kind prod|lima] [--what …]
-  uv run python scripts/topology.py artifact diff [--kind prod|lima --against PATH]
+  uv run python scripts/topology.py artifact generate [--kind prod|bench] [--what …]
+  uv run python scripts/topology.py artifact diff [--kind prod|bench --against PATH]
   uv run python scripts/topology.py artifact runs [--target atlas|…]               (P4)
   uv run python scripts/topology.py artifact metrics [--last]                       (P6)
 Usage — épreuves & réversibilité (groupe `test`) :
@@ -148,7 +148,7 @@ _RUNS_HISTORY = os.path.join(_ROOT, "bench", "lima", "runs-history.yaml")
 # le socle est monté : faux « à installer », scorie de fidélité du RÉEL).
 _BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
 # Inventaire Ansible du BANC Lima, écrit par run-phases.sh (write_inventory → WORKDIR/
-# inventory.yaml ; target_kind: lima, hôtes node1/node2). DISTINCT de bootstrap/hosts.yaml
+# inventory.yaml ; target_kind: bench, hôtes node1/node2). DISTINCT de bootstrap/hosts.yaml
 # (l'inventaire PROD). `next` doit viser CELUI-CI pour une topo lima — sinon un montage
 # banc SSH sur la prod (faille ADR 0053). Choisi par `_inventory_for(topo)`.
 _BENCH_INVENTORY = os.path.join(_ROOT, "bench", "lima", ".work", "inventory.yaml")
@@ -267,7 +267,7 @@ def cmd_ansible(args: argparse.Namespace) -> int:
     # Inventaire DÉRIVÉ de la cible active (`_inventory_for` : temp éphémère côté prod,
     # fichier réel côté banc) — jamais un `hosts.yaml` statique (ADR 0098).
     with _inventory_for(topo) as inv_path:
-        if topo.target_kind == "lima" and not os.path.isfile(inv_path):
+        if topo.target_kind == "bench" and not os.path.isfile(inv_path):
             raise _UsageError(
                 f"inventaire banc absent ({inv_path}) — monter le banc d'abord (`nestor up`)"
             )
@@ -355,9 +355,9 @@ def _active_stack_name(file_arg: str | None) -> str | None:
 
 def _render_inventory(topo, kind: str, lima_home: str | None) -> str:
     """Rend l'inventaire selon le `kind` (prod ou lima). Façade sur le paquet."""
-    if kind == "lima":
+    if kind == "bench":
         if not lima_home:
-            raise _UsageError("--kind lima exige --lima-home (chemin du $HOME du poste)")
+            raise _UsageError("--kind bench exige --lima-home (chemin du $HOME du poste)")
         return render_lima_inventory(topo, lima_home)
     return render_prod_inventory(topo)
 
@@ -368,7 +368,7 @@ def _inventory_for(topo: Topology):
     active (ADR 0053), DÉRIVÉ et éphémère côté prod (ADR 0098).
 
     Le cœur de l'isolation : un montage vise l'inventaire de SA cible —
-    `bench/lima/.work/inventory.yaml` (target_kind: lima, posé par le provisioning banc)
+    `bench/lima/.work/inventory.yaml` (target_kind: bench, posé par le provisioning banc)
     pour une topo lima ; pour la prod, un TEMPORAIRE `mkstemp` (`0o600`) rendu depuis la
     topo (`render_prod_inventory`) et supprimé en sortie. Plus de `bootstrap/hosts.yaml`
     statique pointable (ADR 0098 : source unique d'inventaire ; le fichier persistant
@@ -380,7 +380,7 @@ def _inventory_for(topo: Topology):
     (non supprimé) ; la prod un temp anonyme supprimé en `finally`. Le temp prod doit
     vivre toute la durée du geste (montage entier pour `cmd_up`) → enrouler le `with`
     autour de TOUT le geste, pas juste de l'appel ansible."""
-    if topo.target_kind == "lima":
+    if topo.target_kind == "bench":
         yield _BENCH_INVENTORY
         return
     rendered = _render_inventory(topo, "prod", None)
@@ -727,7 +727,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     # écriture, pas une lecture) qu'on COMPLÈTE la topologie : proposer le champ
     # `~/.kube/<stack>.config` + le rapatriement, puis poser ce KUBECONFIG. Sous
     # `--no-input` : on n'écrit rien (action opérateur), on signale.
-    if topo.target_kind != "lima":
+    if topo.target_kind != "bench":
         cible = _select_prod_kubeconfig(
             topo, target_abs, args.name, no_input=getattr(args, "no_input", False)
         )
@@ -757,7 +757,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     return 0
 
 
-def _real_vms(target_kind: str = "lima") -> list[str]:
+def _real_vms(target_kind: str = "bench") -> list[str]:
     """Noms des VMs Lima EXISTANTES (toute stack), via `limactl list --format json`.
 
     GATÉE par `target_kind` (ADR 0084) : `limactl` n'a de sens qu'en `lima`. Pour une
@@ -768,7 +768,7 @@ def _real_vms(target_kind: str = "lima") -> list[str]:
     Lecture seule du réel (ADR 0056 §7 : on ne stocke pas de state, on le lit). Une
     sortie illisible / `limactl` absent → liste vide (le refresh reste informatif,
     il ne plante pas le poste sans Lima)."""
-    if target_kind != "lima":
+    if target_kind != "bench":
         return []
     try:
         out = subprocess.run(  # noqa: S603 — argv fixe, pas d'entrée shell
@@ -795,7 +795,7 @@ def _real_vms(target_kind: str = "lima") -> list[str]:
     return vms
 
 
-def _ready_nodes(target_kind: str = "lima", declared: str | None = None) -> list[str]:
+def _ready_nodes(target_kind: str = "bench", declared: str | None = None) -> list[str]:
     """Noms des nœuds k8s à l'état Ready (`kubectl get nodes`). Vide si injoignable.
 
     GATÉE par `target_kind` (ADR 0084) et la cible déclarée (ADR 0090) :
@@ -811,7 +811,7 @@ def _ready_nodes(target_kind: str = "lima", declared: str | None = None) -> list
     # défaut auto-posé vers le BANC par `main()` (≠ intention prod) : un KUBECONFIG
     # auto-banc ne doit PAS faire sonder le banc pour une stack prod (bug #405, ADR 0084).
     explicit_kubeconfig = bool(os.environ.get("KUBECONFIG")) and not _KUBECONFIG_AUTO_BENCH
-    if target_kind != "lima" and not explicit_kubeconfig and not declared:
+    if target_kind != "bench" and not explicit_kubeconfig and not declared:
         return []
     try:
         out = subprocess.run(  # noqa: S603 — argv fixe, pas d'entrée shell
@@ -1248,7 +1248,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
     if against is None:
         if kind != "prod":
             raise _UsageError(
-                "--kind lima exige --against (l'inventaire Lima est un artefact de "
+                "--kind bench exige --against (l'inventaire Lima est un artefact de "
                 "run, jamais versionné — aucun golden par défaut)"
             )
         against = _PROD_INVENTORY
@@ -1573,15 +1573,15 @@ def _assert_bench_target(action: str, topo: Topology | None = None) -> None:
     ADR 0074).
 
     PROVISIONNING FROM-SCRATCH (`up`) : quand `topo` est fourni ET déclare
-    `target_kind: lima`, le banc n'existe PAS ENCORE (c'est `up` qui le CRÉE) — exiger
+    `target_kind: bench`, le banc n'existe PAS ENCORE (c'est `up` qui le CRÉE) — exiger
     un kubeconfig de banc bloquerait le cas légitime du montage depuis zéro (vécu : un
     `down` puis `up` était refusé). La TOPOLOGIE qui déclare `lima` est alors le signal
-    sûr (= `EXPECTED_TARGET_KIND=lima` du bash), tant qu'aucun `KUBECONFIG` prod n'est
+    sûr (= `EXPECTED_TARGET_KIND=bench` du bash), tant qu'aucun `KUBECONFIG` prod n'est
     exporté. Une topo `prod` reste soumise à la garde stricte (jamais de from-scratch
     prod sans cible prouvée)."""
     if os.environ.get("KUBECONFIG"):
         return  # intention explicite assumée par l'opérateur
-    if topo is not None and topo.target_kind == "lima":
+    if topo is not None and topo.target_kind == "bench":
         return  # `up` from-scratch d'un banc déclaré : la topo lima EST le signal sûr
     if os.path.exists(_BENCH_KUBECONFIG) and _context_targets_bench():
         return  # banc présent ET contexte = banc : nominal
@@ -1597,7 +1597,7 @@ def _assert_bench_target(action: str, topo: Topology | None = None) -> None:
 
 
 def _assert_inventory_safe(action: str, inventory_path: str, topo: Topology) -> None:
-    """Garde de CIBLE ANSIBLE (ADR 0053) : un montage qui vise le banc (target_kind=lima)
+    """Garde de CIBLE ANSIBLE (ADR 0053) : un montage qui vise le banc (target_kind=bench)
     ne s'exécute PAS sur un inventaire de PROD.
 
     Complément INDISPENSABLE de `_assert_bench_target` : celle-ci ne valide que le
@@ -1621,7 +1621,7 @@ def _assert_inventory_safe(action: str, inventory_path: str, topo: Topology) -> 
             f"REFUS : `{action}` vise la topologie `{topo.target_kind}` mais "
             f"l'inventaire `{os.path.relpath(inventory_path, _ROOT)}` n'est pas une cible "
             f"sûre — {raison} (ADR 0053). Risque de MUTER la mauvaise cible (la PROD).\n"
-            "  • Banc : utiliser l'inventaire Lima (target_kind: lima) — il est généré "
+            "  • Banc : utiliser l'inventaire Lima (target_kind: bench) — il est généré "
             "par le montage du banc (`bench/lima/run-phases.sh up`).\n"
             "  • Prod : lancer le geste via `nestor ansible <playbook>`, qui dérive "
             "l'inventaire de la stack active (ADR 0098 — plus de `hosts.yaml` à régénérer)."
@@ -2113,7 +2113,7 @@ def _resolve_prod_kubeconfig_into_env(topo: Topology, topo_path: str, *, no_inpu
     - Si la topo prod n'a PAS de `kubeconfig:` ni KUBECONFIG exporté : on RÉORIENTE vers
       `stack select` (qui complète la topo, ADR 0090) plutôt que de mentir sur l'état.
     No-op pour une stack `lima` (le banc garde sa résolution, ADR 0053)."""
-    if topo.target_kind == "lima":
+    if topo.target_kind == "bench":
         return
     follows_export = bool(os.environ.get("KUBECONFIG")) and not _KUBECONFIG_AUTO_BENCH
     if follows_export:
@@ -2162,7 +2162,11 @@ def cmd_preview(args: argparse.Namespace) -> int:
     # (une stack prod ne lit pas le banc, ADR 0084 — le message serait trompeur).
     # NB : plus de warning « ton shell n'a pas KUBECONFIG » : `preview` lit DÉJÀ le bon banc
     # (process ≠ shell), et `nestor kubectl …` rend obsolète le `kubectl` nu qu'on prémunissait.
-    if topo.target_kind == "lima" and _active_kubeconfig() is None and not _context_targets_bench():
+    if (
+        topo.target_kind == "bench"
+        and _active_kubeconfig() is None
+        and not _context_targets_bench()
+    ):
         _warn(
             "cluster non installé — pas de connexion possible pour l'instant "
             "(le monter : `nestor up`). L'état réel ci-dessous est vide."
@@ -2238,7 +2242,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
     #   via le kubeconfig DÉCLARÉ dans la topo (`topo.kubeconfig`).
     ready = _ready_nodes(topo.target_kind, topo.kubeconfig)
     print("RÉEL (lu, non stocké) :")
-    if topo.target_kind == "lima":
+    if topo.target_kind == "bench":
         real = classify_refresh(stack_name, declared, _real_vms(topo.target_kind), ready)
         print(f"  VMs présentes  : {', '.join(real.vms_present) or '—'}")
         print(f"  VMs à créer    : {', '.join(real.vms_missing) or '—'}")
@@ -3433,7 +3437,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     refusée / chemin incohérent avec le backend."""
     path = _resolve(args.file)
     topo = load_topology(path)
-    # Garde APRÈS le chargement : `up` from-scratch d'un banc (target_kind: lima) est légitime
+    # Garde APRÈS le chargement : `up` from-scratch d'un banc (target_kind: bench) est légitime
     # même sans kubeconfig de banc existant (c'est `up` qui le crée) — la topo lima est le
     # signal sûr. Une topo prod reste sous garde stricte (cible prouvée requise).
     _assert_bench_target("nestor up", topo)
@@ -3776,7 +3780,7 @@ def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
             inventory,
             ansible_config=ansible_cfg,
             kubeconfig=kubeconfig,
-            target_kind="lima",
+            target_kind="bench",
         )
 
     def run_cni() -> int:
@@ -4422,7 +4426,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_file(p_gen)
     p_gen.add_argument(
         "--kind",
-        choices=["prod", "lima"],
+        choices=["prod", "bench"],
         default=None,
         help="cible (défaut : target_kind du fichier)",
     )
@@ -4435,7 +4439,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gen.add_argument(
         "--lima-home",
         default=os.environ.get("HOME"),
-        help="$HOME du poste (chemin SSH Lima ; requis si --kind lima)",
+        help="$HOME du poste (chemin SSH Lima ; requis si --kind bench)",
     )
     p_gen.add_argument("-o", "--output", default=None, help="fichier de sortie (défaut : stdout)")
 
@@ -4445,7 +4449,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_file(p_diff)
     p_diff.add_argument(
         "--kind",
-        choices=["prod", "lima"],
+        choices=["prod", "bench"],
         default=None,
         help="cible (défaut : target_kind du fichier)",
     )

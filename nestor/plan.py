@@ -241,7 +241,7 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     # `up` = PROVISIONNER les VMs (limactl) : propre au banc Lima. En prod (target_kind:
     # prod), les nœuds baremetal PRÉEXISTENT → pas de phase `up`, le socle commence à
     # `bootstrap` (k8s sur les nœuds existants), ADR 0084.
-    if topo.target_kind != "lima":
+    if topo.target_kind != "bench":
         seq = [p for p in seq if p != "up"]
     if _hardening_requested(topo):
         seq.append("hardening")
