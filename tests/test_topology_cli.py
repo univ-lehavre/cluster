@@ -1159,21 +1159,24 @@ runs:
         self.assertEqual(len(calls), 1)  # UNE couche montée, pas la séquence
         self.assertTrue(calls[0][0].endswith(".yaml"))
 
-    def test_without_inventory_is_usage_error(self):
-        # `up` sans bootstrap/hosts.yaml → erreur d'usage claire (code 2).
-        inv = os.path.join(_ROOT, "bootstrap", "hosts.yaml")
-        if os.path.exists(inv):
-            self.skipTest("bootstrap/hosts.yaml présent localement — cas testé en CI")
+    def test_bench_without_inventory_is_usage_error(self):
+        # Topo BANC (lima) sans `.work/inventory.yaml` → erreur d'usage claire (code 2).
+        # NB : côté PROD ce cas n'existe plus (ADR 0098 : l'inventaire est dérivé dans un
+        # temp à la volée, jamais absent). Seul le banc, dont l'inventaire est posé par le
+        # provisioning, peut manquer son fichier (banc non monté).
+        if os.path.exists(cli._BENCH_INVENTORY):
+            self.skipTest("inventaire banc présent localement — cas testé en CI")
         orig = cli._runner.launch_phase
         cli._runner.launch_phase = lambda *a, **k: None
         self.addCleanup(setattr, cli._runner, "launch_phase", orig)
         hist = _tmp(self._SOCLE_DONE)
         self.addCleanup(os.unlink, hist)
+        lima = _example_as_lima(self)
         code, _, err = _capture(
-            ["next", "-f", _EXAMPLE, "--target", "cluster-dataops", "--history", hist, "--yes"]
+            ["next", "-f", lima, "--target", "cluster-dataops", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 2)
-        self.assertIn("inventaire absent", err)
+        self.assertIn("inventaire du banc absent", err)
 
     def test_propagates_failure_rc(self):
         from nestor.runner import RunResult
