@@ -4,3 +4,12 @@ allowBuilds:
   # sharp : optimisation d'images Astro. Le site doc n'a aucune image locale ;
   # on n'autorise pas son build natif (inutile, évite un postinstall lourd).
   sharp: false
+
+# Remédiation de vulnérabilités sur des dépendances TRANSITIVES tirées par la
+# chaîne de build Astro (alertes Dependabot, esprit ADR 0006 — épingler un
+# minimum sûr). À retirer quand les parents auront eux-mêmes bumpé :
+#   - js-yaml < 4.2.0  : DoS quadratique via merge keys (GHSA-h67p-54hq-rp68)
+#   - esbuild < 0.28.1 : lecture de fichier arbitraire, dev server (GHSA-g7r4-m6w7-qqqr)
+overrides:
+  js-yaml@>=4.0.0 <4.2.0: '>=4.2.0 <5.0.0'
+  esbuild@>=0.27.3 <0.28.1: '>=0.28.1'
