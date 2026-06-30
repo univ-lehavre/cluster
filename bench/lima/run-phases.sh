@@ -37,8 +37,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=bench/lima/lib.sh
 . "${HERE}/lib.sh"
 # Primitives + fonctions pures du ROLLBACK PAR PHASE (ADR 0054, #274). rollback-lib.sh
-# embarque ses propres classify_* (plus de source health-classify.sh / metrology.sh ici :
-# leurs fonctions ne servaient qu'au filet bash retiré — montage des couches en Python).
+# embarque ses propres classify_* (pas de source health-classify.sh : ses fonctions ne
+# servaient qu'au filet bash retiré — montage des couches en Python. metrology.sh est
+# lui aussi retiré, ADR 0101 : sa logique pure vit dans nestor/history.py).
 # shellcheck source=bench/lima/rollback-lib.sh
 . "${HERE}/rollback-lib.sh"
 

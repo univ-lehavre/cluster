@@ -113,15 +113,17 @@ HARDENING_TAGS=audit,detection,smart WITH_HARDENING=1 bench/lima/run-phases.sh a
 
 ## Métrologie, cache & fraîcheur des runs
 
-Le banc s'instrumente lui-même (`metrology.sh`) — pas de saisie manuelle.
-
-- **Historique des runs** (`runs-history.yaml`, versionné) : chaque run de
-  chemin complété y **append** une entrée datée (id, date ISO UTC, branche,
-  commit, profil, topologie, arch, hôte, durées par phase). C'est la **preuve
-  datée** qu'exploite le garde-fou de fraîcheur
+- **Historique des runs** (`runs-history.yaml`, versionné) : un run de chemin
+  complété y **append** une entrée datée (id, date ISO UTC, branche, commit,
+  profil, topologie, arch, hôte, durées par phase). C'est la **preuve datée**
+  qu'exploite le garde-fou de fraîcheur
   ([ADR 0042](/cluster/docs/decisions/0042-fraicheur-preuves-banc/)) — la date
   vit dans le **contenu** (le checkout CI ne préserve pas le mtime).
-- **Métriques de coût** (si `monitoring` déployé) : l'entrée porte un bloc
+  L'auto-consignation bash (`metrology.sh`) a été **retirée** (ADR 0101) ;
+  l'append Python reste à câbler (STUB `record`), donc aujourd'hui l'entrée est
+  ajoutée par un commit `chore(bench)`. La **lecture** des runs (fraîcheur,
+  métriques) vit en Python (`nestor/history.py`, `nestor/metrics.py`).
+- **Métriques de coût** (si `monitoring` déployé) : l'entrée peut porter un bloc
   `metriques` échantillonné depuis **Prometheus** sur la fenêtre du run —
   `cpu_core_s` (cumul CPU×temps), `ram_peak_mib`, `ram_mean_mib`. Best-effort :
   `?` si Prometheus est absent (banc rapide).
