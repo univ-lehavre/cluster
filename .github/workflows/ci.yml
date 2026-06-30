@@ -189,7 +189,9 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - name: shellcheck (Homebrew, présent sur le runner macOS)
+      - name: Install shellcheck (absent du runner macOS par défaut)
+        run: brew install shellcheck
+      - name: shellcheck sur macOS (BSD find/xargs)
         run: pnpm lint:shell
       - name: tests shell (bats) sur macOS arm64
         run: pnpm test:shell
