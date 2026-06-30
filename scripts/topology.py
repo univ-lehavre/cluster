@@ -4126,8 +4126,23 @@ def cmd_roundtrip(args: argparse.Namespace) -> int:
     si réversible, 1 si une étape échoue / confirmation refusée, 2 si usage.
     """
     _assert_bench_target("nestor test roundtrip")
+    # Destruction par DÉCOUVERTE (ADR 0101) : `remove` défait toute la clôture en UN geste
+    # (aval cascadé + node-side Ceph), au lieu de boucler `run-phases.sh rollback` (ex-bash).
+    topo = load_topology(_resolve(args.file))
+
+    def destroy_layer(phase: str) -> int:
+        return _remove_by_discovery(
+            phase,
+            full=args.full,
+            assume_yes=True,  # déjà confirmé par run_roundtrip en amont
+            topo=topo,
+            inventory_path=_BENCH_INVENTORY,
+        )
+
     try:
-        result = _roundtrip.run_roundtrip(args.phase, allow_full=args.full, assume_yes=args.yes)
+        result = _roundtrip.run_roundtrip(
+            args.phase, allow_full=args.full, assume_yes=args.yes, destroy_layer=destroy_layer
+        )
     except _roundtrip.RoundtripError as exc:
         raise _UsageError(str(exc)) from exc
     print(f"Round-trip — couche `{result.phase}` → clôture {result.layers} :")
@@ -4144,7 +4159,7 @@ def _remove_dry_run(phase: str) -> int:
     défaire. Aperçu read-only du rollback par découverte (slice 1, #372) : on sonde les
     ressources réelles des namespaces de la clôture (`api-resources` + ownerReferences) et
     on les ordonne (possédés→possesseurs) via le module PUR `ownership`. Read-only → pas de
-    garde mutante ; le rollback effectif (mutant) reste le chemin table, prouvé au banc."""
+    garde mutante ; le rollback effectif (mutant) passe par `remove`, prouvé au banc."""
     from nestor import ownership
 
     try:
@@ -4171,17 +4186,18 @@ def _remove_dry_run(phase: str) -> int:
     for r in targets:
         ns = f"-n {r.namespace} " if r.namespace else ""
         print(f"    - {ns}{r.ref}")
-    print("→ dry-run : RIEN détruit (aperçu ADR 0079 ; le delete effectif via `--discover`).")
+    print("→ dry-run : RIEN détruit (aperçu ADR 0079 ; le delete effectif via `remove`).")
     return 0
 
 
-# ── Rollback PAR DÉCOUVERTE (mutant) — chemin `--discover` (ADR 0079, slice 2 #372) ──────
-# Coexiste avec le chemin TABLE (run_remove → rollback-lib.sh), QUI RESTE LE DÉFAUT. Ce
-# chemin défait les ressources NAMESPACÉES par découverte (api-resources + ownerReferences)
-# en supprimant les RACINES (le GC k8s cascade) ; il NE touche PAS aux CRD cluster-scoped, au
-# node-side Ceph, ni au force-delete des ns/`/finalize` — ces gestes restent au chemin table.
-# La LOGIQUE (quoi cibler, quel geste de déblocage) est PURE dans nestor/ownership.py ; ici,
-# uniquement l'I/O kubectl borné, env banc (jamais la prod, ADR 0053/0049).
+# ── Rollback PAR DÉCOUVERTE (mutant) — SEUL chemin (ADR 0079/0101, #372) ─────────────────
+# Plus de chemin TABLE (run_remove → rollback-lib.sh, supprimés) : la découverte couvre TOUT.
+# Ce chemin défait les ressources NAMESPACÉES par découverte (api-resources + ownerReferences)
+# en supprimant les RACINES (le GC k8s cascade), force les CR à finalizer, finalise les ns
+# wedgés, PUIS efface le node-side Ceph (wipe des disques) ; il NE touche PAS aux CRD
+# cluster-scoped (élidées à dessein, opérateur réutilisable). La LOGIQUE (quoi cibler, quel
+# geste de déblocage) est PURE dans nestor/ownership.py ; ici, uniquement l'I/O kubectl borné,
+# env banc (jamais la prod, ADR 0053/0049).
 
 
 def _kubectl_delete(kind, name, namespace, *, force_grace0=False) -> tuple[bool, str]:
@@ -4313,7 +4329,7 @@ def _remove_by_discovery(
     topo: Topology | None = None,
     inventory_path: str | None = None,
 ) -> int:
-    """`remove --discover` (ADR 0079) : défait la clôture de `phase` PAR DÉCOUVERTE.
+    """`remove` (ADR 0079/0101) : défait la clôture de `phase` PAR DÉCOUVERTE (seul chemin).
 
     Sonde les ressources réelles (api-resources × ns de la clôture), calcule les CIBLES
     (racines filtrées du bruit, module PUR `ownership`), confirme l'arbre AVANT, puis
@@ -4322,16 +4338,16 @@ def _remove_by_discovery(
     débloquées selon `classify_stuck` (force-delete / retrait finalizer). Puis (étape B)
     supprime les CRD cluster-scoped DÉCOUVERTES comme appartenant à la clôture
     (`ownership.deletable_crds` : tous leurs CR dans les ns de la clôture — jamais une CRD
-    partagée). Enfin finalise les namespaces possédés (ns wedgé → /finalize). Gardes
-    identiques au chemin table : cible banc (appelant), `--full` pour une clôture de
-    stockage, confirmation. Code 0 si tout parti, 1 si résidu / refus."""
+    partagée). Enfin finalise les namespaces possédés (ns wedgé → /finalize). Gardes : cible
+    banc (appelant), `--full` pour une clôture de stockage, confirmation. Code 0 si tout
+    parti, 1 si résidu / refus."""
     from nestor import ownership
 
     try:
         layers = _roundtrip.closure(phase)
         if _roundtrip.involves_storage(phase) and not full:
             raise _UsageError(
-                f"`remove --discover {phase}` touche une clôture de STOCKAGE {layers} "
+                f"`remove {phase}` touche une clôture de STOCKAGE {layers} "
                 "(≈ démontage du socle) — exiger l'opt-in `--full`."
             )
     except _roundtrip.RoundtripError as exc:
@@ -4417,7 +4433,7 @@ def _remove_by_discovery(
         residus.extend(f"node/{n}" for n in node_echecs)
 
     if residus:
-        print(f"→ suppression INCOMPLÈTE — résidus : {residus} (relancer, ou chemin table).")
+        print(f"→ suppression INCOMPLÈTE — résidus : {residus} (relancer pour finir).")
         return 1
     print(f"→ couche supprimée par découverte — re-monter avec `nestor next` ({phase}).")
     return 0
@@ -4436,7 +4452,7 @@ def _rollback_node_side_ceph(phase: str, topo: Topology, *, inventory_path: str)
 
     ⚠️ NON PROUVÉ au banc tant qu'un banc Ceph 3-VM (installation) n'a pas rejoué ce chemin
     (ADR 0034) : le k8s est couvert par la découverte, mais le wipe disques exige des OSD réels
-    à effacer. Preuve = monter ceph.yaml, `remove ceph --discover`, constater lsblk/sgdisk
+    à effacer. Preuve = monter ceph.yaml, `remove ceph --full`, constater lsblk/sgdisk
     vierges (les disques redeviennent sans partition, /var/lib/rook absent)."""
     if not _graph.rollback_phase_has_nodeside(phase):
         return []
@@ -4461,67 +4477,41 @@ def _rollback_node_side_ceph(phase: str, topo: Topology, *, inventory_path: str)
 def cmd_remove(args: argparse.Namespace) -> int:
     """`remove` : supprime UNE couche applicative et sa clôture descendante (inverse de `next`).
 
-    DESTRUCTIF (efface la couche + ses données) : délègue à `run-phases.sh rollback`
-    (périmètre dans rollback-lib.sh, ADR 0054), en ordre aval→amont. Détruire une couche
-    entraîne celle de ses dépendantes (clôture, ADR 0066) — affichées et confirmées
-    AVANT. Une clôture de STOCKAGE (≈ démontage du socle) exige `--full`. `--yes` saute
-    la confirmation (hors TTY).
+    DESTRUCTIF (efface la couche + ses données). Détruire une couche entraîne celle de ses
+    dépendantes (clôture, ADR 0066) — affichées et confirmées AVANT. Une clôture de STOCKAGE
+    (≈ démontage du socle) exige `--full`. `--yes` saute la confirmation (hors TTY).
 
-    Mêmes gardes d'isolation que `next` (ADR 0053) : le rollback vise le banc (kubeconfig
-    + node-side ceph) → `_assert_bench_target` ; `BANC_JETABLE=1` est imposé par
-    run-phases.sh (jamais la prod). Le backend de la stack est THREADÉ à rollback-lib
-    (STORAGE_BACKEND) pour cibler les bonnes ressources : sans lui, le rollback
-    retomberait sur `ceph` et tenterait de supprimer une OBC absente en local-path.
+    Mêmes gardes d'isolation que `next` (ADR 0053) : la suppression vise le banc (kubeconfig
+    + node-side ceph) → `_assert_bench_target` (jamais la prod).
 
-    DÉCOUVERTE PAR DÉFAUT (ADR 0079, étape A) : pour une clôture SANS node-side (tout sauf
-    `ceph` : disques), `remove` défait PAR DÉCOUVERTE d'appartenance (api-resources +
-    ownerReferences) — supprime les RACINES namespacées (le GC k8s cascade), force les CR à
-    finalizer, finalise les ns wedgés. Plus de table « nom/kind oublié » à maintenir pour le
-    k8s namespacé (la classe de bugs vécue ce soir). On ne supprime PAS les CRD cluster-scoped
-    (le lien CRD→opérateur n'est pas découvrable de façon fiable — elles restent, l'opérateur
-    est réutilisable). Les clôtures à node-side (`ceph`) restent au chemin TABLE jusqu'à ce
-    qu'une étape ultérieure couvre le node-side par SSH — `closure_has_nodeside` DÉRIVE le
-    routage de la table (transitoire), pas d'une liste codée. `--table` force le chemin table
-    (échappatoire) ; `--discover` force la découverte (diagnostic).
+    DÉCOUVERTE — SEUL chemin (ADR 0101) : `remove` défait la clôture PAR DÉCOUVERTE
+    d'appartenance (api-resources + ownerReferences) — supprime les RACINES namespacées (le GC
+    k8s cascade), force les CR à finalizer, finalise les ns wedgés, PUIS efface le node-side
+    Ceph (wipe des disques via `_node_exec_script`, topo + inventaire requis). Plus de table
+    « nom/kind oublié » à maintenir, et plus de pont bash `run-phases.sh rollback` /
+    rollback-lib.sh (supprimés) : la découverte couvre TOUT (k8s namespacé + node-side). On ne
+    supprime PAS les CRD cluster-scoped (le lien CRD→opérateur n'est pas découvrable de façon
+    fiable — elles restent, l'opérateur est réutilisable).
 
-    `--dry-run` montre l'arbre découvert sans rien détruire. Garde-fou destructif : sur la
-    découverte, sans `--yes`, on EXIGE une confirmation (l'opérateur voit l'arbre AVANT).
+    `--dry-run` montre l'arbre découvert sans rien détruire. Garde-fou destructif : sans
+    `--yes`, on EXIGE une confirmation (l'opérateur voit l'arbre AVANT).
 
     Code 0 si supprimé/dry-run, 1 si une étape échoue / confirmation refusée, 2 si usage."""
     if args.dry_run:
         return _remove_dry_run(args.phase)
-    # DÉCOUVERTE PAR DÉFAUT (ADR 0079/0101) : la découverte couvre désormais AUSSI le node-side
-    # Ceph (wipe disques via `_node_exec_script` après le k8s), donc plus besoin de router `ceph`
-    # vers la table. `--table` force encore l'échappatoire (ex-rollback-lib, transitoire).
-    par_decouverte = args.discover or not args.table
-    if par_decouverte:
-        _assert_bench_target(f"nestor remove ({args.phase}, découverte)")
-        topo = load_topology(_resolve(args.file))
-        return _remove_by_discovery(
-            args.phase,
-            full=args.full,
-            assume_yes=args.yes,
-            topo=topo,
-            inventory_path=_BENCH_INVENTORY,
-        )
-    _assert_bench_target(f"nestor remove ({args.phase})")
+    # DÉCOUVERTE (ADR 0079/0101) : seul chemin. La découverte défait tout le k8s namespacé
+    # (CR + finalize ns) PUIS le node-side Ceph (wipe disques via `_node_exec_script`) — plus
+    # de chemin table (rollback-lib.sh supprimé). La topo (devices) + l'inventaire (transport)
+    # sont requis pour le node-side.
+    _assert_bench_target(f"nestor remove ({args.phase}, découverte)")
     topo = load_topology(_resolve(args.file))
-    backend = topo.storage.get("backend", "local-path")
-    try:
-        result = _roundtrip.run_remove(
-            args.phase, backend=backend, allow_full=args.full, assume_yes=args.yes
-        )
-    except _roundtrip.RoundtripError as exc:
-        raise _UsageError(str(exc)) from exc
-    print(f"Remove — couche `{result.phase}` → clôture {result.layers} :")
-    for step in result.steps:
-        marque = "✓" if step.ok else "✗"
-        print(f"  {marque} {step.nom} — {step.detail}")
-    if result.removed:
-        print(f"→ couche supprimée — re-monter avec `nestor next` ({result.phase}).")
-        return 0
-    print("→ suppression INCOMPLÈTE (voir ci-dessus).")
-    return 1
+    return _remove_by_discovery(
+        args.phase,
+        full=args.full,
+        assume_yes=args.yes,
+        topo=topo,
+        inventory_path=_BENCH_INVENTORY,
+    )
 
 
 # Verbes du groupe `stack` (calque `pulumi stack` : GESTION des stacks).
@@ -4967,20 +4957,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="ne rien détruire : DÉCOUVRIR et afficher l'ordre de teardown (ADR 0079)",
     )
-    # Routage découverte/table (ADR 0079 étape A). Par défaut : DÉCOUVERTE si la clôture est
-    # namespacée seule (ni CRD ni node-side) ; TABLE sinon (ceph/sc/datalake). Les deux flags
-    # FORCENT un chemin (diagnostic / échappatoire), mutuellement exclusifs.
-    grp = p_remove.add_mutually_exclusive_group()
-    grp.add_argument(
-        "--discover",
-        action="store_true",
-        help="forcer la DÉCOUVERTE d'appartenance (api-resources + ownerReferences, ADR 0079)",
-    )
-    grp.add_argument(
-        "--table",
-        action="store_true",
-        help="forcer le chemin TABLE (rollback-lib.sh) — échappatoire au routage par défaut",
-    )
     p_remove.add_argument(
         "--yes",
         action="store_true",
@@ -5061,6 +5037,9 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="sauter la confirmation interactive (requis hors TTY pour détruire)",
     )
+    # `cmd_roundtrip` charge la topo (`args.file`) pour bâtir le `destroy_layer` par
+    # découverte (devices node-side dérivés de la topo, ADR 0101).
+    _add_file(p_rt)
 
     return ap
 

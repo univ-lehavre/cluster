@@ -1,23 +1,17 @@
 """Tests du graphe Python figé (`nestor/graph.py`, ADR 0096 §1, lot 2).
 
-Deux familles :
+Invariants du graphe atomique, en Python pur : possesseurs de ns distincts, unicité
+du possesseur, complétude par ownership (OBC → producteur), déterminisme/acyclicité de
+`topo_sort`, garde-fou anti-GC des CRD partagées, clôtures par phase, variante backend
+local-path.
 
-1. **REJEU des invariants de `bench/unit/rollback.bats`** en Python : possesseurs de
-   ns distincts, unicité du possesseur, complétude par ownership (OBC → producteur),
-   déterminisme/acyclicité de `topo_sort`, garde-fou anti-GC des CRD partagées,
-   clôtures par phase, variante backend local-path. Mêmes assertions que le bats.
-
-2. **PREUVE DE BYTE-IDENTITÉ automatique** : `RealBashParity` appelle le VRAI bash
-   (`bench/lima/rollback-lib.sh` sourcé en subprocess) et compare, POUR CHAQUE
-   composant et POUR LES DEUX backends (ceph + local-path), la sortie de chaque
-   projection à celle du Python — y compris l'ORDRE de `topo_sort` (le tie-break
-   `%s%03d` / `\\<` reproduit à l'octet). Si bash est absent, ces tests sont skippés
-   (les rejeux purs, eux, tournent toujours).
+`graph.py` est la SOURCE UNIQUE de l'ordre et des composants (ADR 0096). La preuve de
+byte-identité au bash (ex-`RealBashParity`, qui sourçait `rollback-lib.sh`) a disparu
+AVEC le bash (ADR 0101 — rollback-lib.sh supprimé) : il n'y a plus de référence bash à
+comparer, le graphe Python n'a plus de jumeau.
 """
 
 import os
-import shutil
-import subprocess
 import sys
 import unittest
 
@@ -26,44 +20,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from nestor import graph  # noqa: E402
 
 _REPO = os.path.join(os.path.dirname(__file__), "..")
-_ROLLBACK_LIB = os.path.join(_REPO, "bench", "lima", "rollback-lib.sh")
-_BASH = shutil.which("bash")
-
-# Alias de phase éprouvés par la parité (mêmes que component_expand_alias).
-_ALIASES = [
-    "ceph",
-    "sc",
-    "datalake",
-    "storage-simple",
-    "metrics-server",
-    "monitoring",
-    "dataops",
-    "mlflow",
-    "portal",
-    "gitops",
-    "gitops-seed",
-    "atlas-ceph",
-]
-_BACKENDS = [graph.CEPH, graph.LOCAL_PATH]
-
-
-def _bash(snippet: str, backend: str) -> str:
-    """Source rollback-lib.sh avec STORAGE_BACKEND=`backend` et exécute `snippet`."""
-    env = dict(os.environ)
-    env["STORAGE_BACKEND"] = backend
-    out = subprocess.run(  # noqa: S603 — chemin codé, snippet contrôlé (tests)
-        [_BASH, "-c", f'. "{_ROLLBACK_LIB}" && {snippet}'],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return out.stdout
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 1. REJEU DES INVARIANTS bats (purs, sans bash) — bench/unit/rollback.bats
-# ════════════════════════════════════════════════════════════════════════════
 
 
 class NamespacePossessors(unittest.TestCase):
@@ -397,150 +353,6 @@ class SignalIsAGraphProperty(unittest.TestCase):
 
         self.assertEqual(list(cli._LAYER_SIGNAL), list(graph.LAYER_SIGNAL))
         self.assertEqual(cli._LAYER_SIGNAL, graph.LAYER_SIGNAL)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 2. PREUVE DE BYTE-IDENTITÉ — comparaison au VRAI bash (tous comps, 2 backends)
-# ════════════════════════════════════════════════════════════════════════════
-
-
-@unittest.skipUnless(_BASH and os.path.exists(_ROLLBACK_LIB), "bash ou rollback-lib.sh absent")
-class RealBashParity(unittest.TestCase):
-    """Compare CHAQUE projection Python à la sortie du VRAI bash, tous composants,
-    backends ceph ET local-path. C'est la preuve automatique de byte-identité."""
-
-    def test_component_all_matches(self):
-        for be in _BACKENDS:
-            with self.subTest(backend=be):
-                bash_all = _bash("component_all", be).split()
-                self.assertEqual(bash_all, list(graph.COMPONENT_ALL))
-
-    def test_deps_match_every_component(self):
-        for be in _BACKENDS:
-            for c in graph.COMPONENT_ALL:
-                with self.subTest(backend=be, comp=c):
-                    bash_deps = _bash(f"component_deps {c!r}", be).split()
-                    self.assertEqual(bash_deps, graph.component_deps(c, be))
-
-    def test_namespace_match_every_component(self):
-        for c in graph.COMPONENT_ALL:
-            with self.subTest(comp=c):
-                bash_ns = _bash(f"component_namespace {c!r}", graph.CEPH).strip()
-                self.assertEqual(bash_ns, graph.component_namespace(c))
-
-    def test_targeted_match_every_component(self):
-        for c in graph.COMPONENT_ALL:
-            with self.subTest(comp=c):
-                bash_t = [
-                    ln
-                    for ln in _bash(f"component_targeted {c!r}", graph.CEPH).splitlines()
-                    if ln.strip()
-                ]
-                self.assertEqual(bash_t, graph.component_targeted(c))
-
-    def test_crd_groups_match_every_component(self):
-        for c in graph.COMPONENT_ALL:
-            with self.subTest(comp=c):
-                bash_crd = _bash(f"component_crd_groups {c!r}", graph.CEPH).split()
-                self.assertEqual(bash_crd, graph.component_crd_groups(c))
-
-    def test_has_nodeside_match_every_component(self):
-        for c in graph.COMPONENT_ALL:
-            with self.subTest(comp=c):
-                bash_node = _bash(f"component_has_nodeside {c!r}", graph.CEPH).strip() == "yes"
-                self.assertEqual(bash_node, graph.component_has_nodeside(c))
-
-    def test_profile_match_every_component(self):
-        for c in graph.COMPONENT_ALL:
-            with self.subTest(comp=c):
-                bash_prof = _bash(f"component_profile {c!r}", graph.CEPH).strip()
-                self.assertEqual(bash_prof, graph.component_profile(c))
-
-    def test_weight_match_every_component(self):
-        for c in graph.COMPONENT_ALL:
-            with self.subTest(comp=c):
-                bash_w = int(_bash(f"component_alias_weight {c!r}", graph.CEPH).strip())
-                self.assertEqual(bash_w, graph.component_alias_weight(c))
-
-    def test_expand_alias_match(self):
-        for be in _BACKENDS:
-            for a in _ALIASES:
-                with self.subTest(backend=be, alias=a):
-                    bash_a = _bash(f"component_expand_alias {a!r}", be).split()
-                    self.assertEqual(bash_a, graph.component_expand_alias(a, be))
-
-    def test_topo_sort_byte_identical_every_alias(self):
-        """LE test de byte-identité du tie-break (%s%03d / \\<) : l'ORDRE exact."""
-        for be in _BACKENDS:
-            for a in _ALIASES:
-                comps = graph.component_expand_alias(a, be)
-                if not comps:
-                    continue
-                with self.subTest(backend=be, alias=a):
-                    args = " ".join(repr(x) for x in comps)
-                    bash_order = _bash(f"topo_sort {args}", be).split()
-                    self.assertEqual(bash_order, graph.topo_sort(comps, be))
-
-    def test_topo_sort_byte_identical_full_catalogue(self):
-        for be in _BACKENDS:
-            with self.subTest(backend=be):
-                args = " ".join(repr(x) for x in graph.COMPONENT_ALL)
-                bash_order = _bash(f"topo_sort {args}", be).split()
-                self.assertEqual(bash_order, graph.topo_sort(list(graph.COMPONENT_ALL), be))
-
-    def test_phase_of_component_match(self):
-        for be in _BACKENDS:
-            for c in graph.COMPONENT_ALL:
-                with self.subTest(backend=be, comp=c):
-                    bash_ph = _bash(f"phase_of_component {c!r}", be).strip()
-                    self.assertEqual(bash_ph, graph.phase_of_component(c, be))
-
-    def test_phase_closure_match(self):
-        for be in _BACKENDS:
-            for p in graph.ROUNDTRIP_PHASES:
-                with self.subTest(backend=be, phase=p):
-                    bash_cl = _bash(f"phase_closure {p!r}", be).split()
-                    self.assertEqual(bash_cl, graph.phase_closure(p, be))
-
-    def test_phase_involves_storage_match(self):
-        for be in _BACKENDS:
-            for p in graph.ROUNDTRIP_PHASES:
-                with self.subTest(backend=be, phase=p):
-                    env = dict(os.environ)
-                    env["STORAGE_BACKEND"] = be
-                    rc = subprocess.run(  # noqa: S603 — chemin codé, phase contrôlée
-                        [_BASH, "-c", f'. "{_ROLLBACK_LIB}" && phase_involves_storage {p!r}'],
-                        check=False,
-                        env=env,
-                    ).returncode
-                    self.assertEqual(rc == 0, graph.phase_involves_storage(p, be))
-
-    def test_rollback_phase_namespaces_match(self):
-        # Table de périmètre du rollback par phase (ADR 0054) — indépendante du backend.
-        for be in _BACKENDS:
-            for p in graph.ROUNDTRIP_PHASES:
-                with self.subTest(backend=be, phase=p):
-                    bash_ns = _bash(f"rollback_phase_namespaces {p!r}", be).split()
-                    self.assertEqual(bash_ns, graph.rollback_phase_namespaces(p))
-
-    def test_rollback_phase_targeted_resources_match(self):
-        # Backend-conditionnel : les OBC n'existent qu'en ceph (cf. monitoring/dataops/mlflow).
-        for be in _BACKENDS:
-            for p in graph.ROUNDTRIP_PHASES:
-                with self.subTest(backend=be, phase=p):
-                    bash_t = [
-                        ln
-                        for ln in _bash(f"rollback_phase_targeted_resources {p!r}", be).splitlines()
-                        if ln.strip()
-                    ]
-                    self.assertEqual(bash_t, graph.rollback_phase_targeted_resources(p, be))
-
-    def test_rollback_phase_has_nodeside_match(self):
-        for be in _BACKENDS:
-            for p in graph.ROUNDTRIP_PHASES:
-                with self.subTest(backend=be, phase=p):
-                    bash_node = _bash(f"rollback_phase_has_nodeside {p!r}", be).strip() == "yes"
-                    self.assertEqual(bash_node, graph.rollback_phase_has_nodeside(p))
 
 
 if __name__ == "__main__":

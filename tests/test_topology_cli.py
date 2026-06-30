@@ -2089,9 +2089,10 @@ class Roundtrip(unittest.TestCase):
 
         seen = {}
 
-        def capture(phase, *, allow_full=False, assume_yes=False):
+        def capture(phase, *, allow_full=False, assume_yes=False, destroy_layer=None):
             seen["full"] = allow_full
             seen["yes"] = assume_yes
+            seen["has_destroy"] = destroy_layer is not None  # découverte injectée (ADR 0101)
             return RoundtripResult(phase=phase, layers=[phase], steps=[RoundtripStep("x", True)])
 
         orig = cli._roundtrip.run_roundtrip
@@ -2874,7 +2875,7 @@ target_kind: bench
 
 
 class Remove(unittest.TestCase):
-    """`remove` : supprime une couche via run_remove (délégué à run-phases.sh rollback)."""
+    """`remove` : supprime une couche + sa clôture PAR DÉCOUVERTE (ADR 0101, seul chemin)."""
 
     def test_unknown_phase_is_argparse_usage(self):
         with self.assertRaises(SystemExit) as ctx:
@@ -2886,77 +2887,11 @@ class Remove(unittest.TestCase):
             cli.main(["remove"])
         self.assertEqual(ctx.exception.code, 2)
 
-    def test_delegates_to_run_remove_and_maps_rc(self):
-        # Stub run_remove (la logique est testée dans test_roundtrip) : on couvre le
-        # dispatch + le mapping de code de la façade.
-        from nestor.roundtrip import RemoveResult, RoundtripStep
-
-        captured = {}
-
-        def fake(phase, *, backend, allow_full, assume_yes):
-            captured.update(
-                phase=phase, backend=backend, allow_full=allow_full, assume_yes=assume_yes
-            )
-            return RemoveResult(
-                phase=phase,
-                layers=[phase],
-                steps=[RoundtripStep("supprimer", True), RoundtripStep("vérifier supprimé", True)],
-            )
-
-        orig = cli._roundtrip.run_remove
-        cli._roundtrip.run_remove = fake
-        self.addCleanup(setattr, cli._roundtrip, "run_remove", orig)
-        # --table : on teste le chemin TABLE explicitement (le défaut routerait monitoring
-        # vers la découverte, ADR 0079 étape A).
-        code, out, _ = _capture(
-            ["remove", "-f", _EXAMPLE, "--phase", "monitoring", "--table", "--yes"]
-        )
-        self.assertEqual(code, 0)
-        # le backend de la stack est threadé (socle.example = ceph) ; flags relayés.
-        self.assertEqual(captured["phase"], "monitoring")
-        self.assertEqual(captured["allow_full"], False)
-        self.assertEqual(captured["assume_yes"], True)
-        self.assertIn(captured["backend"], ("ceph", "local-path"))  # threadé depuis la topo
-        self.assertIn("couche supprimée", out)
-
-    def test_incomplete_removal_is_rc1(self):
-        from nestor.roundtrip import RemoveResult, RoundtripStep
-
-        def fake(phase, *, backend, allow_full, assume_yes):
-            return RemoveResult(
-                phase=phase, layers=[phase], steps=[RoundtripStep("supprimer", False)]
-            )
-
-        orig = cli._roundtrip.run_remove
-        cli._roundtrip.run_remove = fake
-        self.addCleanup(setattr, cli._roundtrip, "run_remove", orig)
-        code, out, _ = _capture(
-            ["remove", "-f", _EXAMPLE, "--phase", "monitoring", "--table", "--yes"]
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("INCOMPLÈTE", out)
-
-    def test_storage_opt_in_error_is_usage(self):
-        # run_remove lève RoundtripError (clôture stockage sans --full) → usage (2).
-        def boom(phase, *, backend, allow_full, assume_yes):
-            raise cli._roundtrip.RoundtripError("clôture de stockage — exiger --full")
-
-        orig = cli._roundtrip.run_remove
-        cli._roundtrip.run_remove = boom
-        self.addCleanup(setattr, cli._roundtrip, "run_remove", orig)
-        code, _, err = _capture(["remove", "-f", _EXAMPLE, "--phase", "ceph", "--yes"])
-        self.assertEqual(code, 2)
-        self.assertIn("--full", err)
-
     def test_dry_run_discovers_delete_targets_without_destroying(self):
         # #372 : --dry-run DÉCOUVRE les CIBLES (racines ; le GC cascade les possédés) et
-        # n'appelle JAMAIS run_remove (rien détruit). On stube la sonde owned (façade I/O)
-        # ET les ponts bash de roundtrip (closure/phase_namespaces) que le blindage
-        # subprocess neutralise (→ vide sinon).
-        called = []
-        orig_rm = cli._roundtrip.run_remove
-        cli._roundtrip.run_remove = lambda *a, **k: called.append(a)
-        self.addCleanup(setattr, cli._roundtrip, "run_remove", orig_rm)
+        # ne détruit RIEN. On stube la sonde owned (façade I/O) ET les ponts bash de
+        # roundtrip (closure/phase_namespaces) que le blindage subprocess neutralise
+        # (→ vide sinon).
         orig_cl = cli._roundtrip.closure
         cli._roundtrip.closure = lambda phase: [phase]
         self.addCleanup(setattr, cli._roundtrip, "closure", orig_cl)
@@ -2985,22 +2920,20 @@ class Remove(unittest.TestCase):
         self.addCleanup(setattr, cli, "_discover_owned", orig_owned)
         code, out, _ = _capture(["remove", "--phase", "monitoring", "--dry-run"])
         self.assertEqual(code, 0)
-        self.assertEqual(called, [])  # run_remove JAMAIS appelé → rien détruit
         self.assertIn("dry-run", out)
         # Seule la RACINE (Deployment) est une cible ; le Pod possédé cascade (GC k8s) →
         # il n'apparaît PAS dans les cibles affichées.
         self.assertIn("Deployment/loki", out)
         self.assertNotIn("Pod/loki-0", out)
 
-    def _stub_discovery(self, namespaces, owned, *, nodeside=False):
+    def _stub_discovery(self, namespaces, owned):
         # neutralise les ponts bash de roundtrip + la sonde owned (façade I/O) pour un
-        # chemin découverte testable sans cluster. closure = la phase seule ; pas de stockage ;
-        # node-side paramétrable (route le défaut). _delete_namespace stubé (pas de kubectl).
+        # chemin découverte testable sans cluster. closure = la phase seule ; pas de stockage.
+        # _delete_namespace stubé (pas de kubectl).
         for name, val in (
             ("closure", lambda phase: [phase]),
             ("phase_namespaces", lambda phase: namespaces),
             ("involves_storage", lambda phase: False),
-            ("closure_has_nodeside", lambda phase: nodeside),
         ):
             orig = getattr(cli._roundtrip, name)
             setattr(cli._roundtrip, name, val)
@@ -3013,13 +2946,9 @@ class Remove(unittest.TestCase):
         self.addCleanup(setattr, cli, "_lingering_pods", cli._lingering_pods)
         cli._lingering_pods = lambda ns: []  # défaut : aucun pod coincé (sondes sans cluster)
 
-    def test_discover_deletes_roots_only_never_run_remove(self):
-        # --discover supprime les RACINES (le GC cascade les possédés) et n'appelle JAMAIS
-        # le chemin table (run_remove). Le Pod possédé n'est PAS supprimé explicitement.
-        called_table = []
-        orig_rm = cli._roundtrip.run_remove
-        cli._roundtrip.run_remove = lambda *a, **k: called_table.append(a)
-        self.addCleanup(setattr, cli._roundtrip, "run_remove", orig_rm)
+    def test_discover_deletes_roots_only(self):
+        # La découverte supprime les RACINES (le GC cascade les possédés). Le Pod possédé
+        # n'est PAS supprimé explicitement.
         self._stub_discovery(
             ["monitoring"],
             [
@@ -3051,9 +2980,8 @@ class Remove(unittest.TestCase):
         self.addCleanup(setattr, cli, "_probe_resource_stuck", cli._probe_resource_stuck)
         cli._kubectl_delete = lambda k, n, ns, **kw: (deleted.append((k, n)), (True, "supprimé"))[1]
         cli._probe_resource_stuck = lambda k, n, ns: None  # tout est parti
-        code, out, _ = _capture(["remove", "--phase", "monitoring", "--discover", "--yes"])
+        code, out, _ = _capture(["remove", "--phase", "monitoring", "--yes"])
         self.assertEqual(code, 0)
-        self.assertEqual(called_table, [])  # chemin table JAMAIS emprunté
         self.assertEqual(deleted, [("Deployment", "loki")])  # racine seule (ni Pod ni Event)
         self.assertIn("supprimée par découverte", out)
 
@@ -3088,7 +3016,7 @@ class Remove(unittest.TestCase):
         self.addCleanup(setattr, cli, "_probe_resource_stuck", cli._probe_resource_stuck)
         cli._kubectl_delete = fake_delete
         cli._probe_resource_stuck = lambda k, n, ns: None
-        code, out, _ = _capture(["remove", "--phase", "dataops", "--discover", "--yes"])
+        code, out, _ = _capture(["remove", "--phase", "dataops", "--yes"])
         # les DEUX ont été tentées malgré l'échec de la 1re.
         self.assertEqual(sorted(tried), ["a", "b"])
 
@@ -3100,38 +3028,9 @@ class Remove(unittest.TestCase):
         orig_cl = cli._roundtrip.closure
         cli._roundtrip.closure = lambda phase: [phase]
         self.addCleanup(setattr, cli._roundtrip, "closure", orig_cl)
-        code, _, err = _capture(["remove", "--phase", "sc", "--discover", "--yes"])
+        code, _, err = _capture(["remove", "--phase", "sc", "--yes"])
         self.assertEqual(code, 2)
         self.assertIn("--full", err)
-
-    def test_default_routes_to_discovery_when_no_nodeside(self):
-        # ADR 0079 étape A : sans node-side, `remove` (SANS flag) route vers la DÉCOUVERTE,
-        # PAS la table (run_remove jamais appelé). Finalise les ns possédés.
-        called_table = []
-        orig_rm = cli._roundtrip.run_remove
-        cli._roundtrip.run_remove = lambda *a, **k: called_table.append(a)
-        self.addCleanup(setattr, cli._roundtrip, "run_remove", orig_rm)
-        self._stub_discovery(
-            ["dagster"],
-            [
-                {
-                    "kind": "Deployment",
-                    "name": "d",
-                    "uid": "u-d",
-                    "namespace": "dagster",
-                    "ownerReferences": [],
-                }
-            ],
-            nodeside=False,
-        )
-        self.addCleanup(setattr, cli, "_kubectl_delete", cli._kubectl_delete)
-        self.addCleanup(setattr, cli, "_probe_resource_stuck", cli._probe_resource_stuck)
-        cli._kubectl_delete = lambda k, n, ns, **kw: (True, "supprimé")
-        cli._probe_resource_stuck = lambda k, n, ns: None
-        code, out, _ = _capture(["remove", "--phase", "dataops", "--yes"])
-        self.assertEqual(code, 0)
-        self.assertEqual(called_table, [])  # PAS la table
-        self.assertIn("supprimée par découverte", out)
 
     def test_ceph_routes_to_discovery_with_nodeside(self):
         # ADR 0101 : `ceph` (node-side disques) route désormais vers la DÉCOUVERTE — qui
@@ -3172,7 +3071,7 @@ class Remove(unittest.TestCase):
         self.addCleanup(setattr, cli, "_probe_resource_stuck", cli._probe_resource_stuck)
         cli._kubectl_delete = lambda k, n, ns, **kw: (True, "supprimé")
         cli._probe_resource_stuck = lambda k, n, ns: None
-        code, _, _ = _capture(["remove", "--phase", "dataops", "--discover", "--yes"])
+        code, _, _ = _capture(["remove", "--phase", "dataops", "--yes"])
         self.assertEqual(code, 0)
         self.assertEqual(sorted(finalized), ["dagster", "postgres"])
 
@@ -3212,7 +3111,7 @@ class Remove(unittest.TestCase):
 
         cli._kubectl_delete = fake_delete
         cli._probe_resource_stuck = lambda k, n, ns: None
-        code, out, _ = _capture(["remove", "--phase", "dataops", "--discover", "--yes"])
+        code, out, _ = _capture(["remove", "--phase", "dataops", "--yes"])
         self.assertEqual(code, 0)
         # le pod possédé pg-1 a été force-delete (--grace-period=0), pas seulement la racine.
         self.assertIn(("pg-1", True), forced)

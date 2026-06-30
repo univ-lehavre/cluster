@@ -62,10 +62,15 @@ dans les primitives `vm_sh`/`limactl` et `storage/ceph/cleanup.sh`). Verdicts :
    supprimer le `.sh` + `metrology.bats` + le bloc record/cache mort.
 5. **rollback-lib.sh → en dernier, en 2 temps** — (a) migrer `phase_rollback` +
    primitives `kubectl` vers le chemin `remove --discover` Python (le geste
-   node-side ceph passe par la couche nodeside) ; (b) **alors seulement**
-   supprimer la partie pure (déjà dans `graph.py`) + `rollback.bats`. **Preuve
-   banc obligatoire** (k8s sur mono-nœud local-path ; le node-side ceph ne se
-   prouve que sur prod, ADR 0085).
+   node-side ceph passe par la primitive `_node_exec_script` qui POUSSE
+   `storage/ceph/cleanup.sh` — lequel RESTE bash, node-side irréductible) ; (b)
+   **alors seulement** supprimer la partie pure (déjà dans `graph.py`) +
+   `rollback.bats` + l'arm bash. Migrer aussi la destruction de `run_roundtrip`
+   (l'épreuve de réversibilité) vers la découverte. **Preuve banc obligatoire**
+   : le k8s sur mono-nœud local-path, et le **wipe node-side sur un banc Ceph
+   3-VM (installation seule suffit** — on wipe ce que l'installation a posé :
+   monter `ceph.yaml`, `remove ceph --discover`, constater `lsblk`/`sgdisk`
+   vierges + `/var/lib/rook` absent). Pas besoin d'attendre un rebuild prod.
 
 ## Conséquences
 

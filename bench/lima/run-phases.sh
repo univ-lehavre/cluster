@@ -21,7 +21,7 @@
 #   bench/lima/run-phases.sh cni            # pose Cilium (L4 NodePort) + fetch kubeconfig banc
 #   bench/lima/run-phases.sh kubeconfig     # (ré)exporte le kubeconfig banc
 #   bench/lima/run-phases.sh down [vm…]     # détruit les VMs + disques nommés
-#   BANC_JETABLE=1 bench/lima/run-phases.sh rollback <phase>  # défait UNE phase (ns+CRD+node-side) pour la re-tester (ADR 0054) — DESTRUCTIF
+#   (rollback d'UNE phase : porté en Python — `nestor remove <phase>`, ADR 0101)
 #
 # Pré-requis poste : limactl (Lima ≥ 2.0), ansible-playbook, kubectl, python3.
 #
@@ -36,12 +36,10 @@ export EXPECTED_TARGET_KIND=bench
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=bench/lima/lib.sh
 . "${HERE}/lib.sh"
-# Primitives + fonctions pures du ROLLBACK PAR PHASE (ADR 0054, #274). rollback-lib.sh
-# embarque ses propres classify_* (pas de source health-classify.sh : ses fonctions ne
-# servaient qu'au filet bash retiré — montage des couches en Python. metrology.sh est
-# lui aussi retiré, ADR 0101 : sa logique pure vit dans nestor/history.py).
-# shellcheck source=bench/lima/rollback-lib.sh
-. "${HERE}/rollback-lib.sh"
+# Le ROLLBACK est porté en Python (ADR 0101) : la destruction d'une couche passe par
+# `nestor remove --discover` (k8s par découverte + node-side Ceph via _node_exec_script) —
+# rollback-lib.sh + metrology.sh sont retirés, leur logique pure vit dans nestor/ (graph.py,
+# history.py). run-phases.sh ne garde que le MONTAGE des phases (bash node-side légitime).
 
 # ── Table des nœuds (noms génériques — ADR 0023) ─────────────────────────────
 # "nom:rôle". Défaut `multi-node-3` : 1 control-plane + 2 workers (quorum mon Ceph
@@ -317,9 +315,8 @@ case "${1:-}" in
     # hyperconvergé). Conservé le temps de la transition (rappel ha-3cp). Préférer `inventory`.
     ha-inventory) [ -n "${2:-}" ] || die "usage : ha-inventory <cp1,cp2,…>"; mkdir -p "${WORKDIR}"; write_inventory "${INVENTORY}" "$(echo "$2" | tr ',' ' ')" "" ;;
     down) phase_down "${@:2}" ;;
-    # Rollback d'UNE phase (ADR 0054, #274) : défait ce que `<phase>` a monté.
-    # BANC_JETABLE=1 requis (destructif total). Ex : BANC_JETABLE=1 ... rollback ceph
-    rollback) [ -n "${2:-}" ] || die "usage : rollback <phase> (ceph|sc|datalake|metrics-server|monitoring|dataops|gitops|gitops-seed)"; phase_rollback "$2" ;;
+    # Rollback d'UNE phase : porté en Python (ADR 0101). Utiliser `nestor remove <phase>`
+    # (destruction par découverte : k8s + node-side Ceph). L'arm bash `rollback` est retiré.
     *)
         grep -E '^#( |$)' "$0" | sed -E 's/^# ?//' | head -40
         exit 2

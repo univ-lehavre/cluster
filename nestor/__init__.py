@@ -79,9 +79,7 @@ from nestor.prod_target import (
 from nestor.profile import ceph_wipe_env, consumes_storage, derive_run_params
 from nestor.refresh import RefreshState, classify_refresh
 from nestor.roundtrip import (
-    RemoveResult,
     RoundtripResult,
-    run_remove,
     run_roundtrip,
 )
 from nestor.scaffold import (
@@ -156,8 +154,6 @@ __all__ = [
     "format_metrics",
     "RoundtripResult",
     "run_roundtrip",
-    "RemoveResult",
-    "run_remove",
     "RefreshState",
     "classify_refresh",
     "InitPlan",
