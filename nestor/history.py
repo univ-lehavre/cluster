@@ -17,12 +17,14 @@
 Honnêteté des Runs (ADR 0023/0052) : un run `fail` n'est PAS un trou — l'historique
 machine ne porte que les succès (un run complet en émet une entrée), les échecs
 sont consignés en prose dans `bench/lima/RESULTS.md`. Ce module ne FABRIQUE ni ne
-RÉÉCRIT aucun run ; l'append reste l'apanage de `metro_record_run` (bash, en fin
-de run from-scratch). Aucune métrique n'est produite ici (P6) — seules celles déjà
-consignées sont relues.
+RÉÉCRIT aucun run ; l'append d'une entrée reste un geste du BANC (historiquement
+`metro_record_run` ; ce bash a été retiré, ADR 0101 — l'auto-consignation Python
+est un STUB à câbler, cf. `record` de `path.py` ; aujourd'hui l'append se fait par
+commit `chore(bench)`). Aucune métrique n'est produite ici (P6) — seules celles
+déjà consignées sont relues.
 
-Pur (hors `load_runs` qui lit un fichier passé en argument). Testé côte à côte avec
-les bats de `metrology.sh` (parité Python↔bash, tests/test_history.py).
+Pur (hors `load_runs` qui lit un fichier passé en argument). La parité Python↔bash
+des verdicts de fraîcheur (ex-`metrology.sh`) est figée par tests/test_history.py.
 """
 
 from __future__ import annotations
