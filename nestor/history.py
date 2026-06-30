@@ -222,3 +222,43 @@ def verdict_for_run(run: Run | None, target: str | None, now_epoch: int) -> tupl
     compare = f"≤ {seuil} j" if etat == "frais" else f"> {seuil} j"
     suffixe = "" if etat == "frais" else " → ce chemin n'a pas de run frais"
     return etat, f"{label} : {etat} (run {run.date}, {detail} {compare}){suffixe}"
+
+
+# ── Verdict de fraîcheur BLOQUANT par chemin (ex-check-freshness.sh, ADR 0042/0045) ──
+# Chemins surveillés par le cron de fraîcheur : OBLIGATOIRES (un périmé → échec
+# global) et OPTIONNELS (warn-only). Mêmes chemins/cadences que check-freshness.sh.
+FRESHNESS_OBLIGATOIRES = ("atlas", "storage-real")
+FRESHNESS_OPTIONNELS = ("cluster-dataops",)
+
+
+def date_from_log_name(filename: str) -> str | None:
+    """Date ISO (`YYYY-MM-DDT00:00:00Z`) extraite d'un nom de log `runs/<date>-*.log`,
+    ou None si le préfixe n'est pas une date. Pur — repli ADR 0042 §4 quand
+    l'historique YAML est absent (le mtime du checkout CI n'est pas fiable)."""
+    base = os.path.basename(filename)
+    if len(base) < 10:
+        return None
+    prefix = base[:10]
+    try:
+        dt.date.fromisoformat(prefix)
+    except ValueError:
+        return None
+    return f"{prefix}T00:00:00Z"
+
+
+def path_freshness(run: Run | None, target: str, now_epoch: int) -> tuple[str, str]:
+    """(état, ligne de rapport) de fraîcheur d'UN chemin surveillé — parité
+    `evaluer_chemin` de check-freshness.sh. État ∈ {frais, perime, absent}.
+
+    Pur : l'appelant fournit le `run` (dernier du chemin) déjà sélectionné. La ligne
+    de rapport reprend le format à puces du script (✓/✗/•) pour la sortie CI."""
+    seuil = seuil_for_target(target)
+    if run is None or not run.date:
+        return "absent", f"  • {target} : aucun run consigné (seuil {seuil} j)"
+    epoch = _parse_iso_epoch(run.date)
+    if epoch is None:
+        return "absent", f"  • {target} : date illisible ({run.date!r})"
+    age = age_days(epoch, now_epoch)
+    if freshness_verdict(age, seuil) == "frais":
+        return "frais", f"  ✓ {target} : {age} j ≤ {seuil} j ({run.date})"
+    return "perime", f"  ✗ {target} : {age} j > {seuil} j — PÉRIMÉ ({run.date})"
