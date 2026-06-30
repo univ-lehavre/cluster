@@ -121,6 +121,7 @@ from nestor import (  # noqa: E402
     render_lima_inventory,
     render_prod_inventory,
 )
+from nestor.model import topology_from_dict  # noqa: E402
 
 _EXAMPLE = os.path.join(_ROOT, "topologies", "socle.example.yaml")
 
@@ -3209,7 +3210,19 @@ class RollbackNodeSideCeph(unittest.TestCase):
     """ADR 0101 : wipe node-side Ceph (ex-phase_rollback) — boucle nœuds, lance cleanup.sh."""
 
     def _ceph_topo(self):
-        return load_topology(os.path.join(_ROOT, "topologies", "ceph.yaml"))
+        # Topo ceph 3-nœuds EN MÉMOIRE (pas topologies/ceph.yaml, gitignoré → absent en CI).
+        return topology_from_dict(
+            {
+                "catalog": {"topology": "multi-node-3"},
+                "nodes": [
+                    {"name": "node1", "roles": ["control", "worker", "storage"]},
+                    {"name": "node2", "roles": ["worker", "storage"]},
+                    {"name": "node3", "roles": ["worker", "storage"]},
+                ],
+                "storage": {"backend": "ceph"},
+                "target_kind": "bench",
+            }
+        )
 
     def test_skips_when_phase_has_no_nodeside(self):
         # une phase SANS node-side (gitops) → aucun nœud touché, liste d'échecs vide.
