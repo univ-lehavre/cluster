@@ -171,6 +171,35 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:shell
 
+  # Filet de PORTABILITÉ macOS↔Linux (ADR 0100). Le poste de contrôle est macOS
+  # (Apple Silicon, arm64) ou Linux ; tout le reste de la CI tourne sur Ubuntu
+  # (x86 / GNU coreutils), donc une dérive BSD/GNU (un `date -d` sans fallback, un
+  # `mapfile` non gardé pour le bash 3.2…) n'est jamais détectée avant le poste du
+  # mainteneur. Ce job rejoue les tests shell (bats) ET Python sur macOS arm64 —
+  # un seul runner couvre l'axe OS (BSD) ET l'axe architecture (arm64). Non
+  # bloquant n'est PAS souhaité : on veut casser tôt sur une régression de
+  # portabilité réelle.
+  portability-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: shellcheck (Homebrew, présent sur le runner macOS)
+        run: pnpm lint:shell
+      - name: tests shell (bats) sur macOS arm64
+        run: pnpm test:shell
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: tests unittest sur macOS arm64
+        run: uv run python -m unittest discover -s tests
+
   # Lint Markdown (structure) — config tolérante (.markdownlint-cli2.yaml) :
   # cible les vrais défauts, pas le style typographique géré par prettier.
   markdownlint:

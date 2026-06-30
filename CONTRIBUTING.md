@@ -95,11 +95,28 @@ Règles :
   corriger l'index + toutes les références.
 - Détail et index : [`docs/plans/README.md`](/cluster/docs/plans/).
 
+## Système d'exploitation supporté
+
+Le poste de contribution / contrôle est **macOS** (Apple Silicon, arm64) **ou
+Linux** ; les nœuds (banc Lima, prod) sont **Linux Debian**.
+[ADR 0100](/cluster/docs/decisions/0100-perimetre-os-poste-et-noeuds/) acte ce
+périmètre :
+
+- **macOS / Linux** : supportés (poste de contrôle + outillage de validation).
+- **Windows natif** : **non supporté** (la chaîne de lint/hooks suppose un shell
+  POSIX — `find`/`xargs`, `bats`, `kubeconform`). Utiliser **WSL2**.
+- **WSL2** (Ubuntu sur Windows) : supporté, **à condition** de cloner dans le
+  système de fichiers **Linux** de la distribution (`~/…`), **pas** côté Windows
+  (`/mnt/c/…`) — sinon les fins de ligne CRLF cassent les scripts.
+
 ## Installation des outils
 
 ```bash
 pnpm install                                         # installe lefthook + prettier + commitlint
+# macOS :
 brew install yamllint shellcheck kubeconform ansible-lint
+# Linux (Debian/Ubuntu) : yamllint/shellcheck/ansible-lint via apt ; kubeconform
+# par binaire (github.com/yannh/kubeconform/releases), comme en CI.
 ```
 
 `pnpm install` exécute automatiquement `lefthook install` qui pose les hooks git
