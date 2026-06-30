@@ -49,7 +49,13 @@ dans les primitives `vm_sh`/`limactl` et `storage/ceph/cleanup.sh`). Verdicts :
 2. **access.sh → migrer** (`nestor/access.py`) — le candidat le plus naturel :
    remplace le double subprocess de `cmd_access` par du Python natif, banc-only,
    testable par stub. Corrige au passage la dette des flags morts
-   (`--print-hosts`/`--no-hosts`).
+   (`--print-hosts`/`--no-hosts`) — vestiges du bloc `/etc/hosts` + Gateway L7
+   de l'ADR 0048, **déjà supplanté par l'exposition L4 NodePort**
+   ([0092](0092-exposition-hostport-l4.md)) : au banc un `kubectl port-forward`
+   par UI exposée (réseau Lima isolé), en prod l'accès direct
+   `http://<IP-nœud>:<nodePort>`. La **décision** ADR 0048 (accès dev en une
+   commande : URLs + secrets + `.env`) reste valide ; seul son **mécanisme**
+   (forward SSH / `*.cluster.lan`) est remplacé.
 3. **check-freshness.sh → migrer** — pur consommateur de `history.py`, recâble 1
    ligne de workflow.
 4. **metrology.sh → après (3)** — quand le dernier `source` vivant disparaît :

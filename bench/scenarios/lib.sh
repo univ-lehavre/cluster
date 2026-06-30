@@ -15,8 +15,7 @@ log() { printf '\033[36m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
 
 # read_lines VAR < flux → peuple le tableau nommé VAR (une entrée par ligne).
 # Substitut portable de `mapfile`/`readarray`, absents du bash 3.2 de macOS — un
-# scénario peut tourner depuis le poste de contrôle (ADR 0100). Jumeau de
-# `read_lines()` dans bench/lima/access.sh (même politique de portabilité).
+# scénario peut tourner depuis le poste de contrôle (ADR 0100).
 read_lines() {
     local __name=$1 __line
     eval "${__name}=()"
