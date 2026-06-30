@@ -11,6 +11,52 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.46.0](https://github.com/univ-lehavre/cluster/compare/v2.45.0...v2.46.0) (2026-06-30)
+
+
+### Features
+
+* **epreuves:** marque 4 scénarios caducs (terrain Vagrant/ha-3cp abandonné, ADR 0097) ([5c500a9](https://github.com/univ-lehavre/cluster/commit/5c500a93bc8e4673a1925a194d6775b4dbc5ebac))
+* **nestor:** bascule le défaut de cmd_up sur --engine=python (ADR 0097) ([ebf5d0a](https://github.com/univ-lehavre/cluster/commit/ebf5d0addfb03f8374843e262a134f4c1acbd7fa))
+* **nestor:** câble le hook e2e dataops (OpenLineage→Marquez) + build émetteur au banc ([ed996f8](https://github.com/univ-lehavre/cluster/commit/ed996f8f06915c4ad4a039ddaba66c9785715e26))
+* **nestor:** câble le seed GitOps + fix crash playbook=None (gitops-seed) ([91c212f](https://github.com/univ-lehavre/cluster/commit/91c212f37ec959bc11bddf1e2441977508f88560))
+* **nestor:** câble push-code-location — seed gitops complet (7/7 steps) ([a0bc7b2](https://github.com/univ-lehavre/cluster/commit/a0bc7b2fdcf97d317fae2acb7bf82a4e4ec2e9a1))
+* **nestor:** ménage `nestor -h` — ajoute kubectl, renomme destroy → down ([345f754](https://github.com/univ-lehavre/cluster/commit/345f75440e9114773a03d1e9e74fe4781b4cda58))
+* **nestor:** nestor kubectl &lt;args&gt; — kubectl sur la cible de la stack active ([058aa64](https://github.com/univ-lehavre/cluster/commit/058aa645d18261cafddec6ad72089f5bcf98ca53))
+* **nestor:** refonte moteur Python — lots 6 à 9 (ADR 0097 abouti, prouvé au banc) ([fb0dc20](https://github.com/univ-lehavre/cluster/commit/fb0dc2069d05097ca452187e9855559fc1a6f484))
+
+
+### Bug Fixes
+
+* **k8s-cri:** drop-in containerd purge les sockets shim au démarrage (Yunix [#513](https://github.com/univ-lehavre/cluster/issues/513)) ([73f3bfd](https://github.com/univ-lehavre/cluster/commit/73f3bfdadc979f8d0d0ac9bc17f8450287156689))
+* **monitoring:** idempotence des CRDs — changed_when dérivé de kubectl apply (ADR 0051) ([7bf2498](https://github.com/univ-lehavre/cluster/commit/7bf24985770d55da2c6fdc6f2ccbfe0f22e83624))
+* **nestor:** --request-timeout avant les args kubectl (cassait kubectl exec du seed) ([b288a62](https://github.com/univ-lehavre/cluster/commit/b288a62d9226b5c7a6f2a7c92fda68b360487555))
+* **nestor:** commente l'except non-JSON de _seed_resp_has_commit (CodeQL py/empty-except) ([654f290](https://github.com/univ-lehavre/cluster/commit/654f2902b4c32c4ec3ead7564d7a29c478527295))
+* **nestor:** gate gitea/argocd Ready avant le seed (parité run-phases.sh) ([83c520c](https://github.com/univ-lehavre/cluster/commit/83c520c5cbf9ec602d1b255ac63b9c970c7f4b45))
+* **nestor:** le play utilise le kubeconfig banc rapatrié (127.0.0.1), pas l'env vide ([4db9d70](https://github.com/univ-lehavre/cluster/commit/4db9d702728f07dbe81235f3cd252404174acd90))
+* **nestor:** montage en 1 passage + gate (parité bash, pas de faux changed sur builds mutables) ([4ea58dd](https://github.com/univ-lehavre/cluster/commit/4ea58dda10eca21e50bb4281a0da5c6dc722ca03))
+* **nestor:** seed admin distingue 'existe déjà' d'un vrai échec (ADR 0046) ([0486a3c](https://github.com/univ-lehavre/cluster/commit/0486a3c3a7943c5e72d6207db338fa99719e0a36))
+* **nestor:** up from-scratch d'un banc lima passe la garde d'isolation (ADR 0053) ([f390a59](https://github.com/univ-lehavre/cluster/commit/f390a5936eb8ffd7cb84192b499d23c03a433e0d))
+* **platform:** épingle nerdctl-full 2.2.2 (containerd 2.2.1) — corrige le bug Yunix ([#513](https://github.com/univ-lehavre/cluster/issues/513)) ([8ce06ce](https://github.com/univ-lehavre/cluster/commit/8ce06ce5aae077fd2bd532aed95a98b3030dc526))
+
+
+### Refactor
+
+* **bench:** retire le bash redondant de run-phases.sh (-652 lignes) ([0b032b0](https://github.com/univ-lehavre/cluster/commit/0b032b0d228061a6e5cac7ffe6c9e891acb6dff7))
+* **nestor:** abandonne la topologie ha-3cp (ADR 0055 superseded) ([fd04ee0](https://github.com/univ-lehavre/cluster/commit/fd04ee08903b552820cbb4344850a396acec2cb8))
+* **nestor:** le moteur Python est le seul moteur de montage (ADR 0097 abouti) ([ee1afc3](https://github.com/univ-lehavre/cluster/commit/ee1afc34033af232f5adb81dd2cab6b2ec9988e6))
+* **nestor:** retire le warning preview 'shell sans KUBECONFIG' (obsolète) ([0f9dfc0](https://github.com/univ-lehavre/cluster/commit/0f9dfc04b033a0987af63009e2d80df0ab724c75))
+
+
+### Documentation
+
+* **drifts:** consigne L59-L72 — runs --engine=python + drifts antérieurs oubliés ([63efabc](https://github.com/univ-lehavre/cluster/commit/63efabcbac51a505a0fd8d33f9308624bd423a23))
+* **drifts:** le drift yunix L66 est corrigé — nerdctl-full 2.2.2 (containerd 2.2.1) ([6d88b19](https://github.com/univ-lehavre/cluster/commit/6d88b194db597a0d6e11ca7c3c04a621c1d5ad53))
+* **drifts:** régénère la page registre-drifts.md (L59-L72 ajoutés) ([d198a54](https://github.com/univ-lehavre/cluster/commit/d198a5448705184d27bb5c7f9184d886df71ad68))
+* **drifts:** relie le drift yunix L66 à l'issue [#513](https://github.com/univ-lehavre/cluster/issues/513) (fix containerd durable) ([0b42a23](https://github.com/univ-lehavre/cluster/commit/0b42a233d058f41698b188fc3b5740d3687a4222))
+* **readme:** régénère le bloc STATS — 73 drifts (L59-L72 ajoutés) ([0522897](https://github.com/univ-lehavre/cluster/commit/0522897d0a7e2bc08faa5c60c7bed1d325536698))
+* **readme:** régénère STATS — ha-3cp abandonné (ADR superseded, plan abandonné) ([ba4b6be](https://github.com/univ-lehavre/cluster/commit/ba4b6bedf15cd37f1b359d983562df4b5b64f8d5))
+
 ## [2.45.0](https://github.com/univ-lehavre/cluster/compare/v2.44.0...v2.45.0) (2026-06-26)
 
 
