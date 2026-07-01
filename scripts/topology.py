@@ -207,6 +207,31 @@ def _bench_kubeconfig(declared: str | None = None) -> str:
     return os.devnull  # vide : kubectl échoue → "pas de banc", jamais la prod
 
 
+def _operator_kubeconfig() -> str | None:
+    """Le `KUBECONFIG` de l'ENV s'il est RÉELLEMENT EXPLOITABLE, sinon `None`.
+
+    Un `KUBECONFIG` exporté matérialise une intention opérateur PRIORITAIRE (ADR 0090) —
+    MAIS seulement s'il pointe un kubeconfig utilisable. `/dev/null` (garde ADR 0053 :
+    `nestor stack select` sur un banc absent pose `export KUBECONFIG=/dev/null`, souvent
+    `eval`é dans le shell), un fichier VIDE ou INEXISTANT sont des valeurs « poison » :
+    truthy pour un `or`, mais inutilisables pour un play (le module k8s d'Ansible lève
+    « Invalid kube-config. /dev/null file is empty »). On les traite comme ABSENTS → le
+    `or` du site d'appel retombe sur le kubeconfig banc rapatrié (`ctx.kubeconfig_local`),
+    au lieu de laisser `/dev/null` faire échouer une phase alors que le banc est joignable.
+
+    Rend le chemin uniquement s'il existe ET n'est pas vide (donc jamais `/dev/null`,
+    qui a une taille de 0). Sinon `None` (intention non exploitable → défaut du site)."""
+    kc = os.environ.get("KUBECONFIG")
+    if not kc:
+        return None
+    try:
+        if os.path.getsize(kc) > 0:  # exclut /dev/null (0), fichier vide, inexistant (OSError)
+            return kc
+    except OSError:
+        pass
+    return None
+
+
 def _kubectl_env(declared: str | None = None) -> dict[str, str]:
     """Env pour un appel kubectl : force KUBECONFIG vers la cible sûre
     (`_bench_kubeconfig`) — jamais le ~/.kube/config implicite de la prod. `declared`
@@ -3446,14 +3471,16 @@ def _run_path_engine(
             # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
             # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
             # passe le kubeconfig du contexte, qui existe dès que bootstrap l'a rapatrié. Un
-            # KUBECONFIG opérateur explicite (banc déjà monté) reste prioritaire.
+            # KUBECONFIG opérateur EXPLOITABLE (banc déjà monté) reste prioritaire — mais
+            # `_operator_kubeconfig` écarte `/dev/null`/vide (garde 0053 `eval`é dans le shell),
+            # sinon le play ceph héritait de `/dev/null` et levait « file is empty ».
             result = _runner.launch_phase(
                 playbook,
                 extravars,
                 private_data_dir,
                 ctx.inventory,
                 ansible_config=ansible_cfg,
-                kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
+                kubeconfig=_operator_kubeconfig() or ctx.kubeconfig_local,
                 target_kind=topo.target_kind,
             )
             # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy). On ne les joue
@@ -3553,7 +3580,9 @@ def _run_path_engine(
                     ansible_config=ansible_cfg,
                     # Cohérence avec le callback `launch` : en from-scratch KUBECONFIG est vide au
                     # démarrage → repli sur le kubeconfig banc rapatrié (ctx.kubeconfig_local).
-                    kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
+                    # `_operator_kubeconfig` écarte `/dev/null`/vide (garde 0053) pour ne pas
+                    # hériter d'un kubeconfig poison exporté dans le shell.
+                    kubeconfig=_operator_kubeconfig() or ctx.kubeconfig_local,
                     target_kind=topo.target_kind,
                 )
 

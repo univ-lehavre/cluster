@@ -589,6 +589,49 @@ class Kubectl(unittest.TestCase):
         self.assertNotIn(".kubeconfigs/banc.config", seen["kc"])
 
 
+class OperatorKubeconfig(unittest.TestCase):
+    """`_operator_kubeconfig` : le KUBECONFIG de l'env n'est retenu que s'il est EXPLOITABLE.
+
+    Régression (vécue au banc, phase ceph) : un `KUBECONFIG=/dev/null` `eval`é dans le shell
+    par `nestor stack select` sur un banc absent (garde ADR 0053) était propagé tel quel aux
+    phases Ansible via `os.environ.get("KUBECONFIG") or ctx.kubeconfig_local` — `/dev/null`
+    étant truthy, il gagnait le `or` et le module k8s levait « Invalid kube-config. /dev/null
+    file is empty », alors que le banc était monté et joignable. Le helper écarte `/dev/null`,
+    un fichier vide et un fichier inexistant (valeurs poison) → `None` → le site retombe sur
+    le kubeconfig banc rapatrié."""
+
+    def _run_with_env(self, kc_value):
+        env = {k: v for k, v in os.environ.items() if k != "KUBECONFIG"}
+        if kc_value is not None:
+            env["KUBECONFIG"] = kc_value
+        with mock.patch.dict(os.environ, env, clear=True):
+            return cli._operator_kubeconfig()
+
+    def test_devnull_is_treated_as_absent(self):
+        # /dev/null a une taille de 0 → poison, jamais retenu.
+        self.assertIsNone(self._run_with_env(os.devnull))
+
+    def test_empty_file_is_treated_as_absent(self):
+        fd, path = tempfile.mkstemp(suffix=".config")
+        os.close(fd)  # fichier de taille 0
+        self.addCleanup(os.unlink, path)
+        self.assertIsNone(self._run_with_env(path))
+
+    def test_missing_file_is_treated_as_absent(self):
+        self.assertIsNone(self._run_with_env("/n/existe/pas/kube.config"))
+
+    def test_unset_env_returns_none(self):
+        self.assertIsNone(self._run_with_env(None))
+
+    def test_usable_kubeconfig_is_returned(self):
+        # un fichier non vide (kubeconfig réel exporté par l'opérateur) est retenu tel quel.
+        fd, path = tempfile.mkstemp(suffix=".config")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+        self.addCleanup(os.unlink, path)
+        self.assertEqual(self._run_with_env(path), path)
+
+
 class Ansible(unittest.TestCase):
     """`nestor ansible <playbook>` : playbook sur la stack active, inventaire DÉRIVÉ de la
     topologie (ADR 0098 — `hosts.yaml` supprimé, plus de fichier inventaire pointable)."""
