@@ -1,24 +1,24 @@
 # code: language=yaml
 #
-# topology.yaml — EXEMPLE d'une VM publique mono-NIC exposée en `gateway`
-# (hostNetwork), valeurs génériques (ADR 0023).
+# topologies/gateway-public.example.yaml — EXEMPLE d'une VM publique mono-NIC exposée
+# en `gateway` (hostNetwork), valeurs génériques (ADR 0023). Topologie-vitrine de
+# l'exposition internet (ADR 0099 : terrain cloud + exposition gateway).
 #
-# `exposition.mode: gateway` est le mode d'exposition UNIQUE (ADR 0020/0071) : la
-# bordure L7 Cilium (Gateway API) est exposée en **hostNetwork** — l'Envoy du
-# Gateway bind les **ports standards 80/443 directement sur l'IP du nœud**
-# (`gatewayAPI.hostNetwork.enabled`, routage eBPF par `kubeProxyReplacement`, déjà
-# actif), y compris les ports privilégiés < 1024. Le service répond sur
-# `IP_publique:443` **sans plage LB-IPAM à réserver ni interface L2 annonçable**
-# (le coût d'entrée historique du Gateway).
+# ⚠️ `gateway` n'est PLUS le mode par défaut : depuis l'ADR 0092, le défaut canonique est
+# `nodeport` (L4 sur le port du nœud, zéro DNS/LB-IPAM, reproductible partout). `gateway`
+# est un mode LEGACY à DÉCLARER explicitement (rétrocompat) — c'est ce que fait ce fichier,
+# pour le cas d'une VM publique cloud qui veut la bordure L7 sur 80/443.
 #
-# Vs un simple `hostPort` sur le pod : on GARDE ici la bordure L7 — routage
-# host/path (`HTTPRoute`), multiplexage de plusieurs services sur 443 par hostname
-# (SNI), terminaison TLS par cert-manager (ADR 0021). `hostport` et `lb-ipam` sont
-# des alias historiques de `gateway` (ADR 0071) — ce fichier emploie le nom
-# canonique.
+# `exposition.mode: gateway` : la bordure L7 Cilium (Gateway API) est exposée en
+# **hostNetwork** — l'Envoy bind les **ports standards 80/443 directement sur l'IP du nœud**
+# (`gatewayAPI.hostNetwork.enabled`, routage eBPF par `kubeProxyReplacement`), y compris les
+# ports privilégiés < 1024. Le service répond sur `IP_publique:443` **sans plage LB-IPAM à
+# réserver ni interface L2 annonçable**.
 #
-# Le chemin LB-IPAM + L2 (IP virtuelle annoncée sur le LAN) reste une OPTION de prod
-# quand l'admin réseau fournit une plage dédiée ; il n'est plus le défaut.
+# Ce que `gateway` apporte vs un simple `nodeport`/`hostPort` : la bordure L7 — routage
+# host/path (`HTTPRoute`), multiplexage de plusieurs services sur 443 par hostname (SNI),
+# terminaison TLS par cert-manager (ADR 0021). Alias historiques : `hostport` → `nodeport`,
+# `lb-ipam` → `gateway` (ADR 0071/0092) ; ce fichier emploie le nom canonique `gateway`.
 #
 # Ce fichier est VERSIONNÉ (exemple générique) ; le `topology.yaml` réel (symlink
 # d'activation) reste gitignoré.
@@ -29,9 +29,9 @@ catalog:
   topology: edge-public # nom de la stack
   status: cible # buildé | cible | spike
 
-# ─── exposition : Gateway en hostNetwork, 80/443 sur l'IP du nœud (ADR 0020/0071)
+# ─── exposition : Gateway L7 en hostNetwork, 80/443 sur l'IP du nœud (ADR 0092, legacy)
 exposition:
-  mode: gateway # gateway | none (alias historiques lb-ipam, hostport → gateway)
+  mode: gateway # nodeport (défaut) | gateway (legacy) | none. Alias : lb-ipam→gateway, hostport→nodeport
 
 # ─── layers : les couches voulues (ADR 0069). Ici un point d'entrée web simple.
 layers: [gitops]

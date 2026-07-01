@@ -42,6 +42,26 @@ import yaml
 SEUILS_DEFAUT = {"atlas": 7, "storage-real": 30, "cluster-dataops": 90}
 SEUIL_GLOBAL_DEFAUT = 7
 
+# Synonymes d'identité de stack (ADR 0102 volet B) : le `stack_id` est DÉSORMAIS le nom de
+# FICHIER de la topologie (`ceph`), mais des runs ANTÉRIEURS au renommage ont été keyés par
+# la CLASSE de topo alors portée par `catalog.topology` (`multi-node-3`). Réconciliation en
+# LECTURE UNIQUEMENT : on NE réécrit JAMAIS runs-history.yaml (honnêteté des Runs, ADR 0052) ;
+# on élargit la CORRESPONDANCE de lecture. Table FERMÉE et explicite (pas de dérivation floue) :
+# {stack_id: (anciennes clés d'historique équivalentes, …)}. `ceph.example.yaml`/`ceph.yaml`
+# portent `topology: multi-node-3` → les 9 runs `multi-node-3` restent visibles pour `ceph`.
+# Les stacks dont le nom de fichier == l'ancien `catalog.topology` (banc, dirqual) n'ont pas
+# besoin d'alias (correspondance directe).
+STACK_ID_ALIASES: dict[str, tuple[str, ...]] = {"ceph": ("multi-node-3",)}
+
+
+def _matches_stack(run_topologie: str | None, stack: str) -> bool:
+    """Un run appartient-il à la stack `stack` ? Match sur le `stack_id` (nom de fichier)
+    OU sur l'une de ses clés d'historique héritées (`STACK_ID_ALIASES`, ADR 0102 volet B).
+    Réconcilie les runs consignés avant le renommage SANS réécrire l'historique (ADR 0052)."""
+    if run_topologie is None:
+        return False
+    return run_topologie == stack or run_topologie in STACK_ID_ALIASES.get(stack, ())
+
 
 @dataclass
 class Run:
@@ -183,16 +203,19 @@ def last_run_for_target(runs: list[Run], target: str) -> Run | None:
 
 
 def last_run_for_topology(runs: list[Run], topologie: str) -> Run | None:
-    """Dernier run de CETTE stack (match exact sur `topologie`). None si aucun.
+    """Dernier run de CETTE stack (match sur le `stack_id` OU ses alias d'historique). None
+    si aucun.
 
-    Contrairement à `last_run_for_target` (match par chemin nommé), on match sur le
-    NOM de la stack — deux stacks dérivant le même chemin ne partagent PAS leur
-    verdict. Aucune retombée sur le dernier run global : une stack jamais montée
-    (aucun run à son nom) renvoie None (→ tout est à jouer), pas le run d'une autre
-    topologie. C'est ce que `preview` exige pour ne pas mentir (status: cible)."""
+    Contrairement à `last_run_for_target` (match par chemin nommé), on match sur l'IDENTITÉ
+    de la stack (`stack_id` = nom de fichier, ADR 0102 volet B) — deux stacks dérivant le
+    même chemin ne partagent PAS leur verdict. `_matches_stack` réconcilie les runs keyés par
+    l'ancien `catalog.topology` via `STACK_ID_ALIASES` (jamais de réécriture, ADR 0052). Aucune
+    retombée sur le dernier run global : une stack jamais montée (aucun run à son nom ni alias)
+    renvoie None (→ tout est à jouer), pas le run d'une autre topologie. C'est ce que `preview`
+    exige pour ne pas mentir (status: cible)."""
     match = None
     for run in runs:
-        if run.topologie == topologie and run.date:
+        if _matches_stack(run.topologie, topologie) and run.date:
             match = run  # fichier chronologique → le dernier retenu est le plus récent
     return match
 

@@ -53,9 +53,13 @@ généralisation du pattern déjà livré dans
 1. atlas fournit le code + un `code-location.manifest.yaml` (déclaration
    montante,
    [ADR 0094 §3](/cluster/docs/decisions/0094-frontiere-deploiement-applicatif/)).
-2. cluster **lit et valide** ce manifeste (validateur, cf. plus bas) : version
-   de contrat connue, dépendances présentes (base, secret, OBC, migration),
-   capacité suffisante.
+2. cluster **lit et valide** ce manifeste — validateur
+   [`scripts/check_code_location_manifest.py`](https://github.com/univ-lehavre/cluster/blob/main/scripts/check_code_location_manifest.py)
+   (`pnpm lint:code-location`, bloquant en CI) : `contractVersion` connue,
+   dépendances présentes (base, secret, storageClass d'OBC) vérifiées
+   statiquement contre le contrat + les manifestes versionnés ; migration et
+   dépendances inter-apps signalées (non vérifiables depuis le seul dépôt
+   cluster). Capacité réelle confrontée au seed.
 3. cluster **rend** la déclaration d'`Application` à partir du patron
    `apps/<app>.example.yaml` en injectant le `repoURL` atlas réel et le
    `targetRevision` (= champ `revision` du manifeste, le SHA git).
@@ -140,33 +144,45 @@ On **isole** donc ce privilège :
 Moindre privilège, frontière nette — cohérent avec le rôle de garde-fou
 multi-tenant de l'AppProject `atlas`.
 
-### Validation du `code-location.manifest.yaml` — intention (non codée)
+### Validation du `code-location.manifest.yaml` — CODÉE (statique) + capacité au seed
 
-cluster doit **LIRE** le manifeste de déclaration montant atlas
+cluster **LIT** le manifeste de déclaration montant atlas
 ([ADR 0094 §3](/cluster/docs/decisions/0094-frontiere-deploiement-applicatif/))
 **avant** de rendre/pousser la déclaration d'`Application`. Le validateur
-(futur, langage selon
-[ADR 0049](/cluster/docs/decisions/0049-doctrine-choix-outil-par-action/) —
-Python probable : parse YAML + graphe de dépendances) doit, **échouer
-bruyamment** si :
+[`scripts/check_code_location_manifest.py`](https://github.com/univ-lehavre/cluster/blob/main/scripts/check_code_location_manifest.py)
+(Python —
+[ADR 0049](/cluster/docs/decisions/0049-doctrine-choix-outil-par-action/), «
+logique non triviale » : parse YAML + jointures contrat↔manifeste ; testé par
+[`tests/test_check_code_location_manifest.py`](https://github.com/univ-lehavre/cluster/blob/main/tests/test_check_code_location_manifest.py))
+**échoue bruyamment** (BLOQUANT, `pnpm lint:code-location` en CI) si :
 
-- `contractVersion` inconnue du contrat cluster
-  ([`contract/endpoints.example.yaml`](/cluster/contract/)) — c'est le
-  remplacement de la copie figée (cause racine de l'audit) : déclaration +
-  version validée, pas duplication silencieuse ;
-- une dépendance déclarée est absente : `database`, `secrets`, `buckets` (OBC),
-  `migrations`, ou une `dependsOn.codeLocations` non-`ready` ;
-- les `resources` (cpu/mem, `disk` bloc RBD) ou `buckets` (objet RGW, taille +
-  classe) dépassent la marge de capacité réelle du cluster.
+- `contractVersion` inconnue du contrat cluster (le `contract_version` publié
+  par [`contract/*.example.yaml`](/cluster/contract/)) — c'est le remplacement
+  de la copie figée (cause racine de l'audit) : déclaration + version validée,
+  pas duplication silencieuse ;
+- une dépendance **vérifiable statiquement** est absente : `database` (rôles
+  CNPG / postgres_roles du contrat), `secrets` (postgres_roles / derived /
+  s3_backup), `buckets[].storageClass` (StorageClass du dépôt) ;
+- le schéma est cassé : champ requis manquant, `ready` non booléen, `revision`
+  non-SHA (`main`/`HEAD` interdits), quantité `resources` malformée.
 
-Le SHA `revision` du manifeste est la **source unique** du « quelque chose a
-changé » : il alimente le `targetRevision` injecté (point 2 du seed) et le tag
-d'image. Pas de détection magique.
+Sont **signalés sans bloquer** (WARNING) ce qui n'est PAS vérifiable depuis le
+seul dépôt cluster : `dependsOn.migrations` (le `.sql` vit dans atlas, ADR 0094
+§5), `dependsOn.codeLocations` (code d'une autre code-location, ordonnée au
+déploiement par sync-waves), et `ready: false` (atlas n'atteste pas encore).
 
-> **Question ouverte (à trancher) :** le validateur s'exécute-t-il (a) dans le
-> seed bash avant le push (garde-fou côté cluster, simple), ou (b) en hook
-> `PreSync` Argo CD côté fille (validation au plus près du déploiement) ? §3 de
-> l'ADR penche pour « valider AVANT d'instancier » → plutôt (a).
+**Reste au seed (non statique) :** la **capacité réelle** — les `resources`
+(cpu/mem, `disk` bloc RBD) et `buckets[].size` (objet RGW) confrontés à la marge
+du cluster — se vérifie au moment du seed, pas depuis le code. Le SHA `revision`
+est la **source unique** du « quelque chose a changé » : il alimente le
+`targetRevision` injecté (point 2 du seed) et le tag d'image.
+
+> **Tranché :** le validateur STATIQUE (schéma + version + existence des
+> dépendances) tourne **en CI** (garde-fou de revue, comme `check_contract.py`)
+> ; la validation de **capacité** reste au seed (elle a besoin de l'état réel du
+> cluster). §3 de l'ADR (« valider AVANT d'instancier ») est ainsi honoré des
+> deux côtés : la revue attrape les déclarations incohérentes, le seed attrape
+> la saturation.
 
 ### Migration SQL (hook PreSync) — où se branche-t-elle ?
 

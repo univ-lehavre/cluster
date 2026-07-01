@@ -1,13 +1,21 @@
-"""Cible prod de `nestor` : résolution kubeconfig, confirmation, rapatriement (ADR 0090).
+"""Cible de `nestor` : résolution kubeconfig, confirmation, rapatriement (ADR 0090/0102).
 
-Logique PURE (testable sans cluster ni I/O) du ciblage d'un cluster PROD :
-- quel kubeconfig viser (priorité KUBECONFIG exporté → `kubeconfig:` topo → défaut) ;
+Logique PURE (testable sans cluster ni I/O) du ciblage d'un cluster (banc OU prod) :
+- quel kubeconfig viser (priorité KUBECONFIG exporté → `kubeconfig:` topo → convention) ;
 - faut-il rapatrier (kubeconfig absent) et avec quels paramètres ;
 - le message de CONFIRMATION de la cible (endpoint + nœuds) avant toute action.
 
 L'I/O (prompt `input`, `_fetch_kubeconfig`, kubectl) vit dans `scripts/topology.py` ;
 ici, on ne fait que DÉCIDER et FORMATER. Garde-fou ADR 0053/0084 : ces fonctions ne
-mutent rien — elles cadrent une LECTURE prod sûre.
+mutent rien — elles cadrent une LECTURE sûre.
+
+UNIFICATION (ADR 0102 volet B) : `resolve_kubeconfig` est LA fonction unique de
+résolution, pour banc ET prod — plus de `_bench_kubeconfig` séparé. Le kubeconfig d'une
+stack vit à un emplacement UNIQUE nommé par la stack : `<racine>/.kubeconfigs/<stack>.config`
+(in-repo, gitignoré). La garde ADR 0053 devient STRUCTURELLE : le cran par défaut est
+calculé DANS le dépôt à partir du nom de stack — il ne peut plus jamais retomber sur
+`~/.kube/config` (le fichier convention est simplement absent si non provisionné → kubectl
+échoue proprement, lecture vide honnête).
 """
 
 from __future__ import annotations
@@ -15,27 +23,36 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Répertoire racine unique des kubeconfig (ADR 0102 volet B), gitignoré fail-safe.
+# Point-préfixé (artefact local, comme `.work/`). Nommé `.kubeconfigs/`, un fichier
+# `<stack>.config` par stack — banc ET prod au même endroit.
+KUBECONFIGS_DIR = ".kubeconfigs"
 
-def default_kubeconfig_path(stack: str) -> str:
-    """Chemin par défaut du kubeconfig d'une stack (convention ADR 0090) :
-    `~/.kube/<stack>.config`, HORS dépôt (credentials réels jamais commités)."""
-    return os.path.join("~", ".kube", f"{stack}.config")
+
+def default_kubeconfig_path(stack: str, *, repo_root: str) -> str:
+    """Chemin conventionnel du kubeconfig d'une stack (ADR 0102 volet B) :
+    `<repo_root>/.kubeconfigs/<stack>.config`, IN-REPO gitignoré. Pur : `repo_root` est
+    fourni par l'appelant (la racine du dépôt), jamais deviné ici."""
+    return os.path.join(repo_root, KUBECONFIGS_DIR, f"{stack}.config")
 
 
-def resolve_kubeconfig(*, env_kubeconfig: str | None, declared: str | None, stack: str) -> str:
-    """Chemin du kubeconfig prod à viser, par priorité (ADR 0090) :
+def resolve_kubeconfig(
+    *, env_kubeconfig: str | None, declared: str | None, stack: str, repo_root: str
+) -> str:
+    """Chemin du kubeconfig à viser (banc OU prod), par priorité (ADR 0090/0102) :
 
-    1. `env_kubeconfig` (KUBECONFIG exporté, intention explicite de l'opérateur) ;
-    2. `declared` (champ `kubeconfig:` de la topologie) ;
-    3. défaut conventionnel `~/.kube/<stack>.config`.
+    1. `env_kubeconfig` (KUBECONFIG exporté, intention explicite de l'opérateur, ADR 0065) ;
+    2. `declared` (champ `kubeconfig:` de la topologie — override rare, chemin custom) ;
+    3. convention `<repo_root>/.kubeconfigs/<stack>.config` (in-repo, ADR 0102).
 
-    Toujours un chemin (jamais None) : la cible prod est explicite. `~` non expansé
-    (l'appelant expanduser au moment de l'I/O)."""
+    Toujours un chemin (jamais None, JAMAIS `~/.kube/config`) : la cible est explicite ou
+    calculée dans le dépôt. `~` d'un `declared` reste non expansé (l'appelant expanduser
+    au moment de l'I/O)."""
     if env_kubeconfig:
         return env_kubeconfig
     if declared:
         return declared
-    return default_kubeconfig_path(stack)
+    return default_kubeconfig_path(stack, repo_root=repo_root)
 
 
 @dataclass(frozen=True)

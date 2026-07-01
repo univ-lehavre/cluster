@@ -15,7 +15,7 @@
 #
 # Usage (briques irréductibles node-side ; l'entrée normale est `nestor`) :
 #   ── Briques node-side APPELÉES par le moteur Python (ADR 0049/0056) ──
-#   bench/lima/run-phases.sh up             # VMs + (si WITH_CEPH=1) disques bruts + gate vd* (#235)
+#   bench/lima/run-phases.sh up             # VMs + disques bruts DÉCLARÉS par nœud + gate (ADR 0102 volet C)
 #   bench/lima/run-phases.sh inventory <control_csv> [workers_csv] # (ré)écrit l'inventaire (write_inventory byte-stable)
 #   bench/lima/run-phases.sh facts          # contrat machine : imprime CP_IP/L2_IFACE (+ VIP si HA)
 #   bench/lima/run-phases.sh cni            # pose Cilium (L4 NodePort) + fetch kubeconfig banc
@@ -42,13 +42,22 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # history.py). run-phases.sh ne garde que le MONTAGE des phases (bash node-side légitime).
 
 # ── Table des nœuds (noms génériques — ADR 0023) ─────────────────────────────
-# "nom:rôle". Défaut `multi-node-3` : 1 control-plane + 2 workers (quorum mon Ceph
-# + ×3 réplication). SURCHARGEABLE par NODES_OVERRIDE (csv "nom:rôle,…") : c'est
-# ainsi que `topology.py up` PILOTE les nœuds depuis la topologie active (inversion
-# de frontière, ADR 0056 — la topologie décide, le harnais exécute). Le 1er nœud
-# control devient le CP primaire (kubeconfig + cni.sh).
+# SURCHARGEABLE par NODES_OVERRIDE : c'est ainsi que `topology.py up` PILOTE les nœuds
+# depuis la topologie active (inversion de frontière, ADR 0056/0102 — la topologie
+# décide PAR NŒUD, le harnais exécute). Le 1er nœud control devient le CP primaire
+# (kubeconfig + cni.sh).
+#
+# FORMAT ENRICHI (ADR 0102 volet C) — nœuds séparés par `;`, chaque entrée =
+#   `nom|role|cpus,memory,disk|disque1,disque2,…`  (un disque = `name=size=role`).
+# Le 4e champ VIDE = nœud sans disque brut (« mode Ceph » = présence de disques
+# déclarés, plus de WITH_CEPH). Ex :
+#   node1|control|4,12GiB,40GiB|vdb=10GiB=data,vdd=5GiB=metadata;node2|worker|4,12GiB,40GiB|
+#
+# DÉFAUT (lancement NU, sans override) : format court `nom:rôle` (ressources par
+# défaut ci-dessous, pas de disques). phase_up/phase_down DÉTECTENT le format par la
+# présence d'un `|` dans l'entrée — le lancement nu reste possible sans NODES_OVERRIDE.
 if [ -n "${NODES_OVERRIDE:-}" ]; then
-    IFS=',' read -r -a NODES <<< "${NODES_OVERRIDE}"
+    IFS=';' read -r -a NODES <<< "${NODES_OVERRIDE}"
 else
     NODES=(
         "cp1:control"
@@ -56,62 +65,68 @@ else
         "node2:worker"
     )
 fi
+
+# node_name <entry> — nom du nœud, quel que soit le format (riche `nom|…` ou court `nom:rôle`).
+node_name() {
+    local entry=$1
+    case "${entry}" in
+        *"|"*) printf '%s' "${entry%%|*}" ;;
+        *) printf '%s' "${entry%%:*}" ;;
+    esac
+}
+
+# node_role <entry> — rôle du nœud (control|worker), quel que soit le format.
+node_role() {
+    local entry=$1 rest
+    case "${entry}" in
+        *"|"*) rest="${entry#*|}"; printf '%s' "${rest%%|*}" ;;
+        *) printf '%s' "${entry##*:}" ;;
+    esac
+}
+
 # CP = 1er nœud `control` de NODES (primaire). Dérivé, pas codé en dur (suit l'override).
 CP=""
 for _entry in "${NODES[@]}"; do
-    [ "${_entry##*:}" = control ] && { CP="${_entry%%:*}"; break; }
+    [ "$(node_role "${_entry}")" = control ] && { CP="$(node_name "${_entry}")"; break; }
 done
-[ -n "${CP}" ] || CP="${NODES[0]%%:*}" # repli : 1er nœud si aucun rôle control explicite
+[ -n "${CP}" ] || CP="$(node_name "${NODES[0]}")" # repli : 1er nœud si aucun rôle control explicite
 unset _entry
 # Port hôte du forward de l'API du control-plane (127.0.0.1:API_PORT → guest 6443).
 API_PORT=6443
 
-# Ressources par VM. RAM et DISQUE DÉRIVENT du profil (ADR 0046 : pas de valeur
-# de profil codée en dur) :
-#   - mode Ceph (WITH_CEPH=1) : 12 GiB RAM — un nœud porte OSD/mon Ceph + k8s +
-#     CNPG + Dagster/Marquez + monitoring (chemin atlas-ceph). Pic mesuré ~9 GiB ;
-#     Ceph sensible à la pression mémoire (OSD lents → boot/HEALTH qui traînent).
-#   - mode léger (local-path) : 12 GiB RAM. Un banc atlas/banc.yaml MONO-NŒUD porte
-#     la chaîne MLOps complète (monitoring Prometheus/Grafana/Loki + Argo CD + Gitea
-#     + CNPG + registry + Dagster webserver+daemon + MLflow). 8 GiB ne suffit PAS :
-#     dagster-daemon reste Pending/ProgressDeadlineExceeded (limits memory > 88 %,
-#     mesuré le 2026-06-23). 12 GiB requis, comme le mode Ceph — c'est la CHARGE
-#     applicative qui dimensionne, pas le backend de stockage.
-# 12 GiB sur un hôte 48 GiB : marge OK pour macOS. Surchargeable via VM_MEMORY.
-#
-# DISQUE : 40 GiB par défaut (les DEUX backends). 20 GiB ne tenait que pour un banc
-# LÉGER (socle/metrics) ; dès qu'on empile la chaîne applicative — Ceph+dataops, OU
-# local-path+atlas (DataOps + MLflow + churn argocd) — l'ephemeral-storage du rootfs
-# sature à 20 GiB → DiskPressure → évictions en cascade (postgres/rgw/repo-server/mlflow
-# sous le seuil ~2 GiB ; 125 pods Evicted constatés en local-path le 2026-06-17, #391).
-# 40 GiB partout (qcow2 thin-provisionné : n'occupe le disque hôte qu'à l'usage réel,
-# donc gratuit pour un banc léger). Surchargeable via VM_DISK.
-# CPU par VM. Surchargeable via VM_CPUS (comme VM_MEMORY/VM_DISK). Défaut 4 : un nœud
-# qui porte la chaîne MLOps complète (Dagster webserver+daemon + monitoring + CNPG +
-# MLflow…) sature 2 vCPU — la somme des requests.cpu dépasse l'allouable et le
-# scheduler laisse des pods Pending (`Insufficient cpu`, vécu au banc mono-nœud :
-# dagster-webserver non plaçable). 4 vCPU donne la marge.
+# Ressources VM par DÉFAUT (fallback). ADR 0102 volet C : les ressources sont PAR
+# NŒUD, portées par NODES_OVERRIDE (3e champ `cpus,memory,disk`). Ces défauts ne
+# servent QU'au lancement NU (sans override) ou à un nœud dont le champ ressources
+# est vide. Valeurs dérivées de l'expérience banc (ADR 0046 : pas de profil codé) :
+#   - CPU 4 : un nœud qui porte la chaîne MLOps complète (Dagster webserver+daemon +
+#     monitoring + CNPG + MLflow…) sature 2 vCPU (pods Pending `Insufficient cpu`,
+#     vécu au banc mono-nœud). 4 vCPU donne la marge.
+#   - RAM 12 GiB : la chaîne MLOps complète sature 8 GiB (dagster-daemon Pending/
+#     ProgressDeadlineExceeded, mesuré le 2026-06-23), indépendamment de Ceph vs
+#     local-path — c'est la CHARGE applicative qui dimensionne, pas le backend.
+#   - DISQUE 40 GiB : 20 GiB sature l'ephemeral-storage du rootfs dès qu'on empile la
+#     chaîne applicative → DiskPressure → évictions en cascade (125 pods Evicted en
+#     local-path le 2026-06-17, #391). 40 GiB (qcow2 thin : gratuit pour un banc léger).
 VM_CPUS=${VM_CPUS:-4}
-# 12 GiB pour les DEUX backends : la chaîne MLOps complète (dataops/mlflow) sature
-# 8 GiB sur un nœud, indépendamment de Ceph vs local-path (mesuré le 2026-06-23).
-VM_MEMORY_DEFAULT=12GiB
-VM_MEMORY=${VM_MEMORY:-${VM_MEMORY_DEFAULT}}
+VM_MEMORY=${VM_MEMORY:-12GiB}
 VM_DISK=${VM_DISK:-40GiB}
 
-# Disques Ceph par nœud : 3 HDD (data) + 1 block.db. Tailles fonctionnelles
-# (pas perf), à l'image du banc Vagrant (3 × 10 GiB + 5 GiB).
-HDD_COUNT=3
-HDD_SIZE=10GiB
-BLOCKDB_SIZE=5GiB
-
 # ── Emplacements (gitignorés : artefacts de run) ─────────────────────────────
-# Lima présente ses disques bruts (mode Ceph) en virtio-blk → /dev/vd* : vda = OS ;
-# vdb/vdc/vdd = HDD data ; vde = block.db ; vdf = cidata Lima (ignoré). `phase_up`
-# gate sur leur présence. (Les surcharges Ceph CEPH_*/DATA_DEVICE_GLOB consommées par
-# l'ancienne phase `ceph` ont été retirées avec le filet bash — montage en Python.)
+# Lima présente ses disques bruts en virtio-blk → /dev/vd* : vda = OS ; les disques
+# DÉCLARÉS par le nœud (NODES_OVERRIDE) sont attachés dans l'ordre → vdb, vdc… ; le
+# dernier vd* est le cidata Lima (iso9660, ignoré). `phase_up` crée les disques
+# déclarés et gate sur leur présence (fin de WITH_CEPH — la topo pilote, ADR 0102).
 WORKDIR="${HERE}/.work"
 INVENTORY="${WORKDIR}/inventory.yaml"
-KUBECONFIG_LOCAL="${WORKDIR}/kubeconfig"
+# Kubeconfig du banc = `.kubeconfigs/<stack>.config` à la RACINE du dépôt (ADR 0102 volet B) :
+# un banc EST une stack (nommée par le FICHIER de sa topologie, `stack_id`), son kubeconfig
+# vit à l'emplacement UNIQUE nommé par la stack (in-repo, gitignoré fail-safe). C'est PYTHON
+# qui décide le chemin (topology.py `_bench_kubeconfig_path(<stack>)` = `.kubeconfigs/<stack>.config`,
+# dérivé du nom de fichier de la topo active) et le passe par env `KUBECONFIG_LOCAL` ; bash
+# l'UTILISE. Le défaut ci-dessous (`banc.config`) ne sert QUE si le script est lancé nu (hors
+# moteur Python) — fallback banc générique. Une seule source de vérité pour le chemin.
+# `${REPO}` = racine du dépôt (défini dans lib.sh).
+KUBECONFIG_LOCAL="${KUBECONFIG_LOCAL:-${REPO}/.kubeconfigs/banc.config}"
 
 # ── Métriques de run (matériel + temps par phase) ────────────────────────────
 # Consignées dans WORKDIR/metrics.txt à reporter en en-tête du log archivé
@@ -155,11 +170,24 @@ time_phase() {
     return "${rc}"
 }
 
-# Noms des disques nommés Lima d'un nœud (data hdd1..N + blockdb).
-node_disks() {
-    local vm=$1 i
-    for i in $(seq 1 "${HDD_COUNT}"); do echo "${vm}-hdd${i}"; done
-    echo "${vm}-blockdb"
+# node_disk_specs <entry> — imprime les specs de disque déclarées d'un nœud (format
+# riche), une par ligne, au format `name=size=role`. Vide si le nœud n'a pas de 4e
+# champ ou est au format court `nom:rôle` (lancement nu → pas de disque).
+node_disk_specs() {
+    local entry=$1 field
+    case "${entry}" in
+        *"|"*)
+            # 4e champ = tout après le 3e `|`. On enlève les 3 premiers champs.
+            field="${entry#*|}"  # role|res|disks
+            field="${field#*|}"  # res|disks
+            field="${field#*|}"  # disks
+            [ -n "${field}" ] || return 0
+            local IFS=','
+            local spec
+            for spec in ${field}; do printf '%s\n' "${spec}"; done
+            ;;
+        *) : ;; # format court : aucun disque
+    esac
 }
 
 preflight() {
@@ -169,57 +197,81 @@ preflight() {
     need python3
 }
 
-# ── Phase 0 — VMs Lima + disques bruts ───────────────────────────────────────
+# ── Phase 0 — VMs Lima + disques bruts DÉCLARÉS par nœud ──────────────────────
+# ADR 0102 volet C : la TOPOLOGIE pilote, PAR NŒUD, les ressources VM et les disques
+# bruts (fin de WITH_CEPH). Le « mode Ceph » = la PRÉSENCE de disques déclarés : un
+# nœud sans disque ne provisionne que le disque OS (vda), un nœud de stockage crée SES
+# disques nommés Lima (attachés en additionalDisks → vdb, vdc…) et est gaté.
 phase_up() {
     preflight
-    # Disques bruts = SEULEMENT en mode Ceph (#235) : local-path provisionne sur
-    # le filesystem du nœud (disque OS vda), Rook-Ceph est le seul à consommer
-    # vdb/vdc/vdd (data) + vde (block.db). En mode léger on ne crée donc que le
-    # disque OS — up/down plus rapides, pas de réservation disque inutile.
-    local with_ceph="${WITH_CEPH:-0}"
-    log "Phase 0 — VMs Lima$([ "${with_ceph}" = 1 ] && echo " + disques bruts (Ceph)" || echo " (local-path : disque OS seul)")"
+    log "Phase 0 — VMs Lima (ressources + disques bruts pilotés par la topologie, ADR 0102)"
     mkdir -p "${WORKDIR}"
-    local entry vm role
+    local entry vm role resources
     for entry in "${NODES[@]}"; do
-        vm="${entry%%:*}"
-        role="${entry##*:}"
-        local disks=""
-        if [ "${with_ceph}" = 1 ]; then
-            # Disques bruts (créés AVANT le start ; idempotent).
-            local i
-            for i in $(seq 1 "${HDD_COUNT}"); do
-                lima_disk_create "${vm}-hdd${i}" "${HDD_SIZE}"
-            done
-            lima_disk_create "${vm}-blockdb" "${BLOCKDB_SIZE}"
-            disks="$(node_disks "${vm}")"
-        fi
-        # Config VM rendue (additionalDisks SI Ceph ; portForward API pour le CP)
-        # puis start. disks vide ⇒ lima_render_node n'écrit pas additionalDisks.
+        vm="$(node_name "${entry}")"
+        role="$(node_role "${entry}")"
+
+        # Ressources du NŒUD (3e champ `cpus,memory,disk` du format riche). Fallback
+        # sur les défauts globaux (VM_*) si le champ est vide/absent (lancement nu).
+        local cpus="${VM_CPUS}" memory="${VM_MEMORY}" disk="${VM_DISK}"
+        case "${entry}" in
+            *"|"*)
+                resources="${entry#*|}"    # role|res|disks
+                resources="${resources#*|}" # res|disks
+                resources="${resources%%|*}" # res
+                if [ -n "${resources}" ]; then
+                    IFS=',' read -r cpus memory disk <<< "${resources}"
+                    cpus="${cpus:-${VM_CPUS}}"
+                    memory="${memory:-${VM_MEMORY}}"
+                    disk="${disk:-${VM_DISK}}"
+                fi
+                ;;
+        esac
+
+        # Disques DÉCLARÉS du nœud (4e champ). Pour chaque `name=size=role` : on crée le
+        # disque nommé Lima `${vm}-${name}` (créé AVANT le start ; idempotent) et on
+        # collecte SON nom pour le bloc additionalDisks. `disks` vide ⇒ lima_render_node
+        # n'écrit pas additionalDisks (nœud sans stockage brut : disque OS seul).
+        local disks="" spec name size
+        while IFS= read -r spec; do
+            [ -n "${spec}" ] || continue
+            IFS='=' read -r name size _drole <<< "${spec}"
+            lima_disk_create "${vm}-${name}" "${size}"
+            disks="${disks:+${disks} }${vm}-${name}"
+        done < <(node_disk_specs "${entry}")
+
+        # Config VM rendue avec les ressources DU NŒUD (additionalDisks si disques
+        # déclarés ; portForward API pour le CP) puis start.
         local cfg="${WORKDIR}/${vm}.yaml" api_port=""
         [ "${role}" = control ] && api_port="${API_PORT}"
-        lima_render_node "${cfg}" "${VM_CPUS}" "${VM_MEMORY}" "${VM_DISK}" "${disks}" "${api_port}"
+        lima_render_node "${cfg}" "${cpus}" "${memory}" "${disk}" "${disks}" "${api_port}"
         lima_start_node "${vm}" "${cfg}"
     done
 
-    # GATE disques : SEULEMENT en mode Ceph (sans Ceph, aucun disque brut attendu).
-    if [ "${with_ceph}" != 1 ]; then
-        ok "mode local-path : pas de disque brut attendu (#235)"
-        return 0
-    fi
-    # GATE : disques data bruts présents (vdb) + block.db (vde) sur chaque nœud.
-    # NB : `limactl shell <vm> '<cmd avec |>'` ne passe PAS par un shell → on
-    # enveloppe dans `sh -c`. Lima attache aussi un disque cidata (vdf, iso9660,
-    # monté) ignoré par Ceph (useAllDevices ne prend que les disques bruts) ; nos
-    # surcharges ciblent vd[b-e] uniquement.
-    log "Vérification des disques bruts (vdb..vde) sur chaque nœud"
+    # GATE disques : SEULEMENT sur les nœuds qui DÉCLARENT des disques (les autres
+    # n'attachent que le disque OS). NB : `limactl shell <vm> '<cmd avec |>'` ne passe
+    # PAS par un shell → on enveloppe dans `sh -c`. Lima attache aussi un disque cidata
+    # (iso9660, monté) que Rook ignore (useAllDevices ne prend que les disques bruts).
+    # On gate sur le NOMBRE de disques bruts présents (≥ nombre déclaré) plutôt que sur
+    # des devices codés en dur (vdb/vde) : l'ordre d'attachement dérive de la topo.
+    local gated=0
     for entry in "${NODES[@]}"; do
-        vm="${entry%%:*}"
-        vm_sh "${vm}" sh -c 'lsblk -dno NAME | grep -qx vdb' \
-            || die "${vm} : disque data vdb absent (additionalDisks non attachés ?)"
-        vm_sh "${vm}" sh -c 'lsblk -dno NAME | grep -qx vde' \
-            || die "${vm} : disque block.db vde absent"
-        ok "${vm} : disques bruts présents ($(vm_sh "${vm}" sh -c 'lsblk -dno NAME,SIZE | grep -E "^vd[b-e]" | tr "\n" " "'))"
+        vm="$(node_name "${entry}")"
+        local n_expected=0
+        while IFS= read -r spec; do
+            [ -n "${spec}" ] && n_expected=$((n_expected + 1))
+        done < <(node_disk_specs "${entry}")
+        [ "${n_expected}" -gt 0 ] || continue
+        gated=1
+        log "Vérification des disques bruts sur ${vm} (${n_expected} attendu(s))"
+        # Disques bruts = vd* SAUF vda (OS) et le cidata iso9660. On compte les vd[b-z].
+        local n_present
+        n_present=$(vm_sh "${vm}" sh -c 'lsblk -dno NAME | grep -cE "^vd[b-z]$"' | tr -d '[:space:]')
+        [ "${n_present:-0}" -ge "${n_expected}" ] \
+            || die "${vm} : ${n_present:-0} disque(s) brut(s) présent(s) < ${n_expected} déclaré(s) (additionalDisks non attachés ?)"
+        ok "${vm} : disques bruts présents ($(vm_sh "${vm}" sh -c 'lsblk -dno NAME,SIZE | grep -E "^vd[b-z] " | tr "\n" " "'))"
     done
+    [ "${gated}" = 1 ] || ok "aucun disque brut déclaré : pas de gate disque (mode local-path)"
 }
 
 
@@ -231,18 +283,28 @@ phase_up() {
 # démontage COMPLET (sans liste explicite).
 phase_down() {
     require_lima
-    local targets=("$@") vm d
+    local targets=("$@") vm d entry
+    # Table nom→entrée (pour retrouver les disques déclarés d'une VM ciblée par nom).
     if [ ${#targets[@]} -eq 0 ]; then
-        local entry
-        for entry in "${NODES[@]}"; do targets+=("${entry%%:*}"); done
+        for entry in "${NODES[@]}"; do targets+=("$(node_name "${entry}")"); done
         log "Destruction du banc Lima (VMs + disques nommés)"
     else
         log "Destruction des VMs : ${targets[*]} (+ disques nommés)"
     fi
     for vm in "${targets[@]}"; do
         lima_delete_node "${vm}"
-        for d in $(node_disks "${vm}"); do
-            lima_disk_delete "${d}"
+        # Disques nommés Lima de cette VM = ceux DÉCLARÉS dans NODES pour l'entrée
+        # de même nom (`${vm}-${name}` par spec). Si la VM n'est pas dans NODES (cas
+        # d'une cible externe), aucun disque nommé attendu → rien à supprimer.
+        for entry in "${NODES[@]}"; do
+            [ "$(node_name "${entry}")" = "${vm}" ] || continue
+            local spec name
+            while IFS= read -r spec; do
+                [ -n "${spec}" ] || continue
+                IFS='=' read -r name _rest <<< "${spec}"
+                lima_disk_delete "${vm}-${name}"
+            done < <(node_disk_specs "${entry}")
+            break
         done
     done
     # WORKDIR (inventaire/artefacts du banc) : retiré seulement pour un démontage
@@ -285,7 +347,7 @@ emit_facts() {
     printf 'L2_IFACE=%s\n' "${l2_if}"
     # HA = plus d'un nœud `control` dans NODES → on émet la VIP (le moteur HA Python la consomme).
     for entry in "${NODES[@]}"; do
-        [ "${entry##*:}" = control ] && n_control=$((n_control + 1))
+        [ "$(node_role "${entry}")" = control ] && n_control=$((n_control + 1))
     done
     if [ "${n_control}" -gt 1 ]; then
         printf 'VIP=%s\n' "${cp_ip%.*}.40"

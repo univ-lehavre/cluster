@@ -384,6 +384,147 @@ efficience** s'applique ici ; le volet **coût €** est sciemment hors périmè
 > partiel / écarté — est tracé dans
 > l'[ADR 0062](docs/decisions/0062-cultures-ingenierie.md).
 
+## Sécurité
+
+La sécurité n'est pas un chapitre à part : elle est **câblée dans la chaîne**
+(_DevSecOps_, cf. ci-dessus) et **assumée honnêtement**. Cette section
+consolide, en un seul endroit, **ce qui protège** (contrôles actifs) et **ce qui
+est délibérément relâché** (compromis tracés) — car sur ce dépôt les deux se
+lisent ensemble.
+
+### Modèle de menace (à lire d'abord)
+
+Le cluster est **mono-tenant**, **mono-admin**, sur **réseau privé isolé**
+(`10.0.0.0/22`), sans données réglementées. Ce périmètre est le socle de
+plusieurs choix : certains contrôles « attendus » sont **volontairement
+allégés** parce que l'**isolation réseau** en tient lieu, et ces relâchements
+sont **tracés en ADR**, pas subis. Un signalement utile est donc plutôt « telle
+hypothèse d'isolation est fausse dans tel cas » que « tel service n'a pas d'auth
+» — le détail est dans [SECURITY.md](SECURITY.md). **Porte de sortie unique** :
+le jour où le cluster s'ouvre (multi-tenant, accès externe, données
+réglementées), chaque compromis ci-dessous est repris par un nouvel ADR
+([ADR 0003](docs/decisions/0003-pas-de-chiffrement-ceph-tailscale.md)).
+
+### Contrôles actifs
+
+Chaque ligne pointe vers sa preuve (ADR, manifeste, workflow) ; l'inventaire
+opérationnel complet est dans [SAFEGUARDS.md](SAFEGUARDS.md).
+
+#### Chaîne d'approvisionnement & CI (_shift-left_)
+
+- **Analyse IaC bloquante** : `trivy` scanne les manifestes en `HIGH,CRITICAL`
+  avec `exit-code 1` (**bloque le merge**) ; le RBAC inhérent aux bundles
+  upstream est allowlisté **par chemin et avec justification** dans
+  [`.trivyignore.yaml`](.trivyignore.yaml).
+- **SAST** : **CodeQL** (requêtes `security-and-quality`) sur le périmètre
+  Python du harnais (`nestor/`, `scripts/`) —
+  [.github/workflows/codeql.yml](.github/workflows/codeql.yml).
+- **Secret scanning** : `gitleaks` balaie **tout l'historique git** (mode
+  `git`), binaire **épinglé par version + SHA-256**, allowlist limitée aux
+  valeurs d'exemple dans [`.gitleaks.toml`](.gitleaks.toml) ; en complément,
+  secrets jamais versionnés (`.env`, `secrets/`, snapshots etcd sous
+  `.gitignore`).
+- **Supply-chain épinglée** : **toutes** les actions GitHub sont épinglées par
+  **SHA de commit** (une seule exception documentée — le générateur SLSA exige
+  un tag), et les images conteneurs par **digest d'index multi-arch**, jamais
+  par tag mouvant
+  ([ADR 0006](docs/decisions/0006-matrice-de-versions-et-politique-de-bump.md)).
+- **Releases signées** : chaque release publie une archive source **signée
+  cosign _keyless_** (OIDC, aucune clé à gérer) + une **provenance SLSA**
+  (`.intoto.jsonl`) liant l'artefact au commit/workflow
+  ([ADR 0088](docs/decisions/0088-signature-releases-cosign-slsa.md),
+  [.github/workflows/release.yml](.github/workflows/release.yml)).
+- **Least privilege CI** : `permissions:` restreintes au strict nécessaire (top
+  level en lecture, élargi par job), `persist-credentials: false`, et **PAT
+  fine-grained** dédiés (scope = ce repo) pour les rares gestes en écriture
+  (release-please, Scorecard branch-protection).
+- **Posture supply-chain notée** : **OpenSSF Scorecard** recalculé en continu +
+  **OpenSSF Best Practices Badge** validé par questionnaire — voir
+  [Conformité](#conformité). _Non bloquants (modèle « alerte », pas « gate »)
+  aujourd'hui : CodeQL, gitleaks et Scorecard remontent dans l'onglet Security ;
+  seul `trivy` gate le merge — cf._ [SAFEGUARDS.md](SAFEGUARDS.md).
+
+#### Plan de contrôle Kubernetes ([ADR 0014](docs/decisions/0014-durcissement-kubeadm-init.md))
+
+- **Secrets etcd chiffrés at-rest** via `EncryptionConfiguration` (provider
+  `secretbox`) — donc chiffrés aussi dans les snapshots ; clé générée sur le
+  nœud, **jamais versionnée**.
+- **Audit-policy API** de niveau `Metadata` : les appels API directs (qui/quoi/
+  quand) sont journalisés, avec exclusion du bruit.
+- **Pod Security Admission** `baseline` en `enforce` (et `restricted` en `warn`)
+  sur les namespaces applicatifs — bloque `privileged`, `hostPID/IPC`,
+  `hostNetwork`.
+
+#### Réseau
+
+- **Micro-segmentation** : **56 NetworkPolicies** sous
+  [`platform/network-policies/`](platform/network-policies/) — patron
+  `default-deny` (ingress + egress) puis autorisations strictement nécessaires
+  par namespace, validées au banc (le trafic non listé est refusé).
+- **Chiffrement pod-to-pod** inter-nœuds par **WireGuard** (Cilium), clés gérées
+  par Cilium — défense en profondeur qui atténue le principal coût de
+  l'[ADR 0003](docs/decisions/0003-pas-de-chiffrement-ceph-tailscale.md)
+  ([ADR 0019](docs/decisions/0019-durcissement-reseau-cilium.md)).
+- **Observabilité réseau** : **Hubble** (flux L3/L4/L7, verdicts de policy,
+  drops) en CLI par défaut, UI opt-in
+  ([ADR 0073](docs/decisions/0073-hubble-ui-observabilite-reseau.md)).
+- **Bordure unique** : services applicatifs en `ClusterIP`, exposition par
+  **Gateway API** (pas de `NodePort`/`LoadBalancer` bruts sur l'applicatif), TLS
+  terminé par **cert-manager + CA interne** (chaîne self-signed → CA, feuilles
+  renouvelées automatiquement ; pas d'ACME, cluster non joignable d'Internet)
+  ([ADR 0021](docs/decisions/0021-cert-manager-ca-interne.md)).
+
+#### Durcissement OS & accès nœuds
+
+- **SSH durci par défaut** dès le premier accès
+  ([`bootstrap/first-access.sh`](bootstrap/first-access.sh)) :
+  `PasswordAuthentication no`, clés uniquement, `PermitRootLogin no`,
+  `AllowUsers debian`, `MaxAuthTries 3`, timeout d'inactivité — idempotent.
+- **Durcissement OS opt-in par tags** (`bootstrap/security/`) : mises à jour
+  automatiques + expiration mot de passe, `auditd` (règles syscall), `fail2ban`
+  (anti-brute-force SSH), redirection du mail root, **UFW** (après K8s/Cilium/
+  Ceph). Chaque couche s'active explicitement
+  ([`bootstrap/security/IMPLICATIONS.md`](bootstrap/security/IMPLICATIONS.md)) ;
+  visibilité par [`bootstrap/security/report.sh`](bootstrap/security/report.sh).
+- **Audit-log par nœud** : chaque playbook appose qui/quoi/quand dans
+  `/var/log/cluster-bootstrap.log`, corrélé par
+  [`bootstrap/state.sh`](bootstrap/state.sh).
+
+#### Opérabilité & résilience
+
+- **Détection de drift** sur **7 couches** (état réel vs déclaré,
+  [`bootstrap/state.sh`](bootstrap/state.sh)), **sauvegarde etcd** horaire
+  (timer systemd, restauration prouvée réversible au banc) et **rollback
+  scripté** du bootstrap (`-e confirm=yes`).
+- **Sécurité active** : des scénarios d'**attaques contrôlées** (brute-force SSH
+  → ban `fail2ban`, pod privilégié → rejet PSA, exfil → coupe NetworkPolicy) et
+  de chaos valident la défense **par l'acte**, au banc jetable uniquement
+  ([ADR 0025](docs/decisions/0025-securite-active-chaos-attaques-controlees.md)).
+
+### Compromis délibérés (le réseau isolé fait rempart)
+
+Ces relâchements sont des **choix tracés**, pas des failles — chacun assume son
+coût et sa porte de sortie :
+
+| Choix                                                              | ADR                                                              |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Pas de chiffrement Ceph (in-transit / at-rest), RGW HTTP           | [0003](docs/decisions/0003-pas-de-chiffrement-ceph-tailscale.md) |
+| Registry interne en HTTP sans authentification                     | [0011](docs/decisions/0011-registry-http-sans-auth.md)           |
+| RStudio sans login (`DISABLE_AUTH=true`)                           | [0012](docs/decisions/0012-rstudio-disable-auth.md)              |
+| Dashboard Kubernetes lié à `cluster-admin` (tokens ≤ 8 h)          | [0010](docs/decisions/0010-dashboard-cluster-admin.md)           |
+| Clé de chiffrement etcd en clair sur le control plane (pas de KMS) | [0014](docs/decisions/0014-durcissement-kubeadm-init.md)         |
+
+Tous reposent sur l'accès **exclusivement local** (`kubectl port-forward`, saut
+SSH) et l'isolation réseau ; aucun n'est exposé publiquement.
+
+### Signaler une vulnérabilité
+
+**Ne pas** ouvrir d'issue publique. Utiliser le **Private Vulnerability
+Reporting** de GitHub
+(<https://github.com/univ-lehavre/cluster/security/advisories/new>) ou écrire au
+mainteneur — procédure, périmètre et modèle de menace détaillés dans
+[SECURITY.md](SECURITY.md). Les rapports en anglais sont bienvenus.
+
 ## Gouvernance
 
 La gouvernance n'est pas qu'une discipline d'auteur : elle est **mesurée,
@@ -396,7 +537,7 @@ juger en 5 min : [docs/preuves.md](docs/preuves.md).
 
 <!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
 
-- **101 ADR** (87 Accepted, 10 Proposed, 4 Superseded)
+- **102 ADR** (88 Accepted, 10 Proposed, 4 Superseded)
 - **16 plans** vivants (1 Abandonné, 6 Achevé, 8 Actif, 1 Brouillon)
 - **73 drifts** indexés (3 caduc, 67 corrige, 1 en-cours, 2 ouvert)
 - **34 scénarios** E2E reproductibles

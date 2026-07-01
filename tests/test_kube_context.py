@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from nestor import kube_context as kc  # noqa: E402
 
-_BENCH = "/some/bench/.work/kubeconfig"
+_BENCH = "/some/repo/.kubeconfigs/banc.config"
 
 
 def _proc(returncode=0, stderr=""):

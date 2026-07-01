@@ -190,6 +190,15 @@ class TopologyFiltering(unittest.TestCase):
         # empêche `preview` de mentir (bug « preview faux avec 1cp »).
         self.assertIsNone(last_run_for_topology(self.runs, "1cp"))
 
+    def test_stack_id_alias_reconciles_old_topology_key(self):
+        # ADR 0102 volet B : l'identité est passée au NOM DE FICHIER (`ceph`), mais les runs
+        # de la fixture sont keyés par l'ANCIEN `catalog.topology` (`multi-node-3`). La stack
+        # `ceph` DOIT les retrouver via STACK_ID_ALIASES (réconciliation en lecture, jamais de
+        # réécriture, ADR 0052) — sinon `preview` mentirait « jamais monté » alors qu'un run existe.
+        run = last_run_for_topology(self.runs, "ceph")
+        self.assertIsNotNone(run)
+        self.assertEqual(run.id, "r3")  # même dernier run que via la clé historique directe
+
 
 class Verdict(unittest.TestCase):
     def test_jamais_si_aucun_run(self):

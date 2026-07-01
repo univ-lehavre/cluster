@@ -43,7 +43,11 @@ failles :
   ([ADR 0012](/cluster/docs/decisions/0012-rstudio-disable-auth/)).
 - Pas de chiffrement Ceph in-transit/at-rest
   ([ADR 0003](/cluster/docs/decisions/0003-pas-de-chiffrement-ceph-tailscale/)).
-- Secrets etcd non chiffrés / audit-policy API non posée — dette tracée
+- Clé de chiffrement etcd stockée en clair sur le disque du control plane
+  (`/etc/kubernetes/enc/`, 0600 root), pas de KMS externe — les Secrets sont
+  bien chiffrés at-rest et l'audit-policy API est posée (depuis le 2026-06-02,
+  ces deux points ne sont plus une dette), mais un accès disque au nœud control
+  plane reste hors de portée de cette protection
   ([ADR 0014](/cluster/docs/decisions/0014-durcissement-kubeadm-init/)).
 
 Ces choix reposent sur l'**isolation réseau**. Un signalement utile est donc
