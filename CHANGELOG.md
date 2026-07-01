@@ -11,6 +11,62 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.47.0](https://github.com/univ-lehavre/cluster/compare/v2.46.0...v2.47.0) (2026-07-01)
+
+
+### Features
+
+* acte le périmètre os & architecture (windows→wsl) + ferme le risque crlf ([a80aae4](https://github.com/univ-lehavre/cluster/commit/a80aae4eca31d49f972584c9633ecce58ae85af6))
+* **bootstrap:** garde audit-log sur tous les plays distants nus (défense en profondeur, ADR 0053) ([c30ae3b](https://github.com/univ-lehavre/cluster/commit/c30ae3bcd5969d0e519e8d6cc16bc7e7ffbb7e08))
+* **bootstrap:** garde audit-log sur tous les plays distants nus (défense en profondeur) ([22f2d0c](https://github.com/univ-lehavre/cluster/commit/22f2d0c58a3ad5ee1c07d08d8fa65c73a5e29cd1))
+* **nestor:** commande nestor ansible &lt;playbook&gt; — inventaire dérivé (ADR 0098) ([45f3a94](https://github.com/univ-lehavre/cluster/commit/45f3a944ce31967e89b9192df7dba2e5e23c615e))
+* **nestor:** source unique d'inventaire — nestor dérive l'inventaire, hosts.yaml éliminé (ADR 0098/0099) ([40028e7](https://github.com/univ-lehavre/cluster/commit/40028e739862bc2e408c00b718b464c86a09fabd))
+
+
+### Bug Fixes
+
+* **bench:** remplace mapfile par read_lines (compatible bash 3.2 de macos) ([425fafb](https://github.com/univ-lehavre/cluster/commit/425fafbdad779d0c95e9de849b65246e5a3cfb0e))
+* **ci:** le job macos installe bash homebrew et le met en tête du path (bats) ([e2a2908](https://github.com/univ-lehavre/cluster/commit/e2a29080f1e1e9b0ef09df841aefbe66ba9dbe90))
+* **ci:** régénère le bloc stats (100 adr) + installe shellcheck sur le runner macos ([bc2d291](https://github.com/univ-lehavre/cluster/commit/bc2d291cacfdfbdd77e5b8af8cfdc9142745e6c4))
+* **ci:** régénère le bloc stats (100 adr) + installe shellcheck sur le runner macos ([459da9f](https://github.com/univ-lehavre/cluster/commit/459da9f811d122fbbe38dac2634a14b7caecc141))
+
+
+### Refactor
+
+* **bench:** supprime env.sh — nestor couvre la dérivation de contexte (ADR 0097/0098) ([c4ca500](https://github.com/univ-lehavre/cluster/commit/c4ca500f2ee8d17b07f578c33b0bd298a4b6a226))
+* **bench:** supprime gitea-init.sh — mort, le seed est porté en Python (ADR 0101 étape 1) ([2aaca3c](https://github.com/univ-lehavre/cluster/commit/2aaca3c8d7511b37da4f34e36809044a164a1068))
+* **bench:** supprime metrology.sh — orphelin (ADR 0101 étape 4) ([fdbae91](https://github.com/univ-lehavre/cluster/commit/fdbae91d6b264090b13dbb5e2883d5ac6cc75b3d))
+* **bench:** supprime metrology.sh — orphelin, le pur vit en Python (ADR 0101 étape 4) ([03f2103](https://github.com/univ-lehavre/cluster/commit/03f210326e4fa126a1b91b2f5aa36c0909f7b413))
+* **nestor:** _inventory_for devient un contextmanager (inventaire prod éphémère, ADR 0098) ([9ff0b80](https://github.com/univ-lehavre/cluster/commit/9ff0b807c58c24d4ef4ba6d1669a11dc44922759))
+* **nestor:** migre access.sh → nestor/access.py (ADR 0101 étape 2) ([486592b](https://github.com/univ-lehavre/cluster/commit/486592b1415b8e944adfec17acee111d8581715a))
+* **nestor:** migre check-freshness.sh → nestor artifact check-freshness (ADR 0101 étape 3) ([962c36f](https://github.com/univ-lehavre/cluster/commit/962c36fcb73198a729b93c469e75cddbf765b8ad))
+* **nestor:** migre check-freshness.sh → nestor artifact check-freshness (ADR 0101 étape 3) ([887a102](https://github.com/univ-lehavre/cluster/commit/887a102e897a0579fdef6032ef3e080f7135338d))
+* **nestor:** remplace bash -c par un appel kubectl direct (roundtrip) ([0575df3](https://github.com/univ-lehavre/cluster/commit/0575df38e7b2095595ad1f0e996f316499d86624))
+* **nestor:** renomme target_kind lima → bench (la criticité, ADR 0099) ([6f84abe](https://github.com/univ-lehavre/cluster/commit/6f84abee8375679fbb929dd8f3858f6c71037603))
+* **nestor:** renomme target_kind lima → bench (la criticité, pas l'outil — ADR 0099) ([c3bf025](https://github.com/univ-lehavre/cluster/commit/c3bf02566bdc6bcf02a11e4bacd1e9cf068e38bf))
+* **nestor:** supprime le Justfile, bascule ansible.cfg + CLI vers nestor ansible ([b93ca72](https://github.com/univ-lehavre/cluster/commit/b93ca72310fe95771a6e5016e64d52cd18ef7b4f))
+* **nestor:** zone grise bash→Python — gitea-init (mort) + access (ADR 0101 étapes 1-2) ([54c1641](https://github.com/univ-lehavre/cluster/commit/54c1641d270080a09a85be3b7c220babb14213f2))
+
+
+### Documentation
+
+* **adr:** acte le périmètre os & architecture (poste unix, nœuds linux, windows→wsl) ([c7908e8](https://github.com/univ-lehavre/cluster/commit/c7908e82f9cd4f18fc35f2cc1df8d9bdf52db2d7))
+* **adr:** acte le renommage lima→bench fait dans 0099 + renvoi vers 0100 (périmètre OS) ([1f737c3](https://github.com/univ-lehavre/cluster/commit/1f737c369dfb027bbc1dbd241669e9462b253e6a))
+* **adr:** amende 0062 — le socle mlops (mlflow) est désormais en place ([51bbfe6](https://github.com/univ-lehavre/cluster/commit/51bbfe6423506bc14ad051b202d6661184fa1f48))
+* **adr:** amende 0062 — le socle mlops (mlflow) est désormais en place ([9299463](https://github.com/univ-lehavre/cluster/commit/9299463aba6a491a53be81ec1ef5af476c47a2aa))
+* **adr:** cadre la migration de la zone grise bash → Python (ADR 0101) ([b522133](https://github.com/univ-lehavre/cluster/commit/b522133b7cea0bf9f7a86a2421aa400c65af560f))
+* **adr:** cadre la migration de la zone grise bash → Python (ADR 0101) ([a55030d](https://github.com/univ-lehavre/cluster/commit/a55030dc7c8bed30f0bbb72dda78db6cd8d032d7))
+* **adr:** cadre les axes du modèle de topologie (ADR 0099) ([bba09bf](https://github.com/univ-lehavre/cluster/commit/bba09bf4c1fefd9677c60a0bf759329cd5785d37))
+* **adr:** tranche le couplage moteur↔inventaire prod (ADR 0098 point 3) ([d76888f](https://github.com/univ-lehavre/cluster/commit/d76888f15cf3be0986f48aa3e4a462cbc3d05f1a))
+* build OK (218 pages), shellcheck OK, 981 tests OK. ([2aaca3c](https://github.com/univ-lehavre/cluster/commit/2aaca3c8d7511b37da4f34e36809044a164a1068))
+* build OK. ([c4ca500](https://github.com/univ-lehavre/cluster/commit/c4ca500f2ee8d17b07f578c33b0bd298a4b6a226))
+* **gouvernance:** résout 4 manquements préexistants (index ADR + Suivi des plans) ([75c4609](https://github.com/univ-lehavre/cluster/commit/75c4609e6aa217b21c06885147cc833fc425b2f0))
+* **nestor:** bascule la doc opérateur vers nestor ansible (ADR 0098) ([9d5b786](https://github.com/univ-lehavre/cluster/commit/9d5b786d0f9878c2c8dc3d306a32b132cca1c868))
+* **nestor:** justifie l'affichage/écriture des secrets par access (faux positif codeql) ([8e7d9bb](https://github.com/univ-lehavre/cluster/commit/8e7d9bbbaf93b618c9cc7e29875af07844abde44))
+* **nestor:** justifie l'affichage/écriture des secrets par access (faux positif codeql) ([abc6e84](https://github.com/univ-lehavre/cluster/commit/abc6e849f505afb102908f4287aa260088a81b03))
+* **readme:** aligne sur atlas, développe culture et gouvernance ([5b80279](https://github.com/univ-lehavre/cluster/commit/5b8027998208ab90a4856ac7862772762e59a260))
+* **readme:** aligne sur atlas, développe culture et gouvernance ([c7e77fe](https://github.com/univ-lehavre/cluster/commit/c7e77feebaad08781a0fbcdf569d34a486a718e5))
+
 ## [2.46.0](https://github.com/univ-lehavre/cluster/compare/v2.45.0...v2.46.0) (2026-06-30)
 
 
