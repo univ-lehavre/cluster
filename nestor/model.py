@@ -120,9 +120,10 @@ class Topology:
     portal: dict[str, Any] = field(default_factory=dict)
     target_kind: str = "prod"
     # Chemin du kubeconfig de la cible (ADR 0090) — UNIQUEMENT pour la PROD. QUI décide :
-    #   • BANC   → nestor IMPOSE : le provisioning génère `bench/lima/.work/kubeconfig`
-    #              (phase cni) et `_bench_kubeconfig` le trouve seul → laisser ce champ à
-    #              None (le déclarer serait redondant).
+    #   • BANC   → nestor IMPOSE : le provisioning génère `.kubeconfigs/banc.config`
+    #              (phase cni, ADR 0102 volet B — le banc EST la stack `banc`) et
+    #              `_bench_kubeconfig` le trouve seul → laisser ce champ à None (le
+    #              déclarer serait redondant).
     #   • PROD   → l'UTILISATEUR DÉCLARE ici la cible que nestor ne peut PAS deviner :
     #              `~/.kube/<stack>.config`, HORS dépôt (credentials réels, jamais commités).
     #              SOURCE DE VÉRITÉ pour viser une prod en LECTURE (`preview`/état réel) sans

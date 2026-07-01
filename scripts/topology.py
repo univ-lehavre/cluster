@@ -150,11 +150,14 @@ _EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "socle.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
 _RUNS_HISTORY = os.path.join(_ROOT, "bench", "lima", "runs-history.yaml")
 _RUNS_DIR = os.path.join(_ROOT, "bench", "lima", "runs")
-# Kubeconfig du banc Lima, écrit par run-phases.sh (KUBECONFIG_LOCAL = WORKDIR/kubeconfig).
+# Kubeconfig du banc = `.kubeconfigs/banc.config` (ADR 0102 volet B) : le banc EST la
+# stack `banc`, son kubeconfig vit à l'emplacement UNIQUE nommé par la stack (in-repo,
+# gitignoré fail-safe), comme toute stack. Écrit par run-phases.sh (KUBECONFIG_LOCAL,
+# qui reçoit CE chemin par env — Python décide, bash l'utilise, ADR 0102).
 # `preview` lit l'état RÉEL du cluster via kubectl ; sans KUBECONFIG exporté, il retombe
 # ICI (sinon il interroge ~/.kube/config — pas le banc — et voit 0 nœud Ready alors que
 # le socle est monté : faux « à installer », scorie de fidélité du RÉEL).
-_BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
+_BENCH_KUBECONFIG = _prod_target.default_kubeconfig_path("banc", repo_root=_ROOT)
 # Inventaire Ansible du BANC Lima, écrit par run-phases.sh (write_inventory → WORKDIR/
 # inventory.yaml ; target_kind: bench, hôtes node1/node2). DISTINCT de bootstrap/hosts.yaml
 # (l'inventaire PROD). `next` doit viser CELUI-CI pour une topo lima — sinon un montage
@@ -684,7 +687,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         eval "$(nestor stack select banc)"
 
     Le KUBECONFIG posé est celui de la cible (ADR 0053) : le **banc de la stack**
-    s'il est monté (`bench/lima/.work/kubeconfig`), sinon **`/dev/null`** (vide) —
+    s'il est monté (`.kubeconfigs/banc.config`, ADR 0102 volet B), sinon **`/dev/null`** (vide) —
     JAMAIS `~/.kube/config` (la prod). Un `kubectl`/`cilium` direct dans le shell
     vise alors la bonne cible, ou échoue proprement (« pas de banc »), au lieu de
     taper la prod par accident. Le contexte nommé permet AUSSI `kubectl --context
@@ -2581,6 +2584,11 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
         # que s'il est déclaré ; `none` n'arme rien. Alias hostport→nodeport, lb-ipam→
         # gateway déjà résolus par exposition_mode.
         "EXPOSITION_MODE": topo.exposition_mode,
+        # Chemin d'écriture du kubeconfig banc (ADR 0102 volet B) : PYTHON décide
+        # (`_BENCH_KUBECONFIG` = `.kubeconfigs/banc.config`), run-phases.sh l'UTILISE
+        # comme `KUBECONFIG_LOCAL` (fetch du CP). Une seule source de vérité pour le
+        # chemin — la lecture Python (ctx.kubeconfig_local) et l'écriture bash coïncident.
+        "KUBECONFIG_LOCAL": _BENCH_KUBECONFIG,
     }
 
 
@@ -2608,12 +2616,14 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
 def _path_context(topo: Topology, inventory: str) -> _path.PathContext:
     """Construit `PathContext` depuis la TOPOLOGIE (PUR — aucune I/O, ADR 0097 §5.a).
 
-    Remplace les globales bash de run-phases.sh (CP:83 / API_PORT:90 / KUBECONFIG_LOCAL:148
+    Remplace les globales bash de run-phases.sh (CP:83 / API_PORT:90 / KUBECONFIG_LOCAL:116
     / REPO / INVENTORY) par un dataclass IMMUABLE dérivé de la topo, plus de globale ambiante :
     - `cp` : 1er nœud `control` (run-phases.sh:83-87 : 1er `:control` de NODES, sinon 1er
       nœud). DÉRIVÉ, jamais codé en dur (`cp1`).
     - `api_port` : 6443 (= run-phases.sh:90 `API_PORT`).
-    - `kubeconfig_local` : chemin du BANC Lima (`KUBECONFIG_LOCAL` = `<WORKDIR>/kubeconfig`).
+    - `kubeconfig_local` : chemin du kubeconfig du BANC (`_BENCH_KUBECONFIG` =
+      `.kubeconfigs/banc.config`, ADR 0102 volet B) — Python le décide, `KUBECONFIG_LOCAL`
+      de run-phases.sh le reçoit par env (une seule source de vérité pour le chemin).
     - `inventory` : passé PAR L'APPELANT (le chemin dérivé du `with _inventory_for(topo)`,
       ADR 0098) — `_path_context` reste PUR, il n'écrit ni ne supprime rien ; l'appelant
       (`cmd_up`) possède le cycle de vie du temporaire prod.
@@ -3428,7 +3438,7 @@ def _run_path_engine(
             extravars = _phases.extravars_for(phase, derived)
             print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
             # KUBECONFIG du play : le kubeconfig BANC rapatrié par bootstrap (ctx.kubeconfig_local
-            # → bench/lima/.work/kubeconfig, server: 127.0.0.1:6443 — le forward de l'API). En
+            # → .kubeconfigs/banc.config, server: 127.0.0.1:6443 — le forward de l'API). En
             # FROM-SCRATCH, os.environ['KUBECONFIG'] est VIDE au démarrage (le banc n'existe pas
             # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
             # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
@@ -3469,9 +3479,11 @@ def _run_path_engine(
 
         def _runphases(*cmd: str) -> subprocess.CompletedProcess:
             # Rappel d'une sous-commande run-phases.sh (bash garde VM/CNI/inventaire/facts,
-            # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) —
-            # le bash en dérive le MÊME CP/NODES/WORKDIR que `provision` (un seul WORKDIR
-            # `.work` ⇒ inventaire/kubeconfig partagés avec PathContext).
+            # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE
+            # + KUBECONFIG_LOCAL) — le bash en dérive le MÊME CP/NODES/WORKDIR que `provision`
+            # (un seul WORKDIR `.work` ⇒ inventaire partagé) et écrit le kubeconfig à
+            # l'emplacement décidé par Python (`.kubeconfigs/banc.config`, ADR 0102 volet B)
+            # ⇒ lecture (ctx.kubeconfig_local) et écriture (KUBECONFIG_LOCAL) coïncident.
             return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
                 ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
                 check=False,

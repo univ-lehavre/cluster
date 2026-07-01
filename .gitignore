@@ -63,8 +63,16 @@ bench/*.log
 !bench/lima/runs/
 !bench/lima/runs/*.log
 
-# Lima test bench (per-run state : configs VM rendues, inventaire, kubeconfig)
+# Lima test bench (per-run state : configs VM rendues, inventaire)
 bench/**/.work/
+
+# Kubeconfig unifié par stack (ADR 0102 volet B) : `<stack>.config`, banc ET prod, au
+# même endroit racine. FAIL-SAFE : on ignore TOUT le répertoire — JAMAIS de `!*.config`
+# de ré-inclusion. Les kubeconfig PROD portent des credentials réels ; une seule
+# whitelist étroite (.gitkeep) garde le répertoire présent sans risquer de committer un
+# credential. Vérifier `git check-ignore .kubeconfigs/<stack>.config` avant tout rapatriement.
+/.kubeconfigs/*
+!/.kubeconfigs/.gitkeep
 
 # Astro Starlight (generated output + cache, ADR 0089)
 docs/dist/

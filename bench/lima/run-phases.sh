@@ -113,7 +113,13 @@ BLOCKDB_SIZE=5GiB
 # l'ancienne phase `ceph` ont été retirées avec le filet bash — montage en Python.)
 WORKDIR="${HERE}/.work"
 INVENTORY="${WORKDIR}/inventory.yaml"
-KUBECONFIG_LOCAL="${WORKDIR}/kubeconfig"
+# Kubeconfig du banc = `.kubeconfigs/banc.config` à la RACINE du dépôt (ADR 0102 volet B) :
+# le banc EST la stack `banc`, son kubeconfig vit à l'emplacement UNIQUE nommé par la stack
+# (in-repo, gitignoré fail-safe). C'est PYTHON qui décide le chemin (topology.py
+# `_BENCH_KUBECONFIG` = `.kubeconfigs/banc.config`) et le passe par env `KUBECONFIG_LOCAL` ;
+# bash l'UTILISE (défaut cohérent si le script est lancé nu, hors moteur). Une seule source
+# de vérité pour le chemin. `${REPO}` = racine du dépôt (défini dans lib.sh).
+KUBECONFIG_LOCAL="${KUBECONFIG_LOCAL:-${REPO}/.kubeconfigs/banc.config}"
 
 # ── Métriques de run (matériel + temps par phase) ────────────────────────────
 # Consignées dans WORKDIR/metrics.txt à reporter en en-tête du log archivé

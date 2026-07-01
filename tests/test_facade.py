@@ -50,7 +50,7 @@ from nestor.model import topology_from_dict  # noqa: E402
 _REAL_SUBPROCESS_RUN = cli.subprocess.run
 
 # ── Blindage anti-provisionnement (filet de sécurité module, copié de test_topology_cli) ──
-# Le mainteneur PEUT avoir un banc Lima RÉEL (`bench/lima/.work/kubeconfig` présent) : sans
+# Le mainteneur PEUT avoir un banc Lima RÉEL (`.kubeconfigs/banc.config` présent) : sans
 # ce filet, un test qui atteint cmd_up/`provision` lancerait un VRAI `run-phases.sh up`
 # (limactl) et provisionnerait des VMs en silence. setUpModule installe un DEFAULT-DENY : tout
 # appel subprocess de provisionnement RÉEL échoue bruyamment (CI rouge). Les tests qui veulent

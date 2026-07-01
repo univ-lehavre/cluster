@@ -586,7 +586,7 @@ class Kubectl(unittest.TestCase):
                 __import__("argparse").Namespace(file=path, kubectl_args=["get", "nodes"])
             )
         self.assertIn("dirqual.config", seen["kc"])  # vise la PROD, pas le banc
-        self.assertNotIn(".work/kubeconfig", seen["kc"])
+        self.assertNotIn(".kubeconfigs/banc.config", seen["kc"])
 
 
 class Ansible(unittest.TestCase):
