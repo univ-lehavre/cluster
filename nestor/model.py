@@ -119,11 +119,16 @@ class Topology:
     atlas: dict[str, Any] = field(default_factory=dict)
     portal: dict[str, Any] = field(default_factory=dict)
     target_kind: str = "prod"
-    # Chemin du kubeconfig de la cible (ADR 0090). SOURCE DE VÉRITÉ pour viser un
-    # cluster prod en LECTURE (`preview`/état réel) sans dépendre du contexte
-    # courant du poste (ambigu). Convention : `~/.kube/<stack>.config`, HORS dépôt
-    # (credentials réels, jamais commités). None → résolution par défaut (cf.
-    # résolution kubeconfig prod). Sans objet pour le banc Lima (kubeconfig généré).
+    # Chemin du kubeconfig de la cible (ADR 0090) — UNIQUEMENT pour la PROD. QUI décide :
+    #   • BANC   → nestor IMPOSE : le provisioning génère `bench/lima/.work/kubeconfig`
+    #              (phase cni) et `_bench_kubeconfig` le trouve seul → laisser ce champ à
+    #              None (le déclarer serait redondant).
+    #   • PROD   → l'UTILISATEUR DÉCLARE ici la cible que nestor ne peut PAS deviner :
+    #              `~/.kube/<stack>.config`, HORS dépôt (credentials réels, jamais commités).
+    #              SOURCE DE VÉRITÉ pour viser une prod en LECTURE (`preview`/état réel) sans
+    #              dépendre du contexte ambigu du poste.
+    #   • Toujours → `export KUBECONFIG=…` surcharge tout (intention explicite, ADR 0053/0065).
+    # None → résolution par défaut (banc si présent, sinon /dev/null — JAMAIS ~/.kube/config).
     kubeconfig: str | None = None
     # `layers` (ADR 0069) : ENSEMBLE de couches déclaré au top-level, ordonné par le
     # DAG (resolve_layers). Vide → rétrocompat : dérivé de `catalog.profile` (alias

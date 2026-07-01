@@ -1,7 +1,7 @@
-# topologies/banc.yaml — topologie RÉELLE (gitignorée, ADR 0023).
-# Générée par `topology.py stack new` (assistant). Ajuste nœuds/rôles/ressources ;
-# `topology.py stack validate` revérifie le schéma. `status: cible` tant qu'aucun
-# run ne l'a montée (honnêteté ADR 0052).
+# topologies/banc.yaml — topologie d'EXEMPLE versionnée d'un banc Lima mono-nœud
+# (valeurs génériques, ADR 0023). Générée par `nestor stack new` (assistant) ; ajuste
+# nœuds/rôles/ressources et revérifie via `nestor stack validate`. `status: cible` tant
+# qu'aucun run ne l'a montée (honnêteté ADR 0052).
 catalog:
   topology: banc
   terrain: local
@@ -25,12 +25,16 @@ storage:
 target_kind: bench
 # Ressources de la VM Lima (LOT 8, ADR 0097 §3 — remplace les env VM_CPUS/VM_MEMORY/
 # VM_DISK). Bloc GLOBAL (défaut tous nœuds) ; un node peut surcharger via
-# `nodes[].resources`. Ces valeurs ne pilotent réellement la VM qu'avec le moteur
-# Python (`nestor up --engine=python`) ; le défaut bash lit encore les env.
+# `nodes[].resources`. nestor LIT ces valeurs du YAML et les passe au provisioning
+# (le moteur Python est le SEUL, ADR 0097 — le filet bash `--engine` a été retiré).
+# Mono-nœud ici → un seul jeu de ressources ; la surcharge per-node au provisioning
+# multi-nœuds est un chantier en cours (aujourd'hui le provisioning applique un jeu global).
 resources:
   cpus: 6
   memory: 16GiB
   disk: 128GiB
-# Kubeconfig du banc Lima (rapatrié par le provisioning ; KUBECONFIG_LOCAL bash).
-# Explicite la cible LECTURE (preview/état réel) sans dépendre du contexte courant.
-kubeconfig: bench/lima/.work/kubeconfig
+# PAS de `kubeconfig:` ici : pour un banc, nestor DÉRIVE la cible seul (le provisioning
+# rapatrie `bench/lima/.work/kubeconfig`, phase cni ; `_bench_kubeconfig` le trouve par
+# défaut). Le champ `kubeconfig:` ne sert QU'À la PROD (ADR 0090) — déclarer un
+# `~/.kube/<stack>.config` que nestor ne peut pas deviner. Banc = nestor impose ; prod =
+# l'utilisateur déclare ; `export KUBECONFIG=…` surcharge toujours (ADR 0053/0065).
