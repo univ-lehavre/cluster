@@ -2620,6 +2620,59 @@ class Access(unittest.TestCase):
         self.assertIn("ADR 0053", err)
 
 
+class RemoveOwnedStorageClasses(unittest.TestCase):
+    """`_remove_owned_storage_classes` : retire les SC cluster-scoped Ceph (par provisioner),
+    le résidu que la découverte namespacée ne voit pas (début de #392, constaté au banc)."""
+
+    def _stub_kubectl(self, list_out, delete_ok=True):
+        # Stube `_kubectl` : 1er appel (get storageclass) → list_out ; delete → rc selon delete_ok.
+        deleted = []
+
+        def fake(*args, **k):
+            import subprocess as sp
+
+            if args[:2] == ("get", "storageclass"):
+                return sp.CompletedProcess(args=args, returncode=0, stdout=list_out, stderr="")
+            if args[:2] == ("delete", "storageclass"):
+                deleted.append(args[2])
+                rc = 0 if delete_ok else 1
+                return sp.CompletedProcess(args=args, returncode=rc, stdout="", stderr="")
+            return sp.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        orig = cli._kubectl
+        cli._kubectl = fake
+        self.addCleanup(setattr, cli, "_kubectl", orig)
+        return deleted
+
+    _SC_LIST = (
+        "rook-ceph-block-replicated=rook-ceph.rbd.csi.ceph.com\n"
+        "rook-cephfs=rook-ceph.cephfs.csi.ceph.com\n"
+        "rook-ceph-datalake=rook-ceph.ceph.rook.io/bucket\n"
+        "local-path=rancher.io/local-path\n"
+    )
+
+    def test_deletes_only_ceph_provisioner_sc(self):
+        deleted = self._stub_kubectl(self._SC_LIST)
+        echecs = cli._remove_owned_storage_classes()
+        self.assertEqual(echecs, [])
+        # Les 3 SC ceph supprimées, local-path (secours) PRÉSERVÉE.
+        self.assertEqual(
+            sorted(deleted),
+            ["rook-ceph-block-replicated", "rook-ceph-datalake", "rook-cephfs"],
+        )
+        self.assertNotIn("local-path", deleted)
+
+    def test_delete_failure_is_reported_as_residu(self):
+        self._stub_kubectl(self._SC_LIST, delete_ok=False)
+        echecs = cli._remove_owned_storage_classes()
+        self.assertTrue(all(e.startswith("sc/") for e in echecs))
+        self.assertEqual(len(echecs), 3)  # les 3 ceph en échec
+
+    def test_no_storageclass_is_noop(self):
+        self._stub_kubectl("")  # aucune SC
+        self.assertEqual(cli._remove_owned_storage_classes(), [])
+
+
 class BenchTargetGuard(unittest.TestCase):
     """Garde d'isolation (ADR 0053) : les mutations banc refusent une cible non-banc.
 

@@ -4538,6 +4538,14 @@ def _remove_by_discovery(
         if not ok:
             residus.append(f"ns/{ns}")
 
+    # StorageClass CLUSTER-SCOPED de la couche (ADR 0079, début de #392) : la découverte
+    # namespacée ci-dessus ne les voit pas (les SC sont cluster-scoped). MAIS une SC est
+    # découvrable SANS ambiguïté par son `provisioner` (contrairement aux CRD, dont le lien à
+    # l'opérateur n'est pas fiable) : on retire les SC dont le provisioner appartient à la couche
+    # de stockage retirée (ceph → `rook-ceph.*`). PV/webhooks/CRD restent hors périmètre (#392).
+    if _roundtrip.involves_storage(phase):
+        residus.extend(_remove_owned_storage_classes())
+
     # Node-side Ceph (ex-`phase_rollback`) : APRÈS le retrait k8s, wipe les disques + /var/lib/
     # rook sur chaque nœud (seul `ceph` a du node-side). La topo (devices dérivés) + l'inventaire
     # (transport) sont fournis par l'appelant ; absents (None) en test pur → on saute le node-side.
@@ -4555,6 +4563,36 @@ def _remove_by_discovery(
 # `storage/ceph/cleanup.sh` RESTE bash (node-side irréductible, ADR 0049/0101) : il wipe les
 # disques + `/var/lib/rook` DANS la VM. Python ne fait que le POUSSER (jamais réécrire sa logique).
 _CEPH_CLEANUP_SCRIPT = os.path.join(_ROOT, "storage", "ceph", "cleanup.sh")
+
+
+def _remove_owned_storage_classes() -> list[str]:
+    """Supprime les StorageClass CLUSTER-SCOPED appartenant à Ceph (provisioner `rook-ceph.*`),
+    résidu que la découverte NAMESPACÉE ne voit pas (début de #392). Renvoie la liste des SC en
+    échec de suppression (vide = toutes parties, ou aucune à retirer / cluster injoignable).
+
+    Une SC est découvrable SANS ambiguïté par son `provisioner` (`discover.provisioner_is_ceph`,
+    source unique) — contrairement aux CRD/webhooks, laissés hors périmètre (#392 complet). On
+    NE touche PAS les SC local-path (secours) ni celles d'un autre provisioner."""
+    jsonpath = "jsonpath={range .items[*]}{.metadata.name}={.provisioner}{'\\n'}{end}"
+    proc = _kubectl("get", "storageclass", "-o", jsonpath)
+    if proc is None or proc.returncode != 0:
+        return []  # pas de SC / cluster injoignable → rien à faire (non bloquant)
+    echecs: list[str] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if "=" not in line:
+            continue
+        name, _, provisioner = line.partition("=")
+        if not _discover.provisioner_is_ceph(provisioner):
+            continue
+        res = _kubectl("delete", "storageclass", name)
+        if res is not None and res.returncode == 0:
+            print(f"  ✓ delete StorageClass/{name} (cluster-scoped, provisioner {provisioner})")
+        else:
+            detail = "injoignable" if res is None else f"rc={res.returncode}"
+            _warn(f"  ✗ StorageClass/{name} non supprimée ({detail})")
+            echecs.append(f"sc/{name}")
+    return echecs
 
 
 def _rollback_node_side_ceph(phase: str, topo: Topology, *, inventory_path: str) -> list[str]:
@@ -4602,9 +4640,11 @@ def cmd_remove(args: argparse.Namespace) -> int:
     k8s cascade), force les CR à finalizer, finalise les ns wedgés, PUIS efface le node-side
     Ceph (wipe des disques via `_node_exec_script`, topo + inventaire requis). Plus de table
     « nom/kind oublié » à maintenir, et plus de pont bash `run-phases.sh rollback` /
-    rollback-lib.sh (supprimés) : la découverte couvre TOUT (k8s namespacé + node-side). On ne
-    supprime PAS les CRD cluster-scoped (le lien CRD→opérateur n'est pas découvrable de façon
-    fiable — elles restent, l'opérateur est réutilisable).
+    rollback-lib.sh (supprimés) : la découverte couvre le k8s namespacé + les StorageClass
+    cluster-scoped de la couche stockage (retirées par PROVISIONNER, `rook-ceph.*` → sans
+    ambiguïté, début de #392) + le node-side. On ne supprime PAS les CRD ni les webhooks
+    cluster-scoped (le lien CRD→opérateur n'est pas découvrable de façon fiable — ils restent,
+    l'opérateur est réutilisable ; reste de #392).
 
     `--dry-run` montre l'arbre découvert sans rien détruire. Garde-fou destructif : sans
     `--yes`, on EXIGE une confirmation (l'opérateur voit l'arbre AVANT).

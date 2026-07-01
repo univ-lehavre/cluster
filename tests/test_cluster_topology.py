@@ -546,6 +546,61 @@ class CephWipeEnv(unittest.TestCase):
         env = ceph_wipe_env(topology_from_dict(_base()), skip_reboot=False)
         self.assertNotIn("SKIP_REBOOT", env)
 
+    def test_derive_des_disques_declares(self):
+        # ADR 0102 volet C : sans bloc ceph: explicite mais AVEC des disques déclarés, le wipe
+        # dérive data (vdb,vdc) et metadata/nvme (vdd) des DiskSpec — PAS les défauts codés.
+        # Régression (vécue au banc, remove ceph rc=1) : les défauts `/dev/vde` (= cidata Lima)
+        # et `/dev/vd[b-d]` (avale le metadata vdd) faisaient échouer le wipe.
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {
+                        "name": f"n{i}",
+                        "roles": ["storage", "worker"],
+                        "disks": [
+                            {"name": "vdb", "role": "data"},
+                            {"name": "vdc", "role": "data"},
+                            {"name": "vdd", "role": "metadata"},
+                        ],
+                    }
+                    for i in range(3)
+                ],
+                storage={"backend": "ceph"},
+            )
+        )
+        env = ceph_wipe_env(topo)
+        self.assertEqual(env["NVME_BLOCK_DEVICE"], "/dev/vdd")  # metadata déclaré, PAS vde=cidata
+        self.assertEqual(env["DATA_DEVICE_GLOB"], "/dev/vd[bc]")  # vdb+vdc, N'AVALE PAS vdd
+
+    def test_ceph_bloc_explicite_prime_sur_disques_declares(self):
+        # Priorité : ceph.{nvme_block_device,data_device_glob} explicites > disques déclarés.
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {
+                        "name": "n1",
+                        "roles": ["storage"],
+                        "disks": [
+                            {"name": "vdb", "role": "data"},
+                            {"name": "vdd", "role": "metadata"},
+                        ],
+                    }
+                ],
+                storage={"backend": "ceph"},
+                ceph={"nvme_block_device": "/dev/nvme1n1", "data_device_glob": "/dev/sd[b-z]"},
+            )
+        )
+        env = ceph_wipe_env(topo)
+        self.assertEqual(env["NVME_BLOCK_DEVICE"], "/dev/nvme1n1")  # explicite gagne
+        self.assertEqual(env["DATA_DEVICE_GLOB"], "/dev/sd[b-z]")
+
+    def test_glob_un_seul_data_device(self):
+        # Un seul disque data → chemin direct, pas de classe de caractères vide.
+        from nestor.profile import _data_device_glob
+
+        self.assertEqual(_data_device_glob(["vdb"]), "/dev/vdb")
+        self.assertEqual(_data_device_glob(["vdb", "vdc"]), "/dev/vd[bc]")
+
 
 class VmResources(unittest.TestCase):
     """LOT 8 (ADR 0097 §3) : ressources VM lues du YAML — plus de VM_CPUS/VM_MEMORY/VM_DISK

@@ -82,6 +82,27 @@ class DetectBackend(unittest.TestCase):
         self.assertEqual(detect_backend([]), "local-path")
 
 
+class ProvisionerIsCeph(unittest.TestCase):
+    """`provisioner_is_ceph` : critère unique « cette SC appartient à Ceph » (sonde backend
+    ET retrait cluster-scoped de `remove ceph`)."""
+
+    def test_rook_ceph_provisioners_are_ceph(self):
+        from nestor.discover import provisioner_is_ceph
+
+        for p in (
+            "rook-ceph.rbd.csi.ceph.com",
+            "rook-ceph.cephfs.csi.ceph.com",
+            "rook-ceph.ceph.rook.io/bucket",
+        ):
+            self.assertTrue(provisioner_is_ceph(p), p)
+
+    def test_non_ceph_provisioners_are_not(self):
+        from nestor.discover import provisioner_is_ceph
+
+        self.assertFalse(provisioner_is_ceph("rancher.io/local-path"))
+        self.assertFalse(provisioner_is_ceph("kubernetes.io/no-provisioner"))
+
+
 class ClassifyBackendDrift(unittest.TestCase):
     """#356 : signaler un backend réel qui CONTREDIT le déclaré (≠ detect_backend)."""
 
