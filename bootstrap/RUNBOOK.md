@@ -616,10 +616,11 @@ ansible-playbook -i ../bench/lima/.work/inventory.yaml rollback.yaml \
   -e confirm=yes --limit cp1
 ```
 
-> Au banc, préférer le **chemin nommé codé** plutôt qu'un enchaînement manuel
-> (ADR 0045) : `BANC_JETABLE=1 bench/lima/run-phases.sh rollback <phase>` défait
-> une phase pour la re-tester (ADR 0054). La commande ci-dessus reste utile pour
-> un rollback **complet** du bootstrap (hors phases plateforme).
+> Au banc, défaire une phase pour la re-tester passe par
+> `nestor remove --phase <phase>` (découverte d'appartenance, ADR 0079/0101 —
+> l'arm bash `run-phases.sh rollback` et `rollback-lib.sh` ont été retirés, #531
+> ; plus de variable `BANC_JETABLE`). La commande ci-dessus reste utile pour un
+> rollback **complet** du bootstrap (hors phases plateforme).
 
 Ce que le rollback fait :
 

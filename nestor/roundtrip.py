@@ -122,13 +122,14 @@ def phase_signal(phase: str) -> list[str]:
 # ── Couches d'exécution / vérification (isolées, stubables) ─────────────────
 
 
-def _run_phase(args: list[str], *, env_extra: dict | None = None) -> int:
-    """Lance `run-phases.sh <args>` ; renvoie son code (consommé tel quel, ADR 0063 G1)."""
-    env = dict(os.environ)
-    if env_extra:
-        env.update(env_extra)
+def _run_phase(args: list[str]) -> int:
+    """Lance `run-phases.sh <args>` ; renvoie son code (consommé tel quel, ADR 0063 G1).
+
+    Sert à la RECONSTRUCTION du roundtrip (`run-phases.sh <phase>`, montage node-side
+    légitime). La destruction, elle, passe par `remove --discover` (plus de variable d'env
+    `BANC_JETABLE` — retirée avec l'arm bash `rollback`, #531)."""
     completed = subprocess.run(  # noqa: S603 — chemin codé, pas d'entrée shell
-        ["bash", _RUN_PHASES, *args], check=False, env=env
+        ["bash", _RUN_PHASES, *args], check=False
     )
     return completed.returncode
 
@@ -224,10 +225,10 @@ class RoundtripResult:
 def run_roundtrip(
     phase: str,
     *,
+    destroy_layer,
     allow_full: bool = False,
     assume_yes: bool = False,
     run_phase=_run_phase,
-    destroy_layer=None,
     signal_present=_signal_present,
     confirm_fn=confirm,
 ) -> RoundtripResult:
@@ -238,12 +239,11 @@ def run_roundtrip(
     (`run_phase`/`destroy_layer`/`signal_present`/`confirm_fn`) sont injectables (tests
     sans banc).
 
-    DESTRUCTION (ADR 0101) : `destroy_layer(phase) -> int` défait TOUTE la clôture en UN
-    geste (la découverte `remove` cascade l'aval + le node-side Ceph), rc 0 = ok.
-    Injecté par `cmd_roundtrip` ; None = repli legacy `run-phases.sh rollback` couche par
-    couche (transitoire, le temps de retirer rollback-lib.sh). La RECONSTRUCTION reste
-    `run-phases.sh <phase>` (montage, bash légitime) : les phases AUTO-DÉTECTENT leur
-    storageClass (plus de `WITH_CEPH`, #319 fermé).
+    DESTRUCTION (ADR 0079/0101) : `destroy_layer(phase) -> int` (OBLIGATOIRE, = `remove
+    --discover`) défait TOUTE la clôture en UN geste — la découverte d'appartenance cascade
+    l'aval + le node-side Ceph, rc 0 = ok. Plus de repli bash `run-phases.sh rollback` (arm
+    retiré + rollback-lib.sh supprimé, #531). La RECONSTRUCTION reste `run-phases.sh <phase>`
+    (montage, bash légitime) : les phases AUTO-DÉTECTENT leur storageClass (#319 fermé).
     """
     layers = closure(phase)  # ordre de montage (amont→aval)
     if involves_storage(phase) and not allow_full:
@@ -261,19 +261,13 @@ def run_roundtrip(
     destroy_order = list(reversed(layers))  # aval→amont
     rebuild_order = layers  # amont→aval
 
-    # 1. Détruire la clôture. Découverte (destroy_layer) : UN geste défait tout l'aval +
-    # le node-side. Repli legacy : couche par couche via `run-phases.sh rollback`.
-    if destroy_layer is not None:
-        rc = destroy_layer(phase)
-        if rc != 0:
-            result.steps.append(RoundtripStep("détruire", False, f"remove rc={rc}"))
-            return result
-    else:
-        for p in destroy_order:
-            rc = run_phase(["rollback", p], env_extra={"BANC_JETABLE": "1"})
-            if rc != 0:
-                result.steps.append(RoundtripStep(f"détruire {p}", False, f"rollback rc={rc}"))
-                return result
+    # 1. Détruire la clôture par DÉCOUVERTE (`destroy_layer` = `remove --discover`) : UN geste
+    # défait tout l'aval + le node-side Ceph (ADR 0079/0101). Plus de repli bash `run-phases.sh
+    # rollback` (arm retiré + rollback-lib.sh supprimé, #531) — la découverte est le seul chemin.
+    rc = destroy_layer(phase)
+    if rc != 0:
+        result.steps.append(RoundtripStep("détruire", False, f"remove rc={rc}"))
+        return result
     result.steps.append(RoundtripStep("détruire", True, f"clôture défaite : {destroy_order}"))
 
     # 2. Vérifier détruit : aucun signal d'infra de la clôture ne subsiste.
