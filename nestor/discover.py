@@ -54,6 +54,15 @@ _CEPH_SC_MARKERS = ("rook-ceph", "ceph.com", "rbd.csi.ceph.com", "cephfs.csi.cep
 _LOCALPATH_SC_MARKERS = ("rancher.io/local-path", "local-path")
 
 
+def provisioner_is_ceph(provisioner: str) -> bool:
+    """True si `provisioner` désigne une StorageClass Ceph (Rook), par ses marqueurs (PUR).
+
+    Source UNIQUE du critère « cette SC appartient à Ceph » — partagée par `detect_backend`
+    (sonde de backend, ADR 0074) ET le retrait cluster-scoped de `remove ceph` (une SC est
+    découvrable SANS ambiguïté par son provisioner, contrairement aux CRD)."""
+    return any(m in provisioner for m in _CEPH_SC_MARKERS)
+
+
 @dataclass
 class Unknown:
     """Une ressource du réel que le catalogue ne mappe pas (ADR 0074 §2)."""
@@ -148,8 +157,7 @@ def detect_backend(storageclass_provisioners: list[str]) -> str:
     Un provisioner ceph (`rook-ceph`/`*.csi.ceph.com`) ⇒ `ceph` ; `local-path` ⇒
     `local-path` ; rien de reconnu ⇒ `local-path` (défaut du socle léger). Ceph prime
     si les deux coexistent (un cluster ceph garde souvent local-path en secours)."""
-    has_ceph = any(any(m in p for m in _CEPH_SC_MARKERS) for p in storageclass_provisioners)
-    if has_ceph:
+    if any(provisioner_is_ceph(p) for p in storageclass_provisioners):
         return "ceph"
     has_local = any(any(m in p for m in _LOCALPATH_SC_MARKERS) for p in storageclass_provisioners)
     if has_local:
