@@ -77,7 +77,7 @@ storage:
 resources:
   cpus: 4
   memory: 12GiB
-  disk: 20GiB # disque SYSTÈME (vda) ; les disques Ceph bruts sont dans nodes[].disks
+  disk: 40GiB # disque SYSTÈME (vda) ; les disques Ceph bruts sont dans nodes[].disks
 
 # ─── hardening : axe orthogonal (ADR 0045 §3) — non durci sur ce banc Ceph
 hardening:
