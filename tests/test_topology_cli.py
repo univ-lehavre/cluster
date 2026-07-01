@@ -2512,11 +2512,11 @@ class Destroy(unittest.TestCase):
         self.addCleanup(setattr, cli, "_real_vms", orig)
 
     def _stub_down(self, rc=0):
-        # Capture l'appel à run-phases.sh down (PAS de vraie destruction en test).
+        # Capture l'appel à run-phases.sh down (cmd ET env — PAS de vraie destruction).
         calls = []
 
         def _spy(cmd, *a, **k):
-            calls.append(cmd)
+            calls.append({"cmd": cmd, "env": k.get("env")})
             return subprocess.CompletedProcess(args=cmd, returncode=rc)
 
         orig = cli.subprocess.run
@@ -2533,8 +2533,13 @@ class Destroy(unittest.TestCase):
         self.assertIn("détruite", out)
         # Délégation à run-phases.sh down cp1 (les VMs de la stack passées en args).
         self.assertEqual(len(calls), 1)
-        self.assertIn("down", calls[0])
-        self.assertIn("cp1", calls[0])
+        self.assertIn("down", calls[0]["cmd"])
+        self.assertIn("cp1", calls[0]["cmd"])
+        # Régression : l'env DOIT porter NODES_OVERRIDE (sinon `phase_down` ne voit aucun
+        # disque déclaré → les disques Lima SURVIVENT au down, vécu au banc ceph).
+        env = calls[0]["env"]
+        self.assertIsNotNone(env, "destroy doit passer l'env dérivé (NODES_OVERRIDE)")
+        self.assertIn("NODES_OVERRIDE", env)
 
     def test_no_stack_vm_is_noop(self):
         # Aucune VM de la stack présente (cp9 = orpheline) → rien à détruire, code 0,

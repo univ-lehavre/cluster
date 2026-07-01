@@ -1228,10 +1228,15 @@ def cmd_destroy(args: argparse.Namespace) -> int:
         print("destruction annulée.", file=sys.stderr)
         return 2
 
-    # Délégation à run-phases.sh down <vm…> (bash garde limactl, ADR 0049).
+    # Délégation à run-phases.sh down <vm…> (bash garde limactl, ADR 0049). On passe l'ENV
+    # DÉRIVÉ de la topo (`_runphases_env` → NODES_OVERRIDE) : `phase_down` en dérive les
+    # DISQUES déclarés de chaque VM (`node_disk_specs`) pour les supprimer. SANS cet env,
+    # NODES est vide côté bash → aucun `lima_disk_delete` → les disques SURVIVENT en silence
+    # (« rien ne subsiste » mensonger, vécu au banc ceph : 9 disques orphelins après `down`).
     rc = subprocess.run(  # noqa: S603 — chemin codé, noms de VM contrôlés (topo validée)
         ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), "down", *targets],
         check=False,
+        env=_runphases_env(topo, stack),
     ).returncode
     if rc != 0:
         print(f"échec de la destruction (run-phases.sh down rc={rc}).", file=sys.stderr)
