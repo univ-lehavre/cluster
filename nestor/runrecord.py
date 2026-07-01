@@ -74,6 +74,24 @@ def _phase_durations(result) -> dict[str, int]:
     return out
 
 
+def host_model(*, run=subprocess.run) -> str:
+    """MODÈLE matériel de l'hôte (ex. `Mac15,9`), pas son nom d'hôte. GÉNÉRIQUE (ADR 0023) :
+    un modèle de machine ne trahit aucune infra réelle — contrairement à `platform.node()`
+    qui rendrait le FQDN interne de l'organisation (fuite dans un fichier VERSIONNÉ). macOS :
+    `sysctl -n hw.model` (= ce que consignait metrology.sh). Ailleurs / erreur → repli sur
+    `platform.machine()` (arch, générique). `run` injecté pour les tests."""
+    try:
+        proc = run(  # noqa: S603 — argv fixe, pas d'entrée shell
+            ["sysctl", "-n", "hw.model"], capture_output=True, text=True, check=False
+        )
+        model = proc.stdout.strip()
+        if proc.returncode == 0 and model:
+            return model
+    except (OSError, ValueError):
+        pass
+    return platform.machine()
+
+
 def build_run_entry(
     result,
     *,
@@ -88,7 +106,8 @@ def build_run_entry(
     """Assemble l'entrée runs-history (dict ordonné) depuis un PathResult RÉUSSI et
     les faits injectés. PUR : `now`/`branche`/`commit`/`arch`/`hote` sont fournis par
     l'appelant (aucune horloge, git ni I/O ici). L'`id` = `<date-heure>-<profil>-<commit>`
-    (convention du fichier). `metriques` OMISES (cf. docstring module)."""
+    (convention du fichier). `hote` = MODÈLE matériel générique (jamais le FQDN, ADR 0023).
+    `metriques` OMISES (cf. docstring module)."""
     date = now.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     id_prefix = now.astimezone(dt.UTC).strftime("%Y-%m-%dT%H")
     id_profil = profil or "run"
@@ -103,21 +122,33 @@ def build_run_entry(
         "topologie": topologie,
         "target": result.target,
         "arch": arch or platform.machine(),
-        "hote": hote or platform.node(),
+        "hote": hote or host_model(),
         "total_s": sum(phases.values()),
         "phases": phases,
     }
     return entry
 
 
+def format_entry(entry: dict[str, Any]) -> str:
+    """Rend l'entrée SEULE au style du fichier runs-history.yaml : un item de liste sous
+    `runs:`, indenté de 2 espaces (`  - id: …`). PUR (pas d'I/O). On NE réécrit PAS tout le
+    fichier via `safe_dump` global — il ré-indenterait l'existant (diff massif) ET
+    re-sérialiserait les dates déjà parsées en datetime (`…Z` → `… +00:00`, corruption). On
+    formate donc l'entrée seule et on la RÉ-INDENTE de 2 espaces pour l'append en texte."""
+    body = yaml.safe_dump(
+        [entry], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000
+    )
+    # `safe_dump([entry])` rend `- id: …\n  date: …` (item au niveau 0) ; on ré-indente de 2
+    # espaces chaque ligne non vide → `  - id: …\n    date: …` (style du fichier).
+    return "".join(f"  {line}" if line.strip() else line for line in body.splitlines(keepends=True))
+
+
 def append_run(path: str, entry: dict[str, Any]) -> None:
-    """Ajoute `entry` à runs-history.yaml (la SEULE I/O). Réécrit byte-stable :
-    `yaml.safe_dump(sort_keys=False, allow_unicode=True)` — l'ordre des clés est celui
-    d'`entry`, l'indentation 2 espaces (format du fichier). Crée `runs: []` si absent."""
-    data: dict[str, Any] = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    data.setdefault("runs", []).append(entry)
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    """Append l'entrée à runs-history.yaml EN TEXTE (la SEULE I/O), sans relire/réécrire
+    l'existant (préserve byte-pour-byte les runs déjà consignés — dates intactes). Crée le
+    fichier avec `runs:` si absent. L'appelant garantit un fichier terminé par un saut de ligne."""
+    prefix = ""
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        prefix = "runs:\n"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(prefix + format_entry(entry))
