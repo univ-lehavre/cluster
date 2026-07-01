@@ -25,17 +25,16 @@ storage:
   backend: local-path
 target_kind: bench
 # Ressources de la VM Lima (LOT 8, ADR 0097 §3 — remplace les env VM_CPUS/VM_MEMORY/
-# VM_DISK). Bloc GLOBAL (défaut tous nœuds) ; un node peut surcharger via
-# `nodes[].resources`. nestor LIT ces valeurs du YAML et les passe au provisioning
-# (le moteur Python est le SEUL, ADR 0097 — le filet bash `--engine` a été retiré).
-# Mono-nœud ici → un seul jeu de ressources ; la surcharge per-node au provisioning
-# multi-nœuds est un chantier en cours (aujourd'hui le provisioning applique un jeu global).
+# VM_DISK). Défaut GLOBAL (tous nœuds) ; un node surcharge via `nodes[].resources`,
+# effectif au provisioning PAR NŒUD (ADR 0102 volet C : la topo pilote le provisioning,
+# fin de WITH_CEPH et des ressources globales). nestor LIT ces valeurs du YAML et les passe
+# au provisioning (le moteur Python est le SEUL — le filet bash `--engine` a été retiré).
 resources:
   cpus: 6
   memory: 16GiB
   disk: 128GiB
-# PAS de `kubeconfig:` ici : pour un banc, nestor DÉRIVE la cible seul (le provisioning
-# rapatrie `bench/lima/.work/kubeconfig`, phase cni ; `_bench_kubeconfig` le trouve par
-# défaut). Le champ `kubeconfig:` ne sert QU'À la PROD (ADR 0090) — déclarer un
-# `~/.kube/<stack>.config` que nestor ne peut pas deviner. Banc = nestor impose ; prod =
-# l'utilisateur déclare ; `export KUBECONFIG=…` surcharge toujours (ADR 0053/0065).
+# PAS de `kubeconfig:` ici (ADR 0102 volet B) : le kubeconfig d'une stack vit à un
+# emplacement UNIQUE nommé par la stack — `.kubeconfigs/<stack>.config` (in-repo, gitignoré),
+# pour banc ET prod. nestor le DÉRIVE seul (le provisioning l'écrit, phase cni). Ne déclarer
+# `kubeconfig:` que pour un chemin custom hors convention (override rare). Banc = nestor
+# provisionne ; prod = rapatriement ; `export KUBECONFIG=…` surcharge toujours (ADR 0053/0065).

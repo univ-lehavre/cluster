@@ -27,19 +27,48 @@ layers: [ceph, sc, datalake, metrics-server]
 
 # ─── nodes : node1 = control + worker + storage ; node2/node3 = worker + storage.
 # Un seul control-plane (pas de HA, cf. en-tête) ; les 3 nœuds schedulent la charge
-# (détaint ADR 0007) ET hébergent des OSD Ceph. Disques BRUTS par nœud (ADR 0008,
-# 3 par nœud) : `vdb`/`vdc` = OSD data, `vdd` = metadata NVMe (block.db) → 2 disques
-# data × 3 nœuds = 6 OSD. Le banc Lima crée ces disques virtio bruts (`vd[b-d]`).
+# (détaint ADR 0007) ET hébergent des OSD Ceph. Disques BRUTS déclarés PAR NŒUD
+# (ADR 0102 volet C : la topo pilote le provisioning, plus de WITH_CEPH) : chaque
+# disque a un `name` (device attendu `vd*`), une `size` et un `role` (`data` OSD |
+# `metadata` block.db). Ici 2 data (vdb, vdc) + 1 metadata (vdd) par nœud → nestor
+# crée ces disques virtio bruts. 2 data × 3 nœuds = 6 OSD.
 nodes:
   - name: node1
     roles: [control, worker, storage]
-    disks: [vdb, vdc, vdd]
+    disks:
+      - name: vdb
+        size: 10GiB
+        role: data
+      - name: vdc
+        size: 10GiB
+        role: data
+      - name: vdd
+        size: 5GiB
+        role: metadata
   - name: node2
     roles: [worker, storage]
-    disks: [vdb, vdc, vdd]
+    disks:
+      - name: vdb
+        size: 10GiB
+        role: data
+      - name: vdc
+        size: 10GiB
+        role: data
+      - name: vdd
+        size: 5GiB
+        role: metadata
   - name: node3
     roles: [worker, storage]
-    disks: [vdb, vdc, vdd]
+    disks:
+      - name: vdb
+        size: 10GiB
+        role: data
+      - name: vdc
+        size: 10GiB
+        role: data
+      - name: vdd
+        size: 5GiB
+        role: metadata
 
 # ─── storage : Ceph (l'objet de cette topologie). `osd_expected` cadre la gate OSD au
 # banc ; nestor ne le DÉRIVE pas d'une liste `disks:` (il ne sait pas que `vdd` est du
@@ -50,13 +79,13 @@ storage:
   # osd_expected: 6         # 2 disques data (vdb,vdc) × 3 nœuds ; vdd = metadata, pas un OSD
   # metadata_device: vdd    # NVMe block.db (ADR 0008)
 
-# ─── resources : ressources VM par nœud (LOT 8, ADR 0097 §3 — ex-VM_CPUS/VM_MEMORY/
-# VM_DISK de l'env). Bloc GLOBAL appliqué à CHAQUE VM ; surchargeable par node via
-# `nodes[].resources`. 12 GiB RAM = valeur Ceph de référence (run-phases.sh:69-73) : un
-# nœud porte OSD/mon Ceph + k8s ; Ceph est sensible à la pression mémoire (OSD lents →
-# HEALTH qui traîne) — on garde la marge même sur ce `layers` réduit (stockage seul, sans
-# la chaîne MLOps). 40 GiB disque (OS + containerd + images). 3 × 12 GiB ≈ 36 GiB sur un
-# hôte 48 GiB (marge OK macOS, README banc). 4 vCPU : charge répartie sur 3 nœuds.
+# ─── resources : défaut GLOBAL des ressources VM (LOT 8, ADR 0097 ; provisioning per-nœud
+# ADR 0102 volet C). nestor applique ce défaut à CHAQUE nœud, surchargeable par node via
+# `nodes[].resources` (effectif au provisioning depuis le volet C). 12 GiB RAM = valeur
+# Ceph de référence : un nœud porte OSD/mon Ceph + k8s ; Ceph est sensible à la pression
+# mémoire (OSD lents → HEALTH qui traîne) — marge gardée même sur ce `layers` réduit
+# (stockage seul). 40 GiB disque (OS + containerd + images). 3 × 12 GiB ≈ 36 GiB sur un
+# hôte 48 GiB (marge OK macOS). 4 vCPU : charge répartie sur 3 nœuds.
 resources:
   cpus: 4
   memory: 12GiB
