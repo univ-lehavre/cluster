@@ -19,29 +19,55 @@ from nestor.prod_target import (  # noqa: E402
     resolve_kubeconfig,
 )
 
+_ROOT = "/repo"  # racine fictive de test
+
 
 class DefaultPath(unittest.TestCase):
-    def test_convention_per_stack(self):
-        self.assertEqual(default_kubeconfig_path("dirqual"), "~/.kube/dirqual.config")
+    def test_convention_per_stack_in_repo(self):
+        # ADR 0102 : in-repo `<racine>/.kubeconfigs/<stack>.config` (plus ~/.kube/).
+        self.assertEqual(
+            default_kubeconfig_path("dirqual", repo_root=_ROOT),
+            "/repo/.kubeconfigs/dirqual.config",
+        )
+
+    def test_banc_and_prod_same_convention(self):
+        # banc ET prod suivent la MÊME convention (fin du dédoublement).
+        self.assertEqual(
+            default_kubeconfig_path("banc", repo_root=_ROOT), "/repo/.kubeconfigs/banc.config"
+        )
 
 
 class ResolveKubeconfig(unittest.TestCase):
     def test_env_wins(self):
-        # KUBECONFIG exporté = intention explicite → prime sur tout (ADR 0053/0090).
+        # KUBECONFIG exporté = intention explicite → prime sur tout (ADR 0053/0065).
         got = resolve_kubeconfig(
-            env_kubeconfig="/tmp/k", declared="~/.kube/dirqual.config", stack="dirqual"
+            env_kubeconfig="/tmp/k", declared="~/.kube/x.config", stack="dirqual", repo_root=_ROOT
         )
         self.assertEqual(got, "/tmp/k")
 
     def test_declared_when_no_env(self):
+        # `declared` = override rare (chemin custom hors convention).
         got = resolve_kubeconfig(
-            env_kubeconfig=None, declared="~/.kube/dirqual.config", stack="dirqual"
+            env_kubeconfig=None, declared="/custom/k.config", stack="dirqual", repo_root=_ROOT
         )
-        self.assertEqual(got, "~/.kube/dirqual.config")
+        self.assertEqual(got, "/custom/k.config")
 
-    def test_default_when_nothing(self):
-        got = resolve_kubeconfig(env_kubeconfig=None, declared=None, stack="dirqual")
-        self.assertEqual(got, "~/.kube/dirqual.config")
+    def test_default_when_nothing_is_in_repo(self):
+        got = resolve_kubeconfig(
+            env_kubeconfig=None, declared=None, stack="dirqual", repo_root=_ROOT
+        )
+        self.assertEqual(got, "/repo/.kubeconfigs/dirqual.config")
+
+    def test_never_home_kube_config_garde_0053(self):
+        # ANTI-RÉGRESSION garde d'isolation (ADR 0053) : le cran par défaut ne peut JAMAIS
+        # être `~/.kube/config` (la prod ambiante du poste). Quel que soit le nom de stack,
+        # sans env ni declared, le chemin est TOUJOURS in-repo sous .kubeconfigs/.
+        for stack in ("banc", "dirqual", "config", "default", ""):
+            got = resolve_kubeconfig(
+                env_kubeconfig=None, declared=None, stack=stack, repo_root=_ROOT
+            )
+            self.assertTrue(got.startswith("/repo/.kubeconfigs/"), f"stack={stack!r} → {got}")
+            self.assertNotIn("/.kube/config", got)
 
 
 class Confirmation(unittest.TestCase):

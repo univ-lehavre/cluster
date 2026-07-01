@@ -2283,7 +2283,11 @@ class Stack(unittest.TestCase):
             code, out, _ = _capture(["stack", "select", name])  # interactif (pas --no-input)
         self.assertEqual(code, 0)  # ne bloque pas (ni sonde réseau ni prompt)
         with open(target, encoding="utf-8") as f:
-            self.assertIn("kubeconfig: ~/.kube/", f.read())  # champ écrit
+            written = f.read()
+        # ADR 0102 : le défaut écrit est in-repo `.kubeconfigs/<stack>.config` (plus ~/.kube/).
+        self.assertIn(
+            f"kubeconfig: {os.path.join(cli._ROOT, '.kubeconfigs', name)}.config", written
+        )
         # l'export vise la prod déclarée, PAS le banc résiduel.
         self.assertNotIn(cli._BENCH_KUBECONFIG, out)
 

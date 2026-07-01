@@ -650,12 +650,12 @@ def _select_prod_kubeconfig(topo: Topology, topo_path: str, stack: str, *, no_in
     if topo.kubeconfig or env_kc:
         return os.path.expanduser(
             _prod_target.resolve_kubeconfig(
-                env_kubeconfig=env_kc, declared=topo.kubeconfig, stack=stack
+                env_kubeconfig=env_kc, declared=topo.kubeconfig, stack=stack, repo_root=_ROOT
             )
         )
     # Topo sans cible : compléter (déterministe). En --no-input on signale seulement
     # (rester strict en CI : ne pas modifier de fichier versionné/local sans intention).
-    default = _prod_target.default_kubeconfig_path(stack)
+    default = _prod_target.default_kubeconfig_path(stack, repo_root=_ROOT)
     if no_input:
         _warn(
             f"topologie sans `kubeconfig:` — la déclarer (ex. `{default}`) pour que "
