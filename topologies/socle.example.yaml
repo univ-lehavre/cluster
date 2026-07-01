@@ -21,7 +21,7 @@ catalog:
   terrain: baremetal # local | cloud | baremetal
   topology: multi-node-4 # multi-node-3 | multi-node-4 | ha-3cp…
   profile: dataops # base ⊂ store ⊂ obs ⊂ dataops (inclusion cumulative)
-  status: buildé # buildé | cible | spike (ADR 0030/0040)
+  status: cible # buildé | cible | spike (ADR 0030/0040) — `buildé` exige une preuve de run tracée (ADR 0052)
 
 # ─── nodes : UNE seule déclaration nœuds/rôles (résorbe NODES ↔ inventaire)
 # `roles` est une liste : un nœud peut cumuler control+worker+storage

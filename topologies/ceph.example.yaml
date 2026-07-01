@@ -32,10 +32,14 @@ layers: [ceph, sc, datalake, metrics-server]
 # disque a un `name` (device attendu `vd*`), une `size` et un `role` (`data` OSD |
 # `metadata` block.db). Ici 2 data (vdb, vdc) + 1 metadata (vdd) par nœud → nestor
 # crée ces disques virtio bruts. 2 data × 3 nœuds = 6 OSD.
+#
+# Les 3 nœuds sont hyperconvergés à l'identique → on déclare les disques UNE fois via
+# une ancre YAML (`&ceph_disks`) et on la référence (`*ceph_disks`) sur chaque nœud :
+# une seule source, pas de copie qui dérive.
 nodes:
   - name: node1
     roles: [control, worker, storage]
-    disks:
+    disks: &ceph_disks
       - name: vdb
         size: 10GiB
         role: data
@@ -47,28 +51,10 @@ nodes:
         role: metadata
   - name: node2
     roles: [worker, storage]
-    disks:
-      - name: vdb
-        size: 10GiB
-        role: data
-      - name: vdc
-        size: 10GiB
-        role: data
-      - name: vdd
-        size: 5GiB
-        role: metadata
+    disks: *ceph_disks
   - name: node3
     roles: [worker, storage]
-    disks:
-      - name: vdb
-        size: 10GiB
-        role: data
-      - name: vdc
-        size: 10GiB
-        role: data
-      - name: vdd
-        size: 5GiB
-        role: metadata
+    disks: *ceph_disks
 
 # ─── storage : Ceph (l'objet de cette topologie). `osd_expected` (gate OSD au banc) est
 # DÉRIVÉ des disques déclarés : nestor compte les `role: data` des nœuds (le `metadata`
