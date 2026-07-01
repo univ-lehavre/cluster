@@ -129,6 +129,30 @@ def derive_osd_expected(topo: Topology) -> int | None:
     return len(storage_nodes) * int(disks_per_node)
 
 
+def derive_metadata_device(topo: Topology) -> str | None:
+    """Device `metadataDevice` (block.db BlueStore) DÉRIVÉ du disque `role: metadata`
+    déclaré par la topo (ADR 0102 volet C, ADR 0008 : block.db sur disque rapide séparé).
+
+    Le rôle Ansible `platform-ceph-cluster` a un DÉFAUT prod `nvme1n1` (NVMe terrain) ; au
+    banc Lima les disques sont virtio (`vd*`). Sans surcharge, Rook cherche `nvme1n1` absent
+    → `metadata device nvme1n1 is not found` → provisioning OSD avorté. On dérive donc le
+    device du `DiskSpec` de rôle `metadata` déclaré (ex. `vdd`) et on le passe en `-e` : la
+    topo pilote AUSSI la config Ceph, plus de valeur codée hors-topo (résout _BANC_TODO #2).
+
+    Contrat : les nœuds hyperconvergés déclarent le MÊME device metadata (une ancre YAML dans
+    ceph.example) — on prend celui du 1er nœud qui en déclare un. Renvoie None si backend≠ceph
+    ou aucun disque `role: metadata` déclaré (→ le défaut du rôle Ansible tient : prod NVMe, ou
+    OSD sans block.db séparé). Ne renvoie JAMAIS un nom prod codé : soit la topo le déclare,
+    soit on laisse le défaut du rôle."""
+    if topo.storage.get("backend") != "ceph":
+        return None
+    for node in topo.nodes:
+        for disk in node.disks or []:
+            if disk.role == "metadata":
+                return disk.name
+    return None
+
+
 def derive_run_params(topo: Topology) -> dict:
     """Le faisceau de paramètres dérivés qu'un déploiement consomme (= les `-e`
     que run-phases.sh calcule en bash). Source de vérité unique de la dérivation.
@@ -168,6 +192,13 @@ def derive_run_params(topo: Topology) -> dict:
     osd = derive_osd_expected(topo)
     if osd is not None:
         out["ceph_osd_expected"] = osd
+    # metadataDevice (block.db) DÉRIVÉ du disque `role: metadata` déclaré (ADR 0102 volet C) :
+    # surcharge le défaut prod `nvme1n1` du rôle Ansible par le device réel du banc (vdd) —
+    # sinon Rook cherche `nvme1n1` absent → OSD avortés (résout _BANC_TODO #2). Absent → on ne
+    # pose pas la clé (le défaut du rôle tient : prod NVMe).
+    metadata_device = derive_metadata_device(topo)
+    if metadata_device is not None:
+        out["ceph_metadata_device"] = metadata_device
     # Émetteur OpenLineage jetable (preuve e2e dataops_chain_emit_and_verify) : le banc Lima
     # build l'image `dagster-openlineage-emit:dev` au play dataops (parité run-phases.sh:1031,
     # `build_emitter_image=true` INCONDITIONNEL au banc). La PROD ne build PAS cet émetteur e2e

@@ -316,13 +316,15 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     # storage-simple : local-path (banc léger). Pas de `-e` dérivé (le rôle porte tout).
     "storage-simple": _plan("storage-simple", extravars_keys=()),
     # ceph/sc/datalake : socle Ceph. Gate sur status.phase des CR Rook (cr-phase) pour
-    # ceph/datalake, présence de la SC pour sc. Les surcharges banc (ceph_metadata_device,
-    # ceph_osd_memory_request, ceph_osd_expected, dossier dé-épinglé arm64) sont des
-    # paramètres de PROVISIONNEMENT propres au banc Lima → posées par la façade/harnais,
-    # PAS dérivées du profil applicatif. STUB de la PREUVE banc (OSD up, HEALTH_OK).
+    # ceph/datalake, présence de la SC pour sc. `ceph_metadata_device` (block.db) et
+    # `ceph_osd_expected` sont DÉRIVÉS de la topo (disques `role: metadata`/`data` déclarés,
+    # ADR 0102 volet C — `profile.derive_metadata_device`/`derive_osd_expected`) : la topo
+    # pilote la config Ceph, plus de valeur codée hors-topo. Restent STUB de preuve banc les
+    # surcharges de PROVISIONNEMENT pur (ceph_osd_memory_request, dossier dé-épinglé arm64,
+    # /var/lib/rook node-side) — à poser+prouver au banc (OSD up, HEALTH_OK).
     "ceph": _plan(
         "ceph",
-        extravars_keys=("ceph_osd_expected",),
+        extravars_keys=("ceph_osd_expected", "ceph_metadata_device"),
         note="gate cr-phase (CephCluster status.phase=Ready) ; OSD up/HEALTH_OK = preuve banc",
     ),
     "sc": _plan("sc", note="gate présence SC ; gate_test_pvc (PVC Bound) = preuve banc (STUB)"),

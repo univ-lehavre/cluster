@@ -23,6 +23,7 @@ from nestor.model import (  # noqa: E402
 )
 from nestor.profile import (  # noqa: E402
     consumes_storage,
+    derive_metadata_device,
     derive_osd_expected,
     derive_run_params,
     required_profiles,
@@ -437,6 +438,45 @@ class OsdDerivation(unittest.TestCase):
             )
         )
         self.assertEqual(derive_osd_expected(topo), 6)
+
+    def test_metadata_device_derived_from_declared_role(self):
+        # ADR 0102 volet C : le device block.db est le disque `role: metadata` déclaré (vdd),
+        # PAS le défaut prod `nvme1n1` — sinon Rook cherche nvme1n1 absent au banc (OSD avortés).
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {
+                        "name": "n1",
+                        "roles": ["storage", "control"],
+                        "disks": [
+                            {"name": "vdb", "role": "data"},
+                            {"name": "vdd", "role": "metadata"},
+                        ],
+                    }
+                ],
+                storage={"backend": "ceph"},
+            )
+        )
+        self.assertEqual(derive_metadata_device(topo), "vdd")
+        # et il transite dans le faisceau -e consommé par la phase ceph.
+        self.assertEqual(derive_run_params(topo).get("ceph_metadata_device"), "vdd")
+
+    def test_metadata_device_none_when_no_metadata_disk(self):
+        # Aucun disque metadata déclaré → None (le défaut du rôle Ansible tient : prod NVMe).
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {"name": "n1", "roles": ["storage"], "disks": [{"name": "vdb", "role": "data"}]}
+                ],
+                storage={"backend": "ceph"},
+            )
+        )
+        self.assertIsNone(derive_metadata_device(topo))
+        self.assertNotIn("ceph_metadata_device", derive_run_params(topo))
+
+    def test_metadata_device_none_for_local_path(self):
+        topo = topology_from_dict(_base(storage={"backend": "local-path"}))
+        self.assertIsNone(derive_metadata_device(topo))
 
 
 class DiskParsing(unittest.TestCase):
