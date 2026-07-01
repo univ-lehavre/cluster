@@ -15,13 +15,18 @@ de vérité (l'ancien `_DEPENDENTS`/`_MOUNT_ORDER` en dur, « validé à la main
 divergeait du graphe de rollback). Les arêtes de stockage BLOC (`gitea`/`registry`/
 `prometheus-stack`/`cnpg`/`loki` → `sc`, PVC sur la StorageClass) sont dans le graphe
 (workflow consigné 2026-06-13). Plus de sous-process bash pour le périmètre/la clôture
-(lot 3 du plan de refonte : le pont `rollback-lib.sh` est remplacé par `graph.py`) ;
-`run-phases.sh` reste shellé pour l'exécution réelle (rollback/montage d'une phase).
+(lot 3 du plan de refonte : le pont `rollback-lib.sh` est remplacé par `graph.py`).
+
+DESTRUCTION par DÉCOUVERTE (ADR 0101) : défaire une couche ne shelle PLUS
+`run-phases.sh rollback` (l'ancien chemin « table » de `rollback-lib.sh`, supprimé) ;
+elle passe par la DÉCOUVERTE d'appartenance (`remove`, `cmd_remove` /
+`_remove_by_discovery` dans `scripts/topology.py`) qui cascade tout l'aval k8s ET le
+node-side Ceph en UN geste. `run-phases.sh` n'est plus shellé ici que pour le MONTAGE
+(reconstruction d'une phase) — bash légitime.
 
 Cycle, pour la clôture `[X, …descendants]` :
-  1. détruire : `run-phases.sh rollback <p>` pour chaque p, en ordre INVERSE de
-     montage (aval→amont) — la dérivation du périmètre par phase vit dans
-     rollback-lib.sh (ADR 0054), non dupliquée ici ;
+  1. détruire : un `remove` (injecté en `destroy_layer`) défait TOUTE la
+     clôture (aval cascadé + node-side Ceph) en UN geste ;
   2. vérifier détruit : le signal d'infra (namespaces + ressources ciblées) de
      chaque couche a DISPARU ;
   3. reconstruire : `run-phases.sh <p>` en ordre de montage (amont→aval) ;
@@ -112,21 +117,6 @@ def phase_targeted_resources(phase: str) -> list[str]:
 def phase_signal(phase: str) -> list[str]:
     """Signal d'infra VÉRIFIABLE d'une phase : ns + ressources ciblées (étiquetés)."""
     return [f"ns/{n}" for n in phase_namespaces(phase)] + phase_targeted_resources(phase)
-
-
-def phase_has_nodeside(phase: str) -> bool:
-    """`phase` laisse-t-elle un état NODE-SIDE (disques Ceph, /var/lib/rook) que le delete
-    Kubernetes ne couvre pas ? (= graph.rollback_phase_has_nodeside)."""
-    return graph.rollback_phase_has_nodeside(phase)
-
-
-def closure_has_nodeside(phase: str) -> bool:
-    """La clôture de `phase` laisse-t-elle un état NODE-SIDE (disques Ceph) ? (ADR 0079 étape
-    A). La découverte défait tout le k8s NAMESPACÉ (CR + finalize ns) ; seul le node-side
-    reste irréductible (SSH, étape ultérieure, banc Ceph). Donc `remove` route vers la TABLE
-    ssi la clôture a du node-side — sinon DÉCOUVERTE. DÉRIVÉ de la table (has_nodeside) tant
-    que la découverte node-side n'existe pas (transitoire, ADR 0079)."""
-    return any(phase_has_nodeside(p) for p in closure(phase))
 
 
 # ── Couches d'exécution / vérification (isolées, stubables) ─────────────────
@@ -237,6 +227,7 @@ def run_roundtrip(
     allow_full: bool = False,
     assume_yes: bool = False,
     run_phase=_run_phase,
+    destroy_layer=None,
     signal_present=_signal_present,
     confirm_fn=confirm,
 ) -> RoundtripResult:
@@ -244,12 +235,15 @@ def run_roundtrip(
 
     `allow_full` : autorise les clôtures qui touchent le stockage (≈ rebuild du
     socle). `assume_yes` : saute la confirmation TTY (CI/script). Les couches d'I/O
-    (`run_phase`/`signal_present`/`confirm_fn`) sont injectables (tests sans banc).
+    (`run_phase`/`destroy_layer`/`signal_present`/`confirm_fn`) sont injectables (tests
+    sans banc).
 
-    La RECONSTRUCTION utilise le profil RÉEL du cluster : les phases bash
-    (monitoring/dataops/gitops) AUTO-DÉTECTENT leur storageClass (présence de la SC
-    Ceph) — plus de `WITH_CEPH` à passer (drift L44 / #319 fermé). Le roundtrip ne
-    thread donc aucun flag de profil ; il délègue à `run-phases.sh`.
+    DESTRUCTION (ADR 0101) : `destroy_layer(phase) -> int` défait TOUTE la clôture en UN
+    geste (la découverte `remove` cascade l'aval + le node-side Ceph), rc 0 = ok.
+    Injecté par `cmd_roundtrip` ; None = repli legacy `run-phases.sh rollback` couche par
+    couche (transitoire, le temps de retirer rollback-lib.sh). La RECONSTRUCTION reste
+    `run-phases.sh <phase>` (montage, bash légitime) : les phases AUTO-DÉTECTENT leur
+    storageClass (plus de `WITH_CEPH`, #319 fermé).
     """
     layers = closure(phase)  # ordre de montage (amont→aval)
     if involves_storage(phase) and not allow_full:
@@ -267,12 +261,19 @@ def run_roundtrip(
     destroy_order = list(reversed(layers))  # aval→amont
     rebuild_order = layers  # amont→aval
 
-    # 1. Détruire chaque couche de la clôture (ordre inverse).
-    for p in destroy_order:
-        rc = run_phase(["rollback", p], env_extra={"BANC_JETABLE": "1"})
+    # 1. Détruire la clôture. Découverte (destroy_layer) : UN geste défait tout l'aval +
+    # le node-side. Repli legacy : couche par couche via `run-phases.sh rollback`.
+    if destroy_layer is not None:
+        rc = destroy_layer(phase)
         if rc != 0:
-            result.steps.append(RoundtripStep(f"détruire {p}", False, f"rollback rc={rc}"))
+            result.steps.append(RoundtripStep("détruire", False, f"remove rc={rc}"))
             return result
+    else:
+        for p in destroy_order:
+            rc = run_phase(["rollback", p], env_extra={"BANC_JETABLE": "1"})
+            if rc != 0:
+                result.steps.append(RoundtripStep(f"détruire {p}", False, f"rollback rc={rc}"))
+                return result
     result.steps.append(RoundtripStep("détruire", True, f"clôture défaite : {destroy_order}"))
 
     # 2. Vérifier détruit : aucun signal d'infra de la clôture ne subsiste.
@@ -303,86 +304,4 @@ def run_roundtrip(
     result.steps.append(
         RoundtripStep("vérifier sain", ok, "signal revenu" if ok else f"manquant : {manquants}")
     )
-    return result
-
-
-@dataclass
-class RemoveResult:
-    """Verdict d'un `remove` (suppression d'une couche + clôture). `removed` = OK."""
-
-    phase: str
-    layers: list[str] = field(default_factory=list)
-    steps: list[RoundtripStep] = field(default_factory=list)
-
-    @property
-    def removed(self) -> bool:
-        return bool(self.steps) and all(s.ok for s in self.steps)
-
-
-def run_remove(
-    phase: str,
-    *,
-    backend: str | None = None,
-    allow_full: bool = False,
-    assume_yes: bool = False,
-    run_phase=_run_phase,
-    signal_present=_signal_present,
-    confirm_fn=confirm,
-) -> RemoveResult:
-    """Détruire une couche ET sa CLÔTURE descendante, puis vérifier qu'elle a disparu.
-
-    C'est la MOITIÉ « détruire » de `run_roundtrip` (sans reconstruction) : `cluster
-    remove`. Réutilise exactement les mêmes briques (clôture, garde stockage,
-    confirmation, `run-phases.sh rollback`, vérification du signal) — pas de logique de
-    destruction dupliquée. Détruire une couche entraîne celle de ses dépendantes
-    (clôture descendante, ADR 0066) : on les retire en ordre AVAL→AMONT.
-
-    `backend` : le backend de stockage de la stack (local-path|ceph). DOIT être posé
-    (`STORAGE_BACKEND`) pour que rollback-lib cible les BONNES ressources : l'OBC Ceph
-    `cnpg-backups`/`loki-buckets` n'existe QU'en ceph — sans le backend, _rb_backend
-    retombe sur `ceph` par défaut et tente de supprimer une CRD `objectbucketclaim`
-    ABSENTE en local-path (rollback rc≠0). `None` → on laisse le défaut de rollback-lib.
-
-    `allow_full` : autorise une clôture qui touche le stockage (≈ démontage du socle).
-    `assume_yes` : saute la confirmation (CI). I/O injectables (tests sans banc)."""
-    layers = closure(phase)  # ordre de montage (amont→aval)
-    if involves_storage(phase) and not allow_full:
-        raise RoundtripError(
-            f"`{phase}` entraîne une clôture de stockage {layers} (≈ démontage du socle) "
-            "— exiger l'opt-in `--full`"
-        )
-    result = RemoveResult(phase=phase, layers=layers)
-
-    # Garde-fou données : confirmation avant toute suppression définitive.
-    if not confirm_fn(layers, assume_yes=assume_yes):
-        result.steps.append(RoundtripStep("confirmation", False, "suppression non confirmée"))
-        return result
-
-    # Env du rollback : BANC_JETABLE (destructif assumé) + STORAGE_BACKEND (cible les
-    # bonnes ressources par backend — l'OBC Ceph n'existe pas en local-path).
-    rollback_env = {"BANC_JETABLE": "1"}
-    if backend:
-        rollback_env["STORAGE_BACKEND"] = backend
-
-    # 1. Détruire chaque couche de la clôture (ordre inverse : aval→amont). On NE
-    # s'ARRÊTE PAS au 1er échec (#361) : une couche indépendante (dagster, marquez) ne
-    # doit pas être épargnée parce qu'une autre (postgres wedgé) a calé. On tente TOUTE
-    # la clôture et on agrège les échecs — verdict par couche.
-    destroy_order = list(reversed(layers))
-    echecs = []
-    for p in destroy_order:
-        rc = run_phase(["rollback", p], env_extra=rollback_env)
-        if rc != 0:
-            echecs.append(f"{p} (rc={rc})")
-    if echecs:
-        result.steps.append(RoundtripStep("supprimer", False, f"échec(s) : {', '.join(echecs)}"))
-    else:
-        result.steps.append(RoundtripStep("supprimer", True, f"clôture défaite : {destroy_order}"))
-
-    # 2. Vérifier supprimé : aucun signal d'infra de la clôture ne subsiste.
-    full_signal = [s for p in layers for s in phase_signal(p)]
-    still = signal_present(full_signal)
-    ok = not still
-    detail = "signal absent" if ok else f"encore présent : {still}"
-    result.steps.append(RoundtripStep("vérifier supprimé", ok, detail))
     return result

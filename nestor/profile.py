@@ -207,3 +207,24 @@ def derive_run_params(topo: Topology) -> dict:
     if topo.target_kind == "bench":
         out["build_emitter_image"] = "true"
     return out
+
+
+# Défauts banc Lima du wipe node-side Ceph (virtio-blk → /dev/vd* : vda = OS, vd[b-d] =
+# data HDD, vde = NVMe block.db). En PROD les devices DIFFÈRENT (sd*/nvme*) → la topo les
+# DÉCLARE via `ceph.{nvme_block_device,data_device_glob}` (model.py). Ce sont les ex-valeurs
+# CODÉES de phase_rollback (rollback-lib.sh) ; on les DÉRIVE désormais (jamais en dur).
+_CEPH_WIPE_DEFAULTS = {"nvme_block_device": "/dev/vde", "data_device_glob": "/dev/vd[b-d]"}
+
+
+def ceph_wipe_env(topo: Topology, *, skip_reboot: bool = True) -> dict[str, str]:
+    """Variables d'env du wipe node-side Ceph (`storage/ceph/cleanup.sh`), DÉRIVÉES de la
+    topo (PUR). `ceph.nvme_block_device`/`ceph.data_device_glob` si déclarés, sinon les
+    défauts banc Lima. `SKIP_REBOOT=1` par défaut (le wipe d'un rollback ne reboote pas —
+    on re-monte derrière ; le reboot du cleanup prod est un autre geste). Aucune I/O."""
+    ceph = topo.ceph or {}
+    nvme = ceph.get("nvme_block_device") or _CEPH_WIPE_DEFAULTS["nvme_block_device"]
+    data_glob = ceph.get("data_device_glob") or _CEPH_WIPE_DEFAULTS["data_device_glob"]
+    env = {"NVME_BLOCK_DEVICE": str(nvme), "DATA_DEVICE_GLOB": str(data_glob)}
+    if skip_reboot:
+        env["SKIP_REBOOT"] = "1"
+    return env
