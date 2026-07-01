@@ -126,6 +126,7 @@ from nestor import refresh_fuse as _refresh_fuse  # noqa: E402
 from nestor import refresh_plan as _refresh_plan  # noqa: E402
 from nestor import roundtrip as _roundtrip  # noqa: E402
 from nestor import runner as _runner  # noqa: E402
+from nestor import runrecord as _runrecord  # noqa: E402
 from nestor import scale as _scale  # noqa: E402
 from nestor import seed as _seed  # noqa: E402
 from nestor import smoke as _smoke  # noqa: E402
@@ -3749,6 +3750,27 @@ def _run_path_engine(
         print(
             f"→ moteur Python (run_path) : chemin `{target}` ({len(monter)} phase(s)), CP {ctx.cp}."
         )
+
+        def _record_run(res) -> None:
+            # Consigne le run RÉUSSI dans runs-history.yaml (durées mesurées par le moteur +
+            # commit git). NON BLOQUANT : une erreur de consignation ne doit PAS transformer un
+            # montage réussi en échec (la preuve, c'est le montage ; la consignation l'archive).
+            try:
+                branche, commit = _runrecord.git_revision(_ROOT)
+                entry = _runrecord.build_run_entry(
+                    res,
+                    topologie=stack_name,
+                    profil=topo.catalog.get("profile", "base"),
+                    now=dt.datetime.now(dt.UTC),
+                    branche=branche,
+                    commit=commit,
+                    arch=topo.catalog.get("arch"),
+                )
+                _runrecord.append_run(_RUNS_HISTORY, entry)
+                print(f"  ✓ run consigné (runs-history) — commit {commit}, {entry['total_s']}s.")
+            except OSError as exc:
+                _warn(f"consignation runs-history échouée (non bloquant) : {exc}")
+
         try:
             result = _path.run_path(
                 topo,
@@ -3759,12 +3781,13 @@ def _run_path_engine(
                 assert_safe=assert_safe,
                 provision=provision,
                 bootstrap=bootstrap,
-                # record : la consignation runs-history (#216) — agrégation des durées par
-                # phase + métriques Prometheus échantillonnées PENDANT le run. C'était le geste
-                # de `metro_record_run`/`metro_sample_prometheus` (metrology.sh, RETIRÉ ADR 0101).
-                # STUB documenté (None) : le moteur Python ne consigne pas encore (à câbler+
-                # prouver au banc, §5.b) ; en attendant l'append se fait par commit `chore(bench)`.
-                record=None,
+                # record : consignation runs-history (#216, ex-`metro_record_run` de
+                # metrology.sh RETIRÉ ADR 0101). Appelé UNIQUEMENT sur un run from-scratch
+                # RÉUSSI (le moteur ne l'invoque qu'après succès) → jamais une fausse preuve.
+                # Porte le COMMIT git (traçabilité, `-dirty` si arbre sale). Les MÉTRIQUES
+                # (cpu/ram Prometheus) sont OMISES (monitoring déployé après le socle, non lisible
+                # ici — honnête). Non bloquant : un échec de consignation ne casse pas le montage.
+                record=_record_run,
             )
         except _runner.RunnerUnavailable as exc:
             raise _UsageError(str(exc)) from exc

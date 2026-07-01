@@ -38,6 +38,7 @@ lit jamais leur logique, ADR 0097 §2.a) et lance les playbooks via
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 
@@ -95,6 +96,7 @@ class PathStep:
     name: str
     ok: bool
     detail: str = ""
+    duration_s: float | None = None  # durée MESURÉE de la phase (None = gate, non chronométrée)
 
 
 @dataclass
@@ -132,6 +134,7 @@ def run_path(
     bootstrap=None,
     record=None,
     sleep=None,
+    clock=None,
 ):
     """Monte un chemin nommé : boucle PURE-TESTABLE sur sa séquence de phases.
 
@@ -174,6 +177,10 @@ def run_path(
     └─ la court-circuite donc PAS, il appelle la garde et la garde décide.
     """
     _ = sleep  # signature homogène (cf. bootstrap.run_bootstrap) ; gates portent l'attente
+    # Horloge INJECTÉE (défaut `time.monotonic`) : chronomètre chaque phase pour consigner
+    # `phases{nom: secondes}` (ex-`time_phase` de run-phases.sh). Les tests passent un clock
+    # DÉTERMINISTE — le moteur reste pur-testable (aucune horloge réelle en test).
+    _clock = clock or time.monotonic
     seq = sequence(topo, target)
     result = PathResult(target=target)
     try:
@@ -191,6 +198,9 @@ def run_path(
                 ) from exc
 
             # Montage de la phase : amont non-Ansible (provisioning/socle/HA) vs play.
+            # Chronométré (`_clock`) : la durée est attachée au step de la phase pour
+            # `record` (ex-`time_phase`). Les gates (post-montage) ne sont PAS chronométrées.
+            _t0 = _clock()
             if phase in _NON_ANSIBLE_AMONT:
                 _run_amont(
                     phase,
@@ -198,6 +208,7 @@ def run_path(
                     bootstrap=bootstrap,
                     steps=result.steps,
                 )
+                result.steps[-1].duration_s = _clock() - _t0
             else:
                 res = launch(phase)
                 # `launch` peut rendre un IdempotenceResult (`.ok` = double-passage changed=0)
@@ -205,7 +216,12 @@ def run_path(
                 # résultat de seed (`.ok`). On accepte les deux : `.ok` s'il existe, sinon rc==0.
                 ok = bool(res.ok) if hasattr(res, "ok") else getattr(res, "rc", 1) == 0
                 result.steps.append(
-                    PathStep(phase, ok, getattr(res, "verdict", "") or getattr(res, "message", ""))
+                    PathStep(
+                        phase,
+                        ok,
+                        getattr(res, "verdict", "") or getattr(res, "message", ""),
+                        duration_s=_clock() - _t0,
+                    )
                 )
                 if not ok:
                     raise PathError(
@@ -307,10 +323,12 @@ _BANC_TODO = (
     #    n'est pas prouvé au banc. Le moteur `bootstrap.run_bootstrap` est porté+testé ; RESTE
     #    le câblage transport (rappel `cni`, dérivation Lima vivant) — à câbler+prouver au banc.
     "câblage transport bootstrap (cp_ip/iface, CNI) — à prouver au banc",
-    # 3. CONSIGNATION runs-history (#216) : le callback `record` est None (STUB) —
-    #    l'agrégation des durées + métriques metrology.sh PENDANT le run (byte-stable,
-    #    history.py:20) reste à porter côté Python. À câbler+prouver au banc.
-    "consignation runs-history (record) côté Python — à câbler+prouver au banc",
+    # 3. CONSIGNATION runs-history (#216) : le callback `record` est CÂBLÉ (nestor/runrecord.py :
+    #    durées de phases mesurées par le moteur + commit git avec `-dirty`, append byte-stable).
+    #    RESTE : les MÉTRIQUES Prometheus (cpu_core_s/ram_*) — échantillonnées PENDANT le run par
+    #    node-exporter (monitoring déployé APRÈS le socle), non lisibles ici → OMISES honnêtement,
+    #    à câbler quand un run montera aussi le monitoring. À prouver au banc (run consigné réel).
+    "métriques Prometheus du run (cpu/ram) — omises, à échantillonner+consigner au banc",
     # 4. RUN BANC from-scratch consigné (bench/lima/RESULTS.md) + rejeu changed=0
     #    sur LES DEUX topologies (banc local-path PUIS dirqual Ceph, invariants 1-2).
     "run banc from-scratch + rejeu changed=0 (banc PUIS prod) — PREUVE DÉFINITIVE, reste à faire",
