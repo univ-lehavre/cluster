@@ -541,6 +541,51 @@ class Kubectl(unittest.TestCase):
             code = cli.main(["kubectl", "-f", self._topo_file(), "get", "nodes"])
         self.assertEqual(code, 7)
 
+    def test_flag_in_head_passes_through(self):
+        # Régression (vécu au banc) : `nestor kubectl -n rook-ceph get pods` échouait
+        # « unrecognized arguments: -n » — argparse `nargs=REMAINDER` ne capture pas un flag
+        # en TÊTE. Le découpage amont (`_split_passthrough`) le transmet BRUT à kubectl.
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["kubectl", "-n", "rook-ceph", "get", "pods"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["argv"], ["kubectl", "-n", "rook-ceph", "get", "pods"])
+
+    def test_exec_dashdash_preserved_not_consumed_as_file(self):
+        # Un `--` d'exec (`exec pod -- ceph …`) n'est PAS un `--` de tête : il doit rester
+        # dans le passthrough (transmis à kubectl), pas être avalé par le découpage `-f`.
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["kubectl", "-n", "rook-ceph", "exec", "pod", "--", "ceph", "status"])
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            seen["argv"], ["kubectl", "-n", "rook-ceph", "exec", "pod", "--", "ceph", "status"]
+        )
+
+    def test_leading_dashdash_stripped(self):
+        # `nestor kubectl -- -n ns get pods` : le `--` de TÊTE (échappement) est retiré, pas
+        # transmis à kubectl (qui l'interpréterait comme « fin des options » → aide).
+        seen = {}
+
+        def _fake_run(argv, *a, **k):
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=0)
+
+        with mock.patch.object(cli.subprocess, "run", _fake_run):
+            code = cli.main(["kubectl", "--", "-n", "ns", "get", "pods"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["argv"], ["kubectl", "-n", "ns", "get", "pods"])
+
     def test_request_timeout_flag_precedes_args_not_after_exec_dashdash(self):
         # Régression (constaté au banc) : `_kubectl` ajoutait `--request-timeout` EN FIN
         # d'argv → pour un `exec pod -- gitea …`, le flag atterrissait APRÈS le `--`, donc
