@@ -216,14 +216,54 @@ def derive_run_params(topo: Topology) -> dict:
 _CEPH_WIPE_DEFAULTS = {"nvme_block_device": "/dev/vde", "data_device_glob": "/dev/vd[b-d]"}
 
 
+def _declared_disk_names(topo: Topology, role: str) -> list[str]:
+    """Noms des disques déclarés (`DiskSpec.name`) d'un rôle donné, dédupliqués en gardant
+    l'ordre (les nœuds hyperconvergés déclarent les MÊMES devices via une ancre YAML). PUR."""
+    seen: list[str] = []
+    for node in topo.nodes:
+        for disk in node.disks or []:
+            if disk.role == role and disk.name not in seen:
+                seen.append(disk.name)
+    return seen
+
+
+def _data_device_glob(data_names: list[str]) -> str:
+    """Glob `/dev/vd[...]` couvrant EXACTEMENT les devices data déclarés (ex. `vdb`,`vdc` →
+    `/dev/vd[bc]`). Un seul device → `/dev/vdb` (pas de classe). Le glob ne doit JAMAIS avaler
+    le metadata (`vdd`) ni le cidata Lima (`vde`) — d'où la dérivation des noms EXACTS déclarés,
+    pas un `vd[b-d]` codé (bug : `[b-d]` incluait le metadata + `vde`=cidata au wipe). PUR."""
+    letters = "".join(sorted(n[-1] for n in data_names))
+    if len(letters) == 1:
+        return f"/dev/vd{letters}"
+    return f"/dev/vd[{letters}]"
+
+
 def ceph_wipe_env(topo: Topology, *, skip_reboot: bool = True) -> dict[str, str]:
     """Variables d'env du wipe node-side Ceph (`storage/ceph/cleanup.sh`), DÉRIVÉES de la
-    topo (PUR). `ceph.nvme_block_device`/`ceph.data_device_glob` si déclarés, sinon les
-    défauts banc Lima. `SKIP_REBOOT=1` par défaut (le wipe d'un rollback ne reboote pas —
-    on re-monte derrière ; le reboot du cleanup prod est un autre geste). Aucune I/O."""
+    topo (PUR). Priorité : `ceph.{nvme_block_device,data_device_glob}` EXPLICITES (prod
+    terrain) > disques DÉCLARÉS par nœud (`DiskSpec` role data/metadata, ADR 0102 volet C) >
+    défauts banc Lima. `SKIP_REBOOT=1` par défaut (le wipe d'un rollback ne reboote pas — on
+    re-monte derrière ; le reboot du cleanup prod est un autre geste). Aucune I/O.
+
+    ⚠️ Bug corrigé (vécu au banc, `remove ceph --full` échoué rc=1) : les défauts codés
+    `_CEPH_WIPE_DEFAULTS` (`/dev/vde`, `/dev/vd[b-d]`) dataient du banc Vagrant. Au banc Lima,
+    `vde` est le CIDATA (iso9660 monté) → `blkdiscard /dev/vde` échoue ; et `/dev/vd[b-d]`
+    avale `vdd` (le metadata). On dérive donc data (`vdb`,`vdc`) et metadata (`vdd`) des disques
+    DÉCLARÉS — cohérent avec `derive_metadata_device` (même source : la topo pilote)."""
     ceph = topo.ceph or {}
-    nvme = ceph.get("nvme_block_device") or _CEPH_WIPE_DEFAULTS["nvme_block_device"]
-    data_glob = ceph.get("data_device_glob") or _CEPH_WIPE_DEFAULTS["data_device_glob"]
+    # nvme/metadata (block.db) : explicite > disque role=metadata déclaré > défaut banc.
+    nvme = (
+        ceph.get("nvme_block_device")
+        or (f"/dev/{derive_metadata_device(topo)}" if derive_metadata_device(topo) else None)
+        or _CEPH_WIPE_DEFAULTS["nvme_block_device"]
+    )
+    # data : explicite > glob dérivé des disques role=data déclarés > défaut banc.
+    data_names = _declared_disk_names(topo, "data")
+    data_glob = (
+        ceph.get("data_device_glob")
+        or (_data_device_glob(data_names) if data_names else None)
+        or _CEPH_WIPE_DEFAULTS["data_device_glob"]
+    )
     env = {"NVME_BLOCK_DEVICE": str(nvme), "DATA_DEVICE_GLOB": str(data_glob)}
     if skip_reboot:
         env["SKIP_REBOOT"] = "1"

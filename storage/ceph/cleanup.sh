@@ -23,9 +23,14 @@ DATA_DEVICE_GLOB=${DATA_DEVICE_GLOB:-/dev/sd[a-z]}
 
 sudo rm -fR /var/lib/rook
 
-sudo apt-get update
-sudo apt-get upgrade -y
-sudo apt-get install -y gdisk parted
+# Outils de wipe : sgdisk (paquet gdisk) + parted. On n'installe QUE s'ils manquent, et
+# JAMAIS d'`apt-get upgrade` (mutation lourde/risquée hors périmètre d'un wipe ; sous
+# `set -e` un `apt-get update` en échec réseau — banc Lima — faisait avorter tout le
+# nettoyage AVANT le wipe, vécu au banc). L'install échoue proprement s'il faut le réseau.
+if ! command -v sgdisk > /dev/null || ! command -v parted > /dev/null; then
+    sudo apt-get update
+    sudo apt-get install -y gdisk parted
+fi
 
 wipe_all() {
     local device=$1
