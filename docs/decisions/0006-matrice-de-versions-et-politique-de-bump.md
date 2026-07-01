@@ -80,6 +80,37 @@ multi-arch** (politique ci-dessous) ; on note ici le tag de version porteur.
 
 <!-- séparateur entre deux encadrés -->
 
+> **Chaîne dbt des code-locations (deepdiff, interface atlas — #533 /
+> atlas#482).** L'image Dagster **du cluster** n'installe **que** `dagster` +
+> `dagster-*` (cf.
+> [`image/Dockerfile`](../../platform/dagster/image/Dockerfile)) — **aucun
+> `dbt-core`/`dbt-common`/`deepdiff`**. La chaîne dbt vit **entièrement côté
+> atlas** (`dataops/*-dagster/pyproject.toml`), résolue au build applicatif. Le
+> point d'interface n'est donc **pas l'image**, mais le **plancher de version
+> dbt** ciblé par parité avec `dagster-dbt==0.29.7` (lequel autorise déjà
+> `dbt-core<1.12,>=1.7`). **Contrainte figée ici** (source unique, ADR 0043) :
+>
+> - `dbt-common < 1.29` (dont **1.27.1**, résolu aujourd'hui) épingle
+>   `deepdiff<8` → 2 CVE (GHSA-mw26-5g2v-hqw3 critical, GHSA-54jj-px8x-5w5q
+>   high), d'où l'override `deepdiff>=8,<9` **défensif** côté atlas (dbt
+>   n'utilise que `DeepDiff` sur manifests locaux, jamais `Delta`).
+> - **Cible native** : `dbt-common ≥ 1.34.2` accepte `deepdiff<9` (donc
+>   `deepdiff 8`). Elle s'obtient **sans toucher l'image cluster ni la parité
+>   `0.29.7 ↔ dagster 1.13.7`**, en montant le **plancher `dbt-core`** côté
+>   atlas à **`>= 1.10.22`** (tire `dbt-common ≥ 1.34.2`,
+>   `requires-python >= 3.9` — compatible `python:3.10-slim`). `dbt-core 1.11.x`
+>   (`dbt-common ≥ 1.37.2`, `>= 3.10`) est aussi in-range et compatible si l'on
+>   veut aller plus haut.
+> - **`dbt-common 2.0.0` INTERDIT** : ré-épingle `deepdiff<8` (régression).
+>
+> **Action (garde-fou ADR 0033 « même PR ») :** atlas relève son plancher
+> `dbt-core` et **retire l'override** dans la même PR qui met à jour son miroir
+> de ce contrat. Côté cluster : **aucun rebuild d'image requis** — la parité
+> `dagster-dbt 0.29.7` est préservée. Re-valider la résolution multi-arch cp310
+> (arm64 + x64) au banc atlas après le relèvement.
+
+<!-- séparateur entre deux encadrés -->
+
 > **Marquez amd64-only.** Les images officielles Marquez **API et web** sont
 > publiées **amd64 uniquement** (Docker Hub, 0.51.1). Bases multi-arch
 > (`eclipse-temurin:17`, `node:18-alpine`) → on **construit les deux images
