@@ -2,7 +2,11 @@
 
 ## Statut
 
-Proposed (2026-06-24)
+Accepted (2026-06-24 ; passé en Accepted le 2026-07-01, après validation du
+diagnostic cluster et amorçage de l'implémentation — App-of-Apps posé
+[`platform/argocd/app-of-apps/`](../../platform/argocd/app-of-apps/) + seed prod
+[`bootstrap/seed-app-of-apps.sh`](../../bootstrap/seed-app-of-apps.sh) ; plan de
+mise en œuvre [Actif](../plans/plan-build-evenementiel-gitops.md)).
 
 Comble un **implicite** des ADR [0022](0022-argocd-gitops-applicatif.md) (Argo
 CD déploie l'applicatif), [0033](0033-orchestration-ansible-platform-dataops.md)
