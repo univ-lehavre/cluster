@@ -302,6 +302,11 @@ def cmd_kubectl(args: argparse.Namespace) -> int:
         os.environ.pop("KUBECONFIG", None)
     env = _kubectl_env(topo.kubeconfig)
     passthrough = list(getattr(args, "kubectl_args", []) or [])
+    # Retire un `--` de tête résiduel : le passthrough est DÉJÀ brut (`_split_passthrough`),
+    # un `nestor kubectl -- -n …` explicite ne doit pas transmettre le `--` à kubectl (qui
+    # l'interpréterait comme « fin des options » et afficherait l'aide).
+    if passthrough and passthrough[0] == "--":
+        passthrough = passthrough[1:]
     proc = subprocess.run(  # noqa: S603 — kubectl + args opérateur, cible sûre (env)
         ["kubectl", *passthrough], env=env, check=False
     )
@@ -4960,10 +4965,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_kubectl.add_argument(
         "-f", "--file", default=None, help="topology.yaml à viser (défaut : stack active)"
     )
-    # REMAINDER : tout ce qui suit `kubectl` est passé tel quel à la vraie commande kubectl
-    # (`nestor kubectl get pods -A`, `nestor kubectl -n monitoring logs …`).
+    # REMAINDER : garde le sous-parser cohérent (aide `nestor kubectl -h`). MAIS le vrai
+    # découpage se fait dans `main()` via `_split_passthrough` AVANT argparse : REMAINDER est
+    # buggé quand un flag est en TÊTE (`nestor kubectl -n …` → « unrecognized -n »), argparse
+    # le matchant au parent avant d'activer REMAINDER. L'interception amont couvre ce cas.
     p_kubectl.add_argument(
-        "kubectl_args", nargs=argparse.REMAINDER, help="arguments passés à kubectl"
+        "kubectl_args", nargs=argparse.REMAINDER, help="arguments passés à kubectl (bruts)"
     )
 
     p_ansible = sub.add_parser(
@@ -5252,6 +5259,25 @@ def _default_kubeconfig_to_bench() -> None:
         _KUBECONFIG_AUTO_BENCH = True
 
 
+def _split_passthrough(rest: list[str]) -> argparse.Namespace:
+    """Découpe les args d'un passthrough `nestor kubectl` : extrait `-f`/`--file <topo>` de
+    TÊTE, le reste est BRUT (transmis tel quel à kubectl). Remplace le `nargs=REMAINDER`
+    d'argparse — BUGGÉ quand le 1er token du reste est un flag (`-n`) : argparse tente de le
+    matcher comme option du parent AVANT d'activer REMAINDER → « unrecognized arguments: -n »
+    (vécu : `nestor kubectl -n rook-ceph …`). On ne parse QUE `-f/--file` en tête ; tout ce qui
+    suit part inchangé (flags kubectl inclus, `--` d'un exec préservé)."""
+    file = None
+    i = 0
+    # `-f/--file` n'est reconnu qu'en TÊTE (avant les args kubectl) — un `-f` plus loin
+    # appartient à kubectl (ex. `kubectl apply -f manifest.yaml`) et reste dans le passthrough.
+    while i < len(rest) and rest[i] in ("-f", "--file"):
+        if i + 1 >= len(rest):
+            raise _UsageError(f"`{rest[i]}` attend un chemin de topologie")
+        file = rest[i + 1]
+        i += 2
+    return argparse.Namespace(file=file, kubectl_args=rest[i:])
+
+
 def main(argv: list[str] | None = None) -> int:
     _default_kubeconfig_to_bench()
     # Les commandes internes sont interceptées AVANT le parser principal (hors menu).
@@ -5260,6 +5286,17 @@ def main(argv: list[str] | None = None) -> int:
         cmd = args_list[0]
         args = _INTERNAL_PARSERS[cmd]().parse_args(args_list[1:])
         args.cmd = cmd
+        return _run(args)
+    # PASSTHROUGH `kubectl` intercepté AVANT argparse : le reste est BRUT (un flag kubectl en
+    # tête, `-n …`, casse le `nargs=REMAINDER` — cf. `_split_passthrough`). PAS `ansible` : son
+    # 1er argument est le POSITIONNEL `playbook` (jamais un flag) → REMAINDER n'a pas le bug là.
+    if args_list and args_list[0] == "kubectl":
+        try:
+            args = _split_passthrough(args_list[1:])
+        except _UsageError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        args.cmd = "kubectl"
         return _run(args)
     args = _build_parser().parse_args(args_list)
     return _run(args)
