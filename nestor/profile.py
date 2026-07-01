@@ -114,9 +114,7 @@ def derive_osd_expected(topo: Topology) -> int | None:
     if explicit is not None:
         return int(explicit)
     # (2) disques déclarés par nœud → compter les OSD (role data) ; nestor connaît le rôle.
-    declared = sum(
-        1 for n in topo.nodes for d in (n.disks or []) if d.role == "data"
-    )
+    declared = sum(1 for n in topo.nodes for d in (n.disks or []) if d.role == "data")
     if declared:
         return declared
     # (3) rétrocompat : disks_per_node global × nœuds-stockage (sans déclaration disque).
