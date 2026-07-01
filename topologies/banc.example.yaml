@@ -24,11 +24,16 @@ nodes:
 storage:
   backend: local-path
 target_kind: bench
-# Ressources de la VM Lima (LOT 8, ADR 0097 §3 — remplace les env VM_CPUS/VM_MEMORY/
+# DIMENSIONNEMENT de la VM Lima (LOT 8, ADR 0097 §3 — remplace les env VM_CPUS/VM_MEMORY/
 # VM_DISK). Défaut GLOBAL (tous nœuds) ; un node surcharge via `nodes[].resources`,
-# effectif au provisioning PAR NŒUD (ADR 0102 volet C : la topo pilote le provisioning,
-# fin de WITH_CEPH et des ressources globales). nestor LIT ces valeurs du YAML et les passe
-# au provisioning (le moteur Python est le SEUL — le filet bash `--engine` a été retiré).
+# effectif au provisioning PAR NŒUD (ADR 0102 volet C). Les trois champs :
+#   cpus   : nombre de vCPU de la VM.
+#   memory : RAM de la VM.
+#   disk   : taille du disque SYSTÈME de la VM (le `vda` : OS + containerd + images + logs).
+#            Un par VM, toujours présent. ⚠️ À NE PAS confondre avec `nodes[].disks` — les
+#            disques BRUTS ADDITIONNELS (`vd[b-z]`) attachés pour Ceph (OSD/metadata). Ici,
+#            banc local-path : PAS de `nodes[].disks` (aucun disque brut), seul le disque
+#            système compte, d'où 128 GiB (la chaîne MLOps complète y vit).
 resources:
   cpus: 6
   memory: 16GiB

@@ -69,12 +69,15 @@ storage:
 # `nodes[].resources` (effectif au provisioning depuis le volet C). 12 GiB RAM = valeur
 # Ceph de référence : un nœud porte OSD/mon Ceph + k8s ; Ceph est sensible à la pression
 # mémoire (OSD lents → HEALTH qui traîne) — marge gardée même sur ce `layers` réduit
-# (stockage seul). 40 GiB disque (OS + containerd + images). 3 × 12 GiB ≈ 36 GiB sur un
-# hôte 48 GiB (marge OK macOS). 4 vCPU : charge répartie sur 3 nœuds.
+# (stockage seul). 3 × 12 GiB ≈ 36 GiB sur un hôte 48 GiB (marge OK macOS). 4 vCPU :
+# charge répartie sur 3 nœuds.
+# ⚠️ Ici `resources.disk` (40 GiB) = le disque SYSTÈME de la VM (`vda` : OS + containerd +
+#    images), DISTINCT des `nodes[].disks` ci-dessus (les disques BRUTS vdb/vdc/vdd pour les
+#    OSD/metadata Ceph). Une VM Ceph a les DEUX : un vda système + des vd[b-d] bruts.
 resources:
   cpus: 4
   memory: 12GiB
-  disk: 40GiB
+  disk: 20GiB # disque SYSTÈME (vda) ; les disques Ceph bruts sont dans nodes[].disks
 
 # ─── hardening : axe orthogonal (ADR 0045 §3) — non durci sur ce banc Ceph
 hardening:

@@ -66,24 +66,32 @@ VALID_DISK_ROLES = {"data", "metadata"}
 
 @dataclass(frozen=True)
 class NodeResources:
-    """Ressources d'une VM (banc Lima) : cpus / mémoire / disque (LOT 8, ADR 0097 §3).
+    """Dimensionnement de la VM (banc Lima) : cpus / mémoire / disque SYSTÈME (LOT 8,
+    ADR 0097 §3). Remplace les env `VM_CPUS`/`VM_MEMORY`/`VM_DISK`.
 
-    Remplace les variables d'env `VM_CPUS`/`VM_MEMORY`/`VM_DISK`. Le bloc `resources:`
-    du YAML porte le défaut GLOBAL (niveau topologie) ; un node peut le surcharger
-    champ par champ (`nodes[].resources`). IMMUABLE — dérivé à la lecture, pas muté."""
+    `disk` = taille du **disque système** de la VM (le `vda` : OS + containerd + images +
+    logs), TOUJOURS présent, un par VM. À NE PAS confondre avec `Node.disks` (les disques
+    BRUTS additionnels `vd[b-z]` pour Ceph — cf. `DiskSpec`). Deux notions orthogonales :
+    ici on dimensionne la VM ; là on attache du stockage brut.
+
+    Bloc `resources:` du YAML = défaut GLOBAL (niveau topologie) ; un node le surcharge
+    champ par champ via `nodes[].resources`. IMMUABLE — dérivé à la lecture, pas muté."""
 
     cpus: int = _DEFAULT_CPUS
     memory: str = _DEFAULT_MEMORY
-    disk: str = _DEFAULT_DISK
+    disk: str = _DEFAULT_DISK  # disque SYSTÈME (vda), ≠ Node.disks (bruts Ceph)
 
 
 @dataclass(frozen=True)
 class DiskSpec:
-    """Un disque brut déclaré d'un nœud (ADR 0102 volet C) : le NOM du device attendu
-    dans la VM (`vdb`…), sa TAILLE, son RÔLE (`data` OSD | `metadata` block.db). La topo
-    déclare les disques → le provisioning les crée (fin de `WITH_CEPH`). IMMUABLE.
+    """Un disque BRUT ADDITIONNEL déclaré d'un nœud (ADR 0102 volet C) : `name` = device
+    attendu dans la VM (`vdb`, `vdc`… — jamais `vda`, réservé au disque système), `size`,
+    `role` (`data` OSD | `metadata` block.db). La topo les DÉCLARE → le provisioning les
+    crée et les attache (fin de `WITH_CEPH`). IMMUABLE.
 
-    ≠ `nodeside.Disk` (la SONDE lsblk : ce que le nœud EXPOSE) — ici, la DÉCLARATION."""
+    ≠ `NodeResources.disk` (le disque SYSTÈME `vda`, dimensionnement de la VM) : ici c'est
+    du stockage BRUT pour Ceph, pas l'OS. ≠ `nodeside.Disk` (la SONDE lsblk : ce que le nœud
+    EXPOSE réellement) — ici, la DÉCLARATION de ce qu'on veut."""
 
     name: str
     size: str = _DEFAULT_DATA_DISK_SIZE
