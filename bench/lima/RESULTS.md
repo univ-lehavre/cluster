@@ -761,3 +761,59 @@ jamais de blocage ni de faux « non réversible ».
 
 Reste non éprouvé sur banc : `next --apply` (lancement d'une phase via
 `ansible-runner`) et `status --real` (SSH) — à consigner lors d'un run dédié.
+
+## `remove ceph --full` par DÉCOUVERTE : k8s + StorageClass + wipe node-side — prouvé (#372/#389, 2026-07-01)
+
+Preuve banc **from-scratch** de la clôture d'une couche de STOCKAGE par
+découverte d'appartenance
+([ADR 0079](/cluster/docs/decisions/0079-rollback-par-decouverte-appartenance/)),
+le rollback étant désormais 100 % Python
+([ADR 0101](/cluster/docs/decisions/0101-migration-zone-grise-bash-python/),
+`rollback-lib.sh` supprimé). Banc Ceph 3-VM Lima (node1 control+worker,
+node2/node3 worker ; 6 OSD BlueStore sur `vdb`/`vdc` data + `vdd` block.db ;
+CephCluster `Ready`, `HEALTH_OK`), commit `6e1166b`. Commande :
+`BANC_JETABLE=1 nestor remove --phase ceph --full`.
+
+Trois volets, tous constatés en UNE passe, `rc=0` :
+
+1. **Découverte k8s** — la clôture `ceph` (→ sc, datalake, monitoring, gitops,
+   dataops, gitops-seed, mlflow, portal) est défaite par `api-resources` +
+   `ownerReferences` (aucune table `nom/kind` codée) : racines namespacées
+   supprimées (le GC cascade), CR Ceph forcés à finalizer (opérateur parti →
+   finalizers retirés), pods `Terminating` à conteneur vivant
+   `--force --grace-period=0`, namespaces wedgés finalisés. Les **cas durs** que
+   [#372](https://github.com/univ-lehavre/cluster/issues/372) exigeait de gérer
+   nativement ont tous été traités sans intervention.
+2. **StorageClass cluster-scoped** — les 5 `rook-ceph-*` (invisibles à la
+   découverte namespacée) sont retirées par leur `provisioner` (`rook-ceph.*`,
+   sans ambiguïté) — début de
+   [#392](https://github.com/univ-lehavre/cluster/issues/392) (PV/CRD/webhooks
+   restants).
+3. **Wipe node-side** (`storage/ceph/cleanup.sh` poussé via `_node_exec_script`,
+   env `NVME_BLOCK_DEVICE=/dev/vdd`, `DATA_DEVICE_GLOB=/dev/vd[bc]` DÉRIVÉS de
+   la topo) : `✓ node1/node2/node3 : disques + /var/lib/rook nettoyés`. Constaté
+   sur `lima-node1` : `lsblk` montre `vdb`/`vdc`/`vdd` **nus** (plus aucun LV
+   `ceph--…-osd-…`), `vda` (système) et `vde` (cidata) intacts — les bons
+   disques, seulement eux.
+
+Trois correctifs successifs ont été nécessaires, chacun révélé par le banc
+(honnêteté des Runs,
+[ADR 0052](/cluster/docs/decisions/0052-reproductibilite-des-resultats/)) :
+
+- **#537** — les devices du wipe étaient codés (`/dev/vde`, `/dev/vd[b-d]`) :
+  `vde` est le **cidata** Lima (blkdiscard échouait), et `[b-d]` avalait le
+  metadata. Dérivés des disques déclarés désormais (comme `metadataDevice`,
+  [ADR 0102](/cluster/docs/decisions/0102-catalogue-topologies-v2-topo-source-unique/)
+  volet C).
+- **#537** — les StorageClass cluster-scoped survivaient (volet 2 ci-dessus).
+- **#538** — `blkdiscard /dev/vdd` échouait « Device or resource busy » : un OSD
+  BlueStore pose des **LV LVM** sur ses disques ; tant que les device-mapper
+  `ceph-*` sont actifs, le disque est tenu. `cleanup.sh` **libère les LV/VG
+  Ceph** (`dmsetup remove` + `vgremove`) avant le wipe, comme le fait le cleanup
+  de Rook.
+
+Résultat : la découverte couvre TOUT (k8s namespacé + StorageClass + node-side),
+sans table ni pont bash. Débloque
+[#389](https://github.com/univ-lehavre/cluster/issues/389) (wipe node-side par
+`node_exec`, objectif zéro-table atteint) et
+[#372](https://github.com/univ-lehavre/cluster/issues/372).
