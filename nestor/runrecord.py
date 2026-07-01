@@ -84,11 +84,11 @@ def host_model(*, run=subprocess.run) -> str:
         proc = run(  # noqa: S603 — argv fixe, pas d'entrée shell
             ["sysctl", "-n", "hw.model"], capture_output=True, text=True, check=False
         )
-        model = proc.stdout.strip()
-        if proc.returncode == 0 and model:
-            return model
     except (OSError, ValueError):
-        pass
+        return platform.machine()  # sysctl absent (Linux/CI) → repli arch générique
+    model = proc.stdout.strip()
+    if proc.returncode == 0 and model:
+        return model
     return platform.machine()
 
 
