@@ -1,0 +1,50 @@
+# Manifeste de déclaration MONTANT (atlas → cluster) — ADR 0094 §3, patron.
+#
+# C'EST LE FICHIER QU'ATLAS FOURNIT, VERSIONNÉ DANS SON DÉPÔT, pour DÉCLARER ce
+# qu'une code-location / app applicative apporte et consomme. cluster le LIT et
+# le VALIDE (validateur `scripts/check_code_location_manifest.py`, `pnpm
+# lint:code-location`) AVANT de créer l'`Application` Argo CD (App-of-Apps §2) :
+# version de contrat connue, dépendances présentes (base, secret dérivé, OBC,
+# migration), capacité suffisante. Une `contractVersion` inconnue ou une
+# dépendance absente ÉCHOUE BRUYAMMENT — c'est ce qui remplace la copie figée
+# silencieuse (cause racine de l'audit #499).
+#
+# Patron `*.example` (ADR 0023) : `codeLocation`/`revision`/noms d'apps sont des
+# EXEMPLES génériques (`citation`, `mediawatch`, `atlas-datalake`) — les valeurs
+# réelles d'un déploiement (SHA réel, repo atlas réel) sont injectées au seed,
+# jamais gravées. Le SHA `revision` est le SIGNAL CANONIQUE d'évolution (ADR
+# 0094 §3) : l'image `registry:80/citation-dagster:<revision>` en dérive (même
+# tag), et l'`Application` fille le voit et réconcilie.
+#
+# La `contractVersion` ci-dessous CIBLE la version du contrat cluster publié dans
+# `contract/*.example.yaml` (champ `contract_version`). Le validateur refuse une
+# version inconnue du contrat courant : atlas DÉCLARE contre quelle version il
+# code, cluster VALIDE que cette version existe (ADR 0043 — contrat diff-able).
+
+codeLocation: citation # nom de la code-location / app (exemple générique)
+ready: true # atlas atteste : code mergé, taggé, testé
+revision: a3f9c1d # SHA git court = SIGNAL CANONIQUE d'évolution.
+# L'image registry:80/citation-dagster:a3f9c1d en DÉRIVE (même tag). Une nouvelle
+# révision (nouveau SHA poussé) = nouvelle version à réconcilier.
+contractVersion: '1.0' # version du contrat cluster ciblée (cf. contract/*.example.yaml)
+
+resources: # besoins déclarés → cluster VALIDE la capacité AVANT de déployer
+  cpu: 500m # requests indicatifs des pods (run Dagster)
+  memory: 1Gi
+  disk: 20Gi # volume BLOC (PVC RBD) attaché au pod, si la code-location en a besoin
+
+dependsOn:
+  # Autres code-locations atlas requises (ex. citation consomme les marts de
+  # mediawatch). cluster ORDONNE le déploiement (sync-waves Argo CD : la
+  # dépendance déployée et ready AVANT) et REFUSE de créer l'app si une
+  # code-location requise est absente ou non-`ready`.
+  codeLocations: [mediawatch]
+  database: [pgvector] # bases logiques requises
+  secrets: [pgvector-pg-auth] # secrets (dérivés inclus) requis
+  # OBC = stockage OBJET (S3 RGW Ceph), distinct du `disk` bloc ci-dessus :
+  # marts/parquets/artefacts. Chaque bucket déclare sa taille et sa classe.
+  buckets:
+    - name: atlas-datalake # OBC requise
+      size: 100Gi # capacité attendue (dimensionnement Ceph)
+      storageClass: rook-ceph-datalake
+  migrations: [001-researchers-hnsw.sql] # migrations à appliquer avant l'app
