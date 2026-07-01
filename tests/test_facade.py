@@ -153,9 +153,11 @@ class PathContextDerivation(unittest.TestCase):
 
     def test_inventory_is_passed_through_kubeconfig_local_is_bench(self):
         # `inventory` est le chemin PASSÉ par l'appelant (ADR 0098 : dérivé du `with
-        # _inventory_for`) ; `kubeconfig_local` reste le chemin banc figé.
-        ctx = cli._path_context(_topo(_LIMA_SOLO), cli._BENCH_INVENTORY)
-        self.assertEqual(ctx.kubeconfig_local, cli._BENCH_KUBECONFIG)
+        # _inventory_for`) ; `kubeconfig_local` est NOMMÉ PAR LA STACK (ADR 0102 volet B :
+        # `.kubeconfigs/<stack>.config` — ici `ceph`, passé en argument).
+        ctx = cli._path_context(_topo(_LIMA_SOLO), cli._BENCH_INVENTORY, "ceph")
+        self.assertEqual(ctx.kubeconfig_local, cli._bench_kubeconfig_path("ceph"))
+        self.assertTrue(ctx.kubeconfig_local.endswith("/.kubeconfigs/ceph.config"))
         self.assertEqual(ctx.inventory, cli._BENCH_INVENTORY)
 
 

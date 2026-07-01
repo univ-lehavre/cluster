@@ -120,12 +120,14 @@ VM_DISK=${VM_DISK:-40GiB}
 # déclarés et gate sur leur présence (fin de WITH_CEPH — la topo pilote, ADR 0102).
 WORKDIR="${HERE}/.work"
 INVENTORY="${WORKDIR}/inventory.yaml"
-# Kubeconfig du banc = `.kubeconfigs/banc.config` à la RACINE du dépôt (ADR 0102 volet B) :
-# le banc EST la stack `banc`, son kubeconfig vit à l'emplacement UNIQUE nommé par la stack
-# (in-repo, gitignoré fail-safe). C'est PYTHON qui décide le chemin (topology.py
-# `_BENCH_KUBECONFIG` = `.kubeconfigs/banc.config`) et le passe par env `KUBECONFIG_LOCAL` ;
-# bash l'UTILISE (défaut cohérent si le script est lancé nu, hors moteur). Une seule source
-# de vérité pour le chemin. `${REPO}` = racine du dépôt (défini dans lib.sh).
+# Kubeconfig du banc = `.kubeconfigs/<stack>.config` à la RACINE du dépôt (ADR 0102 volet B) :
+# un banc EST une stack (nommée par le FICHIER de sa topologie, `stack_id`), son kubeconfig
+# vit à l'emplacement UNIQUE nommé par la stack (in-repo, gitignoré fail-safe). C'est PYTHON
+# qui décide le chemin (topology.py `_bench_kubeconfig_path(<stack>)` = `.kubeconfigs/<stack>.config`,
+# dérivé du nom de fichier de la topo active) et le passe par env `KUBECONFIG_LOCAL` ; bash
+# l'UTILISE. Le défaut ci-dessous (`banc.config`) ne sert QUE si le script est lancé nu (hors
+# moteur Python) — fallback banc générique. Une seule source de vérité pour le chemin.
+# `${REPO}` = racine du dépôt (défini dans lib.sh).
 KUBECONFIG_LOCAL="${KUBECONFIG_LOCAL:-${REPO}/.kubeconfigs/banc.config}"
 
 # ── Métriques de run (matériel + temps par phase) ────────────────────────────
