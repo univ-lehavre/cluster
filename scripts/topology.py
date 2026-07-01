@@ -2548,13 +2548,30 @@ def _confirm_apply(target: str, *, assume_yes: bool) -> bool:
 
 
 def _nodes_override(topo) -> str:
-    """csv `nom:rôle` des nœuds déclarés (la TOPOLOGIE pilote le banc, ADR 0056).
+    """Canal ENRICHI `nom|role|cpus,memory,disk|disques` des nœuds (ADR 0102 volet C).
 
-    Un nœud `control` (même control+worker, le banc le détaint) → `:control` ; un
-    worker pur → `:worker`. Partagé par `up` et `next` (délégation socle)."""
-    return ",".join(
-        f"{n.name}:{'control' if n.has_role('control') else 'worker'}" for n in topo.nodes
-    )
+    La TOPOLOGIE pilote le banc PAR NŒUD (fin de WITH_CEPH et des ressources globales,
+    ADR 0056/0102) : chaque nœud porte SON rôle, SES ressources VM et SES disques bruts.
+
+    Format (imposé, consommé par run-phases.sh) — 4 champs séparés par `|` :
+      1. `nom`   — nom du nœud (`n.name`).
+      2. `role`  — `control` (même control+worker, le banc le détaint) sinon `worker`.
+      3. ressources — `cpus,memory,disk` (de `topo.node_resources(nom)`).
+      4. disques — `name=size=role` séparés par `,` ; VIDE si le nœud n'en déclare pas
+                   (le « mode Ceph » = la PRÉSENCE de disques déclarés, plus de WITH_CEPH).
+    Nœuds séparés par `;`. Exemple :
+      `node1|control|4,12GiB,40GiB|vdb=10GiB=data,vdd=5GiB=metadata;node2|worker|4,12GiB,40GiB|vdb=10GiB=data`
+    Un nœud sans disque a un 4e champ vide : `node1|control|4,12GiB,40GiB|`.
+
+    PUR (aucune I/O). Partagé par `up` et `next` (délégation socle)."""
+    entries = []
+    for n in topo.nodes:
+        role = "control" if n.has_role("control") else "worker"
+        r = topo.node_resources(n.name)
+        resources = f"{r.cpus},{r.memory},{r.disk}"
+        disks = ",".join(f"{d.name}={d.size}={d.role}" for d in n.disks) if n.disks else ""
+        entries.append(f"{n.name}|{role}|{resources}|{disks}")
+    return ";".join(entries)
 
 
 def _has_runphases_arm(phase: str) -> bool:
@@ -2644,33 +2661,19 @@ def _path_context(topo: Topology, inventory: str) -> _path.PathContext:
 def _provision_via_bash(topo: Topology, stack_name: str) -> int:
     """STUB DOCUMENTÉ du provisioning amont `up` (ADR 0097 §5.b) : délègue à `run-phases.sh up`.
 
-    Le provisioning VM (limactl render/start, disques Ceph conditionnels, gate disques,
+    Le provisioning VM (limactl render/start, disques déclarés par nœud, gate disques,
     dérivation cp_ip/iface) ET `write_inventory` byte-stable sont l'artefact node-side
     IRRÉDUCTIBLE (ADR 0049 — Lima/limactl reste bash). On NE le réécrit PAS en Python ici :
     on POUSSE `run-phases.sh up` comme on applique un manifeste (Python pousse, consomme un
-    `rc`, ne lit pas la logique bash, ADR 0097 §2.a). `phase_up` lit les RESSOURCES VM via
-    VM_CPUS/VM_MEMORY/VM_DISK ; LOT 8 veut qu'elles viennent du YAML (`topo.node_resources`).
-    Pendant la TRANSITION, on les passe en env DEPUIS le YAML (Python décide les VALEURS, bash
-    garde le RENDU `lima_render_node`). Mono-nœud banc : un seul jeu de ressources (le CP).
+    `rc`, ne lit pas la logique bash, ADR 0097 §2.a).
+
+    ADR 0102 volet C : ressources ET disques sont PAR NŒUD, portés par le canal enrichi
+    `NODES_OVERRIDE` (cf. `_nodes_override`) — PLUS de VM_CPUS/VM_MEMORY/VM_DISK globaux (du
+    CP) ni de WITH_CEPH en env. Chaque nœud rend SA VM avec SES ressources et crée SES disques.
 
     RESTE BANC (§5.b) : portage RÉEL du callback (limactl render/start + write_inventory) — non
     inventé ici (un faux provisioning serait pire que rien). Voir `_path.banc_todo`."""
     env = _runphases_env(topo, stack_name)
-    # LOT 8 (ADR 0097 §3) : ressources VM du YAML, plus de l'env. Le banc mono-nœud n'a qu'un
-    # CP → on passe SES ressources. `run-phases.sh:117/124/125` lit VM_CPUS/VM_MEMORY/VM_DISK
-    # (n'écrase PAS un défaut si déjà posé) ; on les pose DEPUIS la topo le temps de la
-    # transition (le câblage direct `lima_render_node(<valeurs>)` reste à faire+prouver au banc).
-    # Ici on ne lit que `ctx.cp` (nom du nœud), pas l'inventaire → pas besoin de
-    # matérialiser un temp prod (inventory="").
-    ctx = _path_context(topo, "")
-    if ctx.cp:
-        res = topo.node_resources(ctx.cp)
-        env = {
-            **env,
-            "VM_CPUS": str(res.cpus),
-            "VM_MEMORY": res.memory,
-            "VM_DISK": res.disk,
-        }
     runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
     print("→ up : provisioning des VMs via run-phases.sh (limactl, ADR 0049)…")
     return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
