@@ -1,0 +1,87 @@
+# code: language=yaml
+#
+# topologies/ceph.example.yaml — topologie d'EXEMPLE VERSIONNÉE d'un banc Ceph à 3 nœuds
+# (ADR 0056). Valeurs GÉNÉRIQUES (ADR 0023). Modèle du catalogue : copier en
+# `topologies/ceph.yaml` (gitignoré) pour une surcharge locale, ou l'activer tel quel.
+#
+# 3 nœuds = le plancher d'un Ceph PROUVABLE : quorum de 3 monitors et ≥ 3 OSD pour une
+# réplication x3 (1 OSD par nœud minimum). Le control-plane n'est PAS HA ici (un seul
+# nœud `control`, pas de VIP) — l'OBJET de ce banc est le STOCKAGE, pas la HA. Les 3
+# nœuds portent des OSD Ceph (mon + OSD hyperconvergés avec k8s, ADR 0007/0055) : le
+# banc minimal qui prouve la pile de stockage sans 6 VM. Pour un control-plane HA
+# (3 control + VIP), voir `ha-3cp` (local-path, HA ⊥ stockage #250).
+#
+# Ceph/Rook exige des DISQUES BRUTS non partitionnés (OSD) → déclarés par nœud. Le
+# chemin dérivé est `atlas-ceph` (backend ceph + profil dataops, nestor/plan.py).
+#
+# Statut `cible` : NON encore buildé ni prouvé au banc (ADR 0030/0040 ; honnêteté
+# ADR 0052 — pas de `buildé` sans run de banc Ceph).
+
+# ─── catalog : arch/terrain/topologie/profil (ADR 0039)
+catalog:
+  arch: arm64 # le banc Lima est arm64
+  terrain: local # banc Lima ; la prod hyperconvergée Ceph serait baremetal
+  topology: multi-node-3 # multi-node-3 | multi-node-4 | ha-3cp
+  status: cible # cible | buildé | spike — NON prouvé tant que le run banc Ceph manque
+layers: [ceph, sc, datalake, metrics-server]
+
+# ─── nodes : node1 = control + worker + storage ; node2/node3 = worker + storage.
+# Un seul control-plane (pas de HA, cf. en-tête) ; les 3 nœuds schedulent la charge
+# (détaint ADR 0007) ET hébergent des OSD Ceph. Disques BRUTS déclarés PAR NŒUD
+# (ADR 0102 volet C : la topo pilote le provisioning, plus de WITH_CEPH) : chaque
+# disque a un `name` (device attendu `vd*`), une `size` et un `role` (`data` OSD |
+# `metadata` block.db). Ici 2 data (vdb, vdc) + 1 metadata (vdd) par nœud → nestor
+# crée ces disques virtio bruts. 2 data × 3 nœuds = 6 OSD.
+#
+# Les 3 nœuds sont hyperconvergés à l'identique → on déclare les disques UNE fois via
+# une ancre YAML (`&ceph_disks`) et on la référence (`*ceph_disks`) sur chaque nœud :
+# une seule source, pas de copie qui dérive.
+nodes:
+  - name: node1
+    roles: [control, worker, storage]
+    disks: &ceph_disks
+      - name: vdb
+        size: 10GiB
+        role: data
+      - name: vdc
+        size: 10GiB
+        role: data
+      - name: vdd
+        size: 5GiB
+        role: metadata
+  - name: node2
+    roles: [worker, storage]
+    disks: *ceph_disks
+  - name: node3
+    roles: [worker, storage]
+    disks: *ceph_disks
+
+# ─── storage : Ceph (l'objet de cette topologie). `osd_expected` (gate OSD au banc) est
+# DÉRIVÉ des disques déclarés : nestor compte les `role: data` des nœuds (le `metadata`
+# block.db n'est PAS un OSD) → ici 2 data × 3 nœuds = 6, automatiquement. `osd_expected`
+# explicite ci-dessous ne sert qu'à FORCER une autre valeur (rétrocompat / prod terrain).
+storage:
+  backend: ceph # ceph | local-path
+  # osd_expected: 6         # override : sinon dérivé des disques role=data (= 6 ici)
+
+# ─── resources : défaut GLOBAL des ressources VM (LOT 8, ADR 0097 ; provisioning per-nœud
+# ADR 0102 volet C). nestor applique ce défaut à CHAQUE nœud, surchargeable par node via
+# `nodes[].resources` (effectif au provisioning depuis le volet C). 12 GiB RAM = valeur
+# Ceph de référence : un nœud porte OSD/mon Ceph + k8s ; Ceph est sensible à la pression
+# mémoire (OSD lents → HEALTH qui traîne) — marge gardée même sur ce `layers` réduit
+# (stockage seul). 3 × 12 GiB ≈ 36 GiB sur un hôte 48 GiB (marge OK macOS). 4 vCPU :
+# charge répartie sur 3 nœuds.
+# ⚠️ Ici `resources.disk` (40 GiB) = le disque SYSTÈME de la VM (`vda` : OS + containerd +
+#    images), DISTINCT des `nodes[].disks` ci-dessus (les disques BRUTS vdb/vdc/vdd pour les
+#    OSD/metadata Ceph). Une VM Ceph a les DEUX : un vda système + des vd[b-d] bruts.
+resources:
+  cpus: 4
+  memory: 12GiB
+  disk: 40GiB # disque SYSTÈME (vda) ; les disques Ceph bruts sont dans nodes[].disks
+
+# ─── hardening : axe orthogonal (ADR 0045 §3) — non durci sur ce banc Ceph
+hardening:
+  enabled: false
+
+# ─── target_kind : banc Lima (garde-fou d'intention, ADR 0053)
+target_kind: bench

@@ -50,7 +50,7 @@ from nestor.model import topology_from_dict  # noqa: E402
 _REAL_SUBPROCESS_RUN = cli.subprocess.run
 
 # ── Blindage anti-provisionnement (filet de sécurité module, copié de test_topology_cli) ──
-# Le mainteneur PEUT avoir un banc Lima RÉEL (`bench/lima/.work/kubeconfig` présent) : sans
+# Le mainteneur PEUT avoir un banc Lima RÉEL (`.kubeconfigs/banc.config` présent) : sans
 # ce filet, un test qui atteint cmd_up/`provision` lancerait un VRAI `run-phases.sh up`
 # (limactl) et provisionnerait des VMs en silence. setUpModule installe un DEFAULT-DENY : tout
 # appel subprocess de provisionnement RÉEL échoue bruyamment (CI rouge). Les tests qui veulent
@@ -153,9 +153,11 @@ class PathContextDerivation(unittest.TestCase):
 
     def test_inventory_is_passed_through_kubeconfig_local_is_bench(self):
         # `inventory` est le chemin PASSÉ par l'appelant (ADR 0098 : dérivé du `with
-        # _inventory_for`) ; `kubeconfig_local` reste le chemin banc figé.
-        ctx = cli._path_context(_topo(_LIMA_SOLO), cli._BENCH_INVENTORY)
-        self.assertEqual(ctx.kubeconfig_local, cli._BENCH_KUBECONFIG)
+        # _inventory_for`) ; `kubeconfig_local` est NOMMÉ PAR LA STACK (ADR 0102 volet B :
+        # `.kubeconfigs/<stack>.config` — ici `ceph`, passé en argument).
+        ctx = cli._path_context(_topo(_LIMA_SOLO), cli._BENCH_INVENTORY, "ceph")
+        self.assertEqual(ctx.kubeconfig_local, cli._bench_kubeconfig_path("ceph"))
+        self.assertTrue(ctx.kubeconfig_local.endswith("/.kubeconfigs/ceph.config"))
         self.assertEqual(ctx.inventory, cli._BENCH_INVENTORY)
 
 
@@ -303,9 +305,15 @@ class CallbacksWireRealBricks(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(rp_calls), 1)
         self.assertIn("up", rp_calls[0]["argv"])
-        # LOT 8 : les ressources VM passées en env viennent du YAML (defaults ici).
-        self.assertIn("VM_CPUS", rp_calls[0]["env"])
-        self.assertIn("VM_MEMORY", rp_calls[0]["env"])
+        # ADR 0102 volet C : plus de VM_CPUS/VM_MEMORY/VM_DISK ni WITH_CEPH globaux en
+        # env — les ressources (et disques) sont PAR NŒUD dans le canal NODES_OVERRIDE.
+        env = rp_calls[0]["env"]
+        self.assertNotIn("VM_CPUS", env)
+        self.assertNotIn("VM_MEMORY", env)
+        self.assertNotIn("WITH_CEPH", env)
+        # NODES_OVERRIDE porte le format enrichi `nom|role|cpus,memory,disk|disques`.
+        # _LIMA_SOLO = 1 nœud control+worker, local-path (pas de disque → 4e champ vide).
+        self.assertEqual(env["NODES_OVERRIDE"], "cp1|control|4,12GiB,40GiB|")
 
     def test_provision_propagates_failure(self):
         # `run-phases.sh up` échoue → PathError fail-fast → code 1 (jamais de fallback).
@@ -1075,6 +1083,77 @@ class ChainEmitAndVerifyWiring(unittest.TestCase):
         self.assertEqual(c(2, 2)[0], "ok")  # idempotence (présence, pas delta)
         self.assertEqual(c(0, 0)[0], "fail")
         self.assertEqual(c(None, 1)[0], "skip")
+
+
+class NodesOverrideEnrichment(unittest.TestCase):
+    """`_nodes_override` émet le canal ENRICHI `nom|role|cpus,memory,disk|disques`
+    (ADR 0102 volet C) — PUR, dérivé de la topo (ressources + disques PAR NŒUD)."""
+
+    def test_local_path_mono_node_empty_disks_field(self):
+        # Mono-nœud local-path (pas de disque déclaré) → 4e champ VIDE, un seul segment.
+        topo = topology_from_dict(
+            {
+                "catalog": {"topology": "solo"},
+                "nodes": [{"name": "cp1", "roles": ["control", "worker"]}],
+                "storage": {"backend": "local-path"},
+                "target_kind": "bench",
+            }
+        )
+        # control+worker → `control` (le banc détaint) ; ressources = défauts (4/12/40).
+        self.assertEqual(cli._nodes_override(topo), "cp1|control|4,12GiB,40GiB|")
+
+    def test_ceph_three_nodes_carries_role_resources_disks(self):
+        # Topo Ceph 3 nœuds : rôle + ressources + disques déclarés (objets DiskSpec), par nœud.
+        # node1 control avec 2 disques (data + metadata), node2/node3 worker avec 1 disque data
+        # (string nue → taille/rôle par défaut : 10GiB=data).
+        topo = topology_from_dict(
+            {
+                "catalog": {"topology": "multi-node-3"},
+                "nodes": [
+                    {
+                        "name": "node1",
+                        "roles": ["control", "worker", "storage"],
+                        "disks": [
+                            {"name": "vdb", "size": "10GiB"},
+                            {"name": "vdd", "size": "5GiB", "role": "metadata"},
+                        ],
+                    },
+                    {"name": "node2", "roles": ["worker", "storage"], "disks": ["vdb"]},
+                    {"name": "node3", "roles": ["worker", "storage"], "disks": ["vdb"]},
+                ],
+                "storage": {"backend": "ceph"},
+                "target_kind": "bench",
+            }
+        )
+        self.assertEqual(
+            cli._nodes_override(topo),
+            "node1|control|4,12GiB,40GiB|vdb=10GiB=data,vdd=5GiB=metadata"
+            ";node2|worker|4,12GiB,40GiB|vdb=10GiB=data"
+            ";node3|worker|4,12GiB,40GiB|vdb=10GiB=data",
+        )
+
+    def test_per_node_resources_override_is_carried(self):
+        # Une surcharge `nodes[].resources` prime dans le 3e champ (ressources PAR NŒUD).
+        topo = topology_from_dict(
+            {
+                "catalog": {"topology": "duo"},
+                "resources": {"cpus": 4, "memory": "12GiB", "disk": "40GiB"},
+                "nodes": [
+                    {
+                        "name": "cp1",
+                        "roles": ["control", "worker"],
+                        "resources": {"cpus": 8, "memory": "24GiB"},
+                    },
+                    {"name": "node1", "roles": ["worker"]},
+                ],
+                "storage": {"backend": "local-path"},
+                "target_kind": "bench",
+            }
+        )
+        self.assertEqual(
+            cli._nodes_override(topo),
+            "cp1|control|8,24GiB,40GiB|;node1|worker|4,12GiB,40GiB|",
+        )
 
 
 if __name__ == "__main__":

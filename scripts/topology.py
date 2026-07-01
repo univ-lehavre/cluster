@@ -133,6 +133,7 @@ from nestor.history import (  # noqa: E402
     FRESHNESS_OPTIONNELS,
     SEUIL_GLOBAL_DEFAUT,
     Run,
+    _matches_stack,
     date_from_log_name,
     last_run_for_target,
     last_run_for_topology,
@@ -150,11 +151,47 @@ _EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "socle.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
 _RUNS_HISTORY = os.path.join(_ROOT, "bench", "lima", "runs-history.yaml")
 _RUNS_DIR = os.path.join(_ROOT, "bench", "lima", "runs")
-# Kubeconfig du banc Lima, écrit par run-phases.sh (KUBECONFIG_LOCAL = WORKDIR/kubeconfig).
+
+
+def _stack_id(path: str) -> str:
+    """Identité de STACK = nom de FICHIER de la topologie (ADR 0102 volet B), source
+    UNIQUE de l'identité SYSTÈME (kubeconfig `.kubeconfigs/<stack>.config` + contexte
+    kubectl nommé). PUR (os.path seulement, ne lit AUCUN champ YAML → robuste à une
+    topo illisible).
+
+    On RÉSOUT le symlink d'abord (`os.path.realpath`) : `topology.yaml` (le symlink
+    d'activation) pointe la topo active — sans realpath, son basename serait `topology`,
+    jamais `ceph`. Puis on retire l'extension COMPOSÉE `.example.yaml` (modèle générique
+    versionné, ADR 0023) AVANT `.yaml`/`.yml` (ordre critique : sinon `ceph.example.yaml`
+    → `ceph.example`). Conséquence VOULUE : `ceph.example.yaml` et `ceph.yaml` (surcharge
+    locale) partagent le MÊME `stack_id` `ceph` — c'est UNE stack, deux variantes de contenu
+    (une seule active à la fois).
+
+    NB : distinct de `catalog.topology` (désormais un champ DESCRIPTIF : la classe de topo,
+    `multi-node-3`…) qui, lui, reste la clé de l'HISTORIQUE de runs (jamais réécrit, ADR 0052 ;
+    réconcilié en lecture via `history.STACK_ID_ALIASES`)."""
+    base = os.path.basename(os.path.realpath(path))
+    for suffix in (".example.yaml", ".example.yml", ".yaml", ".yml"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
+
+# Kubeconfig d'un banc = `.kubeconfigs/<stack>.config` (ADR 0102 volet B) : un banc EST une
+# stack (nommée par le FICHIER de sa topologie, cf. `_stack_id`) ; son kubeconfig vit à
+# l'emplacement UNIQUE nommé par la stack (in-repo, gitignoré fail-safe), UNIFORME banc ET
+# prod (la prod le fait déjà : `.kubeconfigs/dirqual.config`). Écrit par run-phases.sh
+# (KUBECONFIG_LOCAL, qui reçoit CE chemin par env — Python décide, bash l'utilise, ADR 0102).
 # `preview` lit l'état RÉEL du cluster via kubectl ; sans KUBECONFIG exporté, il retombe
 # ICI (sinon il interroge ~/.kube/config — pas le banc — et voit 0 nœud Ready alors que
 # le socle est monté : faux « à installer », scorie de fidélité du RÉEL).
-_BENCH_KUBECONFIG = os.path.join(_ROOT, "bench", "lima", ".work", "kubeconfig")
+def _bench_kubeconfig_path(stack: str | None) -> str:
+    """Chemin du kubeconfig d'un banc, NOMMÉ PAR LA STACK (ADR 0102 volet B) :
+    `.kubeconfigs/<stack>.config`. `stack=None` (aucune stack activée) → fallback "banc"
+    (le banc générique historique). Uniforme banc ET prod (prod = `dirqual.config`)."""
+    return _prod_target.default_kubeconfig_path(stack or "banc", repo_root=_ROOT)
+
+
 # Inventaire Ansible du BANC Lima, écrit par run-phases.sh (write_inventory → WORKDIR/
 # inventory.yaml ; target_kind: bench, hôtes node1/node2). DISTINCT de bootstrap/hosts.yaml
 # (l'inventaire PROD). `next` doit viser CELUI-CI pour une topo lima — sinon un montage
@@ -199,9 +236,36 @@ def _bench_kubeconfig(declared: str | None = None) -> str:
         return explicit
     if declared:
         return os.path.expanduser(declared)
-    if os.path.exists(_BENCH_KUBECONFIG):
-        return _BENCH_KUBECONFIG
+    # Banc de la STACK ACTIVE (ADR 0102 volet B) : `.kubeconfigs/<stack>.config` — pas de
+    # topo en scope ici (résolveur nu), on lit la stack activée (`topology.yaml` → stack_id).
+    bench = _bench_kubeconfig_path(_active_stack_name(None))
+    if os.path.exists(bench):
+        return bench
     return os.devnull  # vide : kubectl échoue → "pas de banc", jamais la prod
+
+
+def _operator_kubeconfig() -> str | None:
+    """Le `KUBECONFIG` de l'ENV s'il est RÉELLEMENT EXPLOITABLE, sinon `None`.
+
+    Un `KUBECONFIG` exporté matérialise une intention opérateur PRIORITAIRE (ADR 0090) —
+    MAIS seulement s'il pointe un kubeconfig utilisable. `/dev/null` (garde ADR 0053 :
+    `nestor stack select` sur un banc absent pose `export KUBECONFIG=/dev/null`, souvent
+    `eval`é dans le shell), un fichier VIDE ou INEXISTANT sont des valeurs « poison » :
+    truthy pour un `or`, mais inutilisables pour un play (le module k8s d'Ansible lève
+    « Invalid kube-config. /dev/null file is empty »). On les traite comme ABSENTS → le
+    `or` du site d'appel retombe sur le kubeconfig banc rapatrié (`ctx.kubeconfig_local`),
+    au lieu de laisser `/dev/null` faire échouer une phase alors que le banc est joignable.
+
+    Rend le chemin uniquement s'il existe ET n'est pas vide (donc jamais `/dev/null`,
+    qui a une taille de 0). Sinon `None` (intention non exploitable → défaut du site)."""
+    kc = os.environ.get("KUBECONFIG")
+    if not kc:
+        return None
+    try:
+        usable = os.path.getsize(kc) > 0  # exclut /dev/null (0) et un fichier vide
+    except OSError:
+        return None  # inexistant / illisible → non exploitable
+    return kc if usable else None
 
 
 def _kubectl_env(declared: str | None = None) -> dict[str, str]:
@@ -344,21 +408,24 @@ def _resolve(path: str | None) -> str:
 
 
 def _active_stack_name(file_arg: str | None) -> str | None:
-    """Nom de la stack ciblée pour les artefacts d'historique (`runs`/`metrics`).
+    """Identité (`stack_id`, ADR 0102 volet B) de la stack ciblée : le NOM DE FICHIER de
+    la topologie (`ceph`), pas `catalog.topology` (`multi-node-3`, désormais descriptif).
 
-    `-f` explicite → la topo donnée ; sinon la stack active (`topology.yaml`). On NE
-    retombe PAS sur l'exemple silencieusement : si aucune stack n'est activée, renvoie
-    None (l'appelant bascule sur la vue globale). Toute erreur de lecture → None
-    (informatif, jamais bloquant — `runs`/`metrics` sont read-only, code 0)."""
+    `-f` explicite → la topo donnée ; sinon la stack active (le symlink `topology.yaml`).
+    On NE retombe PAS sur l'exemple silencieusement : si aucune stack n'est activée, renvoie
+    None (l'appelant bascule sur la vue globale). Purement dérivé du CHEMIN (`_stack_id`,
+    `realpath` résout le symlink) — plus de `load_topology` : l'identité est le nom de
+    fichier, pas un champ YAML. Un chemin absent → None.
+
+    Sert de clé au kubeconfig/contexte ET aux artefacts d'historique (`runs`/`metrics`) —
+    l'historique keyé par l'ancien `catalog.topology` est réconcilié en LECTURE via
+    `history.STACK_ID_ALIASES` (jamais réécrit, ADR 0052)."""
     path = (
         file_arg if file_arg else (_DEFAULT_TOPOLOGY if os.path.exists(_DEFAULT_TOPOLOGY) else None)
     )
     if path is None:
         return None
-    try:
-        return load_topology(path).catalog.get("topology")
-    except (TopologyError, FileNotFoundError, OSError):
-        return None
+    return _stack_id(path)
 
 
 def _render_inventory(topo, kind: str, lima_home: str | None) -> str:
@@ -643,19 +710,21 @@ def _select_prod_kubeconfig(topo: Topology, topo_path: str, stack: str, *, no_in
     # Un KUBECONFIG pointant le BANC (résidu d'un `nestor env`/select banc) n'est PAS une
     # intention prod : on l'ignore pour une stack prod (sinon on viserait le banc et on
     # n'écrirait pas le champ). Seul un KUBECONFIG vers une AUTRE cible compte comme
-    # intention explicite.
+    # intention explicite. Le résidu vise le banc de la stack ACTIVE (ADR 0102 volet B :
+    # `.kubeconfigs/<stack>.config`) — c'est ce chemin qu'on écarte.
     env_kc = os.environ.get("KUBECONFIG")
-    if env_kc and os.path.abspath(env_kc) == os.path.abspath(_BENCH_KUBECONFIG):
+    bench_kc = _bench_kubeconfig_path(_active_stack_name(None))
+    if env_kc and os.path.abspath(env_kc) == os.path.abspath(bench_kc):
         env_kc = None
     if topo.kubeconfig or env_kc:
         return os.path.expanduser(
             _prod_target.resolve_kubeconfig(
-                env_kubeconfig=env_kc, declared=topo.kubeconfig, stack=stack
+                env_kubeconfig=env_kc, declared=topo.kubeconfig, stack=stack, repo_root=_ROOT
             )
         )
     # Topo sans cible : compléter (déterministe). En --no-input on signale seulement
     # (rester strict en CI : ne pas modifier de fichier versionné/local sans intention).
-    default = _prod_target.default_kubeconfig_path(stack)
+    default = _prod_target.default_kubeconfig_path(stack, repo_root=_ROOT)
     if no_input:
         _warn(
             f"topologie sans `kubeconfig:` — la déclarer (ex. `{default}`) pour que "
@@ -684,7 +753,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         eval "$(nestor stack select banc)"
 
     Le KUBECONFIG posé est celui de la cible (ADR 0053) : le **banc de la stack**
-    s'il est monté (`bench/lima/.work/kubeconfig`), sinon **`/dev/null`** (vide) —
+    s'il est monté (`.kubeconfigs/banc.config`, ADR 0102 volet B), sinon **`/dev/null`** (vide) —
     JAMAIS `~/.kube/config` (la prod). Un `kubectl`/`cilium` direct dans le shell
     vise alors la bonne cible, ou échoue proprement (« pas de banc »), au lieu de
     taper la prod par accident. Le contexte nommé permet AUSSI `kubectl --context
@@ -739,13 +808,17 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         cible = _select_prod_kubeconfig(
             topo, target_abs, args.name, no_input=getattr(args, "no_input", False)
         )
-    # BANC : le kubeconfig du banc s'il est monté ET JOIGNABLE, sinon /dev/null (jamais la
-    # prod, ADR 0053). On NE supprime PAS le kubeconfig (le détruire casserait l'accès à
-    # un banc vivant ; il sera de toute façon réécrit par le prochain up/bootstrap). On
-    # vise /dev/null seulement s'il n'existe pas OU ne répond plus (banc d'une autre
-    # stack, ou API tombée) — `_context_targets_bench` le sonde sans toucher au fichier.
-    elif os.path.exists(_BENCH_KUBECONFIG) and _kubeconfig_reaches_api(_BENCH_KUBECONFIG):
-        cible = os.path.abspath(_BENCH_KUBECONFIG)
+    # BANC : le kubeconfig du banc DE CETTE STACK s'il est monté ET JOIGNABLE, sinon
+    # /dev/null (jamais la prod, ADR 0053). Chemin nommé par la stack SÉLECTIONNÉE (ADR 0102
+    # volet B : `.kubeconfigs/<stack>.config`, `stack_id` du fichier `target_abs`). On NE
+    # supprime PAS le kubeconfig (le détruire casserait l'accès à un banc vivant ; il sera
+    # de toute façon réécrit par le prochain up/bootstrap). On vise /dev/null seulement s'il
+    # n'existe pas OU ne répond plus (banc d'une autre stack, ou API tombée) —
+    # `_context_targets_bench` le sonde sans toucher au fichier.
+    elif os.path.exists(bench_kc := _bench_kubeconfig_path(_stack_id(target_abs))) and (
+        _kubeconfig_reaches_api(bench_kc)
+    ):
+        cible = os.path.abspath(bench_kc)
     else:
         cible = os.devnull
         _warn(
@@ -1135,7 +1208,7 @@ def cmd_destroy(args: argparse.Namespace) -> int:
     _assert_bench_target("nestor down")
     path = _resolve(args.file)
     topo = load_topology(path)
-    stack = topo.catalog.get("topology", "—")
+    stack = _stack_id(path)  # identité = nom de fichier (ADR 0102 volet B)
     declared = topo.control_nodes + topo.worker_nodes
     state = classify_refresh(stack, declared, _real_vms(topo.target_kind), [])
     # On ne détruit QUE les VMs de la stack RÉELLEMENT présentes (vms_present) ; les
@@ -1155,10 +1228,15 @@ def cmd_destroy(args: argparse.Namespace) -> int:
         print("destruction annulée.", file=sys.stderr)
         return 2
 
-    # Délégation à run-phases.sh down <vm…> (bash garde limactl, ADR 0049).
+    # Délégation à run-phases.sh down <vm…> (bash garde limactl, ADR 0049). On passe l'ENV
+    # DÉRIVÉ de la topo (`_runphases_env` → NODES_OVERRIDE) : `phase_down` en dérive les
+    # DISQUES déclarés de chaque VM (`node_disk_specs`) pour les supprimer. SANS cet env,
+    # NODES est vide côté bash → aucun `lima_disk_delete` → les disques SURVIVENT en silence
+    # (« rien ne subsiste » mensonger, vécu au banc ceph : 9 disques orphelins après `down`).
     rc = subprocess.run(  # noqa: S603 — chemin codé, noms de VM contrôlés (topo validée)
         ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), "down", *targets],
         check=False,
+        env=_runphases_env(topo, stack),
     ).returncode
     if rc != 0:
         print(f"échec de la destruction (run-phases.sh down rc={rc}).", file=sys.stderr)
@@ -1299,7 +1377,11 @@ def cmd_epreuves(args: argparse.Namespace) -> int:
     # couche tourne) ou « couche à monter » (compatible topo, mais la couche n'est pas
     # là). `profil_min` → phases requises via resolve_layers ; croisé avec _observed_layers.
     backend = topo.storage.get("backend", "local-path")
-    runtime = not args.declared and os.path.exists(_BENCH_KUBECONFIG) and bool(_ready_nodes())
+    # Banc de la stack visée par CETTE commande (ADR 0102 volet B) : `.kubeconfigs/<stack>.config`,
+    # `stack_id` du fichier passé (`path`, déjà résolu) — cohérent avec ce que sondent
+    # `_ready_nodes`/observed (via `_bench_kubeconfig`, même résolution de stack).
+    bench_kc = _bench_kubeconfig_path(_stack_id(path))
+    runtime = not args.declared and os.path.exists(bench_kc) and bool(_ready_nodes())
     observed = _observed_layers(list(_LAYER_SIGNAL)) if runtime else set()
 
     def _pretes(ep) -> bool:
@@ -1513,7 +1595,9 @@ def _pose_named_context(topo: Topology, stack: str) -> None:
             stack,
             kubeconfig=topo.kubeconfig,
             target_kind=topo.target_kind,
-            bench_kubeconfig=_BENCH_KUBECONFIG,
+            # Kubeconfig du banc nommé par la stack (ADR 0102 volet B) :
+            # `.kubeconfigs/<stack>.config`. `stack` = entrée de catalogue (= `stack_id`, fichier).
+            bench_kubeconfig=_bench_kubeconfig_path(stack),
         )
         _kube_context.apply_context(plan)
     except _kube_context.ContextError as exc:
@@ -1732,9 +1816,10 @@ def _active_kubeconfig() -> str | None:
     """Cible kubeconfig EXPLICITE/banc, ou None si ni l'un ni l'autre (= sans cible
     sûre). Sert à la garde/preview pour savoir si on est « hors banc » ; le repli
     réel vers `/dev/null` (jamais la prod) est porté par `_bench_kubeconfig`."""
-    return os.environ.get("KUBECONFIG") or (
-        _BENCH_KUBECONFIG if os.path.exists(_BENCH_KUBECONFIG) else None
-    )
+    # Banc de la stack ACTIVE (ADR 0102 volet B) : `.kubeconfigs/<stack>.config` — pas de
+    # topo en scope (garde nue), on lit la stack activée (`topology.yaml` → stack_id).
+    bench = _bench_kubeconfig_path(_active_stack_name(None))
+    return os.environ.get("KUBECONFIG") or (bench if os.path.exists(bench) else None)
 
 
 def _context_targets_bench() -> bool:
@@ -1787,11 +1872,15 @@ def _assert_bench_target(action: str, topo: Topology | None = None) -> None:
         return  # intention explicite assumée par l'opérateur
     if topo is not None and topo.target_kind == "bench":
         return  # `up` from-scratch d'un banc déclaré : la topo lima EST le signal sûr
-    if os.path.exists(_BENCH_KUBECONFIG) and _context_targets_bench():
+    # Banc de la stack ACTIVE (ADR 0102 volet B) : `.kubeconfigs/<stack>.config`. La branche
+    # `topo bench` from-scratch est déjà sortie ci-dessus ; ici `topo` est None (garde nue)
+    # ou prod → on sonde le banc de la stack activée (`topology.yaml` → stack_id).
+    bench_kc = _bench_kubeconfig_path(_active_stack_name(None))
+    if os.path.exists(bench_kc) and _context_targets_bench():
         return  # banc présent ET contexte = banc : nominal
     raise _UsageError(
         f"REFUS : `{action}` est une commande BANC mais le kubeconfig du banc est "
-        f"absent ({os.path.relpath(_BENCH_KUBECONFIG, _ROOT)}) et le contexte kubectl "
+        f"absent ({os.path.relpath(bench_kc, _ROOT)}) et le contexte kubectl "
         "courant ne vise pas le banc Lima (127.0.0.1). Cette commande pourrait MUTER "
         "la PRODUCTION par erreur (ADR 0053).\n"
         "  • Monter le banc d'abord : `bench/lima/run-phases.sh up`\n"
@@ -2383,7 +2472,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
     except PlanError as exc:
         raise _UsageError(str(exc)) from exc
     resolved_target = target or default_target(topo)
-    stack_name = topo.catalog.get("topology", "—")
+    stack_name = _stack_id(path)  # identité = nom de fichier (ADR 0102 volet B)
 
     # ADR 0069 : `layers` explicite débordant le preset → la séquence VRAIE est celle
     # des couches (resolve_layers), pas celle du preset de repli. PLAN reflète ce que
@@ -2545,13 +2634,30 @@ def _confirm_apply(target: str, *, assume_yes: bool) -> bool:
 
 
 def _nodes_override(topo) -> str:
-    """csv `nom:rôle` des nœuds déclarés (la TOPOLOGIE pilote le banc, ADR 0056).
+    """Canal ENRICHI `nom|role|cpus,memory,disk|disques` des nœuds (ADR 0102 volet C).
 
-    Un nœud `control` (même control+worker, le banc le détaint) → `:control` ; un
-    worker pur → `:worker`. Partagé par `up` et `next` (délégation socle)."""
-    return ",".join(
-        f"{n.name}:{'control' if n.has_role('control') else 'worker'}" for n in topo.nodes
-    )
+    La TOPOLOGIE pilote le banc PAR NŒUD (fin de WITH_CEPH et des ressources globales,
+    ADR 0056/0102) : chaque nœud porte SON rôle, SES ressources VM et SES disques bruts.
+
+    Format (imposé, consommé par run-phases.sh) — 4 champs séparés par `|` :
+      1. `nom`   — nom du nœud (`n.name`).
+      2. `role`  — `control` (même control+worker, le banc le détaint) sinon `worker`.
+      3. ressources — `cpus,memory,disk` (de `topo.node_resources(nom)`).
+      4. disques — `name=size=role` séparés par `,` ; VIDE si le nœud n'en déclare pas
+                   (le « mode Ceph » = la PRÉSENCE de disques déclarés, plus de WITH_CEPH).
+    Nœuds séparés par `;`. Exemple :
+      `node1|control|4,12GiB,40GiB|vdb=10GiB=data,vdd=5GiB=metadata;node2|worker|4,12GiB,40GiB|vdb=10GiB=data`
+    Un nœud sans disque a un 4e champ vide : `node1|control|4,12GiB,40GiB|`.
+
+    PUR (aucune I/O). Partagé par `up` et `next` (délégation socle)."""
+    entries = []
+    for n in topo.nodes:
+        role = "control" if n.has_role("control") else "worker"
+        r = topo.node_resources(n.name)
+        resources = f"{r.cpus},{r.memory},{r.disk}"
+        disks = ",".join(f"{d.name}={d.size}={d.role}" for d in n.disks) if n.disks else ""
+        entries.append(f"{n.name}|{role}|{resources}|{disks}")
+    return ";".join(entries)
 
 
 def _has_runphases_arm(phase: str) -> bool:
@@ -2571,7 +2677,8 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
     """Env passé à run-phases.sh (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) — partagé
     par `up` (chemin complet) et `next` (délégation des phases sans play unitaire :
     up/bootstrap/gitops-seed/hardening/…). Garantit que les deux entrées lancent le banc
-    avec les MÊMES paramètres dérivés."""
+    avec les MÊMES paramètres dérivés. `stack_name` = `stack_id` (nom de fichier, ADR 0102
+    volet B) fourni par l'appelant — sert de nom de stack ET de clé du kubeconfig."""
     return {
         **os.environ,
         "NODES_OVERRIDE": _nodes_override(topo),
@@ -2581,6 +2688,11 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
         # que s'il est déclaré ; `none` n'arme rien. Alias hostport→nodeport, lb-ipam→
         # gateway déjà résolus par exposition_mode.
         "EXPOSITION_MODE": topo.exposition_mode,
+        # Chemin d'écriture du kubeconfig banc, NOMMÉ PAR LA STACK (ADR 0102 volet B) :
+        # PYTHON décide (`.kubeconfigs/<stack>.config`, `stack_id`), run-phases.sh l'UTILISE
+        # comme `KUBECONFIG_LOCAL` (fetch du CP). Une seule source de vérité pour le chemin —
+        # la lecture Python (ctx.kubeconfig_local) et l'écriture bash coïncident.
+        "KUBECONFIG_LOCAL": _bench_kubeconfig_path(stack_name),
     }
 
 
@@ -2605,15 +2717,19 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _path_context(topo: Topology, inventory: str) -> _path.PathContext:
+def _path_context(topo: Topology, inventory: str, stack: str | None = None) -> _path.PathContext:
     """Construit `PathContext` depuis la TOPOLOGIE (PUR — aucune I/O, ADR 0097 §5.a).
 
-    Remplace les globales bash de run-phases.sh (CP:83 / API_PORT:90 / KUBECONFIG_LOCAL:148
+    Remplace les globales bash de run-phases.sh (CP:83 / API_PORT:90 / KUBECONFIG_LOCAL:116
     / REPO / INVENTORY) par un dataclass IMMUABLE dérivé de la topo, plus de globale ambiante :
     - `cp` : 1er nœud `control` (run-phases.sh:83-87 : 1er `:control` de NODES, sinon 1er
       nœud). DÉRIVÉ, jamais codé en dur (`cp1`).
     - `api_port` : 6443 (= run-phases.sh:90 `API_PORT`).
-    - `kubeconfig_local` : chemin du BANC Lima (`KUBECONFIG_LOCAL` = `<WORKDIR>/kubeconfig`).
+    - `kubeconfig_local` : chemin du kubeconfig du BANC, NOMMÉ PAR LA STACK
+      (`.kubeconfigs/<stack>.config`, ADR 0102 volet B) — `stack` = `stack_id` (nom de fichier)
+      fourni par l'appelant (`cmd_up`, depuis son `path`). Python le décide, `KUBECONFIG_LOCAL`
+      de run-phases.sh le reçoit par env (une seule source de vérité pour le chemin). `None` →
+      fallback banc générique.
     - `inventory` : passé PAR L'APPELANT (le chemin dérivé du `with _inventory_for(topo)`,
       ADR 0098) — `_path_context` reste PUR, il n'écrit ni ne supprime rien ; l'appelant
       (`cmd_up`) possède le cycle de vie du temporaire prod.
@@ -2624,7 +2740,7 @@ def _path_context(topo: Topology, inventory: str) -> _path.PathContext:
     return _path.PathContext(
         cp=cp,
         api_port=6443,
-        kubeconfig_local=_BENCH_KUBECONFIG,
+        kubeconfig_local=_bench_kubeconfig_path(stack),
         repo=os.path.abspath(_ROOT),
         inventory=inventory,
         nodes=tuple(n.name for n in topo.nodes),
@@ -2634,33 +2750,19 @@ def _path_context(topo: Topology, inventory: str) -> _path.PathContext:
 def _provision_via_bash(topo: Topology, stack_name: str) -> int:
     """STUB DOCUMENTÉ du provisioning amont `up` (ADR 0097 §5.b) : délègue à `run-phases.sh up`.
 
-    Le provisioning VM (limactl render/start, disques Ceph conditionnels, gate disques,
+    Le provisioning VM (limactl render/start, disques déclarés par nœud, gate disques,
     dérivation cp_ip/iface) ET `write_inventory` byte-stable sont l'artefact node-side
     IRRÉDUCTIBLE (ADR 0049 — Lima/limactl reste bash). On NE le réécrit PAS en Python ici :
     on POUSSE `run-phases.sh up` comme on applique un manifeste (Python pousse, consomme un
-    `rc`, ne lit pas la logique bash, ADR 0097 §2.a). `phase_up` lit les RESSOURCES VM via
-    VM_CPUS/VM_MEMORY/VM_DISK ; LOT 8 veut qu'elles viennent du YAML (`topo.node_resources`).
-    Pendant la TRANSITION, on les passe en env DEPUIS le YAML (Python décide les VALEURS, bash
-    garde le RENDU `lima_render_node`). Mono-nœud banc : un seul jeu de ressources (le CP).
+    `rc`, ne lit pas la logique bash, ADR 0097 §2.a).
+
+    ADR 0102 volet C : ressources ET disques sont PAR NŒUD, portés par le canal enrichi
+    `NODES_OVERRIDE` (cf. `_nodes_override`) — PLUS de VM_CPUS/VM_MEMORY/VM_DISK globaux (du
+    CP) ni de WITH_CEPH en env. Chaque nœud rend SA VM avec SES ressources et crée SES disques.
 
     RESTE BANC (§5.b) : portage RÉEL du callback (limactl render/start + write_inventory) — non
     inventé ici (un faux provisioning serait pire que rien). Voir `_path.banc_todo`."""
     env = _runphases_env(topo, stack_name)
-    # LOT 8 (ADR 0097 §3) : ressources VM du YAML, plus de l'env. Le banc mono-nœud n'a qu'un
-    # CP → on passe SES ressources. `run-phases.sh:117/124/125` lit VM_CPUS/VM_MEMORY/VM_DISK
-    # (n'écrase PAS un défaut si déjà posé) ; on les pose DEPUIS la topo le temps de la
-    # transition (le câblage direct `lima_render_node(<valeurs>)` reste à faire+prouver au banc).
-    # Ici on ne lit que `ctx.cp` (nom du nœud), pas l'inventaire → pas besoin de
-    # matérialiser un temp prod (inventory="").
-    ctx = _path_context(topo, "")
-    if ctx.cp:
-        res = topo.node_resources(ctx.cp)
-        env = {
-            **env,
-            "VM_CPUS": str(res.cpus),
-            "VM_MEMORY": res.memory,
-            "VM_DISK": res.disk,
-        }
     runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
     print("→ up : provisioning des VMs via run-phases.sh (limactl, ADR 0049)…")
     return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
@@ -3395,7 +3497,7 @@ def _run_path_engine(
     # éphémère qui vit TOUT le montage (les closures `assert_safe`/`launch` lisent
     # `ctx.inventory` jusqu'au bout), nettoyé en sortie ; banc = fichier réel.
     with _inventory_for(topo) as _inv:
-        ctx = _path_context(topo, _inv)
+        ctx = _path_context(topo, _inv, stack_name)
         private_data_dir = os.path.join(_ROOT, "bootstrap")
         ansible_cfg = os.path.join(private_data_dir, "ansible.cfg")
         derived = derive_run_params(topo)
@@ -3428,19 +3530,21 @@ def _run_path_engine(
             extravars = _phases.extravars_for(phase, derived)
             print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
             # KUBECONFIG du play : le kubeconfig BANC rapatrié par bootstrap (ctx.kubeconfig_local
-            # → bench/lima/.work/kubeconfig, server: 127.0.0.1:6443 — le forward de l'API). En
+            # → .kubeconfigs/banc.config, server: 127.0.0.1:6443 — le forward de l'API). En
             # FROM-SCRATCH, os.environ['KUBECONFIG'] est VIDE au démarrage (le banc n'existe pas
             # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
             # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
             # passe le kubeconfig du contexte, qui existe dès que bootstrap l'a rapatrié. Un
-            # KUBECONFIG opérateur explicite (banc déjà monté) reste prioritaire.
+            # KUBECONFIG opérateur EXPLOITABLE (banc déjà monté) reste prioritaire — mais
+            # `_operator_kubeconfig` écarte `/dev/null`/vide (garde 0053 `eval`é dans le shell),
+            # sinon le play ceph héritait de `/dev/null` et levait « file is empty ».
             result = _runner.launch_phase(
                 playbook,
                 extravars,
                 private_data_dir,
                 ctx.inventory,
                 ansible_config=ansible_cfg,
-                kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
+                kubeconfig=_operator_kubeconfig() or ctx.kubeconfig_local,
                 target_kind=topo.target_kind,
             )
             # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy). On ne les joue
@@ -3469,9 +3573,11 @@ def _run_path_engine(
 
         def _runphases(*cmd: str) -> subprocess.CompletedProcess:
             # Rappel d'une sous-commande run-phases.sh (bash garde VM/CNI/inventaire/facts,
-            # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE) —
-            # le bash en dérive le MÊME CP/NODES/WORKDIR que `provision` (un seul WORKDIR
-            # `.work` ⇒ inventaire/kubeconfig partagés avec PathContext).
+            # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE
+            # + KUBECONFIG_LOCAL) — le bash en dérive le MÊME CP/NODES/WORKDIR que `provision`
+            # (un seul WORKDIR `.work` ⇒ inventaire partagé) et écrit le kubeconfig à
+            # l'emplacement décidé par Python (`.kubeconfigs/banc.config`, ADR 0102 volet B)
+            # ⇒ lecture (ctx.kubeconfig_local) et écriture (KUBECONFIG_LOCAL) coïncident.
             return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
                 ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
                 check=False,
@@ -3538,7 +3644,9 @@ def _run_path_engine(
                     ansible_config=ansible_cfg,
                     # Cohérence avec le callback `launch` : en from-scratch KUBECONFIG est vide au
                     # démarrage → repli sur le kubeconfig banc rapatrié (ctx.kubeconfig_local).
-                    kubeconfig=os.environ.get("KUBECONFIG") or ctx.kubeconfig_local,
+                    # `_operator_kubeconfig` écarte `/dev/null`/vide (garde 0053) pour ne pas
+                    # hériter d'un kubeconfig poison exporté dans le shell.
+                    kubeconfig=_operator_kubeconfig() or ctx.kubeconfig_local,
                     target_kind=topo.target_kind,
                 )
 
@@ -3650,7 +3758,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         seq = expected_phase_sequence(topo, target)
     except PlanError as exc:
         raise _UsageError(str(exc)) from exc
-    stack_name = topo.catalog.get("topology", "—")
+    stack_name = _stack_id(path)  # identité = nom de fichier (ADR 0102 volet B)
 
     # ADR 0083 : l'ordre vient TOUJOURS de `seq` (expected_phase_sequence → graphe
     # atomique) ; le moteur Python (`_run_path_engine`) MONTE cette séquence (un seul
@@ -3718,12 +3826,14 @@ def _quoi_couche_label(phase: str) -> str:
     return f"{phase} — {label}" if label != phase else phase
 
 
-def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
+def _monter_phase(topo: Topology, phase: str, run_params: dict, stack_name: str) -> int:
     """Monte UNE phase choisie : amont (run-phases.sh up/bootstrap) ou play unitaire
     (ansible-runner). Renvoie 0 (ok) / 1 (échec run) ou lève _UsageError (usage).
 
     Extrait de cmd_next pour être partagé par le chemin « 1re couche » et le menu
-    multi-couches : une fois la phase CHOISIE, son montage est identique."""
+    multi-couches : une fois la phase CHOISIE, son montage est identique. `stack_name` =
+    `stack_id` (nom de fichier, ADR 0102 volet B) — l'appelant le dérive de son `path`
+    (`_monter_phase` n'a pas le chemin de la topo en scope)."""
     playbook_rel = phase_playbook(phase)
     # Phases SANS playbook unitaire :
     #   - `gitops-seed` (init Gitea, DONNÉES) → câblage Python `_launch_seed` (seed.run_seed),
@@ -3738,7 +3848,6 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
             # un arm bash (retiré). Mappe les verdicts du moteur (PathError/IsolationRefused →
             # fail-fast / usage) comme `_run_path_engine`.
             _assert_bench_target(f"nestor next ({phase})")
-            stack_name = topo.catalog.get("topology", "—")
             print(f"→ {phase} : {_quoi_couche(phase)} via nestor/seed.py…")
             try:
                 _launch_seed(phase, topo, run_params)
@@ -3755,7 +3864,6 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict) -> int:
                 "non lançable via `nestor next`"
             )
         _assert_bench_target(f"nestor next ({phase})")
-        stack_name = topo.catalog.get("topology", "—")
         runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
         print(f"→ {phase} : {_quoi_couche(phase)} via run-phases.sh…")
         rc = subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
@@ -3859,8 +3967,10 @@ def cmd_next(args: argparse.Namespace) -> int:
     # topologie (ex. un run `atlas-ceph` multi-node servant de référence à un banc
     # `1cp` local-path → `done` pollué par ceph/sc/datalake/gitops-seed → `next`
     # croit gitops-seed fait et dit « à jour » alors que `preview` le voit « à installer »).
-    # `last_run_for_topology` ne retombe sur AUCUN run d'une autre stack (cf. son docstring).
-    stack_name = topo.catalog.get("topology", "—")
+    # `last_run_for_topology` ne retombe sur AUCUN run d'une autre stack (cf. son docstring) —
+    # mais réconcilie l'ancienne clé `catalog.topology` via `history.STACK_ID_ALIASES` pour ne
+    # pas orpheliner les runs consignés avant le renommage (ADR 0102 volet B / ADR 0052).
+    stack_name = _stack_id(path)  # identité = nom de fichier (ADR 0102 volet B)
     run = last_run_for_topology(runs, stack_name)
     etat_frais, _ = verdict_for_run(run, target, now)
     # Sonde du RÉEL — IDENTIQUE à `cmd_preview` (ADR 0052/0056 §7, ADR 0090). Le socle
@@ -3948,7 +4058,7 @@ def cmd_next(args: argparse.Namespace) -> int:
     ):
         print("montage annulé.", file=sys.stderr)
         return 2
-    return _monter_phase(topo, phase, run_params)
+    return _monter_phase(topo, phase, run_params, _stack_id(path))
 
 
 def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
@@ -4038,8 +4148,11 @@ def cmd_metrics(args: argparse.Namespace) -> int:
         return 0
     # PAR DÉFAUT : les runs de la STACK ACTIVE (filtrés par nom de stack), pas tout
     # l'historique. `--all` rétablit tous les runs ; sans stack active on garde tout.
+    # `_matches_stack` réconcilie l'ancienne clé `catalog.topology` (STACK_ID_ALIASES,
+    # ADR 0102 volet B) — sinon les runs consignés avant le renommage seraient invisibles
+    # ici (6ᵉ site d'identité, match INLINE distinct de last_run_for_topology).
     stack = None if args.all else _active_stack_name(args.file)
-    scope = [r for r in runs if r.topologie == stack] if stack is not None else runs
+    scope = [r for r in runs if _matches_stack(r.topologie, stack)] if stack is not None else runs
     if not scope:
         print(f"aucun run consigné pour la stack `{stack}` (— `--all` pour tout l'historique).")
         return 0
@@ -4999,7 +5112,8 @@ _KUBECONFIG_AUTO_BENCH = False
 
 
 def _default_kubeconfig_to_bench() -> None:
-    """Sans KUBECONFIG exporté, pointe le banc Lima par défaut (`_BENCH_KUBECONFIG`).
+    """Sans KUBECONFIG exporté, pointe le banc de la STACK ACTIVE par défaut
+    (`.kubeconfigs/<stack>.config`, ADR 0102 volet B).
 
     `topology.py` est l'entrée du banc (ADR 0049/0056) : ses commandes « état réel »
     (smoke/scenarios/roundtrip/preview) interrogent le cluster via le client kubernetes
@@ -5008,10 +5122,15 @@ def _default_kubeconfig_to_bench() -> None:
     et échouent/`—` alors que le banc tourne. On NE force PAS si l'opérateur a déjà
     exporté KUBECONFIG (intention explicite respectée). Mémorise dans
     `_KUBECONFIG_AUTO_BENCH` qu'on a posé le défaut (≠ l'opérateur) — le shell, lui,
-    reste sans KUBECONFIG (process ≠ parent)."""
+    reste sans KUBECONFIG (process ≠ parent).
+
+    Appelé par `main()` AVANT le parsing argv : on résout la stack active AU MOMENT de
+    l'appel (`topology.yaml` → `stack_id`), pas au chargement du module (le banc est nommé
+    par la stack, `realpath` résout le symlink d'activation)."""
     global _KUBECONFIG_AUTO_BENCH
-    if not os.environ.get("KUBECONFIG") and os.path.exists(_BENCH_KUBECONFIG):
-        os.environ["KUBECONFIG"] = _BENCH_KUBECONFIG
+    path = _bench_kubeconfig_path(_active_stack_name(None))
+    if not os.environ.get("KUBECONFIG") and os.path.exists(path):
+        os.environ["KUBECONFIG"] = path
         _KUBECONFIG_AUTO_BENCH = True
 
 

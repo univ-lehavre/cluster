@@ -57,18 +57,45 @@ _DEFAULT_CPUS = 4
 _DEFAULT_MEMORY = "12GiB"
 _DEFAULT_DISK = "40GiB"
 
+# Défauts de taille des disques bruts Ceph (ADR 0102 volet C — ex-HDD_SIZE/BLOCKDB_SIZE
+# de run-phases.sh). `data` = OSD (10 GiB) ; `metadata` = block.db NVMe (5 GiB).
+_DEFAULT_DATA_DISK_SIZE = "10GiB"
+_DEFAULT_META_DISK_SIZE = "5GiB"
+VALID_DISK_ROLES = {"data", "metadata"}
+
 
 @dataclass(frozen=True)
 class NodeResources:
-    """Ressources d'une VM (banc Lima) : cpus / mémoire / disque (LOT 8, ADR 0097 §3).
+    """Dimensionnement de la VM (banc Lima) : cpus / mémoire / disque SYSTÈME (LOT 8,
+    ADR 0097 §3). Remplace les env `VM_CPUS`/`VM_MEMORY`/`VM_DISK`.
 
-    Remplace les variables d'env `VM_CPUS`/`VM_MEMORY`/`VM_DISK`. Le bloc `resources:`
-    du YAML porte le défaut GLOBAL (niveau topologie) ; un node peut le surcharger
-    champ par champ (`nodes[].resources`). IMMUABLE — dérivé à la lecture, pas muté."""
+    `disk` = taille du **disque système** de la VM (le `vda` : OS + containerd + images +
+    logs), TOUJOURS présent, un par VM. À NE PAS confondre avec `Node.disks` (les disques
+    BRUTS additionnels `vd[b-z]` pour Ceph — cf. `DiskSpec`). Deux notions orthogonales :
+    ici on dimensionne la VM ; là on attache du stockage brut.
+
+    Bloc `resources:` du YAML = défaut GLOBAL (niveau topologie) ; un node le surcharge
+    champ par champ via `nodes[].resources`. IMMUABLE — dérivé à la lecture, pas muté."""
 
     cpus: int = _DEFAULT_CPUS
     memory: str = _DEFAULT_MEMORY
-    disk: str = _DEFAULT_DISK
+    disk: str = _DEFAULT_DISK  # disque SYSTÈME (vda), ≠ Node.disks (bruts Ceph)
+
+
+@dataclass(frozen=True)
+class DiskSpec:
+    """Un disque BRUT ADDITIONNEL déclaré d'un nœud (ADR 0102 volet C) : `name` = device
+    attendu dans la VM (`vdb`, `vdc`… — jamais `vda`, réservé au disque système), `size`,
+    `role` (`data` OSD | `metadata` block.db). La topo les DÉCLARE → le provisioning les
+    crée et les attache (fin de `WITH_CEPH`). IMMUABLE.
+
+    ≠ `NodeResources.disk` (le disque SYSTÈME `vda`, dimensionnement de la VM) : ici c'est
+    du stockage BRUT pour Ceph, pas l'OS. ≠ `nodeside.Disk` (la SONDE lsblk : ce que le nœud
+    EXPOSE réellement) — ici, la DÉCLARATION de ce qu'on veut."""
+
+    name: str
+    size: str = _DEFAULT_DATA_DISK_SIZE
+    role: str = "data"
 
 
 @dataclass
@@ -76,7 +103,7 @@ class Node:
     name: str
     roles: list[str]
     ansible_host: str | None = None
-    disks: list[str] | None = None
+    disks: list[DiskSpec] | None = None
     # Surcharge des ressources VM PROPRE à ce node (LOT 8) : un dict partiel
     # (`{cpus, memory, disk}` — chaque champ optionnel) qui prime sur le `resources:`
     # global. None → le node hérite intégralement du défaut global de la topologie.
@@ -119,11 +146,17 @@ class Topology:
     atlas: dict[str, Any] = field(default_factory=dict)
     portal: dict[str, Any] = field(default_factory=dict)
     target_kind: str = "prod"
-    # Chemin du kubeconfig de la cible (ADR 0090). SOURCE DE VÉRITÉ pour viser un
-    # cluster prod en LECTURE (`preview`/état réel) sans dépendre du contexte
-    # courant du poste (ambigu). Convention : `~/.kube/<stack>.config`, HORS dépôt
-    # (credentials réels, jamais commités). None → résolution par défaut (cf.
-    # résolution kubeconfig prod). Sans objet pour le banc Lima (kubeconfig généré).
+    # Chemin du kubeconfig de la cible (ADR 0090) — UNIQUEMENT pour la PROD. QUI décide :
+    #   • BANC   → nestor IMPOSE : le provisioning génère `.kubeconfigs/banc.config`
+    #              (phase cni, ADR 0102 volet B — le banc EST la stack `banc`) et
+    #              `_bench_kubeconfig` le trouve seul → laisser ce champ à None (le
+    #              déclarer serait redondant).
+    #   • PROD   → l'UTILISATEUR DÉCLARE ici la cible que nestor ne peut PAS deviner :
+    #              `~/.kube/<stack>.config`, HORS dépôt (credentials réels, jamais commités).
+    #              SOURCE DE VÉRITÉ pour viser une prod en LECTURE (`preview`/état réel) sans
+    #              dépendre du contexte ambigu du poste.
+    #   • Toujours → `export KUBECONFIG=…` surcharge tout (intention explicite, ADR 0053/0065).
+    # None → résolution par défaut (banc si présent, sinon /dev/null — JAMAIS ~/.kube/config).
     kubeconfig: str | None = None
     # `layers` (ADR 0069) : ENSEMBLE de couches déclaré au top-level, ordonné par le
     # DAG (resolve_layers). Vide → rétrocompat : dérivé de `catalog.profile` (alias
@@ -230,6 +263,25 @@ def _resources_from(raw: dict[str, Any], base: NodeResources) -> NodeResources:
     )
 
 
+def _parse_disk(raw: Any, node_name: str) -> DiskSpec:
+    """Un item `disks[]` → `DiskSpec` (ADR 0102 volet C). Accepte un objet
+    `{name, size?, role?}` (forme canonique) OU une string nue `vdb` (rétrocompat :
+    taille/rôle par défaut). Lève `TopologyError` sur item mal formé / rôle inconnu.
+    Défaut de taille dérivé du rôle (data 10 GiB, metadata 5 GiB)."""
+    if isinstance(raw, str):
+        return DiskSpec(name=raw)
+    if not isinstance(raw, dict) or "name" not in raw:
+        raise TopologyError(f"nœud `{node_name}` : disque mal formé {raw!r} (attendu {{name, …}})")
+    role = str(raw.get("role", "data"))
+    if role not in VALID_DISK_ROLES:
+        raise TopologyError(
+            f"nœud `{node_name}` : disque `{raw['name']}` rôle `{role}` inconnu "
+            f"(valides : {sorted(VALID_DISK_ROLES)})"
+        )
+    default_size = _DEFAULT_META_DISK_SIZE if role == "metadata" else _DEFAULT_DATA_DISK_SIZE
+    return DiskSpec(name=str(raw["name"]), size=str(raw.get("size", default_size)), role=role)
+
+
 def _parse_node(raw: dict[str, Any]) -> Node:
     if "name" not in raw:
         raise TopologyError(f"nœud sans `name` : {raw!r}")
@@ -242,11 +294,13 @@ def _parse_node(raw: dict[str, Any]) -> Node:
             f"nœud `{raw['name']}` : rôle(s) inconnu(s) {sorted(unknown)} "
             f"(valides : {sorted(VALID_ROLES)})"
         )
+    raw_disks = raw.get("disks")
+    disks = [_parse_disk(d, raw["name"]) for d in raw_disks] if raw_disks else None
     return Node(
         name=raw["name"],
         roles=list(roles),
         ansible_host=raw.get("ansible_host"),
-        disks=raw.get("disks"),
+        disks=disks,
         resources=raw.get("resources"),  # LOT 8 : surcharge VM per-node (None → global)
     )
 

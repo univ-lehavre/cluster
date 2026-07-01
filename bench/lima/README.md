@@ -178,12 +178,14 @@ kubeconfig banc) et installe la lib Python `kubernetes` en pré-tâche.
 > des Runs, ADR 0023) — succès **et** drifts éventuels.
 
 Chaque phase est **gated** (s'arrête si le critère n'est pas atteint) et
-**idempotente** (rejouable). Le kubeconfig est exporté sous `.work/kubeconfig`
-(gitignoré), avec le `server:` réécrit sur l'IP user-v2 du control-plane :
+**idempotente** (rejouable). Le kubeconfig est exporté sous
+`.kubeconfigs/banc.config` (le banc EST la stack `banc`, ADR 0102 volet B ;
+in-repo gitignoré), avec le `server:` réécrit sur le forward `127.0.0.1:6443` du
+control-plane :
 
 ```bash
-KUBECONFIG=bench/lima/.work/kubeconfig kubectl get nodes -o wide
-KUBECONFIG=bench/lima/.work/kubeconfig kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status
+KUBECONFIG=.kubeconfigs/banc.config kubectl get nodes -o wide
+KUBECONFIG=.kubeconfigs/banc.config kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status
 ```
 
 ## Réserves transversales

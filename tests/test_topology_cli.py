@@ -327,7 +327,9 @@ class Epreuves(unittest.TestCase):
         )
         cli._ready_nodes = lambda *_a: ["node1"]  # banc up
         cli._observed_layers = lambda phases: {"metrics-server"}  # seul metrics monté
-        cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else orig_exists(p)
+        # `test scenarios -f _EXAMPLE` → stack `socle` : le code sonde `.kubeconfigs/socle.config`.
+        _bp = cli._bench_kubeconfig_path(cli._stack_id(_EXAMPLE))
+        cli.os.path.exists = lambda p: True if p == _bp else orig_exists(p)
         self.addCleanup(setattr, cli, "_ready_nodes", orig_ready)
         self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
         self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
@@ -354,7 +356,9 @@ class Epreuves(unittest.TestCase):
         cli._observed_layers = lambda phases: observed
         cli._assert_bench_target = lambda *a, **k: None
         self._orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: True if p == cli._BENCH_KUBECONFIG else self._orig_exists(p)
+        # les tests qui utilisent ce stub lancent `test scenarios -f _EXAMPLE` → stack `socle`.
+        _bp = cli._bench_kubeconfig_path(cli._stack_id(_EXAMPLE))
+        cli.os.path.exists = lambda p: True if p == _bp else self._orig_exists(p)
         for k, v in orig.items():
             self.addCleanup(setattr, cli, k, v)
         self.addCleanup(setattr, cli.os.path, "exists", self._orig_exists)
@@ -581,12 +585,97 @@ class Kubectl(unittest.TestCase):
             mock.patch.object(cli, "_KUBECONFIG_AUTO_BENCH", True),
             mock.patch.object(cli.subprocess, "run", _fake_run),
         ):
-            os.environ["KUBECONFIG"] = cli._BENCH_KUBECONFIG  # défaut auto-banc en place
+            # défaut auto-banc en place (banc de la stack active, ADR 0102 volet B)
+            os.environ["KUBECONFIG"] = cli._bench_kubeconfig_path(cli._active_stack_name(None))
             cli.cmd_kubectl(
                 __import__("argparse").Namespace(file=path, kubectl_args=["get", "nodes"])
             )
         self.assertIn("dirqual.config", seen["kc"])  # vise la PROD, pas le banc
-        self.assertNotIn(".work/kubeconfig", seen["kc"])
+        self.assertNotIn(".kubeconfigs/banc.config", seen["kc"])
+
+
+class StackIdentity(unittest.TestCase):
+    """Identité de stack = NOM DE FICHIER de la topo (ADR 0102 volet B) : `_stack_id`,
+    `_bench_kubeconfig_path`, et la réconciliation d'historique `STACK_ID_ALIASES`."""
+
+    def test_stack_id_strips_example_yaml(self):
+        # `.example.yaml` (modèle générique) retiré AVANT `.yaml` : ceph.example.yaml → ceph.
+        self.assertEqual(cli._stack_id("topologies/ceph.example.yaml"), "ceph")
+
+    def test_stack_id_strips_plain_yaml(self):
+        # topo réelle gitignorée : dirqual.yaml → dirqual.
+        self.assertEqual(cli._stack_id("topologies/dirqual.yaml"), "dirqual")
+
+    def test_stack_id_resolves_symlink(self):
+        # `topology.yaml` (symlink d'activation) → realpath vers la cible réelle, PAS "topology".
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        real = os.path.join(d, "ceph.example.yaml")
+        with open(real, "w", encoding="utf-8") as f:
+            f.write("catalog: {topology: multi-node-3}\n")
+        link = os.path.join(d, "topology.yaml")
+        os.symlink(real, link)
+        self.assertEqual(cli._stack_id(link), "ceph")  # jamais "topology"
+
+    def test_bench_kubeconfig_path_named_by_stack(self):
+        self.assertTrue(cli._bench_kubeconfig_path("ceph").endswith("/.kubeconfigs/ceph.config"))
+        # stack None → fallback banc générique.
+        self.assertTrue(cli._bench_kubeconfig_path(None).endswith("/.kubeconfigs/banc.config"))
+
+    def test_history_alias_reconciles_old_key(self):
+        # Les runs consignés avant le renommage (keyés `multi-node-3`) restent visibles pour
+        # la stack `ceph` (STACK_ID_ALIASES) — sans réécrire runs-history (ADR 0052).
+        from nestor.history import _matches_stack
+
+        self.assertTrue(_matches_stack("multi-node-3", "ceph"))  # ancien alias réconcilié
+        self.assertTrue(_matches_stack("ceph", "ceph"))  # correspondance directe
+        self.assertFalse(_matches_stack("banc", "ceph"))  # pas de contamination croisée
+        self.assertFalse(_matches_stack(None, "ceph"))  # run sans topologie
+
+
+class OperatorKubeconfig(unittest.TestCase):
+    """`_operator_kubeconfig` : le KUBECONFIG de l'env n'est retenu que s'il est EXPLOITABLE.
+
+    Régression (vécue au banc, phase ceph) : un `KUBECONFIG=/dev/null` `eval`é dans le shell
+    par `nestor stack select` sur un banc absent (garde ADR 0053) était propagé tel quel aux
+    phases Ansible via `os.environ.get("KUBECONFIG") or ctx.kubeconfig_local` — `/dev/null`
+    étant truthy, il gagnait le `or` et le module k8s levait « Invalid kube-config. /dev/null
+    file is empty », alors que le banc était monté et joignable. Le helper écarte `/dev/null`,
+    un fichier vide et un fichier inexistant (valeurs poison) → `None` → le site retombe sur
+    le kubeconfig banc rapatrié."""
+
+    def _run_with_env(self, kc_value):
+        env = {k: v for k, v in os.environ.items() if k != "KUBECONFIG"}
+        if kc_value is not None:
+            env["KUBECONFIG"] = kc_value
+        with mock.patch.dict(os.environ, env, clear=True):
+            return cli._operator_kubeconfig()
+
+    def test_devnull_is_treated_as_absent(self):
+        # /dev/null a une taille de 0 → poison, jamais retenu.
+        self.assertIsNone(self._run_with_env(os.devnull))
+
+    def test_empty_file_is_treated_as_absent(self):
+        fd, path = tempfile.mkstemp(suffix=".config")
+        os.close(fd)  # fichier de taille 0
+        self.addCleanup(os.unlink, path)
+        self.assertIsNone(self._run_with_env(path))
+
+    def test_missing_file_is_treated_as_absent(self):
+        self.assertIsNone(self._run_with_env("/n/existe/pas/kube.config"))
+
+    def test_unset_env_returns_none(self):
+        self.assertIsNone(self._run_with_env(None))
+
+    def test_usable_kubeconfig_is_returned(self):
+        # un fichier non vide (kubeconfig réel exporté par l'opérateur) est retenu tel quel.
+        fd, path = tempfile.mkstemp(suffix=".config")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+        self.addCleanup(os.unlink, path)
+        self.assertEqual(self._run_with_env(path), path)
 
 
 class Ansible(unittest.TestCase):
@@ -698,13 +787,16 @@ runs:
 """
     # Run PÉRIMÉ de _EXAMPLE (date vieille → freshness=perime, pas jamais) : le socle
     # est « déjà monté mais pas frais » → « à rejouer », distinct de l'inédit.
+    # `topologie` = `stack_id` (nom de fichier, ADR 0102 volet B) : `_EXAMPLE` =
+    # `socle.example.yaml` → stack `socle`. (Un run RÉEL antérieur keyé `multi-node-4`
+    # serait réconcilié par `STACK_ID_ALIASES` ; ici on écrit directement la clé actuelle.)
     _SOCLE_STALE = """\
 runs:
   - id: r1
     date: 2020-01-01T00:00:00Z
     target: atlas-ceph
     profil: ceph
-    topologie: multi-node-4
+    topologie: socle
     phases:
       up: 1
       bootstrap: 1
@@ -1892,7 +1984,7 @@ class NextHealthGate(unittest.TestCase):
         out = io.StringIO()
         err = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = cli._monter_phase(topo, "monitoring", {})
+            rc = cli._monter_phase(topo, "monitoring", {}, "banc")
         self.assertEqual(rc, 1)
         self.assertIn("PAS saine", err.getvalue())
 
@@ -1921,7 +2013,7 @@ class NextHealthGate(unittest.TestCase):
         self.addCleanup(setattr, cli.subprocess, "run", orig_run)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            rc = cli._monter_phase(topo, "gitops-seed", {})
+            rc = cli._monter_phase(topo, "gitops-seed", {}, "banc")
         self.assertEqual(rc, 0)
         self.assertEqual(called["phase"], "gitops-seed")  # routé vers le seed Python
 
@@ -1930,7 +2022,7 @@ class NextHealthGate(unittest.TestCase):
         # run-phases.sh (le filet bash a été retiré → `hardening` n'a plus d'arm) → usage net.
         topo = cli.load_topology(_EXAMPLE)
         with self.assertRaises(cli._UsageError):
-            cli._monter_phase(topo, "hardening", {})
+            cli._monter_phase(topo, "hardening", {}, "banc")
 
 
 class Metrics(unittest.TestCase):
@@ -1956,25 +2048,27 @@ runs:
         self.assertIn("12m39s", out)  # 759 s
 
     def test_defaults_to_active_stack(self):
-        # PAR DÉFAUT (-f pointe une topo `multi-node-3`), metrics ne montre QUE les runs
-        # de cette stack (filtre par nom de stack) — pas tout l'historique.
-        hist = _tmp(
-            "runs:\n"
-            "  - {id: a, date: 2026-06-01T00:00:00Z, profil: ceph, topologie: multi-node-3,"
-            " total_s: 100, phases: {up: 100}}\n"
-            "  - {id: b, date: 2026-06-02T00:00:00Z, profil: local-path, topologie: other,"
-            " total_s: 200, phases: {up: 200}}\n"
-        )
-        self.addCleanup(os.unlink, hist)
+        # PAR DÉFAUT (-f pointe une topo), metrics ne montre QUE les runs de CETTE stack
+        # (filtre par `stack_id` = nom de fichier, ADR 0102 volet B) — pas tout l'historique.
         topo = _tmp(
             "catalog: {topology: multi-node-3, profile: base}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
             "storage: {backend: ceph}\ntarget_kind: bench\n"
         )
         self.addCleanup(os.unlink, topo)
+        stack = cli._stack_id(topo)  # nom de fichier du temp (identité, pas catalog.topology)
+        # L'historique de CETTE stack est keyé par le `stack_id` ; un run `other` est exclu.
+        hist = _tmp(
+            "runs:\n"
+            f"  - {{id: a, date: 2026-06-01T00:00:00Z, profil: ceph, topologie: {stack},"
+            " total_s: 100, phases: {up: 100}}\n"
+            "  - {id: b, date: 2026-06-02T00:00:00Z, profil: local-path, topologie: other,"
+            " total_s: 200, phases: {up: 200}}\n"
+        )
+        self.addCleanup(os.unlink, hist)
         code, out, _ = _capture(["artifact", "metrics", "--history", hist, "-f", topo])
         self.assertEqual(code, 0)
-        self.assertIn("multi-node-3", out)
+        self.assertIn(stack, out)  # la stack active (nom de fichier)
         self.assertNotIn("topologie: other", out)  # l'autre stack est exclue
 
     def test_no_run_for_active_stack(self):
@@ -2210,7 +2304,8 @@ class Stack(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
         _capture(["stack", "new", name, "--no-input"])
         orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: False if p == cli._BENCH_KUBECONFIG else orig_exists(p)
+        _bp = cli._bench_kubeconfig_path(cli._active_stack_name(None))
+        cli.os.path.exists = lambda p: False if p == _bp else orig_exists(p)
         self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
         code, out, err = _capture(["stack", "select", name])
         self.assertEqual(code, 0)
@@ -2225,7 +2320,9 @@ class Stack(unittest.TestCase):
         target = self._catalog(name)
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
         _capture(["stack", "new", name, "--activate", "--no-input"])
-        bench = cli._BENCH_KUBECONFIG
+        # Kubeconfig du banc NOMMÉ PAR LA STACK sélectionnée (ADR 0102 volet B) :
+        # `stack new <name>` crée `topologies/<name>.yaml` → `stack_id` == `name`.
+        bench = cli._bench_kubeconfig_path(name)
         os.makedirs(os.path.dirname(bench), exist_ok=True)
         if not os.path.exists(bench):
             with open(bench, "w", encoding="utf-8") as f:
@@ -2255,7 +2352,8 @@ class Stack(unittest.TestCase):
         # ou un env pollué sauterait la branche « topo sans kubeconfig »). On force les
         # deux absents pour un test déterministe (indépendant de l'ordre des tests).
         orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: False if p == cli._BENCH_KUBECONFIG else orig_exists(p)
+        _bp = cli._bench_kubeconfig_path(cli._active_stack_name(None))
+        cli.os.path.exists = lambda p: False if p == _bp else orig_exists(p)
         self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("KUBECONFIG", None)
@@ -2279,13 +2377,25 @@ class Stack(unittest.TestCase):
                 "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
                 "storage: {backend: ceph}\ntarget_kind: prod\n"
             )
-        with mock.patch.dict(os.environ, {"KUBECONFIG": cli._BENCH_KUBECONFIG}, clear=False):
+        # Le résidu à ignorer = le banc de la stack ACTIVE. `stack select` REPOINTE le symlink
+        # AVANT `_select_prod_kubeconfig`, donc la stack active y est déjà `name` : le résidu
+        # visé est SON banc `.kubeconfigs/<name>.config` (ADR 0102 volet B). On le pose en env
+        # (comme un `eval` d'un select banc antérieur) — il doit être IGNORÉ au profit de la
+        # cible prod déclarée.
+        residu_banc = cli._bench_kubeconfig_path(name)
+        with mock.patch.dict(os.environ, {"KUBECONFIG": residu_banc}, clear=False):
             code, out, _ = _capture(["stack", "select", name])  # interactif (pas --no-input)
         self.assertEqual(code, 0)  # ne bloque pas (ni sonde réseau ni prompt)
         with open(target, encoding="utf-8") as f:
-            self.assertIn("kubeconfig: ~/.kube/", f.read())  # champ écrit
-        # l'export vise la prod déclarée, PAS le banc résiduel.
-        self.assertNotIn(cli._BENCH_KUBECONFIG, out)
+            written = f.read()
+        # ADR 0102 : le défaut écrit est in-repo `.kubeconfigs/<stack>.config` (plus ~/.kube/).
+        # Le champ kubeconfig prod déclaré vaut ce même chemin — donc l'écriture EST la preuve
+        # que le résidu banc a été écarté (sinon `_select_prod_kubeconfig` aurait retourné tôt
+        # sur l'env sans écrire le champ). Pas d'assert « export ≠ résidu » : les deux chemins
+        # coïncident par construction (`.kubeconfigs/<name>.config`), la preuve est l'écriture.
+        self.assertIn(
+            f"kubeconfig: {os.path.join(cli._ROOT, '.kubeconfigs', name)}.config", written
+        )
 
     def test_activate_absent_is_business_error_with_catalog(self):
         code, _, err = _capture(["stack", "select", "zz-nexistepas"])
@@ -2402,11 +2512,11 @@ class Destroy(unittest.TestCase):
         self.addCleanup(setattr, cli, "_real_vms", orig)
 
     def _stub_down(self, rc=0):
-        # Capture l'appel à run-phases.sh down (PAS de vraie destruction en test).
+        # Capture l'appel à run-phases.sh down (cmd ET env — PAS de vraie destruction).
         calls = []
 
         def _spy(cmd, *a, **k):
-            calls.append(cmd)
+            calls.append({"cmd": cmd, "env": k.get("env")})
             return subprocess.CompletedProcess(args=cmd, returncode=rc)
 
         orig = cli.subprocess.run
@@ -2423,8 +2533,13 @@ class Destroy(unittest.TestCase):
         self.assertIn("détruite", out)
         # Délégation à run-phases.sh down cp1 (les VMs de la stack passées en args).
         self.assertEqual(len(calls), 1)
-        self.assertIn("down", calls[0])
-        self.assertIn("cp1", calls[0])
+        self.assertIn("down", calls[0]["cmd"])
+        self.assertIn("cp1", calls[0]["cmd"])
+        # Régression : l'env DOIT porter NODES_OVERRIDE (sinon `phase_down` ne voit aucun
+        # disque déclaré → les disques Lima SURVIVENT au down, vécu au banc ceph).
+        env = calls[0]["env"]
+        self.assertIsNotNone(env, "destroy doit passer l'env dérivé (NODES_OVERRIDE)")
+        self.assertIn("NODES_OVERRIDE", env)
 
     def test_no_stack_vm_is_noop(self):
         # Aucune VM de la stack présente (cp9 = orpheline) → rien à détruire, code 0,
@@ -2490,7 +2605,8 @@ class Access(unittest.TestCase):
         # On force le banc ABSENT (le kubeconfig banc peut exister sur la machine de dev).
         orig_exists = cli.os.path.exists
         cli._assert_bench_target = _REAL_ASSERT_BENCH
-        cli.os.path.exists = lambda p: False if p == cli._BENCH_KUBECONFIG else orig_exists(p)
+        _bp = cli._bench_kubeconfig_path(cli._active_stack_name(None))
+        cli.os.path.exists = lambda p: False if p == _bp else orig_exists(p)
         self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
         self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
         orig_ctx = cli._context_targets_bench
@@ -2512,9 +2628,10 @@ class BenchTargetGuard(unittest.TestCase):
         cli._assert_bench_target = _REAL_ASSERT_BENCH
         self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
         orig_exists = cli.os.path.exists
-        cli.os.path.exists = lambda p: (
-            bench_exists if p == cli._BENCH_KUBECONFIG else orig_exists(p)
-        )
+        # Chemin banc de la stack active CAPTURÉ avant de poser le mock : `_active_stack_name`
+        # appelle `os.path.exists` (symlink) → le résoudre DANS le lambda récursionnerait.
+        bench_path = cli._bench_kubeconfig_path(cli._active_stack_name(None))
+        cli.os.path.exists = lambda p: bench_exists if p == bench_path else orig_exists(p)
         self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
         orig_ctx = cli._context_targets_bench
         cli._context_targets_bench = lambda: targets_bench

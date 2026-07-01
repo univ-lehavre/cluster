@@ -1,0 +1,45 @@
+# topologies/banc.example.yaml — modèle VERSIONNÉ d'un banc Lima mono-nœud (valeurs
+# génériques, ADR 0023 ; nommage uniforme .example, ADR 0102). Copier en
+# `topologies/banc.yaml` (gitignoré) pour une surcharge locale, ou l'activer tel quel.
+# Générée par `nestor stack new` ; ajuste nœuds/rôles/ressources, revérifie via
+# `nestor stack validate`. `status: cible` tant qu'aucun run ne l'a montée (ADR 0052).
+catalog:
+  topology: banc
+  terrain: local
+  status: cible # cible | buildé | spike — `buildé` seulement après un run réel
+# `atlas` = alias de la chaîne MLOps complète (ADR 0083) : metrics + monitoring +
+# gitops + gitops-seed + dataops + mlflow. C'est un alias de LAYERS (top-level),
+# PAS un profil (profile reste le préfixe cumulatif base⊂…⊂dataops, ADR 0039).
+layers:
+  - metrics-server
+  - monitoring
+  - gitops
+  - gitops-seed
+  - dataops
+  - mlflow
+  - portal
+nodes:
+  - name: node1
+    roles: [control, worker]
+storage:
+  backend: local-path
+target_kind: bench
+# DIMENSIONNEMENT de la VM Lima (LOT 8, ADR 0097 §3 — remplace les env VM_CPUS/VM_MEMORY/
+# VM_DISK). Défaut GLOBAL (tous nœuds) ; un node surcharge via `nodes[].resources`,
+# effectif au provisioning PAR NŒUD (ADR 0102 volet C). Les trois champs :
+#   cpus   : nombre de vCPU de la VM.
+#   memory : RAM de la VM.
+#   disk   : taille du disque SYSTÈME de la VM (le `vda` : OS + containerd + images + logs).
+#            Un par VM, toujours présent. ⚠️ À NE PAS confondre avec `nodes[].disks` — les
+#            disques BRUTS ADDITIONNELS (`vd[b-z]`) attachés pour Ceph (OSD/metadata). Ici,
+#            banc local-path : PAS de `nodes[].disks` (aucun disque brut), seul le disque
+#            système compte, d'où 128 GiB (la chaîne MLOps complète y vit).
+resources:
+  cpus: 6
+  memory: 16GiB
+  disk: 128GiB
+# PAS de `kubeconfig:` ici (ADR 0102 volet B) : le kubeconfig d'une stack vit à un
+# emplacement UNIQUE nommé par la stack — `.kubeconfigs/<stack>.config` (in-repo, gitignoré),
+# pour banc ET prod. nestor le DÉRIVE seul (le provisioning l'écrit, phase cni). Ne déclarer
+# `kubeconfig:` que pour un chemin custom hors convention (override rare). Banc = nestor
+# provisionne ; prod = rapatriement ; `export KUBECONFIG=…` surcharge toujours (ADR 0053/0065).

@@ -17,11 +17,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from nestor import load_topology, render_prod_inventory  # noqa: E402
 from nestor.generator import render_lima_inventory  # noqa: E402
 from nestor.model import (  # noqa: E402
+    DiskSpec,
     TopologyError,
     topology_from_dict,
 )
 from nestor.profile import (  # noqa: E402
     consumes_storage,
+    derive_metadata_device,
     derive_osd_expected,
     derive_run_params,
     required_profiles,
@@ -414,6 +416,108 @@ class OsdDerivation(unittest.TestCase):
         # prod générique : pas de disks_per_node → None (le rôle/hosts.yaml décide).
         topo = topology_from_dict(_base(storage={"backend": "ceph"}))
         self.assertIsNone(derive_osd_expected(topo))
+
+    def test_derives_from_declared_disk_roles(self):
+        # ADR 0102 : nestor compte les DiskSpec role=data des nœuds (le metadata/block.db
+        # n'est PAS un OSD). 3 nœuds × 2 data (+ 1 metadata ignoré) → 6.
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {
+                        "name": f"n{i}",
+                        "roles": ["storage", "worker"],
+                        "disks": [
+                            {"name": "vdb", "role": "data"},
+                            {"name": "vdc", "role": "data"},
+                            {"name": "vdd", "role": "metadata"},
+                        ],
+                    }
+                    for i in range(3)
+                ],
+                storage={"backend": "ceph"},
+            )
+        )
+        self.assertEqual(derive_osd_expected(topo), 6)
+
+    def test_metadata_device_derived_from_declared_role(self):
+        # ADR 0102 volet C : le device block.db est le disque `role: metadata` déclaré (vdd),
+        # PAS le défaut prod `nvme1n1` — sinon Rook cherche nvme1n1 absent au banc (OSD avortés).
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {
+                        "name": "n1",
+                        "roles": ["storage", "control"],
+                        "disks": [
+                            {"name": "vdb", "role": "data"},
+                            {"name": "vdd", "role": "metadata"},
+                        ],
+                    }
+                ],
+                storage={"backend": "ceph"},
+            )
+        )
+        self.assertEqual(derive_metadata_device(topo), "vdd")
+        # et il transite dans le faisceau -e consommé par la phase ceph.
+        self.assertEqual(derive_run_params(topo).get("ceph_metadata_device"), "vdd")
+
+    def test_metadata_device_none_when_no_metadata_disk(self):
+        # Aucun disque metadata déclaré → None (le défaut du rôle Ansible tient : prod NVMe).
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {"name": "n1", "roles": ["storage"], "disks": [{"name": "vdb", "role": "data"}]}
+                ],
+                storage={"backend": "ceph"},
+            )
+        )
+        self.assertIsNone(derive_metadata_device(topo))
+        self.assertNotIn("ceph_metadata_device", derive_run_params(topo))
+
+    def test_metadata_device_none_for_local_path(self):
+        topo = topology_from_dict(_base(storage={"backend": "local-path"}))
+        self.assertIsNone(derive_metadata_device(topo))
+
+
+class DiskParsing(unittest.TestCase):
+    """ADR 0102 volet C : `nodes[].disks` → `DiskSpec` (name/size/role), la topo pilote."""
+
+    def _node_disks(self, disks):
+        topo = topology_from_dict(
+            _base(nodes=[{"name": "n1", "roles": ["storage", "control"], "disks": disks}])
+        )
+        return topo.nodes[0].disks
+
+    def test_objects_with_name_size_role(self):
+        d = self._node_disks(
+            [{"name": "vdb", "size": "10GiB"}, {"name": "vdd", "size": "5GiB", "role": "metadata"}]
+        )
+        self.assertEqual(d[0], DiskSpec(name="vdb", size="10GiB", role="data"))
+        self.assertEqual(d[1], DiskSpec(name="vdd", size="5GiB", role="metadata"))
+
+    def test_string_shorthand_defaults(self):
+        # rétrocompat : une string nue → data, taille par défaut (10 GiB).
+        d = self._node_disks(["vdb", "vdc"])
+        self.assertEqual(d, [DiskSpec(name="vdb"), DiskSpec(name="vdc")])
+        self.assertEqual(d[0].size, "10GiB")
+        self.assertEqual(d[0].role, "data")
+
+    def test_metadata_default_size_differs(self):
+        # role metadata sans size → défaut 5 GiB (≠ data 10 GiB), ex-BLOCKDB_SIZE.
+        d = self._node_disks([{"name": "vdd", "role": "metadata"}])
+        self.assertEqual(d[0].size, "5GiB")
+
+    def test_unknown_role_rejected(self):
+        with self.assertRaises(TopologyError):
+            self._node_disks([{"name": "vdb", "role": "journal"}])
+
+    def test_malformed_disk_rejected(self):
+        with self.assertRaises(TopologyError):
+            self._node_disks([{"size": "10GiB"}])  # pas de name
+
+    def test_no_disks_is_none(self):
+        topo = topology_from_dict(_base())
+        self.assertIsNone(topo.nodes[0].disks)
 
 
 class VmResources(unittest.TestCase):
