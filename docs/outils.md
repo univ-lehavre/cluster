@@ -92,14 +92,14 @@ Le banc Lima est l'environnement de validation e2e
 ([ADR 0034](decisions/0034-validation-e2e-from-scratch.md)). Tout passe par un
 **orchestrateur unique** :
 
-| Pour…                                               | Commande                                                          | Détails                                                                                  |
-| --------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Monter le banc par étapes (gate par phase)          | `bench/lima/run-phases.sh <phase>`                                | [bench/lima/README.md](../bench/lima/README.md)                                          |
-| Monter un **chemin nommé** complet                  | `bench/lima/run-phases.sh socle\|atlas\|atlas-ceph\|storage-real` | [ADR 0045](decisions/0045-chemins-installation-banc-couches.md)                          |
-| Voir l'état du banc (VMs, nœuds, phases, UIs)       | `bench/lima/run-phases.sh status`                                 | lecture seule                                                                            |
-| (Ré)exporter le kubeconfig du banc                  | `bench/lima/run-phases.sh kubeconfig`                             |                                                                                          |
-| Détruire le banc (VMs + disques)                    | `bench/lima/run-phases.sh down`                                   | destructif                                                                               |
-| Prouver une **reprise après faute** (arrêt injecté) | `BANC_JETABLE=1 bench/lima/run-phases.sh bootstrap-fault`         | [ADR 0050](decisions/0050-modele-reprise-role-ansible.md) — **destructif**, banc jetable |
+| Pour…                                         | Commande                                                          | Détails                                                                                   |
+| --------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Monter le banc par étapes (gate par phase)    | `bench/lima/run-phases.sh <phase>`                                | [bench/lima/README.md](../bench/lima/README.md)                                           |
+| Monter un **chemin nommé** complet            | `bench/lima/run-phases.sh socle\|atlas\|atlas-ceph\|storage-real` | [ADR 0045](decisions/0045-chemins-installation-banc-couches.md)                           |
+| Voir l'état du banc (VMs, nœuds, phases, UIs) | `bench/lima/run-phases.sh status`                                 | lecture seule                                                                             |
+| (Ré)exporter le kubeconfig du banc            | `bench/lima/run-phases.sh kubeconfig`                             |                                                                                           |
+| Détruire le banc (VMs + disques)              | `bench/lima/run-phases.sh down`                                   | destructif                                                                                |
+| Défaire une couche pour la re-tester          | `nestor remove --phase <phase>`                                   | découverte d'appartenance (ADR 0079/0101) — **destructif**, banc ; plus de `BANC_JETABLE` |
 
 ## Accès développeur
 

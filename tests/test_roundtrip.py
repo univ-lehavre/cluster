@@ -138,14 +138,12 @@ class FakeBench:
         self.present = set(present or [])
         self.calls = []
 
-    def run_phase(self, args, *, env_extra=None):
-        self.calls.append((tuple(args), env_extra))
-        if args[0] == "rollback":
-            for s in roundtrip.phase_signal(args[1]):
-                self.present.discard(s)
-        else:
-            for s in roundtrip.phase_signal(args[0]):
-                self.present.add(s)
+    def run_phase(self, args):
+        # `run_phase` ne sert plus qu'à la RECONSTRUCTION (`run-phases.sh <phase>`) — la
+        # destruction passe par `destroy_layer` (découverte). Plus de branche `rollback`.
+        self.calls.append(tuple(args))
+        for s in roundtrip.phase_signal(args[0]):
+            self.present.add(s)
         return 0
 
     def signal_present(self, signal, *, api=None):
@@ -156,11 +154,27 @@ def _yes(layers, *, assume_yes):
     return True
 
 
+def _discovery_destroy(fb):
+    # `destroy_layer` = `remove --discover` : UN geste défait TOUTE la clôture (aval +
+    # node-side). Modélise la découverte pour les tests (retire le signal de la clôture).
+    def destroy_layer(phase):
+        for p in roundtrip.closure(phase):
+            for s in roundtrip.phase_signal(p):
+                fb.present.discard(s)
+        return 0
+
+    return destroy_layer
+
+
 class RoundtripNominal(unittest.TestCase):
     def test_monitoring_reversible(self):
         fb = FakeBench(present=roundtrip.phase_signal("monitoring"))
         res = roundtrip.run_roundtrip(
-            "monitoring", run_phase=fb.run_phase, signal_present=fb.signal_present, confirm_fn=_yes
+            "monitoring",
+            run_phase=fb.run_phase,
+            destroy_layer=_discovery_destroy(fb),
+            signal_present=fb.signal_present,
+            confirm_fn=_yes,
         )
         self.assertTrue(res.reversible)
         self.assertEqual(
@@ -168,26 +182,21 @@ class RoundtripNominal(unittest.TestCase):
             ["détruire", "vérifier détruit", "reconstruire", "vérifier sain"],
         )
 
-    def test_gitops_closure_destroys_seed_first_rebuilds_gitops_first(self):
+    def test_gitops_closure_rebuilds_gitops_first(self):
         fb = FakeBench(
             present=roundtrip.phase_signal("gitops") + roundtrip.phase_signal("gitops-seed")
         )
         res = roundtrip.run_roundtrip(
-            "gitops", run_phase=fb.run_phase, signal_present=fb.signal_present, confirm_fn=_yes
+            "gitops",
+            run_phase=fb.run_phase,
+            destroy_layer=_discovery_destroy(fb),
+            signal_present=fb.signal_present,
+            confirm_fn=_yes,
         )
         self.assertTrue(res.reversible)
-        rollbacks = [c[0] for c in fb.calls if c[0][0] == "rollback"]
-        rebuilds = [c[0] for c in fb.calls if c[0][0] != "rollback"]
-        # détruire en ordre inverse (seed avant gitops), reconstruire en ordre direct.
-        self.assertEqual(rollbacks, [("rollback", "gitops-seed"), ("rollback", "gitops")])
-        self.assertEqual(rebuilds, [("gitops",), ("gitops-seed",)])
-
-    def test_rollback_uses_banc_jetable(self):
-        fb = FakeBench(present=roundtrip.phase_signal("monitoring"))
-        roundtrip.run_roundtrip(
-            "monitoring", run_phase=fb.run_phase, signal_present=fb.signal_present, confirm_fn=_yes
-        )
-        self.assertEqual(fb.calls[0][1], {"BANC_JETABLE": "1"})
+        # La destruction est UN geste (découverte) ; les appels run_phase sont les RECONSTRUCTIONS,
+        # dans l'ordre de montage (gitops avant gitops-seed). Plus aucun `rollback` bash.
+        self.assertEqual(fb.calls, [("gitops",), ("gitops-seed",)])
 
     def test_destroy_layer_discovery_destroys_whole_closure_in_one_call(self):
         # ADR 0101 : destroy_layer injecté (découverte) défait TOUTE la clôture en UN geste
@@ -234,11 +243,13 @@ class RoundtripNominal(unittest.TestCase):
 class StorageOptIn(unittest.TestCase):
     def test_ceph_requires_full(self):
         with self.assertRaises(roundtrip.RoundtripError):
-            roundtrip.run_roundtrip("ceph", confirm_fn=_yes)  # allow_full défaut False
+            roundtrip.run_roundtrip(
+                "ceph", destroy_layer=lambda p: 0, confirm_fn=_yes
+            )  # allow_full défaut False
 
     def test_sc_requires_full(self):
         with self.assertRaises(roundtrip.RoundtripError):
-            roundtrip.run_roundtrip("sc", confirm_fn=_yes)
+            roundtrip.run_roundtrip("sc", destroy_layer=lambda p: 0, confirm_fn=_yes)
 
     def test_ceph_allowed_with_full(self):
         fb = FakeBench(
@@ -248,6 +259,7 @@ class StorageOptIn(unittest.TestCase):
             "ceph",
             allow_full=True,
             run_phase=fb.run_phase,
+            destroy_layer=_discovery_destroy(fb),
             signal_present=fb.signal_present,
             confirm_fn=_yes,
         )
@@ -260,6 +272,7 @@ class ConfirmationGate(unittest.TestCase):
         res = roundtrip.run_roundtrip(
             "monitoring",
             run_phase=fb.run_phase,
+            destroy_layer=lambda p: 0,
             signal_present=fb.signal_present,
             confirm_fn=lambda layers, *, assume_yes: False,
         )
@@ -269,21 +282,15 @@ class ConfirmationGate(unittest.TestCase):
 
 
 class Failures(unittest.TestCase):
-    def test_rollback_failure_stops(self):
-        def runner(args, *, env_extra=None):
-            return 3 if args[0] == "rollback" else 0
-
-        res = roundtrip.run_roundtrip(
-            "monitoring", run_phase=runner, signal_present=lambda s, **k: [], confirm_fn=_yes
-        )
-        self.assertFalse(res.reversible)
-        self.assertTrue(res.steps[-1].nom.startswith("détruire"))
+    # L'échec de la DESTRUCTION (découverte) qui arrête le roundtrip est couvert par
+    # `Reversibility.test_destroy_layer_failure_stops` (destroy_layer rend rc≠0).
 
     def test_still_present_after_destroy(self):
         sig = roundtrip.phase_signal("monitoring")
         res = roundtrip.run_roundtrip(
             "monitoring",
-            run_phase=lambda a, **k: 0,
+            run_phase=lambda a: 0,
+            destroy_layer=lambda p: 0,
             signal_present=lambda s, **k: sig,  # toujours présent
             confirm_fn=_yes,
         )
@@ -293,7 +300,8 @@ class Failures(unittest.TestCase):
     def test_not_back_after_rebuild(self):
         res = roundtrip.run_roundtrip(
             "monitoring",
-            run_phase=lambda a, **k: 0,
+            run_phase=lambda a: 0,
+            destroy_layer=lambda p: 0,
             signal_present=lambda s, **k: [],  # jamais présent → manquant à la fin
             confirm_fn=_yes,
         )
