@@ -97,18 +97,29 @@ def storage_params(backend: str) -> dict:
 
 
 def derive_osd_expected(topo: Topology) -> int | None:
-    """Nombre d'OSD attendus = #nœuds-stockage × #disques data (banc/prod Ceph).
+    """Nombre d'OSD attendus (banc/prod Ceph). Un OSD = un disque `role: data` (le
+    `metadata`/block.db n'est PAS un OSD, ADR 0008).
 
-    Dérivé uniquement si backend=ceph ET les disques sont déclarés (banc) ou un
-    `osd_expected` explicite est posé. Renvoie None si non dérivable (prod
-    générique : le défaut du rôle / la valeur réelle de hosts.yaml gitignoré
-    s'appliquent — la valeur réelle 47 est dérivée-du-terrain, jamais générée).
+    Priorité de dérivation (backend=ceph requis) :
+      1. `storage.osd_expected` explicite ;
+      2. les disques DÉCLARÉS par nœud (ADR 0102 volet C) : somme des `DiskSpec` de rôle
+         `data` sur tous les nœuds (nestor connaît le rôle → exclut le metadata) ;
+      3. `storage.disks_per_node` × #nœuds-stockage (rétrocompat, sans déclaration disque).
+    Renvoie None si non dérivable (prod générique : la valeur réelle vient du terrain /
+    hosts.yaml gitignoré, jamais générée).
     """
     if topo.storage.get("backend") != "ceph":
         return None
     explicit = topo.storage.get("osd_expected")
     if explicit is not None:
         return int(explicit)
+    # (2) disques déclarés par nœud → compter les OSD (role data) ; nestor connaît le rôle.
+    declared = sum(
+        1 for n in topo.nodes for d in (n.disks or []) if d.role == "data"
+    )
+    if declared:
+        return declared
+    # (3) rétrocompat : disks_per_node global × nœuds-stockage (sans déclaration disque).
     disks_per_node = topo.storage.get("disks_per_node")
     if disks_per_node is None:
         return None

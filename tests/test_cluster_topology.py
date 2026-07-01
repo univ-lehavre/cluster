@@ -416,6 +416,28 @@ class OsdDerivation(unittest.TestCase):
         topo = topology_from_dict(_base(storage={"backend": "ceph"}))
         self.assertIsNone(derive_osd_expected(topo))
 
+    def test_derives_from_declared_disk_roles(self):
+        # ADR 0102 : nestor compte les DiskSpec role=data des nœuds (le metadata/block.db
+        # n'est PAS un OSD). 3 nœuds × 2 data (+ 1 metadata ignoré) → 6.
+        topo = topology_from_dict(
+            _base(
+                nodes=[
+                    {
+                        "name": f"n{i}",
+                        "roles": ["storage", "worker"],
+                        "disks": [
+                            {"name": "vdb", "role": "data"},
+                            {"name": "vdc", "role": "data"},
+                            {"name": "vdd", "role": "metadata"},
+                        ],
+                    }
+                    for i in range(3)
+                ],
+                storage={"backend": "ceph"},
+            )
+        )
+        self.assertEqual(derive_osd_expected(topo), 6)
+
 
 class DiskParsing(unittest.TestCase):
     """ADR 0102 volet C : `nodes[].disks` → `DiskSpec` (name/size/role), la topo pilote."""

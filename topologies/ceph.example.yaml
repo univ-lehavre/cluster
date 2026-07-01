@@ -70,14 +70,13 @@ nodes:
         size: 5GiB
         role: metadata
 
-# ─── storage : Ceph (l'objet de cette topologie). `osd_expected` cadre la gate OSD au
-# banc ; nestor ne le DÉRIVE pas d'une liste `disks:` (il ne sait pas que `vdd` est du
-# metadata, pas un OSD) → `derive_osd_expected` rend None ici. Le poser explicitement si
-# la gate OSD doit avoir une cible (6 = 2 data × 3 nœuds). `metadata_device` = NVMe block.db.
+# ─── storage : Ceph (l'objet de cette topologie). `osd_expected` (gate OSD au banc) est
+# DÉRIVÉ des disques déclarés : nestor compte les `role: data` des nœuds (le `metadata`
+# block.db n'est PAS un OSD) → ici 2 data × 3 nœuds = 6, automatiquement. `osd_expected`
+# explicite ci-dessous ne sert qu'à FORCER une autre valeur (rétrocompat / prod terrain).
 storage:
   backend: ceph # ceph | local-path
-  # osd_expected: 6         # 2 disques data (vdb,vdc) × 3 nœuds ; vdd = metadata, pas un OSD
-  # metadata_device: vdd    # NVMe block.db (ADR 0008)
+  # osd_expected: 6         # override : sinon dérivé des disques role=data (= 6 ici)
 
 # ─── resources : défaut GLOBAL des ressources VM (LOT 8, ADR 0097 ; provisioning per-nœud
 # ADR 0102 volet C). nestor applique ce défaut à CHAQUE nœud, surchargeable par node via
