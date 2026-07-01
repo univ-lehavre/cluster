@@ -1,7 +1,8 @@
-# topologies/banc.yaml — topologie d'EXEMPLE versionnée d'un banc Lima mono-nœud
-# (valeurs génériques, ADR 0023). Générée par `nestor stack new` (assistant) ; ajuste
-# nœuds/rôles/ressources et revérifie via `nestor stack validate`. `status: cible` tant
-# qu'aucun run ne l'a montée (honnêteté ADR 0052).
+# topologies/banc.example.yaml — modèle VERSIONNÉ d'un banc Lima mono-nœud (valeurs
+# génériques, ADR 0023 ; nommage uniforme .example, ADR 0102). Copier en
+# `topologies/banc.yaml` (gitignoré) pour une surcharge locale, ou l'activer tel quel.
+# Générée par `nestor stack new` ; ajuste nœuds/rôles/ressources, revérifie via
+# `nestor stack validate`. `status: cible` tant qu'aucun run ne l'a montée (ADR 0052).
 catalog:
   topology: banc
   terrain: local

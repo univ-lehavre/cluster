@@ -146,11 +146,17 @@ protocole. Critère : _« cette valeur changerait-elle d'un déploiement à l'au
 
 - **Le banc Vagrant (`192.168.67.0/24`) reste tel quel** : c'est un exemple
   **fonctionnel, public et reproductible**, pas l'infrastructure de l'auteur.
-- **La topologie de banc `topologies/banc.yaml` est versionnée** (exception au
-  gitignore `/topologies/*`) : banc Lima mono-nœud aux **valeurs génériques**
-  (`node1`, `local-path`, ressources d'exemple), c'est un **exemple fonctionnel
-  public** au même titre que le banc Vagrant. `dirqual.yaml` (cible prod réelle)
-  reste **non versionné**.
+- **La topologie de banc est versionnée** : banc Lima mono-nœud aux **valeurs
+  génériques** (`node1`, `local-path`, ressources d'exemple), c'est un **exemple
+  fonctionnel public** au même titre que le banc Vagrant. `dirqual.yaml` (cible
+  prod réelle) reste **non versionné**.
+  > **Amendé par
+  > [ADR 0102](0102-catalogue-topologies-v2-topo-source-unique.md)**
+  > (2026-07-01) : le nommage devient uniforme — ce modèle est désormais
+  > `topologies/banc.example.yaml` (suffixe `.example` comme tout modèle
+  > versionné), et non plus `banc.yaml` sans suffixe (l'exception au gitignore
+  > est supprimée). Le `banc.yaml` local (surcharge de l'opérateur) redevient
+  > gitignoré.
 - **L'honnêteté des validations banc est préservée** : `bench/RESULTS.md`
   consigne des exécutions réelles (qui utilisent littéralement `192.168.67.x`) ;
   on ne **réécrit pas** cet historique. Seules les références à la **production

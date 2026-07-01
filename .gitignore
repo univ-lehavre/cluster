@@ -31,17 +31,13 @@ secrets/
 # génériques `*.example.yaml` restent versionnés.
 bootstrap/hosts.yaml
 
-# Catalogue de topologies (ADR 0023/0056) : les topologies RÉELLES
-# `topologies/*.yaml` sont NON versionnées ; seuls les modèles génériques
-# `*.example.*` (yaml, README…) restent versionnés.
+# Catalogue de topologies (ADR 0023/0056 ; nommage uniforme ADR 0102) : les
+# topologies RÉELLES/locales `topologies/*.yaml` sont NON versionnées ; seuls les
+# modèles génériques `*.example.*` (yaml, README…) restent versionnés. Un seul patron :
+# le banc Lima est `banc.example.yaml` (versionné) comme tout modèle — plus d'exception.
 /topologies/*
 !/topologies/*.example.yaml
 !/topologies/*.example.*
-# EXCEPTION (ADR 0023) : le banc Lima `banc.yaml` est un EXEMPLE FONCTIONNEL PUBLIC
-# (node1, local-path, ressources génériques) — même statut que le banc Vagrant
-# `192.168.67.0/24` que l'ADR garde explicitement. Versionné. `dirqual.yaml` (vraie
-# prod) reste ignoré (couvert par /topologies/* ci-dessus).
-!/topologies/banc.yaml
 
 # topology.yaml (racine) = symlink d'activation vers une topo du catalogue —
 # repointé pour activer (`ln -sf topologies/<x>.example.yaml topology.yaml`),
