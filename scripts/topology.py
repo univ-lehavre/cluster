@@ -262,11 +262,10 @@ def _operator_kubeconfig() -> str | None:
     if not kc:
         return None
     try:
-        if os.path.getsize(kc) > 0:  # exclut /dev/null (0), fichier vide, inexistant (OSError)
-            return kc
+        usable = os.path.getsize(kc) > 0  # exclut /dev/null (0) et un fichier vide
     except OSError:
-        pass
-    return None
+        return None  # inexistant / illisible → non exploitable
+    return kc if usable else None
 
 
 def _kubectl_env(declared: str | None = None) -> dict[str, str]:
