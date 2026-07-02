@@ -155,3 +155,32 @@ portal_build_images:
     dockerfile: '{{ build_workdir }}/portal/Dockerfile'
     build_all_arch: true
     force_rebuild: true
+
+# Image APPLICATIVE de la code-location atlas `citation` (exemple générique ADR 0023 ;
+# ADR 0094/0095 §1.a « premier pas »). Liste SÉPARÉE de build_images : consommée
+# UNIQUEMENT par la layer autonome bootstrap/citation.yaml (override `build_images` au
+# niveau import_role), JAMAIS par dataops/mlflow/portal.
+#
+# CAS CONTEXTE MULTI-DOSSIER (comme portal) : le Dockerfile citation (dépôt atlas,
+# dataops/citation-dagster/Dockerfile) a pour contexte de build `dataops/` — il embarque
+# la code-location `citation-dagster/` ET le projet dbt frère `citation-dbt/` (`COPY
+# citation-dagster/… ` et `COPY citation-dbt …`). Le `src_context` générique mono-dossier
+# ne couvre pas ce cas → PAS de `src_context` ici : le play bootstrap/citation.yaml
+# RÉPLIQUE node-side l'arborescence minimale attendue (citation-dagster/{pyproject,uv.lock,
+# README,src,scripts} + citation-dbt/ + le Dockerfile à la racine du contexte) sous
+# `build_workdir/citation/` AVANT d'importer ce rôle. Le rôle build ce contexte préparé.
+#
+# PAS d'`official_image` : image 100 % maison (FROM python:3.10-slim + le paquet atlas).
+# `build_all_arch: true` : aucune officielle amd64 à retaguer → BUILD sur TOUTE arche (x86
+# prod inclus). `force_rebuild: true` : tag `:dev` MUTABLE — le code atlas évolue à chaque
+# révision (raisonnement émetteur/portail, defaults L51-53). `gitops_writeback: true` : le
+# DÉPLOIEMENT est GitOps par DIGEST (ADR 0095 §2), pas par tag ; le rôle lit `RepoDigests`
+# après push et expose `build_image_digests` que le SEED publie dans cluster/apps.
+citation_build_images:
+  - name: citation-dagster
+    tag: dev
+    build_context: '{{ build_workdir }}/citation'
+    dockerfile: '{{ build_workdir }}/citation/Dockerfile'
+    build_all_arch: true
+    force_rebuild: true
+    gitops_writeback: true

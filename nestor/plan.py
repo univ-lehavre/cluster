@@ -100,6 +100,15 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
         "portail d'accès aux UI (NodePort L4, lecture seule)",
         "portail d'accès aux UI",
     ),
+    # Citation (ADR 0094/0095 §1.a) : layer AUTONOME node-side qui BUILD l'image
+    # applicative de la code-location atlas `citation` (contexte multi-dossier dataops/,
+    # comme portal) et lit son digest. Le DÉPLOIEMENT est GitOps (Argo CD tire par
+    # digest), pas un signal de couche ici. Montée via le chemin générique `layers`.
+    "citation": PhaseSpec(
+        "bootstrap/citation.yaml",
+        "build de l'image applicative citation (code-location atlas)",
+        "image citation (build applicatif)",
+    ),
     # hardening lance bootstrap/security/secure.yml AVEC --tags audit,detection et
     # un préflight d'env (phase_hardening, run-phases.sh) que `--apply` ne pose pas
     # — non lançable comme play unitaire ici, déléguée au chemin nommé run-phases.sh.

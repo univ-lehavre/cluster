@@ -305,51 +305,195 @@ existantes.
   [`bench/scenarios/README.md`](../../bench/scenarios/README.md) (n°, sujet,
   tests, durée, couverture) + l'arbre ASCII.
 
-## Étapes — CIBLE (cadrée, **différée**, NON implémentée dans ce plan)
+## Étapes — CIBLE ÉVÉNEMENTIELLE (détaillée 2026-07-02, **différée** après le premier pas)
 
 > Chacune est tranchée par
 > [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md)
-> §1.b/§3 et **différée à une itération ultérieure**, **prouvée au banc avant
-> prod**. Elles ne sont **pas** livrées par ce plan — il en pose le cadre.
+> §1.b/§3. **Objectif utilisateur : « détection d'une code-location atlas →
+> installation automatisée », zéro geste opérateur** — un `git push` de code
+> atlas aboutit, sans intervention, à un pod qui tourne. Ces 4 étapes
+> **remplacent le seul déclencheur** (le `ansible-playbook` du premier pas) par
+> l'événementiel ; **tout l'aval §1.a est réutilisé tel quel** (lecture digest →
+> write-back `cluster/apps` → Argo CD). Ordre imposé **1→…→4 d'abord, puis
+> 5→6→7→8** (ADR 0095 §Mise en œuvre incrémentale) : la cible **s'appuie sur le
+> premier pas prouvé**, elle ne le refait pas. Chaque étape est livrable et
+> prouvable seule au banc, **prouvée AVANT prod**.
 
-### Étape 5 (cible / différé) — Vendorer Argo Events + Argo Workflows + NATS
+**Vue d'ensemble (termes du dépôt).**
 
-Trois bundles upstream, **épinglés par digest d'index multi-arch**
-([ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md),
-vérifier `MediaType: …image.index…`), **exclus** de prettier/yamllint/jscpd
-(comme `platform/{cert-manager,argocd}`), RBAC inhérent **allowlisté** dans
-`.trivyignore.yaml` avec justification par chemin. **Dette de bump récurrent**
-assumée (mono-mainteneur, ADR 0095 §Coût).
+```text
+[atlas/atlas Gitea] --git push--> webhook Gitea #2 (NOUVEAU, posé au seed comme le #1)
+  --> [Argo Events] EventSource webhook -> EventBus NATS(1) -> Sensor (filtre code-location)
+        --> instancie Workflow paramétré {codeLocation dérivé du chemin, revision=SHA}
+  --> [Argo Workflows] Pod builder sur WORKER : clone@SHA -> buildkitd + buildkitd.toml(http)
+        -> build (context dataops/, -f citation-dagster/Dockerfile) -> push registry:80/<cl>:<sha12>
+        -> lit DIGEST -> write-back apps/<cl>.yaml @sha256 dans cluster/apps  (patron §1.a réutilisé)
+  --> webhook #1 (DÉJÀ câblé) --> [Argo CD] réconcilie -> pull @sha256 -> pod gRPC
+  [filet] CronWorkflow : compare HEAD atlas au tag déployé, rejoue si event NATS perdu
+```
 
-### Étape 6 (cible / différé) — Workflow builder BuildKit-in-pod sur worker
+### Étape 5 — Vendorer Argo Workflows + Argo Events (EventBus NATS natif)
 
-Pod `buildkitd` **rootless sur un worker** (jamais le control-plane, invariant
-5). Point dur : `buildkitd` en Pod **n'hérite pas** du `hosts.toml` du nœud →
-fournir un **`buildkitd.toml`** déclarant `registry:80` en `http = true` /
-`insecure = true` (sinon `push` échoue en handshake TLS sur du HTTP).
-**NetworkPolicy egress build** = liste blanche `443` (PyPI / HuggingFace /
-miroirs Debian / CDN DuckDB) + DNS + Gitea + `registry:80` — **jamais
-`0.0.0.0/0`**. **À coder et prouver au banc.**
+- **CRÉER** `platform/argo-workflows/argo-workflows.yaml` (ns `argo`) et
+  `platform/argo-events/argo-events.yaml` (ns `argo-events`) — bundles upstream,
+  **calquer strictement** [`platform/argocd/`](../../platform/argocd/)
+  (structure, README de frontière : ces opérateurs sont **infra**, posés par
+  Ansible et `kubectl apply --server-side`, PAS par Argo CD — évite la
+  circularité bootstrap). L'**EventBus NATS `native`** d'Argo Events (géré par
+  l'opérateur) est **préféré** à un 3e bundle NATS séparé (réduit la dette de
+  bump).
+- **Digest d'index multi-arch**
+  ([ADR 0006](../decisions/0006-matrice-de-versions-et-politique-de-bump.md)) :
+  épingler chaque `image:` en `repo:vX.Y.Z@sha256:…` comme
+  `platform/argocd/argocd.yaml` ; **vérifier `MediaType: …image.index…`** (banc
+  arm64) via
+  [`scripts/audit-image-digests.sh`](../../scripts/audit-image-digests.sh)
+  **étendu aux 2 nouveaux chemins**.
+- **Exclusions lint** (prettier/yamllint/jscpd) + **RBAC allowlisté**
+  `.trivyignore.yaml` par chemin, calqués sur le bloc cert-manager
+  (justification écrite : controller Argo `create/delete pods`, EventSource RBAC
+  réseau).
+- **Preuve SANS banc** : `kubeconform` (CRD + workloads), `trivy config` vert,
+  `audit-image-digests.sh` → `image.index` sur chaque image.
+- **Preuve banc** : `kubectl apply --server-side` → opérateurs `Ready`, EventBus
+  `Deployed`. **Gate** : socle événementiel Running, digests index vérifiés.
 
-### Étape 7 (cible / différé) — Argo Events (webhook Gitea #2) + filet event-loss
+### Étape 6 — WorkflowTemplate builder BuildKit-in-pod sur worker
 
-EventSource webhook Gitea (push code → build) + **EventBus NATS** + Sensor
-filtrant la branche, instanciant un Workflow paramétré par le SHA. Deux webhooks
-Gitea **distincts** : `#1` push `cluster/apps` → Argo CD (**déjà câblé**) ; `#2`
-push code → Argo Events (**nouveau**, posé au seed). **NATS `replicas:1` = SPOF
-transitoire** d'un event en vol → **CronWorkflow de réconciliation** (compare
-HEAD atlas au tag courant) comme **filet** (pas l'équivalent du rejeu
-`changed=0` Ansible — honnêteté assumée, ADR 0095 §Coût).
+- **CRÉER** `platform/argo-workflows/configmap-buildkitd-toml.yaml` — **POINT
+  DUR 1** : `[registry."registry:80"] http = true / insecure = true`, monté en
+  `/etc/buildkit/buildkitd.toml`. Réplique ce que le `hosts.toml` containerd
+  **du nœud** fait pour le build node-side (`build_registry_host: registry:80`
+  HTTP, [ADR 0011](../decisions/0011-registry-http-sans-auth.md)) ; buildkitd
+  rootless en Pod n'en hérite PAS → sans lui, `push` échoue en handshake TLS sur
+  HTTP.
+- **CRÉER** `platform/argo-workflows/workflowtemplate-builder.yaml` —
+  `image-builder` générique paramétré `{codeLocation, revision}`, steps :
+  clone@SHA → `buildctl` (image `moby/buildkit:*-rootless` épinglée par digest
+  index) contexte `dataops/` + `-f <cl>-dagster/Dockerfile` → lit digest (garde
+  `^sha256:[0-9a-f]{64}$`, parité étape 1) → write-back Contents API
+  **factorisant le MÊME `push_contents_file`** que
+  [`bootstrap/seed-app-of-apps.sh`](../../bootstrap/seed-app-of-apps.sh). Sur
+  **worker**
+  (`nodeSelector: {node-role.kubernetes.io/control-plane: DoesNotExist}`,
+  invariant 5) — au banc mono-nœud le CP EST le builder : **écart documenté**
+  (overlay banc), comme le scénario 34. `runAsNonRoot` (buildkit rootless, pas
+  Kaniko root) ; KSV-0014 allowlisté sur ce seul chemin.
+- **CRÉER** `platform/network-policies/argo-workflows/allow-build-egress.yaml` —
+  **POINT DUR 2, air-gap asymétrique** : calquer
+  [`platform/network-policies/dagster/allow-internet-egress.yaml`](../../platform/network-policies/dagster/allow-internet-egress.yaml)
+  (idiome `0.0.0.0/0` **restreint aux ports 443**) + DNS + registry:80 + Gitea.
+  **Cibles révélées par le Dockerfile citation** (documentées en en-tête) :
+  `deb.debian.org`, `pypi.org`/`files.pythonhosted.org`,
+  `extensions.duckdb.org`, `huggingface.co`/`cdn-lfs*`. Portée par le **seul ns
+  `argo`** : le **runtime (dagster) et Argo CD restent air-gappés**. **Isolement
+  prouvé** : témoin dans `dagster` timeout 443, témoin dans `argo` (sous NP
+  build) → 200.
+- **Preuve SANS banc** : `kubeconform` (WorkflowTemplate + NP), `yamllint`
+  buildkitd.toml. **Preuve banc** :
+  `argo submit --from wt/image-builder -p codeLocation=citation -p revision=<SHA>`
+  → image poussée **par digest** ; témoin egress. **Gate** : push HTTP registry
+  OK via buildkitd.toml ; egress cantonné à `argo` ; write-back `@sha256`.
 
-### Étape 8 (cible / différé) — Miroir GitHub → Gitea en PULL
+### Étape 7 — Argo Events (webhook Gitea #2) + découverte + filet event-loss
 
-Repos miroirs `cluster/cluster` (+ `atlas/atlas`) en mode « Mirror Repository »
-: **Gitea TIRE** depuis GitHub (jamais GitHub ne pousse), via **CronJob**
-`gitea-mirror-sync` (`gitea admin repo-mirror-sync`, egress GitHub
-**temporaire**). **Argo CD ne réconcilie JAMAIS depuis GitHub** — air-gap
-déploiement préservé (ADR 0095 §3). Webhook entrant GitHub → cluster **écarté**
-(casserait l'air-gap entrant). Mnémonique : **GitHub VALIDE, Gitea/cluster
-CONSTRUIT + DÉPLOIE.**
+- **CRÉER** `platform/argo-events/eventbus-nats.yaml` (`replicas: 1`, SPOF
+  **tracé**), `eventsource-gitea.example.yaml` (webhook, secret HMAC injecté au
+  seed — patron `*.example`,
+  [ADR 0023](../decisions/0023-plateforme-exemple-generique.md)),
+  `sensor-code-location.example.yaml`.
+- **DÉCOUVERTE (cœur de la demande) — voie (C) App-of-Apps `cluster/apps`
+  alimenté par le builder.** Le Sensor filtre le webhook sur **tout changement
+  d'un `code-location.manifest.yaml`** (ou `Dockerfile`/`src/` sous
+  `dataops/*-dagster/`) ; le `codeLocation` est **dérivé du chemin modifié**
+  (`dataops/(<name>)-dagster/…` par `jq`), **jamais énuméré**. Le Workflow
+  builder (générique) write-back `apps/<cl>.yaml` dans `cluster/apps` → la
+  **racine App-of-Apps existante** (`prune: true`) matérialise l'Application.
+  Une code-location **NOUVELLE** = un **fichier neuf** → Application créée sans
+  geste. Respecte la frontière
+  [ADR 0094](../decisions/0094-frontiere-deploiement-applicatif.md)
+  (`cluster/apps` seule surface écrite ; séparation build/déploiement).
+  Garde-fou :
+  [`check_code_location_manifest.py`](../../scripts/check_code_location_manifest.py)
+  échoue bruyamment sur un manifeste incohérent (la découverte n'installe pas
+  n'importe quoi). Voies (A) Sensor→apply et (B) ApplicationSet **écartées**
+  (mélangent build/déploiement ou déplacent la surface hors `cluster/apps`).
+- **CRÉER** `platform/argo-workflows/cronworkflow-reconcile.yaml` — **POINT DUR
+  4** : compare `git ls-remote atlas HEAD` au tag déployé (sha12 dans
+  `apps/<cl>.yaml`) ; si écart → `submit` le builder. **Honnêteté (commentaire +
+  doc) : filet de rattrapage d'event NATS perdu, PAS le rejeu `changed=0`
+  Ansible** ; latence = période du Cron.
+- **Webhook #2 au seed** : handler `webhook_build` dans
+  [`scripts/topology.py`](../../scripts/topology.py) (calqué sur le handler
+  `webhook` du #1, cible **atlas/atlas** au lieu de cluster/apps, url =
+  EventSource Argo Events) ; étape `"webhook-build"` dans `_PROD_STEPS`/
+  `_BANC_CITATION_STEPS` de [`nestor/seed.py`](../../nestor/seed.py).
+- **POINT DUR 3, token Gitea write `cluster/apps`** : Secret **scopé au seul
+  repo cluster/apps** (token à scope `write:repository`), patron
+  `gitea-writeback-token.example.yaml` versionné + secret généré au seed **non
+  versionné** (ADR 0023 `gen_secret`). Tracé README.
+- **Preuve SANS banc** : `kubeconform`
+  (EventSource/Sensor/EventBus/CronWorkflow), pytest `seed_steps("prod")`
+  contient `webhook-build`, test pur extraction `codeLocation`/`revision`.
+  **Preuve banc** : `git push` atlas touchant un manifeste → Sensor instancie un
+  Workflow **corrélé au SHA** (patron `classify_webhook_trigger` de
+  [`bench/lima/gitops-assert.sh`](../../bench/lima/gitops-assert.sh) :
+  before≠after, déclenchement **pas** polling) → pod ; event perdu →
+  CronWorkflow rejoue. **Gate** : push → Workflow sans geste ; filet prouvé ;
+  webhook idempotent.
+
+### Étape 8 — Miroir GitHub → Gitea en PULL
+
+- **CRÉER** `platform/gitea/gitea-mirror-sync-cronjob.yaml` (`suspend: true` par
+  défaut, `concurrencyPolicy: Forbid`, securityContext durci — calquer
+  [`platform/container-registry/garbage-collect-cronjob.yaml`](../../platform/container-registry/garbage-collect-cronjob.yaml))
+  : `gitea admin repo-mirror-sync` sur `cluster/cluster` (+ `atlas/atlas`) créés
+  en mode « Mirror Repository » (**Gitea TIRE**). +
+  `platform/network-policies/gitea/allow-github-egress.yaml` (443 →
+  `github.com`/ `codeload.github.com`, **porté par le seul pod du CronJob**).
+- **Argo CD ne réconcilie JAMAIS depuis GitHub** (aucun egress github sur
+  `argocd`) — air-gap déploiement préservé (ADR 0095 §3). **Webhook entrant
+  GitHub → cluster ÉCARTÉ** (casserait l'air-gap entrant) : le build est
+  déclenché par le push Gitea **local** produit par le miroir. Mnémonique :
+  **GitHub VALIDE, Gitea/cluster CONSTRUIT + DÉPLOIE.**
+- **Preuve SANS banc** : `kubeconform` + `trivy config` vert. **Preuve banc** :
+  `kubectl create job --from=cronjob/gitea-mirror-sync` → `cluster/cluster`
+  peuplé, Argo CD réconcilie **100 % Gitea**, témoin argocd timeout github.com.
+  **Gate** : zéro egress GitHub au sync ; egress GitHub cantonné au CronJob.
+
+### SPOF & dettes de la cible — à TRACER honnêtement (ADR 0095 §Coût)
+
+Ne jamais masquer ; loguer/documenter à l'endroit indiqué :
+
+- **NATS `replicas:1`** (event-loss) → en-tête `eventbus-nats.yaml` +
+  `cronworkflow-reconcile.yaml` (« filet, pas rejeu `changed=0` ») +
+  `RESULTS.md`.
+- **Registry `replicas:1`** amplifié (push build + pull deploy, PVC RWO) →
+  README container-registry + en-tête WorkflowTemplate. Renvoi
+  [ADR 0011](../decisions/0011-registry-http-sans-auth.md).
+- **Token Gitea write** cluster/apps (surface d'élévation) → scopé repo, patron
+  `*.example` + secret généré, README argo-workflows.
+- **Build non bit-reproductible** (apt/base non lockés) → commentaire
+  WorkflowTemplate + `RESULTS.md` (traçabilité commit→image OK, bit-repro NON,
+  tension [ADR 0052](../decisions/0052-reproductibilite-des-resultats.md)).
+- **Dette de bump** des bundles (mono-mainteneur) → README + matrice de versions
+  (ADR 0006), `audit-image-digests.sh` détecte la dérive.
+- **Digest single-arch** (banc arm64 / prod x86, build in-pod = manifest pas
+  index) → commentaire WorkflowTemplate + `RESULTS.md` (acceptable prod
+  x86-only, ADR 0095 §2).
+
+### Preuve DÉFINITIVE de la cible (ADR 0034) — un run banc « zéro geste »
+
+**CRÉER** `bench/scenarios/35-build-evenementiel.sh` (dérivé du 34) : banc
+monté + étapes 5-7 appliquées + webhook #2 posé ; **garde banc absolue**
+(`EXPECTED_CLUSTER=cluster-banc`, `die` si prod, parité 34). **Geste unique
+final** : `git push` atlas (port-forward Gitea, `localhost:3000` — piège DNS)
+touchant `dataops/citation-dagster/code-location.manifest.yaml`. **Zéro geste
+ensuite** ; assertions en chaîne (pures, `gitops-assert.sh`) : Sensor → Workflow
+corrélé au SHA → image `@sha256` → `apps/citation.yaml` par digest → Application
+Synced/Healthy → pod gRPC Ready tiré par `@sha256` → **idempotence** (re-push
+même SHA = no-op). Consigner `RESULTS.md` + ligne 35 dans
+[`bench/scenarios/README.md`](../../bench/scenarios/README.md).
 
 ## Stratégie de preuve
 
