@@ -301,6 +301,26 @@ endpoints:
       UI GitOps (état des Application, sync/health). CLI gRPC via Gateway non
       fonctionnel en l'état (finding #26) ; UI/REST OK.
 
+  - id: argo-workflows-ui
+    service: argo-server
+    namespace: argo
+    fqdn: argo-server.argo.svc.cluster.local
+    port: 2746 # UI/API du serveur Argo Workflows
+    protocol: http
+    auth: none # intra-cluster / réseau privé (server auth-mode=server, ADR 0003)
+    layer: gitops
+    exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
+    source: platform/argo-workflows/nodeport.yaml
+    note: >-
+      UI Argo Workflows : observe les BUILDS in-pod (Workflows issus du
+      WorkflowTemplate `image-builder`, BuildKit rootless) de la chaîne
+      événementielle build (ADR 0095 §1.b). Un push de code atlas déclenche le
+      webhook Gitea #2 → EventSource Argo Events → Sensor `code-location-build`,
+      qui soumet ce WorkflowTemplate pour construire+pousser
+      `registry:80/<cl>:<revision>` puis write-back le digest ; cette UI donne
+      logs et statut de ces Workflows. Mise en place — preuve banc de bout en
+      bout (run from-scratch) en cours.
+
   - id: gitea-ui
     service: gitea-http
     namespace: gitea
@@ -371,3 +391,58 @@ network_access:
   - endpoint: registry (:80) / s3 datalake (RGW, rook-ceph)
     ingress_from: [] # pas de default-deny restrictif côté cible — joignables
     note: registry HTTP ouvert (air-gap, ADR 0011) ; rook-ceph sans default-deny.
+
+# ── Chaîne événementielle BUILD — artefacts de frontière (ADR 0094/0095) ─────
+# Ce que `cluster` fournit et attend pour construire+déployer une image atlas SANS
+# intervention. Frontière ADR 0094 : atlas DÉCLARE + FOURNIT (manifeste montant,
+# placeholders __CITATION_IMAGE__/__CITATION_IMAGE_DIGEST__) ; cluster VALIDE +
+# INSTANCIE + REMPLIT (build, injecte le DIGEST @sha256, crée l'Application).
+#
+# DEUX webhooks Gitea DISTINCTS, à ne pas confondre :
+#   #1 push cluster/apps → Argo CD  (DÉPLOIEMENT — déjà câblé, cf. argocd-ui)
+#   #2 push code atlas/atlas → Argo Events (BUILD — décrit ici)
+#
+# Design (au présent) : un `git push` sur le repo atlas/atlas déclenche le webhook
+# #2 → l'EventSource ci-dessous → EventBus NATS → Sensor `code-location-build`, qui
+# DÉRIVE le codeLocation du CHEMIN modifié (`dataops/<X>-dagster/`) + revision =
+# body.after → soumet le WorkflowTemplate `image-builder` (BuildKit rootless, sur
+# worker) → build+push `registry:80/<cl>:<revision>` → lit le DIGEST → write-back
+# `apps/<cl>.yaml` PAR `@sha256` dans le repo Gitea cluster/apps → Argo CD (webhook
+# #1) réconcilie la racine App-of-Apps → pod gRPC. Déploiement PAR DIGEST, jamais
+# par tag : le SHA12 (revision) est le tag LISIBLE (traçabilité commit→image), le
+# `@sha256` est l'ANCRE d'immuabilité (ADR 0006/0052/0075/0095 §2). Filet
+# event-loss : un CronWorkflow compare le HEAD atlas au tag déployé.
+# Mise en place — preuve banc de bout en bout (run from-scratch) en cours.
+event_driven_build:
+  # Réception du webhook #2 (push code atlas) : point d'entrée HTTP de l'EventSource
+  # Argo Events. C'est l'endpoint que la config du webhook Gitea #2 doit cibler.
+  webhook_endpoint:
+    id: gitea-push-eventsource
+    service: gitea-push-eventsource-svc
+    namespace: argo-events
+    fqdn: gitea-push-eventsource-svc.argo-events.svc.cluster.local
+    port: 12000
+    path: /push # le webhook Gitea #2 POSTe le body du push ici
+    protocol: http
+    layer: gitops
+    source: platform/argo-events/eventsource-gitea.example.yaml
+    note: >-
+      EventSource Argo Events du webhook Gitea #2 (BUILD, distinct du #1 déploiement).
+      Reçoit le body du push atlas/atlas ; le Sensor `code-location-build` en dérive
+      le codeLocation (CHEMIN modifié) + revision (body.after).
+  # Secrets de la chaîne — HORS dépôt (config locale non versionnée, ADR 0023) ;
+  # NOMS/scopes stables ci-dessous, valeurs générées au seed (jamais versionnées).
+  secrets:
+    - secret: gitea-writeback-token
+      namespace: argo # lu par le WorkflowTemplate image-builder pour le write-back
+      scope: write:repository sur cluster/apps # token API Gitea scopé au strict nécessaire
+      note: >-
+        Jeton d'écriture du write-back : le Workflow `image-builder` pousse
+        `apps/<cl>.yaml` mis à jour PAR @sha256 dans le repo Gitea cluster/apps.
+        Généré au seed (nestor/seed.py via scripts/topology.py), non versionné.
+    - secret: gitea-webhook-build-hmac
+      namespace: argo-events # partagé avec la config du webhook Gitea #2
+      shared_with: webhook Gitea #2 (côté forge) # même secret HMAC des deux côtés
+      note: >-
+        Secret HMAC partagé : Gitea signe le POST du webhook #2, l'EventSource
+        vérifie la signature avant d'admettre l'event. Généré au seed, non versionné.

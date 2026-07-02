@@ -1,0 +1,22 @@
+# Exposition L4 NodePort de l'UI Argo Workflows (ADR 0092 — http://<IP-nœud>:<nodePort>,
+# zéro DNS). Service SÉPARÉ du bundle vendored argo-workflows.yaml (CLAUDE.md : on ne
+# touche jamais le bundle upstream volumineux) : il reprend le MÊME selector que
+# le ClusterIP "argo-server" (app: argo-server) et son port 2746 -> 2746.
+#
+# PAS de nodePort figé : Kubernetes l'attribue dans la plage --service-node-port-range
+# (le récupérer via `kubectl -n argo get svc argo-server-nodeport`).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-server-nodeport
+  namespace: argo
+spec:
+  type: NodePort
+  selector:
+    app: argo-server
+  ports:
+    - name: web
+      port: 2746
+      targetPort: 2746
+      protocol: TCP
