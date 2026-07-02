@@ -74,6 +74,11 @@
     - name: 'Check if mirror image already present in registry — {{ mirror.name }}'
       ansible.builtin.command: >-
         nerdctl manifest inspect {{ eventful_mirror_registry }}/{{ mirror.name }}:{{ mirror.tag }}
+      # become: true OBLIGATOIRE — la config `certs.d/registry:80/hosts.toml` (HTTP,
+      # skip_verify) est ROOT-only ; sans root, nerdctl l'ignore et tape registry:80 en
+      # HTTPS → « server gave HTTP response to HTTPS client ». Le rôle platform-build-images
+      # (importé avec become) marche pour ça ; ce play autonome doit le poser lui-même.
+      become: true
       register: eventful_mirror_present
       changed_when: false
       failed_when: false
@@ -88,6 +93,9 @@
     # registry:80/<img>:<tag> → push. On boucle sur les résultats du pré-check et on saute
     # celles déjà présentes (rc==0). Les 3 gestes tiennent dans une commande shell pour
     # rester atomiques par image ; le tag REPOSE le tag lisible attendu par les manifestes.
+    # ⚠️ TOUTES les lignes du scalar `>-` DOIVENT être à la MÊME indentation : une ligne
+    # plus indentée fait CONSERVER son saut de ligne au folded scalar (`\n   registry:80…`
+    # → argv coupé, la commande échoue). D'où `dest` pré-calculé + une seule chaîne à plat.
     - name: 'Mirror missing public builder images to {{ eventful_mirror_registry }}'
       ansible.builtin.command:
         argv:
@@ -95,10 +103,11 @@
           - -c
           - >-
             nerdctl pull {{ item.mirror.public }}
-            && nerdctl tag {{ item.mirror.public }}
-               {{ eventful_mirror_registry }}/{{ item.mirror.name }}:{{ item.mirror.tag }}
-            && nerdctl push
-               {{ eventful_mirror_registry }}/{{ item.mirror.name }}:{{ item.mirror.tag }}
+            && nerdctl tag {{ item.mirror.public }} {{ _dest }}
+            && nerdctl push {{ _dest }}
+      vars:
+        _dest: '{{ eventful_mirror_registry }}/{{ item.mirror.name }}:{{ item.mirror.tag }}'
+      become: true # cf. pré-check : certs.d HTTP root-only (sinon push HTTPS échoue)
       changed_when: true
       when: item.rc != 0
       run_once: true
