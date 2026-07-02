@@ -303,12 +303,8 @@ def render_citation_declaration(example_text: str, atlas_repo_url: str, revision
     quel. Lève `SeedError` si UNE des deux injections ne matche pas (garde anti-injection
     ratée, parité des `grep -q` du bash — on ne pousse pas une déclaration à valeurs
     d'exemple)."""
-    out = re.sub(
-        r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {atlas_repo_url}", example_text
-    )
-    out = re.sub(
-        r"(?m)^( {4})targetRevision:.*$", rf"\g<1>targetRevision: {revision}", out
-    )
+    out = re.sub(r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {atlas_repo_url}", example_text)
+    out = re.sub(r"(?m)^( {4})targetRevision:.*$", rf"\g<1>targetRevision: {revision}", out)
     if f"repoURL: {atlas_repo_url}" not in out:
         raise SeedError("injection repoURL ratée dans citation.yaml (motif non matché)")
     if f"targetRevision: {revision}" not in out:
