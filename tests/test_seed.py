@@ -291,7 +291,7 @@ class RenderCitationDeclaration(unittest.TestCase):
         "  source:\n"
         "    repoURL: http://example/atlas.git\n"
         "    targetRevision: 0000000\n"
-        "    path: overlays/prod\n"
+        "    path: dataops/citation-dagster/deploy/overlays/prod\n"
     )
 
     def test_injects_repourl_and_revision(self):
@@ -300,8 +300,26 @@ class RenderCitationDeclaration(unittest.TestCase):
         )
         self.assertIn("repoURL: http://gitea/atlas/atlas.git", out)
         self.assertIn("targetRevision: c98feea9", out)
-        # Le path (overlay) n'est PAS touché.
-        self.assertIn("path: overlays/prod", out)
+        # Sans overlay explicite, le path du patron (prod) n'est PAS touché.
+        self.assertIn("path: dataops/citation-dagster/deploy/overlays/prod", out)
+
+    def test_overlay_rewrites_path_to_bench(self):
+        # banc-citation : le path prod du patron est réécrit vers bench (décision D2).
+        out = seed.render_citation_declaration(
+            self._EXAMPLE, "http://gitea/atlas/atlas.git", "c98feea9", overlay="bench"
+        )
+        self.assertIn("path: dataops/citation-dagster/deploy/overlays/bench", out)
+        self.assertNotIn("overlays/prod", out)
+
+    def test_overlay_not_matched_raises(self):
+        # Un patron sans ligne path overlays/ + overlay demandé → garde (motif non matché).
+        with self.assertRaises(seed.SeedError):
+            seed.render_citation_declaration(
+                "spec:\n  source:\n    repoURL: http://x/a.git\n    targetRevision: abc1234\n",
+                "http://x/a.git",
+                "abc1234",
+                overlay="bench",
+            )
 
     def test_failed_injection_raises(self):
         # Patron sans les lignes ciblées (indentation absente) → garde anti-injection ratée.

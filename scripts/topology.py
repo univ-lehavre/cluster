@@ -3354,8 +3354,14 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
             print("  ! CITATION_IMAGE_DIGEST non fourni — overlay poussé avec le tag d'exemple")
             print("    (déploiement par tag mutable, NON conforme ADR 0095 §2 — preuve seule)")
 
-        # Port-forward vers gitea-http (tunnel k8s, contourne le piège DNS FQDN).
-        lport, pf = _seed_port_forward(ns, "svc/gitea-http", 3000)
+        # Port-forward vers gitea-http (tunnel k8s, contourne le piège DNS FQDN). Le PORT du
+        # Service DIFFÈRE selon la topo (banc: 80 ; prod: 3000) → on le LIT (jamais codé) :
+        # `port-forward :<port-svc>` échoue si le Service n'expose pas ce port (vécu au banc).
+        svc_port = _kubectl(
+            "-n", ns, "get", "svc", "gitea-http", "-o", "jsonpath={.spec.ports[0].port}"
+        )
+        gitea_port = int(svc_port.stdout.strip()) if svc_port and svc_port.stdout.strip() else 80
+        lport, pf = _seed_port_forward(ns, "svc/gitea-http", gitea_port)
         if not lport:
             return False
         try:
@@ -3567,8 +3573,10 @@ def _seed_do_banc_citation(topo: Topology, config) -> Callable[[str], bool]:
             print(f"  ✗ patron introuvable : {_CITATION_EXAMPLE}")
             return False
         try:
+            # overlay=bench : au banc mono-nœud local-path, l'Application déploie l'overlay
+            # bench (SeaweedFS, pas d'OBC Ceph) — le patron pointe overlays/prod (décision D2).
             rendered = _seed.render_citation_declaration(
-                example, config.atlas_repo_url(), config.citation_revision or ""
+                example, config.atlas_repo_url(), config.citation_revision or "", overlay="bench"
             )
         except _seed.SeedError as exc:
             print(f"  ✗ {exc}")

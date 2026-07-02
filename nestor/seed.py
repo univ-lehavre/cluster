@@ -314,17 +314,27 @@ def substitute_citation_placeholders(text: str, image_name: str, digest: str) ->
     return text, n
 
 
-def render_citation_declaration(example_text: str, atlas_repo_url: str, revision: str) -> str:
+def render_citation_declaration(
+    example_text: str, atlas_repo_url: str, revision: str, *, overlay: str | None = None
+) -> str:
     """Rend `apps/citation.yaml` depuis le patron `*.example` (PUR, ADR 0023).
 
     Porte `push_citation_declaration` (seed-app-of-apps.sh) sans l'I/O : injecte le
     `repoURL` atlas réel et le `targetRevision` (SHA figé) dans les lignes `spec.source.*`
-    (indentation 4 espaces, comme le `sed` ancré du bash) ; le `path:` (overlay) reste tel
-    quel. Lève `SeedError` si UNE des deux injections ne matche pas (garde anti-injection
-    ratée, parité des `grep -q` du bash — on ne pousse pas une déclaration à valeurs
-    d'exemple)."""
+    (indentation 4 espaces, comme le `sed` ancré du bash). Lève `SeedError` si UNE des deux
+    injections ne matche pas (garde anti-injection ratée, parité des `grep -q` du bash).
+
+    `overlay` (banc-citation : `bench`) RÉÉCRIT le `path:` de l'overlay kustomize — le patron
+    pointe `overlays/prod` (SC Ceph, OBC) ; au banc local-path il faut `overlays/bench` (Secret
+    SeaweedFS, pas d'OBC — décision D2). None = on garde le path du patron (prod)."""
     out = re.sub(r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {atlas_repo_url}", example_text)
     out = re.sub(r"(?m)^( {4})targetRevision:.*$", rf"\g<1>targetRevision: {revision}", out)
+    if overlay is not None:
+        out = re.sub(
+            r"(?m)^( {4})path: (.*/deploy/overlays/)\w+$", rf"\g<1>path: \g<2>{overlay}", out
+        )
+        if f"/deploy/overlays/{overlay}" not in out:
+            raise SeedError(f"injection overlay `{overlay}` ratée dans citation.yaml (non matché)")
     if f"repoURL: {atlas_repo_url}" not in out:
         raise SeedError("injection repoURL ratée dans citation.yaml (motif non matché)")
     if f"targetRevision: {revision}" not in out:
