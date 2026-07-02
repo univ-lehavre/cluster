@@ -1,0 +1,292 @@
+# code: language=ansible
+# Rôle platform-eventful (ADR 0095 §1.b) — pose la CHAÎNE ÉVÉNEMENTIELLE :
+# Argo Workflows (build in-pod, ns `argo`) + Argo Events (webhook #2 → EventBus NATS →
+# Sensor, ns `argo-events`). C'est le « git push atlas → build → write-back → déploiement,
+# zéro geste » de l'ADR 0095. Ce rôle TRADUIT les ~10 gestes kubectl manuels du banc
+# (README argo-workflows + argo-events) en tâches idempotentes (ADR 0046 : corriger le
+# CODE, pas l'état), sur le MODÈLE de platform-argocd.
+#
+# INFRA, pas applicatif (anti-bootstrap-circulaire, ADR 0022) : Argo Workflows/Events
+# et leurs CRDs — dont dépend le CHEMIN de déploiement — vont dans Ansible, PAS en GitOps.
+#
+# DÉPENDANCES D'ORDRE (hors de ce rôle — documentées, à respecter par le chemin nommé) :
+#   • registry:80 doit contenir les 4 images publiques du builder (alpine/git, buildkit,
+#     crane, curl) → play node-side `bootstrap/eventful-mirror.yaml` AVANT (banc air-gappé,
+#     ADR 0011) ; sinon les Workflows font ImagePullBackOff (pas ce rôle : le controller
+#     démarre, seuls les BUILDS échoueraient).
+#   • Secret HMAC `gitea-webhook-build-hmac` (ns argo-events) : GÉNÉRÉ AU SEED
+#     (webhook-build, _seed_ensure_build_webhook) — PAS gravé ici (surface, ADR 0095 §Coût).
+#     L'EventSource le RÉFÉRENCE (authSecret) : sans lui, le pod EventSource fait
+#     FailedMount tant que le Secret manque. Le seed webhook-build DOIT tourner AVANT que
+#     l'EventSource démarre sainement (vécu au banc). On applique le CR ; le Secret vient
+#     d'ailleurs (l'EventSource converge dès que le seed a posé le HMAC).
+#   • Token d'écriture `gitea-writeback-token` (ns argo) : GÉNÉRÉ AU SEED (token Gitea scopé
+#     cluster/apps, write:repository) — PAS appliqué depuis le `.example` factice versionné
+#     (grave un secret = interdit). Monté SEULEMENT dans le step write-back du Workflow ;
+#     un build ne démarre pas sans lui, mais le controller n'en dépend pas → hors gates.
+#
+# Images : les 2 bundles épinglent leurs images par digest (ADR 0006). En prod SANS
+# Internet elles doivent être mirrorées au registry interne (ADR 0011) — hors de ce rôle.
+- name: Deploy the eventful chain (Argo Workflows + Argo Events)
+  tags: eventful
+  run_once: true
+  block:
+    # ── (a) Namespaces explicites — AUCUN des 2 bundles ne crée son ns. ─────────
+    - name: Ensure the eventful namespaces exist
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: '{{ item }}'
+      loop:
+        - '{{ eventful_workflows_namespace }}'
+        - '{{ eventful_events_namespace }}'
+
+    # ── (b) Bundle Argo Workflows (ns argo) en SERVER-SIDE. ────────────────────
+    # --server-side OBLIGATOIRE : les CRDs Argo Workflows (workflowtemplates,
+    # cronworkflows…) dépassent la limite d'annotation de l'apply client-side, comme
+    # le bundle Argo CD (parité platform-argocd, validé banc). field_manager dédié +
+    # force_conflicts (le controller densifie ensuite ses CR).
+    - name: Apply the Argo Workflows bundle (server-side)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_workflows_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-workflows/argo-workflows.yaml'
+        server_side_apply:
+          field_manager: ansible-platform-eventful
+          force_conflicts: true
+
+    # ── (c) Bundle Argo Events (ns argo-events) en SERVER-SIDE. ────────────────
+    - name: Apply the Argo Events bundle (server-side)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_events_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-events/argo-events.yaml'
+        server_side_apply:
+          field_manager: ansible-platform-eventful
+          force_conflicts: true
+
+    # ── (d) RBAC de soumission (ns argo-events) — le Sensor EN DÉPEND. ──────────
+    # SA `operate-workflow-sa` + ClusterRole + Binding : sans lui le pod Sensor reste
+    # « serviceaccount not found » (PROUVÉ AU BANC 2026-07-02, operate-workflow-rbac.yaml).
+    # Posé AVANT le Sensor (qui déclare serviceAccountName: operate-workflow-sa).
+    - name: Apply the operate-workflow RBAC (SA + ClusterRole + Binding)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/argo-events/operate-workflow-rbac.yaml'
+
+    # ── (e) NetworkPolicies ns argo ORDONNÉES : default-deny AVANT les allow. ───
+    # Ordre explicite via loop (pas un apply de dossier) : le socle fermé
+    # (00-default-deny) doit précéder les allow, sinon fenêtre de deny / allow ignoré
+    # (parité platform-argocd). allow-apiserver-egress est INDISPENSABLE : sans lui le
+    # workflow-controller ne joint pas l'API server → CrashLoopBackOff (PROUVÉ AU BANC).
+    # allow-build-egress porte l'egress Internet CIBLÉ (443) du builder + DNS + registry +
+    # gitea (air-gap asymétrique, seul ns argo sort). VÉRIFIÉ : 3 fichiers dans le dossier
+    # (00-default-deny, allow-apiserver-egress, allow-build-egress ; ce dernier porte
+    # DNS/registry/gitea INLINE, pas de sous-fichiers séparés).
+    - name: Apply argo-workflows network policies (ordered, default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/network-policies/argo-workflows/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-apiserver-egress.yaml
+        - allow-build-egress.yaml
+
+    # ── (f) ConfigMap buildkitd-config (ns argo) — POINT DUR 1 (registry:80 HTTP). ─
+    - name: Apply the buildkitd ConfigMap (POINT DUR 1 — registry:80 insecure)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_workflows_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-workflows/configmap-buildkitd-toml.yaml'
+
+    # ── (g) WorkflowTemplate image-builder (ns argo) — la chaîne clone→build→write-back. ─
+    # NOTE : réfère le Secret `gitea-writeback-token` (write-back) — GÉNÉRÉ AU SEED,
+    # PAS appliqué depuis le `.example` factice (cf. en-tête). Un build attend ce Secret ;
+    # le WorkflowTemplate lui-même s'applique sans (le montage du volume n'a lieu qu'à l'exécution).
+    #
+    # PATCH BANC INTÉGRÉ (CP = builder) — au banc mono-nœud le control-plane EST le seul nœud,
+    # le nodeSelector worker `DoesNotExist` ne matcherait aucun nœud (pod Pending). On CHARGE
+    # le manifeste et, au banc (eventful_patch_worker_selector), on RETIRE le nodeSelector AVANT
+    # l'apply — en UNE tâche. Sépare-t-on apply (repose le selector) et patch (le retire), les
+    # deux se BATTENT à chaque run (changed perpétuel, pattern apply-vs-patch). Ici l'état
+    # appliqué EST l'état final → idempotent (changed=0 au rejeu). En prod on garde le selector
+    # (builder worker-only, SPOF unique invariant 5 ADR 0095).
+    - name: Load the image-builder WorkflowTemplate manifest
+      ansible.builtin.set_fact:
+        eventful_builder_def: >-
+          {{ lookup('file',
+             platform_repo_dir ~ '/platform/argo-workflows/workflowtemplate-builder.yaml')
+             | from_yaml }}
+
+    - name: Drop the worker nodeSelector at the banc (CP is the builder)
+      ansible.builtin.set_fact:
+        eventful_builder_def: >-
+          {{ eventful_builder_def
+             | combine({'spec': eventful_builder_def.spec
+                        | dict2items | rejectattr('key', 'equalto', 'nodeSelector')
+                        | items2dict}) }}
+      when: eventful_patch_worker_selector | bool
+
+    - name: Apply the image-builder WorkflowTemplate (nodeSelector already resolved)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_workflows_namespace }}'
+        definition: '{{ eventful_builder_def }}'
+        server_side_apply:
+          field_manager: ansible-platform-eventful
+          force_conflicts: true
+
+    # ── (g bis) CronWorkflow builder-reconcile (ns argo) — filet event-loss NATS. ─
+    # Rattrape un event push perdu (EventBus replicas:1, SPOF assumé) en comparant HEAD
+    # atlas au tag déployé (cronworkflow-reconcile.yaml). Idempotent ; PAS le rejeu
+    # changed=0 d'Ansible (honnêteté ADR 0052) — un filet, pas une preuve d'idempotence.
+    # Le manifeste utilise `spec.schedules` (LISTE, CRD Argo Workflows v4) — corrigé depuis
+    # le `spec.schedule` singulier qui échouait 422 au montage banc (2026-07-02).
+    - name: Apply the builder-reconcile CronWorkflow (event-loss safety net)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_workflows_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-workflows/cronworkflow-reconcile.yaml'
+
+    # ── (i) CR Argo Events (ns argo-events) : EventBus, EventSource, Sensor. ────
+    # EventBus AVANT EventSource/Sensor (ils s'y rattachent, `default`). EventSource +
+    # Sensor sont des *.example : l'EventSource référence le Secret HMAC
+    # `gitea-webhook-build-hmac` (GÉNÉRÉ AU SEED, cf. en-tête). On applique les CR ; le
+    # Secret vient du seed webhook-build. Sans ce Secret, le pod EventSource fait
+    # FailedMount jusqu'à ce que le seed le pose — d'où la dépendance d'ordre documentée
+    # (seed webhook-build AVANT que l'EventSource converge ; vécu au banc). Le Sensor
+    # dépend du RBAC (d) — déjà posé au-dessus.
+    - name: Apply the EventBus (NATS native, `default`)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_events_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-events/eventbus-nats.yaml'
+
+    - name: Apply the gitea-push EventSource (build webhook, HMAC from seed)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_events_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-events/eventsource-gitea.example.yaml'
+
+    - name: Apply the code-location-build Sensor (discovery core)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_events_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-events/sensor-code-location.example.yaml'
+
+    # ── (j) NodePort UI Argo Workflows (ns argo) — exposition L4 (ADR 0092). ────
+    # Service SÉPARÉ du bundle (on ne touche pas le bundle vendored) ; même selector que
+    # le ClusterIP argo-server. nodePort auto-attribué. Sans dépendance CRD (parité argocd).
+    - name: Apply the Argo Workflows NodePort Service (L4 UI exposure)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ eventful_workflows_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/argo-workflows/nodeport.yaml'
+
+    # ── (k) Le patch banc du nodeSelector est INTÉGRÉ à l'apply (g) — plus de tâche
+    #    séparée (elle se battait avec l'apply : changed perpétuel). Cf. (g). ─────────
+
+    # ── (l) GATES DE SANTÉ (until readyReplicas==1 / status Deployed). ──────────
+    # workflow-controller + argo-server (ns argo), controller-manager (ns argo-events) :
+    # Deployments → readyReplicas==1 (parité argocd-server). NOTE : les Workflows
+    # eux-mêmes n'ont pas de Deployment (Pods éphémères par SHA) → rien à gater ; on gate
+    # les CONTROLLERS (le montage de la chaîne, pas un build). L'EventSource/Sensor sont
+    # des CR pilotés par le controller (leurs Deployments naissent quand ils convergent,
+    # ce qui dépend du Secret HMAC du seed) → hors gates ici (dépendance d'ordre externe).
+    - name: Wait for the argo Deployments to be Ready (controllers)
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: '{{ item }}'
+        namespace: '{{ eventful_workflows_namespace }}'
+      register: eventful_argo_deploy
+      until: >-
+        eventful_argo_deploy.resources | default([]) | length > 0
+        and (eventful_argo_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ eventful_ready_retries }}'
+      delay: '{{ eventful_ready_delay }}'
+      loop:
+        - workflow-controller
+        - argo-server
+
+    - name: Wait for the argo-events controller-manager to be Ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: controller-manager
+        namespace: '{{ eventful_events_namespace }}'
+      register: eventful_events_deploy
+      until: >-
+        eventful_events_deploy.resources | default([]) | length > 0
+        and (eventful_events_deploy.resources[0].status.readyReplicas | default(0)) == 1
+      retries: '{{ eventful_ready_retries }}'
+      delay: '{{ eventful_ready_delay }}'
+
+    # EventBus NATS : le controller le déploie et pose une condition `Deployed`=True dans
+    # son `status.conditions` (StatefulSet eventbus-default-js). On gate sur cette
+    # condition (until). NB : le nom exact de la condition reste À CONFIRMER AU BANC (voir
+    # le TODO du play) — le défaut `| default([])` garde la boucle non-bloquante si le
+    # champ n'est pas encore peuplé.
+    - name: Wait for the EventBus to be Deployed
+      kubernetes.core.k8s_info:
+        api_version: argoproj.io/v1alpha1
+        kind: EventBus
+        name: default
+        namespace: '{{ eventful_events_namespace }}'
+      register: eventful_eventbus
+      until: >-
+        eventful_eventbus.resources | default([]) | length > 0
+        and (eventful_eventbus.resources[0].status.conditions | default([]))
+            | selectattr('type', 'equalto', 'Deployed')
+            | selectattr('status', 'equalto', 'True') | list | length > 0
+      retries: '{{ eventful_ready_retries }}'
+      delay: '{{ eventful_ready_delay }}'
+
+  # ── (m) rescue DIAGNOSTIQUE (ADR 0050, calque argocd) ──────────────────────────
+  # Un apply k8s est DÉCLARATIF/idempotent — un « rollback » qui supprimerait la chaîne
+  # serait contre-productif (on répare, un re-run reprend là où ça a cassé). Le rescue
+  # utile est DIAGNOSTIQUE : capturer les pods non prêts des DEUX ns + échouer avec un
+  # message actionnable (drifts connus : egress apiserver, Secret HMAC/token du seed).
+  rescue:
+    - name: Collect eventful pods state (diagnostic)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: '{{ item }}'
+      register: eventful_pods_diag
+      run_once: true
+      loop:
+        - '{{ eventful_workflows_namespace }}'
+        - '{{ eventful_events_namespace }}'
+
+    - name: Report not-ready eventful pods
+      ansible.builtin.debug:
+        msg: >-
+          Chaîne événementielle non convergée. Pods non prêts :
+          {{ eventful_pods_diag.results | map(attribute='resources') | flatten
+             | rejectattr('status.phase', 'equalto', 'Running')
+             | map(attribute='metadata.name') | list }}.
+          Causes fréquentes : egress apiserver du controller (allow-apiserver-egress,
+          sinon CrashLoop) ; Secret HMAC `gitea-webhook-build-hmac` (ns
+          {{ eventful_events_namespace }}) NON posé par le seed webhook-build →
+          EventSource FailedMount ; images builder non mirrorées (eventful-mirror.yaml).
+          Diagnostic : kubectl -n {{ eventful_workflows_namespace }} get pods ;
+          kubectl -n {{ eventful_events_namespace }} get pods,eventsource,sensor,eventbus.
+      run_once: true
+
+    - name: Fail with an actionable message
+      ansible.builtin.fail:
+        msg: >-
+          Déploiement de la chaîne événementielle échoué (voir le diagnostic ci-dessus).
+          Le re-run du rôle est idempotent et reprend la convergence — corriger d'abord la
+          cause (réseau / Secret HMAC du seed / mirror d'images) signalée.
+
+  always:
+    - name: Eventful deployment outcome (état final)
+      ansible.builtin.debug:
+        msg: >-
+          platform-eventful terminé. La chaîne « git push atlas → build » attend le seed
+          webhook-build (Secret HMAC + hook Gitea). Vérifier :
+          kubectl -n {{ eventful_events_namespace }} get eventsource,sensor,eventbus ;
+          kubectl -n {{ eventful_workflows_namespace }} get workflowtemplate,cronworkflow.
+      run_once: true
