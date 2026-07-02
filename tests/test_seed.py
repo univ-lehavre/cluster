@@ -100,6 +100,13 @@ class Steps(unittest.TestCase):
         self.assertEqual(steps[0], "admin-token")
         self.assertIn("push-atlas-tree", steps)
 
+    def test_banc_citation_shares_prod_sequence(self):
+        # banc-citation joue LE flux App-of-Apps citation (= la séquence prod) mais AU BANC.
+        # Partager la séquence garantit qu'une preuve banc valide le vrai chemin prod (même
+        # ordre, mêmes gardes de digest) — ADR 0095 §1.a « premier pas ».
+        self.assertEqual(seed.seed_steps("banc-citation"), seed.seed_steps("prod"))
+        self.assertIn("push-citation", seed.seed_steps("banc-citation"))
+
     def test_unknown_kind_rejected(self):
         with self.assertRaises(seed.SeedError):
             seed.seed_steps("staging")
@@ -150,6 +157,38 @@ class GuardsOpposed(unittest.TestCase):
         with self.assertRaises(seed.SeedGuardRefused):
             seed.run_seed(
                 "prod",
+                seed.SeedConfig(),
+                assert_target=guard_refuses,
+                do=lambda step: executed.append(step) or True,
+            )
+        self.assertEqual(executed, [])
+
+    def test_banc_citation_runs_prod_sequence_under_banc_guard(self):
+        # Le POINT de la décision A (ADR 0095 §1.a) : banc-citation joue la séquence prod
+        # SOUS garde banc. La garde passe (cible = banc) → les 6 étapes du flux citation.
+        order = []
+        result = seed.run_seed(
+            "banc-citation",
+            seed.SeedConfig(),
+            assert_target=lambda: order.append("guard"),
+            do=lambda step: order.append(step) or True,
+        )
+        self.assertTrue(result.done)
+        self.assertEqual(order[0], "guard")
+        self.assertEqual(order[1:], list(seed.seed_steps("prod")))
+
+    def test_banc_citation_guard_refusing_prod_target_stops_before_steps(self):
+        # SÉCURITÉ (ADR 0053/0084) : la garde banc de banc-citation DÉTECTE une cible prod
+        # → lève AVANT toute étape. On ne déploie jamais citation « réel » sur la prod par
+        # cette voie banc (la voie prod garde `assert_prod_target`, séparée).
+        executed = []
+
+        def guard_refuses():
+            raise seed.SeedGuardRefused("cible = prod, pas le banc (ADR 0053)")
+
+        with self.assertRaises(seed.SeedGuardRefused):
+            seed.run_seed(
+                "banc-citation",
                 seed.SeedConfig(),
                 assert_target=guard_refuses,
                 do=lambda step: executed.append(step) or True,

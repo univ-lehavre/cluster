@@ -2,18 +2,33 @@
 
 ## État
 
-> **État : Actif** (2026-06-25) · **Fonde :**
+> **État : Actif** (2026-06-25, revu 2026-07-02) · **Fonde :**
 > [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md)
 > (Accepted) +
 > [ADR 0094](../decisions/0094-frontiere-deploiement-applicatif.md). · **Issues
 > :** atlas #499/#501 (déblocage citation). · **Preuve :** bench/lima + scénario
-> 34 à écrire.
+> 34 (chaîne prouvée avec image JOUET busybox ; `MODE=citation` reste en SKIP —
+> bascule sur l'image RÉELLE = ce que cette révision livre).
 >
 > ADR `Accepted` ⇒ implémentation mergeable
 > ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6).
 > Ce plan **livre le premier pas** (§1.a de l'ADR, étapes 1-4) ; la **cible
 > événementielle** (§1.b, étapes 5-8) est **cadrée mais différée** à des
 > itérations ultérieures.
+>
+> **Révision 2026-07-02 — bascule sur l'image citation RÉELLE au banc.** Une
+> cartographie des deux dépôts (côté atlas : `dataops/citation-dagster/deploy/`
+> **prêt**, revision `c98feea9`, base + overlays `bench`/`prod`, placeholders
+> factorisés ; côté cluster : briques de réception présentes) a établi ce qui
+> RESTE, côté cluster **seul**, pour déployer la VRAIE code-location citation au
+> banc (et non plus la preuve jouet busybox). Trois manches, dont deux nouvelles
+> décisions tranchées (§« Décisions banc » ci-dessous) : (1) BUILD de l'image
+> citation absent du rôle `platform-build-images` → calquer le patron `portal` ;
+> (2) le seed prod n'est **pas monté au banc** (la façade `topology.py` ne monte
+> que le seed jouet) → nouvelle **variante `banc-citation`** (garde banc,
+> séquence prod, overlay bench) ; (3) alimenter le **digest** issu du build. La
+> dérivation `pgvector-pg-auth` et le contrat (`pgvector`, `rook-ceph-datalake`,
+> `contract_version 1.0`) sont **déjà en place** (fausse alerte levée).
 
 Met en œuvre
 [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md) :
@@ -85,6 +100,68 @@ cadre sans l'implémenter.
 6. **Outil conservé** (ADR 0005/0033) : containerd-natif nerdctl/buildkit, **pas
    Kaniko** (écarté : root-fs en tension avec la Pod Security, maintenance
    réduite, **n'aide en rien sur l'air-gap**).
+
+## Décisions banc (révision 2026-07-02 — déployer citation RÉEL au banc)
+
+Trois décisions tranchées pour jouer le premier pas avec la **vraie** image
+citation au banc Lima mono-nœud local-path, **sans toucher le dépôt atlas**
+(prêt, revision `c98feea9`) et **sans jamais risquer la prod** (ADR 0053/0084).
+
+### D1 — Variante de seed `banc-citation` (garde banc, séquence prod, overlay bench)
+
+**Constat.** Le seed prod (`nestor/seed.py` : `_PROD_STEPS`, `run_seed`,
+`citation_image_ref`) est **écrit et testé** (stubé), mais la façade
+(`scripts/topology.py`) ne monte au banc que `run_seed('banc', …)` — le flux
+**jouet** `atlas-workflow-sample` (`toy_assets`). Le seed prod est gardé
+`assert_prod_target` (cible `cluster-prod`), donc **injouable au banc** tel
+quel.
+
+**Décision.** Une **3ᵉ variante `kind="banc-citation"`** qui joue la **séquence
+`_PROD_STEPS`** (le vrai flux App-of-Apps citation : org/repo atlas, push de
+l'arbre atlas figé, `apps/citation.yaml` par digest, AppProject + racine) mais
+sous garde **banc** (`_assert_bench_target`) et ciblant l'overlay **bench**.
+Partager la séquence prod garantit qu'une preuve banc valide le **vrai** chemin
+prod (même ordre, mêmes gardes de digest), pas un chemin cousin qui divergerait.
+
+**Écartées :** (b) abaisser `assert_prod_target` à accepter `cluster-banc` par
+paramètre — **refusé**, ce serait rendre la garde prod franchissable par config
+(ADR 0053/0084) ; (c) fondre citation dans le seed banc jouet — **refusé**,
+casse la lisibilité de la séquence et empêche de prouver citation isolément (ADR
+0034). La garde prod reste `cluster-prod`-only, en dur. **✅ LIVRÉ** (logique
+pure + tests) : `seed_steps("banc-citation")` = `_PROD_STEPS` ; reste le
+`do(step)` réel en façade (§Étape 3) et le run banc.
+
+### D2 — `rook-ceph-datalake` au banc local-path : overlay `bench` existant (aucun geste)
+
+Le manifeste atlas déclare `buckets[].storageClass: rook-ceph-datalake`, absente
+du banc local-path (pas de Ceph). **Non bloquant** : atlas fournit **déjà** un
+`overlays/bench` qui remplace l'OBC Ceph par un Secret SeaweedFS statique (l'OBC
+et le patch OBC ne vivent que dans `overlays/prod`). La variante `banc-citation`
+pointe l'Application fille sur `path: …/deploy/overlays/bench` → la StorageClass
+Ceph n'apparaît jamais dans les manifestes rendus au banc. **Aucun geste** côté
+cluster ni atlas (cluster CHOISIT l'overlay, atlas FOURNIT les deux — ADR 0094).
+
+**Digest au banc (point dur codé).** L'overlay `bench` déploie par tag `:dev`
+(pas de placeholder digest, contrairement à `prod`). Pour tenir ADR 0095 §2
+(digest figé) au banc AUSSI, le seed `banc-citation` **injecte** un bloc
+`images:[{name: registry:80/citation-dagster, digest: <sha256>}]` dans le
+`overlays/bench/kustomization.yaml` **du clone poussé** (jamais dans le dépôt
+atlas versionné) — purement additif, prouvable au banc, atlas intact.
+
+### D3 — Build de l'image citation : calquer le patron `portal`
+
+Le Dockerfile citation a un **contexte multi-dossier** (contexte = `dataops/`,
+il embarque `citation-dbt/`) — le **même cas que `portal`** (dont le contexte
+est la racine du dépôt, `nestor/`+`contract/`), que le `src_context` générique
+mono-dossier de `platform-build-images` ne couvre pas. On **calque
+`bootstrap/portal.yaml`** : liste séparée `citation_build_images` (image 100 %
+maison, pas d'`official_image`, `build_all_arch: true`, `force_rebuild: true`) +
+un play `bootstrap/citation.yaml` qui **réplique le contexte node-side** depuis
+le dépôt atlas puis `import_role: platform-build-images` avec override
+`build_images`. **Egress build déjà présent** au bootstrap → aucune
+NetworkPolicy à ouvrir pour le premier pas (c'est la cible §1.b, in-cluster, qui
+aura ce souci). Le rôle **lit le digest** après push (`nerdctl … RepoDigests`) →
+alimente D1/D2.
 
 ## Étapes — PREMIER PAS (cœur de ce plan, à implémenter)
 
@@ -301,15 +378,25 @@ CONSTRUIT + DÉPLOIE.**
       factorisé) ; **DÉCISION** cible du write-back (A) `atlas/atlas` overlay
       prod vs (B) `cluster/apps` — tranchée par le scénario 34.
       `ansible-lint`/`yamllint` verts.
-- [ ] **Étape 2** — dérivation `pgvector-pg-auth` extraite sous tag dédié
-      `pgvector-secret` (option a), rejouable seule **sans toucher au
-      workspace** ; rejeu `changed=0`, contenu == `pg-role-pgvector`.
-- [ ] **Étape 3** — `seed-app-of-apps.sh` généralisé : (a) build/vérif image,
-      (b) write-back digest, (c) dérivation `pgvector-pg-auth`, injection
-      **digest** (pas tag) ; gardes prod conservées ; `--dry-run` propre.
-- [ ] **Étape 4** — scénario `34-build-gitops-digest.sh` créé + matrice
-      `bench/scenarios/README.md` (n° 34) ; **joué au banc** (Application
-      Synced/Healthy, pod tiré par `@sha256`, idempotence) → `RESULTS.md`.
+- [x] **Étape 2** — dérivation `pgvector-pg-auth` **✅ LIVRÉE** :
+      `bootstrap/roles/platform-dagster/tasks/main.yaml` la porte sous tag dédié
+      `pgvector-secret` (3 tâches rejouables seules, source `pg-role-pgvector`).
+      Contrat complet (`contract/*.example.yaml` : `contract_version 1.0`,
+      `database:[pgvector]`, `secrets:[pgvector-pg-auth]`,
+      `rook-ceph-datalake`). **Reste** : rejeu banc `--tags pgvector-secret`
+      `changed=0` (preuve).
+- [ ] **Étape 3** — variante seed `banc-citation` (D1). **Logique pure ✅
+      LIVRÉE** (`nestor/seed.py` : `seed_steps("banc-citation")` = `_PROD_STEPS`
+      ; tests `test_seed.py` : partage séquence + garde banc joue le flux prod +
+      garde banc **refuse la prod**). **Reste** : câbler le `do(step)` réel en
+      façade (`scripts/topology.py`, garde `_assert_bench_target`, overlay
+      **bench**, injection digest D2) + le build citation (D3,
+      `citation_build_images` + `bootstrap/citation.yaml` calqué sur `portal`).
+- [ ] **Étape 4** — scénario `34-build-gitops-digest.sh` **existe** (prouve la
+      chaîne avec image JOUET busybox) ; **lever le SKIP `MODE=citation`** (ou
+      dériver `35-citation-reel.sh`) pour prouver la VRAIE image citation
+      déployée par `@sha256` ; **joué au banc** (Application Synced/Healthy, pod
+      tiré par `@sha256`, idempotence) → `RESULTS.md`.
 - [ ] **Déblocage prod** — seed sur `cluster-prod` après preuve banc ; clôture
       atlas #499 (`pgvector-pg-auth` rendu au code) / #501 (citation déployée).
 - [ ] **Étape 5 (cible / différé)** — vendoring Argo Events + Argo Workflows +
