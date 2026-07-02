@@ -2865,6 +2865,13 @@ _SEED_BANC_TODO = (
     "de format cloche, il ne lève plus de STUB à l'aveugle",
     "dédup du webhook par URL (gitea-init.sh:163-166) : le comptage parse la réponse "
     "`GET /hooks` réelle — ici on POST best-effort (Gitea refuse un doublon) ; affiner+prouver",
+    "WEBHOOK #2 (build, ADR 0095 §1.b / étape 7) : le handler `webhook-build` est ÉCRIT "
+    "(cible atlas/atlas, endpoint EventSource `gitea-push`, secret HMAC partagé "
+    "`gitea-webhook-build-hmac`) MAIS pas encore branché dans `seed_steps('banc')` — il "
+    "faut (a) monter le socle événementiel (Argo Events/Workflows/NATS, étapes 5-6), (b) "
+    'ajouter une étape `"webhook-build"` à la séquence banc, (c) PROUVER au banc le nom '
+    "réel du Service EventSource (`<eventsource>-eventsource-svc`) et le format du payload "
+    "push Gitea (body.after/commits[].modified) que le Sensor filtre",
     "run banc gitops-seed (gitea-init réel : admin/token/org-repo/push-code-location/"
     "webhook/application) consigné — PREUVE DÉFINITIVE, reste à faire au banc",
 )
@@ -2988,6 +2995,9 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
     la cible SÛRE (`_kubectl`/`_kubectl_env`) ; le pod est résolu une fois au 1er besoin."""
     ns, argocd_ns = config.ns, config.argocd_ns
     org, repo = config.org, config.repo
+    # Repo de CODE atlas (org_atlas/repo_atlas) — cible du webhook #2 (build), DISTINCT du
+    # repo des workflows (org/repo) ciblé par le webhook #1 (déploiement). ADR 0095 §1.b.
+    org_atlas, repo_atlas = config.org_atlas, config.repo_atlas
     api_base = f"{config.api}/api/v1"
     state: dict[str, str] = {}
 
@@ -3231,6 +3241,64 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
         # 2xx OU « existe déjà » (Gitea refuse un doublon) = ok ; échec réel (token/exec) = KO.
         return _seed_api_ok(c_hook)
 
+    def webhook_build() -> bool:
+        # WEBHOOK #2 (BUILD, cible événementielle ADR 0095 §1.b / étape 7 du plan). DISTINCT
+        # du #1 (webhook() ci-dessus, DÉPLOIEMENT → argocd-server) : le #2 vise le repo de
+        # CODE atlas (`org_atlas/repo_atlas`, ADR 0023) et pointe vers l'endpoint de
+        # l'EventSource Argo Events `gitea-push` (platform/argo-events/eventsource-gitea.
+        # example.yaml). Un `git push` atlas déclenche ainsi le Sensor `code-location-build`
+        # → soumission du WorkflowTemplate `image-builder`.
+        #
+        # Le SECRET HMAC est PARTAGÉ entre le hook Gitea et l'EventSource : on lit/crée le
+        # Secret `gitea-webhook-build-hmac` (ns `argo-events`, clé `secret`) — le MÊME que
+        # l'EventSource référence via `webhook.push.authSecret`. Idempotent (parité
+        # webhook_secret : create s'il manque, puis relit). Sans partage, l'EventSource
+        # rejetterait le payload signé par Gitea.
+        #
+        # _BANC : la DÉDUP par URL (compter les hooks existants) dépend du format de réponse
+        # réel de `GET /hooks` — ici on POST best-effort (Gitea refuse un doublon, idempotent
+        # de fait). Le nom réel du Service EventSource (`<eventsource>-eventsource-svc`) et le
+        # format du payload push (body.after/commits[].modified) restent à PROUVER au banc
+        # (_SEED_BANC_TODO). L'URL du hook est intra-cluster (résolue par Gitea, pas l'hôte).
+        es_ns = "argo-events"
+        hmac_secret = "gitea-webhook-build-hmac"
+        chk = _kubectl("-n", es_ns, "get", "secret", hmac_secret)
+        if not (chk and chk.returncode == 0):
+            _kubectl(
+                "-n",
+                es_ns,
+                "create",
+                "secret",
+                "generic",
+                hmac_secret,
+                "--from-literal=secret=" + _seed_gen_secret(),
+            )
+        got = _kubectl(
+            "-n",
+            es_ns,
+            "get",
+            "secret",
+            hmac_secret,
+            "-o",
+            "jsonpath={.data.secret}",
+        )
+        hmac = _b64decode(got.stdout.strip()) if got and got.returncode == 0 else ""
+        if not hmac:
+            return False
+        # Endpoint de l'EventSource `gitea-push` (Service `<eventsource>-eventsource-svc`,
+        # port/endpoint de eventsource-gitea.example.yaml). Résolu PAR Gitea DANS le cluster.
+        es_url = f"http://gitea-push-eventsource-svc.{es_ns}.svc.cluster.local:12000/push"
+        body = (
+            '{"type":"gitea","active":true,"events":["push"],"config":{"url":"'
+            + es_url
+            + '","content_type":"json","secret":"'
+            + hmac
+            + '"}}'
+        )
+        # Cible = repo de CODE atlas (org_atlas/repo_atlas), PAS org/repo des workflows.
+        _, c_hook = _api("POST", f"/repos/{org_atlas}/{repo_atlas}/hooks", body)
+        return _seed_api_ok(c_hook)
+
     def application() -> bool:
         # 7/7 — Application Argo CD `atlas-workflows` (repoURL Gitea injecté, valeur de
         # déploiement, ADR 0023). `kubectl apply -f -` du manifeste rendu (parité
@@ -3247,6 +3315,12 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
         "webhook-secret": webhook_secret,
         "webhook": webhook,
         "application": application,
+        # WEBHOOK #2 (build, cible événementielle ADR 0095 §1.b). Handler PRÊT mais PAS
+        # encore dans `seed_steps('banc')` : le montage du socle événementiel (Argo Events/
+        # Workflows/NATS, étapes 5-6 du plan) doit précéder — une étape `"webhook-build"`
+        # l'appellera quand la chaîne sera montée au banc (cf. _SEED_BANC_TODO). Le poser dès
+        # maintenant SANS l'EventSource déployé créerait un hook vers un endpoint mort.
+        "webhook-build": webhook_build,
     }
 
     def do(step: str) -> bool:

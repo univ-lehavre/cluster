@@ -1,0 +1,45 @@
+# EventBus `default` (Argo Events v1.9.10) — bus d'événements NATS natif de la
+# chaîne événementielle (ADR 0095 §1.b, étape 7 du plan build événementiel).
+#
+# Rôle : l'EventSource `gitea-push` (webhook #2) PUBLIE les événements push atlas
+# sur ce bus ; le Sensor `code-location-build` les CONSOMME et déclenche le
+# WorkflowTemplate `image-builder`. Le nom `default` est CONVENTIONNEL : un
+# EventSource/Sensor sans `eventBusName` explicite se rattache à l'EventBus nommé
+# `default` du namespace — d'où ce nom (aucune valeur d'instance codée).
+#
+# ── POINT DUR 4 (SPOF assumé, TRACÉ — ADR 0095 §Coût / plan §SPOF) ────────────
+# `replicas: 1` = NATS mono-réplique. C'est un SPOF TRANSITOIRE : si le pod NATS
+# redémarre pile pendant qu'un event push est en vol, l'event est PERDU — et le
+# build n'a PAS de polling natif (contrairement à Argo CD côté déploiement, ~3
+# min). Le filet de rattrapage est le CronWorkflow `builder-reconcile`
+# (platform/argo-workflows/cronworkflow-reconcile.yaml) qui compare
+# périodiquement HEAD atlas au tag déployé. HONNÊTETÉ : ce filet N'EST PAS
+# l'équivalent du rejeu `changed=0` d'Ansible (ADR 0052) — sa latence = la
+# période du Cron ; il rattrape, il ne prouve pas l'idempotence. À consigner
+# aussi dans `bench/lima/RESULTS.md` au run banc.
+#
+# ── ÉPINGLAGE (ADR 0006) ──────────────────────────────────────────────────────
+# Les 3 images NATS de l'EventBus native sont épinglées par DIGEST d'index
+# multi-arch (arm64 banc + amd64 prod, vérifiés crane 2026-07-02) — mêmes
+# versions que le ConfigMap `argo-events-controller-config` (nats:2.10.29 +
+# reloader/exporter 0.14.0). Champs `spec.nats.native.{natsImage,
+# metricsExporterImage, configReloaderImage}` (nomenclature de la CRD EventBus
+# v1.9.10, cf. le bloc `jetstream.versions[]` du controller-config).
+# TODO intégration (ADR 0011) : au banc/prod air-gappés, ces 3 images doivent
+# être MIRRORÉES au registry interne (registry:80), sinon ImagePullBackOff.
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: default
+  namespace: argo-events
+spec:
+  nats:
+    native:
+      # SPOF assumé — cf. POINT DUR 4 en en-tête.
+      replicas: 1
+      # nats:2.10.29 (serveur NATS embarqué)
+      natsImage: nats:2.10.29@sha256:5498ba57b9471840be3d15b033a4eec554d1c02fa6c2cc0ca2d888637f6c6e2f
+      # natsio/prometheus-nats-exporter:0.14.0 (métriques Prometheus du bus)
+      metricsExporterImage: natsio/prometheus-nats-exporter:0.14.0@sha256:839c59f6a23473a657f6560c2a14dca9b9ce722a017933a41d071a3c9dd3a7d7
+      # natsio/nats-server-config-reloader:0.14.0 (recharge la conf sans restart)
+      configReloaderImage: natsio/nats-server-config-reloader:0.14.0@sha256:8c28b75bc416bb068761b19edf9a471bf8e35062bf619ea49c8e22af517e383e

@@ -26,10 +26,12 @@ in-pod**, puis Argo CD réconcilie l'applicatif publié. Les CR concrets
 (`EventBus`, `EventSource`, `Sensor`, `WorkflowTemplate`) sont posés aux
 **étapes 6-7** (hors périmètre de ce vendoring).
 
-> **EventBus NATS** : le CR `EventBus` natif (étape 7) tirera `nats:2.10.29` +
-> `natsio/nats-server-config-reloader:0.14.0` (versions référencées dans le
-> ConfigMap `argo-events-controller-config`). Ces images seront **à épingler par
-> digest quand le CR `EventBus` sera écrit** — hors périmètre de ce vendoring.
+> **EventBus NATS** : le CR `EventBus` natif (étape 7,
+> [`eventbus-nats.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argo-events/eventbus-nats.yaml))
+> tire `nats:2.10.29` + `natsio/nats-server-config-reloader:0.14.0` +
+> `natsio/prometheus-nats-exporter:0.14.0` (versions référencées dans le
+> ConfigMap `argo-events-controller-config`), **épinglées par digest d'index
+> multi-arch** (cf. « Chaîne de découverte » ci-dessous).
 
 ## Frontière Ansible / GitOps (anti-bootstrap-circulaire)
 
@@ -48,11 +50,62 @@ kubectl apply --server-side -n argo-events -f platform/argo-events/argo-events.y
 kubectl -n argo-events rollout status deploy/controller-manager
 ```
 
+## Chaîne de découverte (étape 7)
+
+Les CR concrets de la chaîne événementielle (posés par
+`kubectl apply --server-side`, comme le bundle) transforment un **`git push`
+atlas** en **build** puis, via le write-back du builder et l'App-of-Apps
+existante, en **déploiement** — **zéro geste** (ADR 0095 §1.b ; plan build
+événementiel §4 « Mécanisme de DÉCOUVERTE », voie C).
+
+| Fichier                                                                                                                                         | CR            | Rôle dans la chaîne                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| [`eventbus-nats.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argo-events/eventbus-nats.yaml)                               | `EventBus`    | Bus NATS natif `default`, `replicas: 1` (**SPOF assumé, TRACÉ**). 3 images NATS épinglées par digest.                                   |
+| [`eventsource-gitea.example.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argo-events/eventsource-gitea.example.yaml)       | `EventSource` | **Webhook #2 (build)** : endpoint `/push` (port 12000), secret HMAC injecté au seed (patron `*.example`). DISTINCT du #1 (déploiement). |
+| [`sensor-code-location.example.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argo-events/sensor-code-location.example.yaml) | `Sensor`      | **CŒUR de la découverte** : filtre branche + chemin, DÉRIVE `codeLocation` du chemin, SOUMET le WorkflowTemplate `image-builder`.       |
+
+**Flux** : `git push atlas` → **EventSource** (webhook #2) → **EventBus** NATS →
+**Sensor** (découverte) → **soumet `image-builder`** (Argo Workflows, ns `argo`)
+→ build+push+write-back `apps/<cl>.yaml` par digest dans `cluster/apps` → **Argo
+CD** (webhook #1, déjà câblé) réconcilie la racine App-of-Apps → pod gRPC.
+
+**Découverte = `codeLocation` DÉRIVÉ du chemin, jamais énuméré.** Le Sensor
+filtre le push sur (a) `ref == refs/heads/main` ET (b) un chemin modifié sous
+`dataops/<x>-dagster/` (regex, pas de liste), puis extrait `codeLocation` du
+chemin (`dataops/<name>-dagster/…` → `<name>`) et `revision` de `body.after`
+(SHA, signal canonique ADR 0094 §3). Une code-location **NOUVELLE**
+`dataops/newthing-dagster/…` donne `codeLocation=newthing` →
+`apps/newthing.yaml` → Application `newthing`, **sans énumération ni geste**.
+Garde-fou amont :
+[`check_code_location_manifest.py`](/cluster/scripts/check_code_location_manifest.py)
+échoue bruyamment sur un manifeste incohérent.
+
+**Filet event-loss** :
+[`cronworkflow-reconcile.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argo-workflows/cronworkflow-reconcile.yaml)
+(ns `argo`) compare périodiquement le HEAD atlas au tag déployé et resoumet le
+builder si un event NATS a été perdu (`replicas: 1`). **Honnêteté** : filet de
+rattrapage à latence = période du Cron, **PAS** le rejeu `changed=0` d'Ansible
+(ADR 0052).
+
+**Webhook #2 au seed** : le handler `webhook_build()`
+([`scripts/topology.py`](/cluster/scripts/topology.py)) pose ce hook Gitea sur
+le repo **atlas/atlas** vers l'endpoint de l'EventSource
+(`gitea-push-eventsource-svc.argo-events.svc.cluster.local:12000/push`), avec le
+secret HMAC partagé `gitea-webhook-build-hmac`. Câblé mais pas encore dans la
+séquence de seed (à brancher quand le socle événementiel est monté — cf.
+`_SEED_BANC_TODO`).
+
+Détail :
+[ADR 0095 §1.b](/cluster/docs/decisions/0095-build-applicatif-evenementiel-in-cluster/),
+[plan build événementiel §4](/cluster/docs/plans/plan-build-evenementiel-gitops/).
+
 ## Décisions assumées
 
 - **Argo Events ≠ self-managed par Argo CD** : c'est de l'infra (frontière
   0022/0095).
 - **Images à mirrorer** (cluster sans Internet, 0011) — TODO d'intégration.
 - **Épinglage par digest** (ADR 0006), tag conservé pour lisibilité.
-- **Images NATS de l'EventBus** épinglées plus tard (étape 7), avec le CR
-  `EventBus`.
+- **Images NATS de l'EventBus** épinglées (étape 7) dans
+  [`eventbus-nats.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argo-events/eventbus-nats.yaml)
+  : `nats:2.10.29` + `nats-server-config-reloader:0.14.0` +
+  `prometheus-nats-exporter:0.14.0`, par digest d'index multi-arch.

@@ -1,0 +1,53 @@
+# EventSource `gitea-push` (Argo Events v1.9.10) — WEBHOOK #2 (BUILD) de la
+# chaîne événementielle (ADR 0095 §1.b, étape 7 du plan build événementiel).
+#
+# ── DEUX WEBHOOKS GITEA DISTINCTS (ADR 0095 §1.b) ─────────────────────────────
+#  • webhook #1 (DÉPLOIEMENT, DÉJÀ câblé) : push sur `cluster/apps` →
+#    argocd-server/api/webhook → Argo CD réconcilie. Posé par `webhook()` du seed
+#    (scripts/topology.py) sur le repo des Application.
+#  • webhook #2 (BUILD, CE FICHIER) : push sur `atlas/atlas` (code applicatif) →
+#    CET EventSource → EventBus NATS → Sensor `code-location-build` → soumet le
+#    WorkflowTemplate `image-builder`. Posé par `webhook_build()` du seed sur le
+#    repo de CODE atlas. C'est LE déclencheur « git push atlas → build » de la
+#    demande utilisateur (« détection d'une code-location → installation, zéro
+#    geste »).
+#
+# L'EventSource webhook OUVRE un serveur HTTP dans le namespace argo-events. Il
+# est joignable en intra-cluster via le Service `gitea-push-eventsource-svc`
+# (convention Argo Events `<eventsource-name>-eventsource-svc`), sur le port
+# ci-dessous. L'URL que Gitea appellera :
+#   http://gitea-push-eventsource-svc.argo-events.svc.cluster.local:12000/push
+#
+# ── PATRON *.example (ADR 0023) ───────────────────────────────────────────────
+# Ce fichier est un GABARIT versionné. Le secret HMAC de validation du webhook
+# (partagé entre Gitea et l'EventSource) N'EST PAS gravé ici : il est référencé
+# depuis un Secret `gitea-webhook-build-hmac` (clé `secret`), GÉNÉRÉ au seed
+# (`gen_secret`, jamais versionné) — le MÊME secret que `webhook_build()` du seed
+# pose côté hook Gitea. Sans ce secret partagé, l'EventSource rejette les payloads
+# (protection contre un POST forgé). Gitea signe le corps en HMAC-SHA256 dans
+# l'en-tête `X-Gitea-Signature` ; `webhook.<name>.authSecret` fait valider cette
+# signature par l'EventSource.
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: gitea-push
+  namespace: argo-events
+spec:
+  service:
+    # Le Service exposant l'endpoint (nom dérivé = gitea-push-eventsource-svc).
+    ports:
+      - port: 12000
+        targetPort: 12000
+  webhook:
+    # Clé `push` = nom de l'endpoint (repris tel quel par la dépendance du Sensor,
+    # `eventName: push`). Un seul endpoint suffit : le webhook Gitea #2 ne pousse
+    # que des events `push`.
+    push:
+      port: '12000'
+      endpoint: /push
+      method: POST
+      # Validation HMAC — Secret GÉNÉRÉ au seed (patron *.example, ADR 0023).
+      # Le seed pose le MÊME secret côté hook Gitea (`webhook_build()`).
+      authSecret:
+        name: gitea-webhook-build-hmac
+        key: secret
