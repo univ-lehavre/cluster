@@ -136,6 +136,18 @@ EMITTER_OL_NAMESPACE = "dagster"
 MARQUEZ_URL = "http://marquez.marquez.svc.cluster.local:5000"
 MARQUEZ_ENDPOINT = "api/v1/lineage"
 
+# Preuve egress Internet (NetworkPolicy `allow-internet-egress`, #256) : un pod éphémère du
+# ns `dagster` curl une IP publique sur 443. IP LITTÉRALE (Cloudflare 1.1.1.1) et non un FQDN
+# — on prouve qu'un paquet sortant atteint le « world », sans dépendre du DNS ni d'un endpoint
+# S3 mouvant (piège DNS, mémoire dns-fqdn-timeout). Image curl épinglée (historiquement prouvée).
+EGRESS_PROBE_IMAGE = "curlimages/curl:8.11.1"
+EGRESS_PROBE_TARGET = "https://1.1.1.1/"
+EGRESS_NAMESPACE = "dagster"
+EGRESS_NP_NAME = "allow-internet-egress"
+# Manifeste VERSIONNÉ de la NP (relatif à la racine du dépôt) : source de vérité réappliquée
+# par le trap de garantie (corriger l'état, jamais l'inventer — ADR 0046).
+EGRESS_NP_MANIFEST = "platform/network-policies/dagster/allow-internet-egress.yaml"
+
 
 def emit_toy_job_manifest(
     *,
@@ -225,13 +237,47 @@ def classify_marquez_ingest(before: int | None, after: int | None) -> tuple[str,
     return ("fail", f"Marquez : aucun job ingéré ({before} → {after})")
 
 
-# ── Harnais e2e (réserve critique ADR 0097 §5 / lot 7) : 1 câblé, 1 STUB ─────────
+def classify_egress_probe(with_np: str, without_np: str) -> tuple[str, str]:
+    """Verdict de la preuve egress Internet (NetworkPolicy `allow-internet-egress`) d'après
+    le code HTTP curl AVEC la NP et SANS elle (PUR). Port FIDÈLE de `classify_egress_probe`
+    (dataops-assert.sh:97, mêmes 6 cas que dataops-assert.bats:78) — verdict `(status, message)`,
+    `status ∈ {ok, fail, skip}` :
+      - `with_np` vide → `skip` (probe non exécutée — pas un échec) ;
+      - `with_np == "000"` → `fail` (la NP n'ouvre PAS la sortie : curl=000 AVEC la policy) ;
+      - `with_np` abouti ET `without_np == "000"` → `ok` (flux ouvert par la NP, deny prouvé) ;
+      - `with_np` abouti ET `without_np == ""` → `ok` (allow attesté, deny sans-NP non mesuré) ;
+      - `with_np` abouti ET `without_np` abouti aussi → `fail` (default-deny ne mord pas).
+
+    Un code HTTP réel (2xx/3xx/4xx, même un 403 S3) prouve que le FLUX réseau sortant a abouti
+    (c'est le flux qu'on valide, pas une autorisation applicative). `"000"` = curl sans réponse
+    (timeout/refus). La NORMALISATION (toute sortie hors « 3 chiffres » → `000`) est faite côté
+    façade (là où curl s'exécute) : ici l'entrée est déjà propre."""
+    if not with_np:
+        return ("skip", "Egress : probe non exécutée (code AVEC-NP vide)")
+    if with_np == "000":
+        return ("fail", "Egress : la NP n'ouvre PAS la sortie Internet (curl=000 avec la policy)")
+    if without_np == "000":
+        return ("ok", f"Egress : flux Internet ouvert par la NP (avec={with_np}, sans=bloqué)")
+    if without_np == "":
+        return (
+            "ok",
+            f"Egress : sortie Internet aboutie (avec={with_np} ; deny sans-NP non mesuré)",
+        )
+    return (
+        "fail",
+        f"Egress : la sortie aboutit AUSSI sans la NP (avec={with_np}, sans={without_np}) "
+        "— default-deny ne mord pas",
+    )
+
+
+# ── Harnais e2e (réserve critique ADR 0097 §5 / lot 7) : les DEUX câblés ─────────
 # Ces harnais PROUVENT le maillon final que _wait_layer_healthy ne couvre PAS (un
 # Deployment Marquez Ready ne prouve PAS qu'un run Dagster émet du lineage ingéré). Ils
-# sont DÉCLARÉS comme hooks de la phase `dataops`. `dataops_chain_emit_and_verify` est
-# désormais CÂBLÉ DANS LA FAÇADE (Job émetteur + poll + delta Marquez, I/O kubectl) ; le
-# STUB ci-dessous reste le DÉFAUT du registre (appelé sans I/O injectée → lève, honnêteté).
-# `dataops_egress_internet_check` reste STUBÉ (bascule NetworkPolicy + probe egress 443).
+# sont DÉCLARÉS comme hooks de la phase `dataops`, CÂBLÉS DANS LA FAÇADE (I/O kubectl) :
+# `dataops_chain_emit_and_verify` (Job émetteur + poll + delta Marquez) et
+# `dataops_egress_internet_check` (probe egress 443 + bascule NetworkPolicy + trap). Les
+# STUBS ci-dessous restent les DÉFAUTS du registre (appelés sans I/O injectée → lèvent,
+# honnêteté ADR 0034) — atteints seulement si on joue le registre nu sans la façade.
 
 
 class E2EHookStubbed(RuntimeError):
@@ -261,16 +307,15 @@ def _hook_chain_emit_and_verify(**_kw) -> None:
 
 
 def _hook_egress_internet_check(**_kw) -> None:
-    """STUB de `dataops_egress_internet_check` (run-phases.sh:1312).
-
-    RÉEL à câbler (à PROUVER au banc) : probe egress 443 d'un pod du ns `dagster`
-    (`curl https://1.1.1.1/`) AVEC la NetworkPolicy `allow-internet-egress` (doit
-    aboutir), RETIRER la NP et re-probe (doit timeouter `000`), RÉAPPLIQUER la NP depuis
-    le manifeste versionné (corriger l'état, ADR 0046 ; trap de garantie), verdict
-    `classify_egress_probe`. Stub qui LÈVE tant que ce n'est pas prouvé au banc."""
+    """DÉFAUT registre de `dataops_egress_internet_check` — le geste réel (probe egress 443
+    + bascule NetworkPolicy + trap de réapplication) est CÂBLÉ DANS LA FAÇADE
+    (`scripts/topology.py:_egress_internet_check_banc`, ADR 0049) et substitué à ce défaut par
+    le moteur (`_E2E_HOOK_IMPL`). Ce défaut N'A PAS l'I/O injectée → il LÈVE (jamais un faux
+    « ok », honnêteté ADR 0034) : atteint seulement si on joue le registre nu sans la façade."""
     raise E2EHookStubbed(
-        "dataops_egress_internet_check NON câblé (STUB) : bascule NetworkPolicy egress 443 "
-        "+ probe avec/sans à porter et PROUVER au banc (run-phases.sh:1312, ADR 0097 §5)"
+        "dataops_egress_internet_check appelé SANS I/O injectée (défaut registre) : le geste "
+        "réel (probe egress 443 + bascule NetworkPolicy) vit dans la façade — voir "
+        "scripts/topology.py:_egress_internet_check_banc (ADR 0097 §5)"
     )
 
 
@@ -349,7 +394,7 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     "gitops": _plan("gitops", extravars_keys=("gitea_storage_class",)),
     # ── dataops : chaîne registry → CNPG → Dagster → Marquez. NON TRIVIALE :
     #    après le playbook + gate Marquez, DEUX harnais e2e (OpenLineage→Marquez,
-    #    egress 443) que _wait_layer_healthy NE couvre PAS → hooks explicites (STUBÉS). ─
+    #    egress 443) que _wait_layer_healthy NE couvre PAS → hooks explicites (CÂBLÉS façade). ─
     "dataops": _plan(
         "dataops",
         extravars_keys=(
@@ -362,8 +407,8 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
             "build_emitter_image",
         ),
         e2e_hooks=("dataops_chain_emit_and_verify", "dataops_egress_internet_check"),
-        note="playbook + gate Marquez Ready, PUIS 2 harnais e2e (OpenLineage→Marquez, "
-        "egress NP 443) STUBÉS — preuve e2e à câbler+prouver au banc (ADR 0097 §5)",
+        note="playbook + gate Marquez Ready, PUIS 2 harnais e2e CÂBLÉS façade "
+        "(OpenLineage→Marquez, egress NP 443) — à re-prouver au banc (ADR 0097 §5)",
     ),
     # ── mlflow : suivi de modèles (backend CNPG + artefacts S3). ──────────────
     "mlflow": _plan("mlflow", extravars_keys=("mlflow_s3_backing", "mlflow_s3_endpoint")),
@@ -466,10 +511,10 @@ _BANC_TODO = (
     #    `_chain_emit_and_verify_banc`) — RESTE À PROUVER AU BANC (run-phases.sh:1213) +
     #    GARANTIR l'image émetteur : le play `dataops` du moteur Python NE passe PAS encore
     #    `build_emitter_image=true` (le bash si, run-phases.sh:1031) → sans build, le Job
-    #    ImagePullBackOff → le hook échoue honnêtement. `_hook_egress_internet_check` reste
-    #    STUBÉ (bascule NetworkPolicy + probe 443 — à câbler+prouver au banc, run-phases.sh:1312).
-    "harnais e2e dataops : chain_emit CÂBLÉ (prouver au banc + garantir l'image émetteur) ; "
-    "egress 443 encore STUBÉ — à câbler+prouver au banc",
+    #    ImagePullBackOff → le hook échoue honnêtement. `_egress_internet_check_banc` est CÂBLÉ
+    #    dans la façade (probe 443 + bascule NP + trap réapplication, portage bash prouvé ee1afc3).
+    "harnais e2e dataops CÂBLÉS (chain_emit + egress NP 443) — à re-prouver au banc "
+    "(garantir l'image émetteur + egress internet réel au banc)",
     # 2. SURCHARGES banc des phases Ceph (ceph_metadata_device=vde, ceph_osd_memory_request,
     #    dossier dé-épinglé arm64, /var/lib/rook node-side) : paramètres de PROVISIONNEMENT
     #    propres au banc Lima, à poser par la façade et PROUVER (OSD up, HEALTH_OK).

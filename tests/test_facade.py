@@ -330,29 +330,36 @@ class CallbacksWireRealBricks(unittest.TestCase):
         code = _engine(topo, "layers", ["up"], "solo")
         self.assertEqual(code, 1)
 
-    def test_e2e_hook_stubbed_stops_net(self):
-        # dataops joue DEUX hooks e2e : `chain_emit_and_verify` (CÂBLÉ) puis
-        # `egress_internet_check` (encore STUBÉ → LÈVE). Même si le 1er passe, le 2nd stoppe
-        # NET le montage (code 1) — PAS de verdissement à tort (honnêteté ADR 0034). On stube
-        # le hook CÂBLÉ en succès (pas d'I/O kubectl en test) pour isoler le rôle du stub.
+    def test_e2e_hook_failure_stops_net(self):
+        # dataops joue DEUX hooks e2e CÂBLÉS (`chain_emit_and_verify` puis `egress_internet_check`).
+        # Si un hook LÈVE (ici on force l'egress à échouer), le montage s'arrête NET (code 1) —
+        # PAS de verdissement à tort (honnêteté ADR 0034). On stube les deux impls façade : la
+        # 1re en succès, la 2nde qui lève, pour isoler le rôle du fail-fast des hooks.
         self._stub_idempotent([])
         self._patch(cli, "_chain_emit_and_verify_banc", lambda *_a, **_k: None)
+
+        def _egress_fails(*_a, **_k):
+            raise _phases.E2EHookStubbed("egress KO (test)")
+
+        self._patch(cli, "_egress_internet_check_banc", _egress_fails)
         topo = _topo(_LIMA_SOLO)
         code = _engine(topo, "layers", ["dataops"], "solo")
         self.assertEqual(code, 1)
 
-    def test_chain_hook_routed_to_real_facade_impl(self):
-        # Le moteur SUBSTITUE l'implémentation RÉELLE de façade (`_chain_emit_and_verify_banc`)
-        # au STUB du registre pour `dataops_chain_emit_and_verify` — il ne joue plus le stub
-        # `phases.E2E_HOOKS` (qui lèverait E2EHookStubbed). On espionne l'impl façade : si le
-        # play réussit, elle est appelée ; on neutralise l'egress (stub) pour s'arrêter avant.
+    def test_both_hooks_routed_to_real_facade_impl(self):
+        # Le moteur SUBSTITUE les implémentations RÉELLES de façade aux STUBS du registre pour
+        # les DEUX hooks dataops (chain_emit → `_chain_emit_and_verify_banc`, egress →
+        # `_egress_internet_check_banc`) — il ne joue plus les stubs `phases.E2E_HOOKS` (qui
+        # lèveraient E2EHookStubbed). On espionne les deux impls : si le play réussit, elles
+        # sont appelées DANS L'ORDRE, et le montage aboutit (code 0).
         self._stub_idempotent([])
         called = []
-        self._patch(cli, "_chain_emit_and_verify_banc", lambda *_a, **_k: called.append(True))
-        # On laisse l'egress lever (code 1) ; ce qui compte : le hook CÂBLÉ a bien été joué.
+        self._patch(cli, "_chain_emit_and_verify_banc", lambda *_a, **_k: called.append("chain"))
+        self._patch(cli, "_egress_internet_check_banc", lambda *_a, **_k: called.append("egress"))
         topo = _topo(_LIMA_SOLO)
-        _engine(topo, "layers", ["dataops"], "solo")
-        self.assertEqual(called, [True], "le hook chain réel (façade) doit être joué, pas le stub")
+        code = _engine(topo, "layers", ["dataops"], "solo")
+        self.assertEqual(code, 0)
+        self.assertEqual(called, ["chain", "egress"], "les 2 hooks réels façade, dans l'ordre")
 
 
 class BootstrapCallbackWiring(unittest.TestCase):
@@ -902,14 +909,11 @@ class SeedPhaseWiring(unittest.TestCase):
 
     def test_gitops_seed_chains_after_dataops(self):
         # Le chemin enchaîne dataops → gitops-seed : la phase déléguée se monte APRÈS la
-        # couche dataops (parité de la séquence run-phases.sh). dataops joue 2 hooks e2e ; pour
-        # exercer l'ENCHAÎNEMENT de routage (pas les hooks), on neutralise les deux : le hook
-        # CÂBLÉ (`_chain_emit_and_verify_banc`, façade) en succès, et le STUB du registre de
-        # l'egress (`E2E_HOOKS[...]`, qui sinon lèverait E2EHookStubbed → arrêt net).
+        # couche dataops (parité de la séquence run-phases.sh). dataops joue 2 hooks e2e CÂBLÉS ;
+        # pour exercer l'ENCHAÎNEMENT de routage (pas les hooks), on neutralise les deux impls
+        # façade en succès (pas d'I/O kubectl en test).
         self._patch(cli, "_chain_emit_and_verify_banc", lambda *_a, **_k: None)
-        self._patch_dict_item(
-            _phases.E2E_HOOKS, "dataops_egress_internet_check", lambda *_a, **_k: None
-        )
+        self._patch(cli, "_egress_internet_check_banc", lambda *_a, **_k: None)
 
         def _ok_idem(*_a, **_k):
             return _runner.RunResult(rc=0, status="successful", changed=0)
@@ -1083,6 +1087,118 @@ class ChainEmitAndVerifyWiring(unittest.TestCase):
         self.assertEqual(c(2, 2)[0], "ok")  # idempotence (présence, pas delta)
         self.assertEqual(c(0, 0)[0], "fail")
         self.assertEqual(c(None, 1)[0], "skip")
+
+
+class EgressInternetCheckWiring(unittest.TestCase):
+    """Le hook e2e `dataops_egress_internet_check` CÂBLÉ (`_egress_internet_check_banc`,
+    porte le geste bash prouvé ee1afc3) — I/O kubectl INJECTÉE, ZÉRO cluster (honnêteté ADR
+    0034). On prouve le GESTE (probe AVEC la NP, bascule delete, re-probe, RÉAPPLICATION
+    garantie par le trap même si le probe lève), le verdict (ok silencieux / fail lève), et
+    l'anti-DNS (la cible curl est l'IP littérale 1.1.1.1, jamais un FQDN). La preuve d'egress
+    RÉEL reste un run banc du mainteneur."""
+
+    def _patch(self, obj, name, value):
+        orig = getattr(obj, name)
+        setattr(obj, name, value)
+        self.addCleanup(setattr, obj, name, orig)
+
+    def _run(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._egress_internet_check_banc(sleep=lambda _s: None)
+
+    def _harness(self, *, probe_codes):
+        """Espionne `_kubectl`. `probe_codes` : suite des codes HTTP que `kubectl run egress-probe`
+        rend successivement (AVEC-NP, puis SANS-NP). Capture les argv run/delete/apply."""
+        captured = {"probe": [], "delete": [], "apply": []}
+        codes = iter(probe_codes)
+
+        def _spy_kubectl(*args, **kw):
+            argv = list(args)
+            if "run" in argv and any("egress-probe" in str(a) for a in argv):
+                captured["probe"].append(argv)
+                try:
+                    code = next(codes)
+                except StopIteration:
+                    code = "000"
+                return subprocess.CompletedProcess(args, 0, code, "")
+            if "delete" in argv and "-f" in argv:
+                captured["delete"].append(argv)
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if "apply" in argv and "-f" in argv:
+                captured["apply"].append(argv)
+                return subprocess.CompletedProcess(args, 0, "", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        self._patch(cli, "_kubectl", _spy_kubectl)
+        return captured
+
+    def test_probe_with_np_ok_without_blocked_is_ok(self):
+        # AVEC la NP → 301 (aboutit) ; SANS → 000 (bloqué) : verdict ok → ne LÈVE PAS. Le geste
+        # complet : 2 probes, 1 delete de la NP, 1 apply de réapplication (trap).
+        cap = self._harness(probe_codes=["301", "000"])
+        self._run()  # ne lève pas
+        self.assertEqual(len(cap["probe"]), 2)
+        self.assertEqual(len(cap["delete"]), 1)
+        self.assertEqual(len(cap["apply"]), 1, "la NP doit être réappliquée (trap)")
+
+    def test_probe_fails_with_np_raises(self):
+        # AVEC la NP → 000 (la NP n'ouvre pas / pas d'egress internet) → fail → LÈVE (pas de
+        # faux vert). La NP est quand même réappliquée (trap).
+        cap = self._harness(probe_codes=["000", "000"])
+        with self.assertRaises(_phases.E2EHookStubbed):
+            self._run()
+        self.assertEqual(len(cap["apply"]), 1, "réapplication garantie même en échec")
+
+    def test_both_probes_succeed_raises(self):
+        # AVEC 301 ET SANS 301 (default-deny ne mord pas) → fail → LÈVE.
+        self._harness(probe_codes=["301", "301"])
+        with self.assertRaises(_phases.E2EHookStubbed):
+            self._run()
+
+    def test_np_reapplied_even_if_reprobe_raises(self):
+        # TRAP de garantie (ADR 0046) : si le re-probe SANS-NP lève au milieu, le `finally`
+        # réapplique QUAND MÊME la NP (l'état du banc reconverge, jamais laissé sans NP).
+        applied = []
+        probes = {"n": 0}
+
+        def _spy_kubectl(*args, **kw):
+            argv = list(args)
+            if "run" in argv and any("egress-probe" in str(a) for a in argv):
+                probes["n"] += 1
+                if probes["n"] == 2:  # le re-probe SANS-NP explose (kubectl injoignable)
+                    raise OSError("kubectl a disparu au milieu du test")
+                return subprocess.CompletedProcess(args, 0, "301", "")
+            if "apply" in argv and "-f" in argv:
+                applied.append(argv)
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        self._patch(cli, "_kubectl", _spy_kubectl)
+        with self.assertRaises(OSError), contextlib.redirect_stdout(io.StringIO()):
+            cli._egress_internet_check_banc(sleep=lambda _s: None)
+        self.assertEqual(len(applied), 1, "le trap DOIT réappliquer la NP malgré l'exception")
+
+    def test_probe_targets_literal_ip_not_fqdn(self):
+        # Anti-DNS : la cible curl est l'IP littérale 1.1.1.1 (paquet sortant « world »), JAMAIS
+        # un FQDN (qui timeouterait / dépendrait du DNS — mémoire dns-fqdn-timeout).
+        cap = self._harness(probe_codes=["301", "000"])
+        self._run()
+        for argv in cap["probe"]:
+            self.assertIn("https://1.1.1.1/", argv)
+            self.assertFalse(
+                any("svc.cluster.local" in str(a) or "openalex" in str(a) for a in argv),
+                "le probe ne doit viser aucun FQDN",
+            )
+
+    def test_probe_code_normalizes_garbage_to_000(self):
+        # `_egress_probe_code` normalise toute sortie hors « 3 chiffres » à 000 (pod qui ne
+        # démarre pas, sortie parasite) — pas de faux verdict (leçon L59, double 000).
+        self._patch(
+            cli, "_kubectl", lambda *_a, **_k: subprocess.CompletedProcess([], 0, "pod error", "")
+        )
+        self.assertEqual(cli._egress_probe_code(), "000")
+        # kubectl injoignable (None) → 000 aussi.
+        self._patch(cli, "_kubectl", lambda *_a, **_k: None)
+        self.assertEqual(cli._egress_probe_code(), "000")
 
 
 class NodesOverrideEnrichment(unittest.TestCase):

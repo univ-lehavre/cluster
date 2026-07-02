@@ -217,6 +217,26 @@ class ChainEmitPureLogic(unittest.TestCase):
         # Le message d'un ok porte le compteur avant→après (info de diagnostic).
         self.assertIn("0 → 1", phases.classify_marquez_ingest(0, 1)[1])
 
+    def test_classify_egress_probe(self):
+        # Port FIDÈLE de classify_egress_probe (dataops-assert.sh:97) — les 6 cas des bats
+        # (dataops-assert.bats:78). Un code HTTP réel (2xx/3xx/4xx) = flux sortant abouti ;
+        # "000" = pas de réponse ; "" = non mesuré.
+        c = phases.classify_egress_probe
+        # avec abouti + sans bloqué → ok (la NP ouvre le flux, deny prouvé).
+        self.assertEqual(c("403", "000")[0], "ok")
+        self.assertIn("sans=bloqué", c("403", "000")[1])
+        self.assertEqual(c("200", "000")[0], "ok")
+        # avec=000 → fail (la NP n'ouvre pas la sortie).
+        self.assertEqual(c("000", "000")[0], "fail")
+        # abouti des DEUX côtés → fail (default-deny ne mord pas).
+        self.assertEqual(c("403", "403")[0], "fail")
+        self.assertIn("sans la NP", c("403", "403")[1])
+        # avec abouti / sans non mesuré → ok (allow attesté, deny non prouvé).
+        self.assertEqual(c("200", "")[0], "ok")
+        self.assertIn("non mesuré", c("200", "")[1])
+        # avec vide → skip (probe non exécutée).
+        self.assertEqual(c("", "")[0], "skip")
+
 
 class ExtravarsAreRestrictedPerPhase(unittest.TestCase):
     """Parité run-phases.sh : chaque play ne reçoit QUE ses `-e` (+ dataops_k8s_host)."""
