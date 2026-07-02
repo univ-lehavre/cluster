@@ -11,6 +11,64 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.48.0](https://github.com/univ-lehavre/cluster/compare/v2.47.0...v2.48.0) (2026-07-02)
+
+
+### Features
+
+* **contract:** valider le manifeste de déclaration montant atlas→cluster ([b8d4a91](https://github.com/univ-lehavre/cluster/commit/b8d4a91e77d3f11cc75f3ac06318f72dbdff589f))
+* frontière atlas — ADR 0094 accepté, validateur de manifeste, déblocage [#533](https://github.com/univ-lehavre/cluster/issues/533) ([45c4372](https://github.com/univ-lehavre/cluster/commit/45c43728875ca39caacf58fa746d490d52066bcf))
+* **nestor:** amorce le câblage record — chrono des phases + module runrecord ([c58af24](https://github.com/univ-lehavre/cluster/commit/c58af247e3bc2360ebb1ff7290b430ddc369de31))
+* **nestor:** câble la consignation record d'un run réussi ([#216](https://github.com/univ-lehavre/cluster/issues/216), ex-metrology.sh) ([659bd91](https://github.com/univ-lehavre/cluster/commit/659bd91c0fd4d9e39caf64297345d9cacfad9285))
+* **nestor:** consigne un run réussi dans runs-history (SHA + durées, [#216](https://github.com/univ-lehavre/cluster/issues/216)) ([495bcf3](https://github.com/univ-lehavre/cluster/commit/495bcf3b0ebf0a4a09af4097e63af00cc804e834))
+* **nestor:** dérive ceph_metadata_device du disque role=metadata déclaré (ADR 0102) ([d84abdd](https://github.com/univ-lehavre/cluster/commit/d84abdd33ccd70e7b86d05df92ffa8dddd7aba92))
+* **nestor:** dérive osd_expected des disques role=data déclarés (ADR 0102) ([4d02784](https://github.com/univ-lehavre/cluster/commit/4d027845f2cace809b4af4ab2cbfe697bbaafc26))
+* **nestor:** la topo déclare ses disques par nœud (DiskSpec, ADR 0102 volet C1) ([2d64abf](https://github.com/univ-lehavre/cluster/commit/2d64abf004f0b2677c3e180aaba4093975aa55fb))
+* **nestor:** provisioning par nœud piloté par la topo (ADR 0102 volet C2+C3) ([799f09f](https://github.com/univ-lehavre/cluster/commit/799f09f93d7432d20b22aac5fd5bd009e14cafa1))
+* **nestor:** remove retire les StorageClass cluster-scoped de la couche (par provisioner) ([9aa6672](https://github.com/univ-lehavre/cluster/commit/9aa6672cca24f015af3dc4b82a116d829418dfff))
+
+
+### Bug Fixes
+
+* **ceph:** libère les LV/VG Ceph avant le wipe node-side (blkdiscard busy) ([6e1166b](https://github.com/univ-lehavre/cluster/commit/6e1166bdf338da9b89ce6958e311f6b2ce07c527))
+* **ceph:** libère les LV/VG Ceph avant le wipe node-side (blkdiscard busy) ([b02f207](https://github.com/univ-lehavre/cluster/commit/b02f207e27cc1607bca7a5ad12d1863fd4f7cb60))
+* **nestor:** dérive le wipe node-side Ceph des disques déclarés (bug vde=cidata) ([29f13b1](https://github.com/univ-lehavre/cluster/commit/29f13b16382850809ea8a2311b4db461cab648f2))
+* **nestor:** destroy passe NODES_OVERRIDE au down (sinon les disques survivent) ([6c935e1](https://github.com/univ-lehavre/cluster/commit/6c935e1aceadde67b427ae5003ace93da8e0c056))
+* **nestor:** écarte un KUBECONFIG poison (/dev/null, vide) des phases du montage ([889fb21](https://github.com/univ-lehavre/cluster/commit/889fb21d93dd672851b2d4c7d9888a6ee891b080))
+* **nestor:** kubectl passe un flag en tête (-n) au lieu de « unrecognized » ([b91c4f7](https://github.com/univ-lehavre/cluster/commit/b91c4f76b422278c38bed99411470b6f25840fd0))
+* **nestor:** kubectl passe un flag en tête (-n) au lieu de « unrecognized » ([9f42b40](https://github.com/univ-lehavre/cluster/commit/9f42b40ab82cbb1b1aca6412b64965ae695ec9ff))
+* **nestor:** wipe node-side Ceph dérivé de la topo + remove des StorageClass cluster-scoped ([0d694d7](https://github.com/univ-lehavre/cluster/commit/0d694d796d1e447ef5e5b32c2973d078aad3b358))
+* **topologies:** ceph.example disque système à 40GiB (20 sature → DiskPressure) ([83b53fd](https://github.com/univ-lehavre/cluster/commit/83b53fdb55f936404945041ba324cd731b9a4f5d))
+
+
+### Refactor
+
+* catalogue de topologies v2 — la topo, source unique (ADR 0102) ([ab3370a](https://github.com/univ-lehavre/cluster/commit/ab3370a87380991021c48711e16322c5e972b0c0))
+* **nestor:** fonction unique de résolution kubeconfig, in-repo (ADR 0102 volet B1) ([545d455](https://github.com/univ-lehavre/cluster/commit/545d455de64deec0afa6c8cc1e87c9bad641e0d5))
+* **nestor:** identité de stack = nom de fichier de la topo (ADR 0102 volet B) ([d433c90](https://github.com/univ-lehavre/cluster/commit/d433c90e82216f98fc183096355e02eb4a1b52c7))
+* **nestor:** kubeconfig banc dans .kubeconfigs/banc.config (ADR 0102 volet B2+B3) ([fc3332e](https://github.com/univ-lehavre/cluster/commit/fc3332ecd25c86549f736093d3cfe08d15c8918c))
+* **nestor:** retire BANC_JETABLE et le repli rollback mort de roundtrip ([341161d](https://github.com/univ-lehavre/cluster/commit/341161d767b11cc849749c92c38588eb743e99ed))
+* **nestor:** retire BANC_JETABLE et le repli rollback mort de roundtrip ([ec500d0](https://github.com/univ-lehavre/cluster/commit/ec500d0738c6bf6acb8bc1427f1f94ca904ffeeb))
+* **nestor:** retire l'except vide de _operator_kubeconfig (alerte CodeQL) ([e4a36eb](https://github.com/univ-lehavre/cluster/commit/e4a36eb3ee7fe73ff7b29c318e1898ecf98c36cd))
+* **nestor:** retire l'except vide de host_model (alerte CodeQL) ([245557b](https://github.com/univ-lehavre/cluster/commit/245557b812c05ad89e8a928ccd60c96e1c4a759d))
+* **nestor:** rollback 100% Python — supprime rollback-lib.sh (ADR 0101 étape 5) ([d828051](https://github.com/univ-lehavre/cluster/commit/d828051a2d85862ced65b15a920a2e070b20f909))
+* **topologies:** renomme banc.yaml en banc.example.yaml (ADR 0102 volet A) ([05822ab](https://github.com/univ-lehavre/cluster/commit/05822ab869bbb496ab534dfe07665ea2980658a3))
+
+
+### Documentation
+
+* **adr:** passer l'adr 0094 (frontière de déploiement) en accepted ([e0cebea](https://github.com/univ-lehavre/cluster/commit/e0cebea03fc33e6f8b5c94db548f368d566351c2))
+* **adr:** tracer la contrainte de chaîne dbt pour débloquer [#533](https://github.com/univ-lehavre/cluster/issues/533) ([57ae08b](https://github.com/univ-lehavre/cluster/commit/57ae08b50a66d31b9782a2de242a8c08c2530a5a))
+* **bench:** consigne la preuve banc du remove ceph par découverte ([#372](https://github.com/univ-lehavre/cluster/issues/372)/[#389](https://github.com/univ-lehavre/cluster/issues/389)) ([49136ad](https://github.com/univ-lehavre/cluster/commit/49136ada28151eba02bc64baeb12534e84ff13b4))
+* **bench:** preuve banc du remove ceph par découverte (ferme [#372](https://github.com/univ-lehavre/cluster/issues/372)/[#389](https://github.com/univ-lehavre/cluster/issues/389)) ([9803e83](https://github.com/univ-lehavre/cluster/commit/9803e83c91c89e38cda0fc15d90ae1c547589366))
+* **gouvernance:** pose l'ADR 0102 catalogue de topologies v2 (topo = source unique) ([be1ba58](https://github.com/univ-lehavre/cluster/commit/be1ba582dbf2ecc64b9a15b679c5045d88aed12e))
+* **readme:** ajouter une section sécurité dédiée ([b2890e1](https://github.com/univ-lehavre/cluster/commit/b2890e171b164a222306253f467b9927db94b37b))
+* section sécurité dédiée dans le README ([1aa6c2a](https://github.com/univ-lehavre/cluster/commit/1aa6c2a11b8284b12731f87625c9f160f405f53b))
+* **security:** corriger l'état obsolète du chiffrement etcd et de l'audit-policy ([acc243d](https://github.com/univ-lehavre/cluster/commit/acc243d5cfb77a68bf742e3788bc783ec64e8a3e))
+* **topologies:** aligne banc.example et ceph.example sur ADR 0102 (fin d'alignement) ([8030ef8](https://github.com/univ-lehavre/cluster/commit/8030ef8b78bd2eef75a9d49740db306966807f96))
+* **topologies:** audit de cohérence du catalogue (ADR 0102/0092/0052) ([293c047](https://github.com/univ-lehavre/cluster/commit/293c047c0f0d5ae90b3b56ed3bbabfdeeb00da28))
+* **topologies:** clarifie resources.disk (disque système) vs nodes[].disks (bruts Ceph) ([ce7fa8a](https://github.com/univ-lehavre/cluster/commit/ce7fa8a651aa90849fa41e50a7f03777e7f9c3f3))
+
 ## [2.47.0](https://github.com/univ-lehavre/cluster/compare/v2.46.0...v2.47.0) (2026-07-01)
 
 
