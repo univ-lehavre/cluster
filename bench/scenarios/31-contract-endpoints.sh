@@ -40,27 +40,44 @@ command -v yq >/dev/null 2>&1 || { log "skip — yq absent (requis pour lire le 
 [ -f "${CONTRACT}" ] || { log "skip — contrat introuvable : ${CONTRACT}"; exit 0; }
 
 PROBE_NS=default
+# Ns où une sonde a pu être lancée (alimenté au fil des endpoints `probe_from`) — pour le trap.
+# DÉCLARÉ avant `cleanup`/`trap` (qui l'utilisent) : sous `set -u`, un trap tôt ne doit pas
+# tomber sur une variable non définie.
+declare -a PROBE_FROM_NS=()
 # shellcheck disable=SC2329  # invoquée via trap EXIT
 cleanup() {
-    kubectl -n "${PROBE_NS}" delete pod "contract-probe-$$" --wait=false 2>/dev/null || true
+    # Le pod-sonde `--rm` s'auto-nettoie ; ce trap est un filet si le run est interrompu.
+    # Il peut naître dans PROBE_NS OU un ns `probe_from` (endpoint sous NetworkPolicy) : on
+    # balaie tous les ns où une sonde a pu être lancée (best-effort, --wait=false).
+    for _ns in "${PROBE_NS}" ${PROBE_FROM_NS[@]+"${PROBE_FROM_NS[@]}"}; do
+        kubectl -n "${_ns}" delete pod "contract-probe-$$" --wait=false 2>/dev/null || true
+    done
 }
 trap cleanup EXIT
 
 # Sonde réseau depuis un pod éphémère intra-cluster (le FQDN .svc doit résoudre).
 # HTTP : wget renvoie 0 dès qu'une réponse arrive (même 401/403/404 = service
 # vivant) ; on accepte aussi un code HTTP. TCP : nc -z teste l'ouverture du port.
+#
+# On NE se fie PAS au code de retour de `kubectl run -i` : une commande qui EXIT
+# INSTANTANÉMENT (`nc -z`, quasi-immédiat) laisse le conteneur en `CONTAINER_EXITED`
+# avant que kubectl ait pu s'y attacher → kubectl « falls back to streaming logs » et
+# peut rendre un rc≠0 alors que la sonde a RÉUSSI (faux « muet » sur postgres, vécu au
+# banc). On fait donc imprimer un MARQUEUR par le pod (`PROBE_OK`) et on le cherche dans
+# la sortie (le fallback logs capture quand même le stdout du pod) — robuste à la race.
 probe_endpoint() {
-    local proto=$1 fqdn=$2 port=$3
+    local proto=$1 fqdn=$2 port=$3 from=${4:-${PROBE_NS}} cmd out
     if [ "${proto}" = "tcp" ]; then
-        kubectl -n "${PROBE_NS}" run "contract-probe-$$" --rm -i --restart=Never \
-            --image=busybox:1.36 --quiet --timeout=30s -- \
-            sh -c "nc -z -w ${PROBE_TIMEOUT} ${fqdn} ${port}" >/dev/null 2>&1
+        cmd="nc -z -w ${PROBE_TIMEOUT} ${fqdn} ${port} && echo PROBE_OK"
     else
         # HTTP : toute réponse (y compris 4xx) prouve que le service écoute et parle.
-        kubectl -n "${PROBE_NS}" run "contract-probe-$$" --rm -i --restart=Never \
-            --image=busybox:1.36 --quiet --timeout=30s -- \
-            sh -c "wget -q -T ${PROBE_TIMEOUT} -O /dev/null 'http://${fqdn}:${port}/' 2>&1; [ \$? -le 8 ]" >/dev/null 2>&1
+        cmd="wget -q -T ${PROBE_TIMEOUT} -O /dev/null 'http://${fqdn}:${port}/' 2>&1; [ \$? -le 8 ] && echo PROBE_OK"
     fi
+    # `from` = ns du pod-sonde (défaut PROBE_NS) : un endpoint sous NetworkPolicy n'accepte
+    # l'ingress que depuis un ns autorisé — on sonde depuis là (accès RÉEL d'un consommateur).
+    out=$(kubectl -n "${from}" run "contract-probe-$$" --rm -i --restart=Never \
+        --image=busybox:1.36 --quiet --timeout=30s -- sh -c "${cmd}" 2>/dev/null)
+    printf '%s' "${out}" | grep -q PROBE_OK
 }
 
 log "Contrat cluster→atlas : ${CONTRACT}"
@@ -77,6 +94,12 @@ for id in "${ids[@]}"; do
     port=$(yq -r ".endpoints[] | select(.id==\"${id}\") | .port" "${CONTRACT}")
     fqdn=$(yq -r ".endpoints[] | select(.id==\"${id}\") | .fqdn" "${CONTRACT}")
     proto=$(yq -r ".endpoints[] | select(.id==\"${id}\") | .protocol // \"tcp\"" "${CONTRACT}")
+    # `probe_from` : ns depuis lequel sonder (défaut = PROBE_NS). Nécessaire pour un endpoint
+    # protégé par NetworkPolicy (ex. postgres n'ouvre 5432 QU'à ses consommateurs déclarés) —
+    # sonder depuis `default` serait bloqué à raison → faux « muet ». On sonde donc depuis un
+    # ns autorisé (le contrat le déclare), ce qui teste l'accès RÉEL d'un consommateur.
+    probe_from=$(yq -r ".endpoints[] | select(.id==\"${id}\") | .probe_from // \"${PROBE_NS}\"" "${CONTRACT}")
+    [ "${probe_from}" = "${PROBE_NS}" ] || PROBE_FROM_NS+=("${probe_from}")
 
     # 1. Le Service existe-t-il au bon namespace ?
     if ! kubectl -n "${ns}" get svc "${svc}" >/dev/null 2>&1; then
@@ -95,8 +118,8 @@ for id in "${ids[@]}"; do
         continue
     fi
 
-    # 3. L'endpoint répond-il (TCP/HTTP) ?
-    if probe_endpoint "${proto}" "${fqdn}" "${port}"; then
+    # 3. L'endpoint répond-il (TCP/HTTP) ? Sonde depuis `probe_from` (ns autorisé si NP).
+    if probe_endpoint "${proto}" "${fqdn}" "${port}" "${probe_from}"; then
         log "  ✓ ${id} — ${ns}/${svc}:${port} (${proto}) présent et répondant"
         responding=$((responding + 1))
     else
