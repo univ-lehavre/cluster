@@ -21,8 +21,63 @@ bench/lima/run-phases.sh atlas
 bench/lima/access.sh
 ```
 
-Puis travaillez dans `atlas` et `git push` (le webhook Gitea → Argo CD
-réconcilie). Détail pas à pas : [guide du développeur data](guide-dev-data.md).
+Puis travaillez dans `atlas` et `git push` : **zéro geste**, l'image se
+construit et se déploie toute seule. Vous ne buildez **plus** l'image à la main.
+Détail pas à pas : [guide du développeur data](guide-dev-data.md) ; mécanique
+complète ci-dessous.
+
+## Ce qui se passe quand vous poussez (build événementiel)
+
+_Mise en place — la preuve banc de bout en bout (run from-scratch) est en
+cours._
+
+Deux webhooks Gitea **distincts** se déclenchent selon _ce_ que vous poussez :
+
+- **Webhook #1 — déploiement (déjà là).** Un push dans le repo Gitea
+  `cluster/apps` (le manifeste d'une `Application`) réveille **Argo CD**, qui
+  réconcilie l'App-of-Apps. C'est le canal GitOps historique
+  ([ADR 0022](decisions/0022-argocd-gitops-applicatif.md) /
+  [0044](decisions/0044-topologie-deploiement-banc-atlas.md)).
+- **Webhook #2 — build (nouveau).** Un `git push` de **code** dans `atlas/atlas`
+  déclenche la chaîne de fabrique d'image, in-cluster et sans intervention.
+
+La chaîne du webhook #2 fonctionne ainsi :
+
+1. `git push` sur `atlas/atlas` → **webhook Gitea #2** (distinct du #1) →
+   **EventSource** Argo Events → **EventBus** NATS.
+2. Le **Sensor** « code-location-build » **dérive** la `codeLocation` du
+   **chemin modifié** (`dataops/<X>-dagster/`, jamais énuméré) et prend
+   `revision = body.after`.
+3. Il soumet le **WorkflowTemplate** « image-builder » (BuildKit rootless, sur
+   un worker) : build + push vers `registry:80/<cl>:<revision>`.
+4. Le workflow **lit le digest** de l'image poussée et fait un **write-back**
+   dans `apps/<cl>.yaml` du repo Gitea `cluster/apps`, **épinglé par
+   `@sha256`**.
+5. Ce write-back **est** un push sur `cluster/apps` → **webhook #1** → **Argo
+   CD** réconcilie → le pod gRPC (code-location Dagster) tourne sur la nouvelle
+   image.
+
+**Découverte, pas énumération.** Créer une **nouvelle** code-location revient à
+ajouter un dossier `dataops/<X>-dagster/` dans `atlas` et à le pousser : le
+Sensor dérive `<X>` du chemin, aucune liste à tenir côté cluster. Un filet
+anti-perte d'évènement (**CronWorkflow**) compare périodiquement le `HEAD`
+d'atlas au tag déployé et rattrape un push manqué.
+
+**Déploiement par digest, jamais par tag.** Le SHA court (`revision`) est le tag
+**lisible** (traçabilité commit → image) ; le `@sha256` est l'**ancre**
+d'immuabilité effectivement déployée
+([ADR 0006](decisions/0006-matrice-de-versions-et-politique-de-bump.md),
+épinglage par digest ; [0052](decisions/0052-reproductibilite-des-resultats.md),
+reproductibilité).
+
+**Frontière atlas ↔ cluster
+([ADR 0094](decisions/0094-frontiere-deploiement-applicatif.md)).** atlas
+**déclare + fournit** (le manifeste montant, avec ses placeholders
+`__CITATION_IMAGE__` / `__CITATION_IMAGE_DIGEST__`) ; cluster **valide +
+instancie + remplit** (lit le manifeste, build, injecte le digest, crée
+l'`Application`). Design complet :
+[ADR 0095](decisions/0095-build-applicatif-evenementiel-in-cluster.md) et son
+[plan de mise en œuvre](plans/plan-build-evenementiel-gitops.md).
 
 ## Comprendre la plateforme
 
@@ -63,14 +118,16 @@ bench/lima/run-phases.sh down       # détruire le banc
 
 ## Décisions qui vous concernent (ADR)
 
-| ADR                                                         | Sujet                                                  |
-| ----------------------------------------------------------- | ------------------------------------------------------ |
-| [0022](decisions/0022-argocd-gitops-applicatif.md)          | Frontière infra (Ansible) / applicatif (Argo CD)       |
-| [0043](decisions/0043-contrat-interface-cluster-atlas.md)   | Contrat d'interface cluster → atlas                    |
-| [0044](decisions/0044-topologie-deploiement-banc-atlas.md)  | Topologie du banc atlas (Gitea intra-banc, webhook)    |
-| [0045](decisions/0045-chemins-installation-banc-couches.md) | Chemins d'installation nommés (`atlas`, `atlas-ceph`…) |
-| [0048](decisions/0048-acces-local-developpeur.md)           | Accès local développeur (`access.sh`)                  |
-| [0023](decisions/0023-plateforme-exemple-generique.md)      | Valeurs génériques, config locale non versionnée       |
+| ADR                                                                | Sujet                                                                 |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| [0022](decisions/0022-argocd-gitops-applicatif.md)                 | Frontière infra (Ansible) / applicatif (Argo CD)                      |
+| [0043](decisions/0043-contrat-interface-cluster-atlas.md)          | Contrat d'interface cluster → atlas                                   |
+| [0044](decisions/0044-topologie-deploiement-banc-atlas.md)         | Topologie du banc atlas (Gitea intra-banc, webhook)                   |
+| [0045](decisions/0045-chemins-installation-banc-couches.md)        | Chemins d'installation nommés (`atlas`, `atlas-ceph`…)                |
+| [0048](decisions/0048-acces-local-developpeur.md)                  | Accès local développeur (`access.sh`)                                 |
+| [0094](decisions/0094-frontiere-deploiement-applicatif.md)         | Frontière de déploiement : atlas déclare, cluster instancie           |
+| [0095](decisions/0095-build-applicatif-evenementiel-in-cluster.md) | Build applicatif événementiel in-cluster (push → image → déploiement) |
+| [0023](decisions/0023-plateforme-exemple-generique.md)             | Valeurs génériques, config locale non versionnée                      |
 
 Index complet : [décisions (ADR)](decisions/).
 
