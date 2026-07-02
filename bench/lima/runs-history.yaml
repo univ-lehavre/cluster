@@ -246,3 +246,17 @@ runs:
       ram_mean_mib: 4614
       par_noeud:
         192.168.104.3:9100: {cpu_core_s: 7812, ram_peak_mib: 4614, ram_mean_mib: 0}
+  - id: 2026-07-02T07-base-6337f0a
+    date: '2026-07-02T07:26:17Z'
+    branche: fix/tests-facade-polluent-runs-history
+    commit: 6337f0a
+    profil: base
+    topologie: banc
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 317
+    phases:
+      gitops-seed: 2
+      mlflow: 154
+      portal: 161
