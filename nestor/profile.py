@@ -206,6 +206,14 @@ def derive_run_params(topo: Topology) -> dict:
     # ImagePullBackOff (image absente du registry). Gardé au target_kind bench.
     if topo.target_kind == "bench":
         out["build_emitter_image"] = "true"
+    # Bloc `atlas` (ADR 0023, config locale) → extravars du build citation
+    # (bootstrap/citation.yaml, ADR 0094/0095 §1.a). `citation_repo_dir` = chemin du
+    # dépôt atlas EXTERNE requis par la garde du play ; sa dérivation depuis
+    # `atlas.repo_dir` évite de le passer en `-e` à la main (parité des autres clés).
+    # Absent → on ne pose pas la clé (la garde du play lève, message explicite).
+    atlas_block = getattr(topo, "atlas", {}) or {}
+    if atlas_block.get("repo_dir"):
+        out["citation_repo_dir"] = atlas_block["repo_dir"]
     return out
 
 

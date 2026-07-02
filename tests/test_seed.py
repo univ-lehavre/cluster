@@ -100,12 +100,20 @@ class Steps(unittest.TestCase):
         self.assertEqual(steps[0], "admin-token")
         self.assertIn("push-atlas-tree", steps)
 
-    def test_banc_citation_shares_prod_sequence(self):
-        # banc-citation joue LE flux App-of-Apps citation (= la séquence prod) mais AU BANC.
-        # Partager la séquence garantit qu'une preuve banc valide le vrai chemin prod (même
-        # ordre, mêmes gardes de digest) — ADR 0095 §1.a « premier pas ».
-        self.assertEqual(seed.seed_steps("banc-citation"), seed.seed_steps("prod"))
-        self.assertIn("push-citation", seed.seed_steps("banc-citation"))
+    def test_banc_citation_extends_prod_with_webhook_build(self):
+        # banc-citation REPREND le flux App-of-Apps citation (la séquence prod) mais AU BANC,
+        # et y AJOUTE le webhook #2 (build) de la chaîne événementielle (ADR 0095 §1.b) —
+        # geste BANC absent de la prod. Le CŒUR App-of-Apps (org/repo, push arbre, citation,
+        # racine) reste partagé → une preuve banc valide le vrai chemin prod.
+        bc = seed.seed_steps("banc-citation")
+        prod = seed.seed_steps("prod")
+        self.assertIn("push-citation", bc)
+        self.assertIn("webhook-build", bc)
+        self.assertNotIn("webhook-build", prod)  # la prod NE grave PAS le webhook #2
+        # webhook-build vient APRÈS push-atlas-tree (le repo de code atlas doit exister avant).
+        self.assertGreater(bc.index("webhook-build"), bc.index("push-atlas-tree"))
+        # Le cœur App-of-Apps prod est un SOUS-ensemble ordonné de banc-citation (seul ajout).
+        self.assertEqual(tuple(s for s in bc if s != "webhook-build"), prod)
 
     def test_unknown_kind_rejected(self):
         with self.assertRaises(seed.SeedError):
@@ -163,9 +171,10 @@ class GuardsOpposed(unittest.TestCase):
             )
         self.assertEqual(executed, [])
 
-    def test_banc_citation_runs_prod_sequence_under_banc_guard(self):
-        # Le POINT de la décision A (ADR 0095 §1.a) : banc-citation joue la séquence prod
-        # SOUS garde banc. La garde passe (cible = banc) → les 6 étapes du flux citation.
+    def test_banc_citation_runs_its_sequence_under_banc_guard(self):
+        # Le POINT de la décision A (ADR 0095 §1.a) : banc-citation joue le flux App-of-Apps
+        # (séquence prod) + le webhook #2 (build) SOUS garde banc. La garde passe (cible =
+        # banc) → les 7 étapes de banc-citation, dans l'ordre.
         order = []
         result = seed.run_seed(
             "banc-citation",
@@ -175,7 +184,8 @@ class GuardsOpposed(unittest.TestCase):
         )
         self.assertTrue(result.done)
         self.assertEqual(order[0], "guard")
-        self.assertEqual(order[1:], list(seed.seed_steps("prod")))
+        self.assertEqual(order[1:], list(seed.seed_steps("banc-citation")))
+        self.assertIn("webhook-build", order)
 
     def test_banc_citation_guard_refusing_prod_target_stops_before_steps(self):
         # SÉCURITÉ (ADR 0053/0084) : la garde banc de banc-citation DÉTECTE une cible prod
@@ -281,7 +291,7 @@ class RenderCitationDeclaration(unittest.TestCase):
         "  source:\n"
         "    repoURL: http://example/atlas.git\n"
         "    targetRevision: 0000000\n"
-        "    path: overlays/prod\n"
+        "    path: dataops/citation-dagster/deploy/overlays/prod\n"
     )
 
     def test_injects_repourl_and_revision(self):
@@ -290,8 +300,26 @@ class RenderCitationDeclaration(unittest.TestCase):
         )
         self.assertIn("repoURL: http://gitea/atlas/atlas.git", out)
         self.assertIn("targetRevision: c98feea9", out)
-        # Le path (overlay) n'est PAS touché.
-        self.assertIn("path: overlays/prod", out)
+        # Sans overlay explicite, le path du patron (prod) n'est PAS touché.
+        self.assertIn("path: dataops/citation-dagster/deploy/overlays/prod", out)
+
+    def test_overlay_rewrites_path_to_bench(self):
+        # banc-citation : le path prod du patron est réécrit vers bench (décision D2).
+        out = seed.render_citation_declaration(
+            self._EXAMPLE, "http://gitea/atlas/atlas.git", "c98feea9", overlay="bench"
+        )
+        self.assertIn("path: dataops/citation-dagster/deploy/overlays/bench", out)
+        self.assertNotIn("overlays/prod", out)
+
+    def test_overlay_not_matched_raises(self):
+        # Un patron sans ligne path overlays/ + overlay demandé → garde (motif non matché).
+        with self.assertRaises(seed.SeedError):
+            seed.render_citation_declaration(
+                "spec:\n  source:\n    repoURL: http://x/a.git\n    targetRevision: abc1234\n",
+                "http://x/a.git",
+                "abc1234",
+                overlay="bench",
+            )
 
     def test_failed_injection_raises(self):
         # Patron sans les lignes ciblées (indentation absente) → garde anti-injection ratée.

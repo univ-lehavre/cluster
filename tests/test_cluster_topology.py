@@ -479,6 +479,16 @@ class OsdDerivation(unittest.TestCase):
         topo = topology_from_dict(_base(storage={"backend": "local-path"}))
         self.assertIsNone(derive_metadata_device(topo))
 
+    def test_citation_repo_dir_derived_from_atlas_block(self):
+        # Le bloc `atlas.repo_dir` (config locale, ADR 0023) → extravar citation_repo_dir
+        # du build citation (bootstrap/citation.yaml, ADR 0095 §1.a) — évite le -e manuel.
+        topo = topology_from_dict(_base(atlas={"repo_dir": "/x/atlas"}))
+        self.assertEqual(derive_run_params(topo).get("citation_repo_dir"), "/x/atlas")
+
+    def test_citation_repo_dir_absent_without_atlas_block(self):
+        # Pas de bloc atlas → clé absente (la garde du play lève, message explicite).
+        self.assertNotIn("citation_repo_dir", derive_run_params(topology_from_dict(_base())))
+
 
 class DiskParsing(unittest.TestCase):
     """ADR 0102 volet C : `nodes[].disks` → `DiskSpec` (name/size/role), la topo pilote."""

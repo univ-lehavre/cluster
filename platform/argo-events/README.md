@@ -87,13 +87,19 @@ builder si un event NATS a été perdu (`replicas: 1`). **Honnêteté** : filet 
 rattrapage à latence = période du Cron, **PAS** le rejeu `changed=0` d'Ansible
 (ADR 0052).
 
-**Webhook #2 au seed** : le handler `webhook_build()`
+**Webhook #2 au seed** : le geste `_seed_ensure_build_webhook`
 ([`scripts/topology.py`](https://github.com/univ-lehavre/cluster/blob/main/scripts/topology.py))
 pose ce hook Gitea sur le repo **atlas/atlas** vers l'endpoint de l'EventSource
 (`gitea-push-eventsource-svc.argo-events.svc.cluster.local:12000/push`), avec le
-secret HMAC partagé `gitea-webhook-build-hmac`. Câblé mais pas encore dans la
-séquence de seed (à brancher quand le socle événementiel est monté — cf.
-`_SEED_BANC_TODO`).
+secret HMAC partagé `gitea-webhook-build-hmac`. Il est **branché dans la
+séquence `banc-citation`** du seed (étape `webhook-build`, APRÈS
+`push-atlas-tree` — le repo de code atlas doit exister avant qu'on y pose le
+hook ; cf.
+[`nestor/seed.py`](https://github.com/univ-lehavre/cluster/blob/main/nestor/seed.py)
+`_BANC_CITATION_STEPS`). La PROD ne grave PAS ce webhook (geste banc de la
+preuve événementielle) ; son câblage prod reste différé (`_BANC_TODO`). Le nom
+réel du Service EventSource et le format du payload push restent à **prouver au
+banc**.
 
 Détail :
 [ADR 0095 §1.b](/cluster/docs/decisions/0095-build-applicatif-evenementiel-in-cluster/),

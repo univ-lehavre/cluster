@@ -22,9 +22,12 @@
 # concrètes (parsing du sha12 dans le manifeste, appel `argo`/API) restent à
 # CÂBLER ET PROUVER AU BANC (format réel des `apps/<cl>.yaml`, RBAC du SA pour
 # soumettre, image `argocli`/`git` mirrorée). NE PAS prétendre qu'il tourne.
-# TODO intégration (ADR 0011) : les images `alpine/git` + `argocli` sont
-# PUBLIQUES → à MIRRORER au registry:80 + épingler @sha256 (index multi-arch),
-# comme les steps du WorkflowTemplate `image-builder`.
+# RÉSOLU intégration (ADR 0011) : l'image `argocli` (porte `argo submit` + un git/curl
+# utilitaires — un seul conteneur suffit à ce filet) est désormais TIRÉE du registry
+# interne registry:80, épinglée par le MÊME digest que le bundle argo-workflows.yaml
+# (v4.0.6, index multi-arch, ADR 0006). Elle se mirore AVEC le bundle argo-workflows
+# (workflow-controller/argocli, cf. le TODO de mirror du bundle dans README.md), PAS
+# par `bootstrap/eventful-mirror.yaml` (qui ne mirore que les 4 images du builder).
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
@@ -45,9 +48,12 @@ spec:
     templates:
       - name: reconcile
         container:
-          # PUBLIQUE — à mirrorer + épingler @sha256 à l'intégration (ADR 0011).
           # `argocli` porte à la fois `argo` (submit) et un git/curl utilitaires.
-          image: quay.io/argoproj/argocli:latest # TODO: mirrorer registry:80 + @sha256
+          # Tirée du registry interne (ADR 0011) par TAG : c'est une image DU BUNDLE
+          # argo-workflows.yaml (v4.0.6) — son mirror au registry interne (avec
+          # workflow-controller) est un TODO du montage bundle air-gappé, distinct du
+          # play eventful-mirror (qui ne couvre que les 4 images publiques du builder).
+          image: registry:80/quay.io/argoproj/argocli:v4.0.6
           command: [sh, -c]
           args:
             - |
