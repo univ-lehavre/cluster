@@ -352,6 +352,17 @@ _CATALOGUE: tuple[Component, ...] = (
         weight=9,
     ),
     Component(
+        name="citation",
+        role=None,  # BUILD node-side (bootstrap/citation.yaml importe platform-build-images,
+        # PAS de rôle dédié) : l'image citation est FABRIQUÉE, pas déployée ici — le
+        # déploiement est GitOps (Argo CD tire par digest, ADR 0094/0095). Comme portal,
+        # elle consomme le registry + le rôle générique de build (build-images), mais son
+        # « succès » est l'image présente au registry, pas un Deployment k8s → signal=None
+        # (pur BUILD, aucun workload à gater ; hors ROUNDTRIP_PHASES, comme storage-simple).
+        deps=("registry", "build-images"),
+        weight=9,
+    ),
+    Component(
         name="gitea",
         role="platform-gitea",
         deps=("cert-manager", "gateway-api", _SC),
@@ -377,6 +388,19 @@ _CATALOGUE: tuple[Component, ...] = (
         targeted=("-n argocd applications.argoproj.io atlas-workflows",),
         # Application Argo CD `atlas-workflows` (CRD sans replicas) → présence seule.
         signal=("application", "atlas-workflows", "argocd", False),
+        weight=7,
+    ),
+    Component(
+        name="gitops-seed-citation",
+        role=None,  # données : le VRAI flux App-of-Apps citation (git push arbre atlas +
+        # apps/citation.yaml par digest + Applications) — pas de rôle Ansible dédié (comme
+        # gitops-seed). Dépend d'argocd/gitea (org/repo poussé) ET de citation (l'image
+        # buildée dont le digest est publié dans apps/citation.yaml, ADR 0095 §2).
+        deps=("argocd", "gitea", "citation"),
+        # Application `citation-dagster` (déployée dans dagster, projet argocd `atlas`).
+        targeted=("-n argocd applications.argoproj.io citation-dagster",),
+        # Application Argo CD `citation-dagster` (CRD sans replicas) → présence seule.
+        signal=("application", "citation-dagster", "argocd", False),
         weight=7,
     ),
 )
@@ -469,8 +493,10 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     ),
     "mlflow": ("mlflow", "s3-backing-mlflow"),
     "portal": ("portal",),
+    "citation": ("citation",),
     "gitops": ("gitea", "argocd"),
     "gitops-seed": ("gitops-seed",),
+    "gitops-seed-citation": ("gitops-seed-citation",),
     # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
     # seulement) ; l'ordre vient de topo_sort, pas de cette énumération.
     "atlas-ceph": (
@@ -594,6 +620,7 @@ ROUNDTRIP_PHASES: tuple[str, ...] = (
     "mlflow",
     "gitops",
     "gitops-seed",
+    "gitops-seed-citation",
     "portal",
 )
 
@@ -723,6 +750,7 @@ _PHASE_SIGNAL_COMPONENT: dict[str, str] = {
     "dataops": "marquez",  # DERNIER maillon ≠ nom de phase
     "mlflow": "mlflow",
     "gitops-seed": "gitops-seed",
+    "gitops-seed-citation": "gitops-seed-citation",
     "portal": "portal",
 }
 
@@ -809,6 +837,8 @@ def rollback_phase_targeted_resources(phase: str, backend: str = CEPH) -> list[s
         )
     if phase == "gitops-seed":
         return ["-n argocd applications.argoproj.io atlas-workflows"]
+    if phase == "gitops-seed-citation":
+        return ["-n argocd applications.argoproj.io citation-dagster"]
     return []
 
 

@@ -91,10 +91,10 @@ class Invariant3Determinism(unittest.TestCase):
 class Acyclicite(unittest.TestCase):
     """topo_sort sur tout le catalogue réussit ; un cycle est détecté."""
 
-    def test_all_components_sortable_27(self):
+    def test_all_components_sortable_29(self):
         order = graph.topo_sort(list(graph.COMPONENT_ALL))
-        # 27 composants (24 + mlflow + s3-backing-mlflow + portal), tous émis.
-        self.assertEqual(len(order), 27)
+        # 29 composants (27 + citation + gitops-seed-citation, ADR 0094/0095), tous émis.
+        self.assertEqual(len(order), 29)
         self.assertEqual(set(order), set(graph.COMPONENT_ALL))
 
     def test_injected_cycle_detected(self):
@@ -193,6 +193,7 @@ class PhaseClosureCeph(unittest.TestCase):
                 "gitops-seed",
                 "mlflow",
                 "portal",
+                "gitops-seed-citation",
             ],
         )
 
@@ -209,6 +210,7 @@ class PhaseClosureCeph(unittest.TestCase):
                 "gitops-seed",
                 "mlflow",
                 "portal",
+                "gitops-seed-citation",
             ],
         )
         self.assertIn("gitops", cl)
@@ -220,7 +222,11 @@ class PhaseClosureCeph(unittest.TestCase):
         )
 
     def test_gitops_pulls_seed(self):
-        self.assertEqual(graph.phase_closure("gitops"), ["gitops", "gitops-seed"])
+        # gitops-seed-citation dépend d'argocd/gitea (chaîne gitops) → tiré aussi (ADR 0095).
+        self.assertEqual(
+            graph.phase_closure("gitops"),
+            ["gitops", "gitops-seed", "gitops-seed-citation"],
+        )
 
     def test_leaves_pull_only_themselves(self):
         self.assertEqual(graph.phase_closure("monitoring"), ["monitoring"])
@@ -229,7 +235,11 @@ class PhaseClosureCeph(unittest.TestCase):
         self.assertEqual(graph.phase_closure("metrics-server"), ["metrics-server"])
 
     def test_dataops_pulls_mlflow_portal(self):
-        self.assertEqual(graph.phase_closure("dataops"), ["dataops", "mlflow", "portal"])
+        # gitops-seed-citation dépend de citation → registry (∈ dataops) → tiré aussi.
+        self.assertEqual(
+            graph.phase_closure("dataops"),
+            ["dataops", "mlflow", "portal", "gitops-seed-citation"],
+        )
 
     def test_mount_order_ceph_first(self):
         cl = graph.phase_closure("ceph")
@@ -308,6 +318,7 @@ class SignalIsAGraphProperty(unittest.TestCase):
         "dataops": ("deployment", "marquez", "marquez", True),
         "mlflow": ("deployment", "mlflow", "mlflow", True),
         "gitops-seed": ("application", "atlas-workflows", "argocd", False),
+        "gitops-seed-citation": ("application", "citation-dagster", "argocd", False),
         "portal": ("deployment", "portal", "portal", True),
     }
 

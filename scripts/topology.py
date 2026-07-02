@@ -70,6 +70,7 @@ import difflib
 import glob
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -3332,6 +3333,369 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
     return do
 
 
+# ── Patrons *.example de l'App-of-Apps (ADR 0023 : valeurs d'exemple, injectées au seed).
+_AOA_DIR = os.path.join(_ROOT, "platform", "argocd", "app-of-apps")
+_CITATION_EXAMPLE = os.path.join(_AOA_DIR, "apps", "citation.example.yaml")
+_APPPROJECT_EXAMPLE = os.path.join(_AOA_DIR, "appproject-cluster-apps.example.yaml")
+_ROOT_APP_EXAMPLE = os.path.join(_AOA_DIR, "root-application.example.yaml")
+
+
+def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
+    """Push GIT de l'arbre atlas figé (révision + digest injecté) vers Gitea intra-cluster.
+
+    Porte `push_atlas_tree` de seed-app-of-apps.sh (façade banc-citation, ADR 0095 §1.a) :
+      1. clone LOCAL figé du dépôt atlas (`config.atlas_repo_dir`) → branche `main` sur la
+         révision exacte (`config.citation_revision`) ; on ne pousse JAMAIS le checkout de
+         travail ;
+      2. substitution du DIGEST dans l'overlay prod du CLONE (jamais le dépôt source —
+         frontière ADR 0094) via `_seed.substitute_citation_placeholders` (logique pure) ;
+      3. `kubectl port-forward svc/gitea-http :3000` (tunnel k8s — CONTOURNE le piège DNS
+         FQDN côté hôte, cf. gitea-init) puis `git push --force main:main` avec un askpass
+         (creds jamais dans l'URL/les logs).
+    Idempotent (un rejeu re-pousse le même SHA). Renvoie False (fail-fast) sur tout échec."""
+    repo_dir = config.atlas_repo_dir
+    revision = config.citation_revision
+    if not repo_dir or not os.path.isdir(os.path.join(repo_dir, ".git")):
+        print(f"  ✗ dépôt atlas introuvable : {repo_dir!r} (config atlas.repo_dir)")
+        return False
+    if not revision:
+        print("  ✗ citation_revision non fournie (config atlas.citation_revision)")
+        return False
+
+    def _git(*argv: str, cwd: str | None = None, env: dict | None = None):
+        try:
+            return subprocess.run(  # noqa: S603 — argv git contrôlé
+                ["git", *argv], cwd=cwd, env=env, check=False, capture_output=True, text=True
+            )
+        except OSError:
+            return None
+
+    # La révision DOIT exister dans le checkout atlas (sinon rien à pousser).
+    chk = _git("-C", repo_dir, "cat-file", "-e", f"{revision}^{{commit}}")
+    if not (chk and chk.returncode == 0):
+        print(f"  ✗ révision {revision} absente du dépôt atlas ({repo_dir})")
+        return False
+
+    with tempfile.TemporaryDirectory(prefix="seed-citation-") as workdir:
+        clone = os.path.join(workdir, "atlas-clone")
+        # --no-local force un vrai clone (objets copiés) → la révision est présente même
+        # hors branche du checkout source.
+        cloned = _git("clone", "--quiet", "--no-local", repo_dir, clone)
+        if not (cloned and cloned.returncode == 0):
+            print("  ✗ clone du dépôt atlas échoué")
+            return False
+        branched = _git("-C", clone, "branch", "-f", "main", revision)
+        if not (branched and branched.returncode == 0):
+            print(f"  ✗ impossible de placer main sur {revision}")
+            return False
+        _git("-C", clone, "checkout", "--quiet", "main")
+
+        # Substitution du digest dans l'overlay prod DU CLONE (ADR 0095 §2 / frontière 0094).
+        digest = config.citation_image_digest
+        overlay = os.path.join(clone, "dataops", "citation-dagster", "deploy", "overlays", "prod")
+        if digest:
+            if not os.path.isdir(overlay):
+                print(f"  ✗ overlay prod introuvable dans le clone : {overlay}")
+                return False
+            if not _substitute_digest_in_tree(overlay, config.citation_image_name, digest):
+                return False
+        else:
+            print("  ! CITATION_IMAGE_DIGEST non fourni — overlay poussé avec le tag d'exemple")
+            print("    (déploiement par tag mutable, NON conforme ADR 0095 §2 — preuve seule)")
+
+        # Port-forward vers gitea-http (tunnel k8s, contourne le piège DNS FQDN).
+        lport, pf = _seed_port_forward(ns, "svc/gitea-http", 3000)
+        if not lport:
+            return False
+        try:
+            askpass = os.path.join(workdir, "askpass.sh")
+            with open(askpass, "w", encoding="utf-8") as fh:
+                fh.write(
+                    "#!/usr/bin/env bash\n"
+                    'case "$1" in\n'
+                    '  *[Uu]sername*) printf "%s" "${GIT_ASKPASS_USER}" ;;\n'
+                    '  *[Pp]assword*) printf "%s" "${GIT_ASKPASS_PASS}" ;;\n'
+                    "esac\n"
+                )
+            # 0o700 (owner-only rwx), PAS 0o755 : le helper est exécuté par git dans le
+            # MÊME process/user (via GIT_ASKPASS) — inutile de le rendre world-readable, et
+            # un askpass qui touche à l'auth ne doit pas être lisible par d'autres (CodeQL
+            # py/overly-permissive-file-permissions). Le workdir est déjà un mkdtemp privé.
+            os.chmod(askpass, 0o700)
+            push_url = f"http://127.0.0.1:{lport}/{config.org_atlas}/{config.repo_atlas}.git"
+            env = {
+                **os.environ,
+                "GIT_ASKPASS": askpass,
+                "GIT_ASKPASS_USER": config.admin_user,
+                "GIT_ASKPASS_PASS": admin_pw,
+                "GIT_TERMINAL_PROMPT": "0",
+            }
+            # --force : Gitea a auto_init le repo ; on impose l'arbre atlas figé comme main
+            # (le SHA épinglé dans targetRevision DOIT être la tête). Idempotent au rejeu.
+            pushed = _git("-C", clone, "push", "--force", push_url, "main:main", env=env)
+            if not (pushed and pushed.returncode == 0):
+                err = (pushed.stderr if pushed else "") or "git push injoignable"
+                print(f"  ✗ git push de l'arbre atlas échoué : {err.strip()[:200]}")
+                return False
+        finally:
+            if pf:
+                pf.terminate()
+    return True
+
+
+def _substitute_digest_in_tree(overlay_dir: str, image_name: str, digest: str) -> bool:
+    """Applique `_seed.substitute_citation_placeholders` à CHAQUE fichier de l'overlay clone.
+
+    Garde de frontière (ADR 0094) : au moins UN placeholder doit être présent sur l'ensemble
+    (sinon atlas n'a pas factorisé → on refuse de deviner la structure interne, pas de
+    déploiement par tag mutable en douce). Renvoie False (fail-fast) si aucun placeholder,
+    digest invalide, ou I/O échouée."""
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(overlay_dir):
+            for name in files:
+                path = os.path.join(root, name)
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+                new_text, n = _seed.substitute_citation_placeholders(text, image_name, digest)
+                if n:
+                    with open(path, "w", encoding="utf-8") as fh:
+                        fh.write(new_text)
+                    total += n
+    except _seed.SeedError as exc:
+        print(f"  ✗ substitution digest refusée : {exc}")
+        return False
+    except OSError as exc:
+        print(f"  ✗ substitution digest — I/O overlay : {exc}")
+        return False
+    if total == 0:
+        print(
+            "  ✗ placeholders d'image absents de l'overlay atlas — atlas doit factoriser "
+            "__CITATION_IMAGE_DIGEST__/__CITATION_IMAGE__ (frontière ADR 0094, audit #499)"
+        )
+        return False
+    return True
+
+
+def _seed_port_forward(ns: str, target: str, remote_port: int):
+    """Ouvre `kubectl port-forward <target> :<remote_port>` (port local éphémère) — tunnel k8s.
+
+    Contourne le piège DNS FQDN côté hôte (parité push_atlas_tree). Renvoie `(lport, proc)` ;
+    `(None, None)` si le port local n'est pas annoncé (kubectl mort/lent). L'appelant DOIT
+    `proc.terminate()` en `finally`."""
+    try:
+        proc = subprocess.Popen(  # noqa: S603 — argv contrôlé
+            ["kubectl", "-n", ns, "port-forward", target, f":{remote_port}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=_kubectl_env(),
+        )
+    except OSError:
+        print("  ✗ port-forward gitea-http : kubectl introuvable")
+        return None, None
+    # Attendre l'annonce « Forwarding from 127.0.0.1:PORT » (borné, ~10s).
+    for _ in range(50):
+        line = proc.stdout.readline() if proc.stdout else ""
+        m = re.search(r"127\.0\.0\.1:(\d+)", line or "")
+        if m:
+            return int(m.group(1)), proc
+        if proc.poll() is not None:
+            break
+    print("  ✗ port-forward gitea-http : port local non annoncé")
+    proc.terminate()
+    return None, None
+
+
+def _seed_do_banc_citation(topo: Topology, config) -> Callable[[str], bool]:
+    """Construit le `do(step)` RÉEL du seed banc-citation (porte seed-app-of-apps.sh AU BANC).
+
+    Joue la SÉQUENCE `_PROD_STEPS` (le vrai flux App-of-Apps citation) mais sous garde BANC
+    (branchée par `_launch_seed`) et ciblant l'overlay prod avec le digest injecté. C'est
+    l'étape 1 « premier pas » d'ADR 0095 §1.a prouvée au banc AVANT la prod (ADR 0034/0085).
+    Réutilise le patron du seed banc (admin/token via `gitea admin`, appels API Contents),
+    ajoute le git push d'arbre + l'apply des Applications. État (token, admin_pw) threadé via
+    closure (le `do(step) -> bool` est sans état). Idempotent ; fail-fast, aucun faux-vert."""
+    ns = config.ns
+    api_base = f"{config.api}/api/v1"
+    state: dict[str, str] = {}
+
+    def pod() -> str:
+        if "pod" not in state:
+            state["pod"] = _gitea_pod(ns)
+        return state["pod"]
+
+    def _api(method: str, path: str, body: str | None = None) -> str:
+        """Appel REST Gitea depuis le pod (curl localhost:3000) → code HTTP (dernière ligne)."""
+        argv = [
+            "curl", "-sS", "-w", "\n%{http_code}", "-X", method,
+            "-H", f"Authorization: token {state.get('token', '')}",
+            "-H", "Content-Type: application/json", f"{api_base}{path}",
+        ]  # fmt: skip
+        if body is not None:
+            argv += ["-d", body]
+        out = _gitea_exec(ns, pod(), argv)
+        if not (out and out.returncode == 0):
+            return ""
+        return (out.stdout or "").rpartition("\n")[2].strip()
+
+    def admin_token() -> bool:
+        # 1 — admin Gitea + token API (idempotent). Réutilise EXACTEMENT le patron banc :
+        # crée le Secret gitea-admin s'il manque, `gitea admin user create` (avale « already
+        # exists »), puis génère un token. On CONSERVE admin_pw (git push l'exige après).
+        chk = _kubectl("-n", ns, "get", "secret", "gitea-admin")
+        if not (chk and chk.returncode == 0):
+            _kubectl(
+                "-n", ns, "create", "secret", "generic", "gitea-admin",
+                "--from-literal=username=" + config.admin_user,
+                "--from-literal=password=" + _seed_gen_secret(),
+            )  # fmt: skip
+        pw = _kubectl("-n", ns, "get", "secret", "gitea-admin", "-o", "jsonpath={.data.password}")
+        admin_pw = _b64decode(pw.stdout.strip()) if pw and pw.returncode == 0 else ""
+        if not admin_pw:
+            return False
+        state["admin_pw"] = admin_pw
+        created = _gitea_exec(
+            ns, pod(),
+            ["gitea", "admin", "user", "create", "--username", config.admin_user,
+             "--password", admin_pw, "--email", config.admin_email, "--admin",
+             "--must-change-password=false"],
+        )  # fmt: skip
+        if not (created and created.returncode == 0):
+            blob = ((created.stdout or "") + (created.stderr or "")) if created else ""
+            if "already exists" not in blob:
+                return False
+        token_name = f"citation-seed-{os.getpid()}-{int(time.time())}"
+        out = _gitea_exec(
+            ns, pod(),
+            ["gitea", "admin", "user", "generate-access-token", "--username", config.admin_user,
+             "--token-name", token_name, "--scopes", "all", "--raw"],
+        )  # fmt: skip
+        tok = "".join((out.stdout or "").split()) if out and out.returncode == 0 else ""
+        if not tok:
+            return False
+        state["token"] = tok
+        return True
+
+    def _ensure_org_repo(org: str, repo: str) -> bool:
+        # POST org + repo (auto_init), idempotent (409/422 « existe déjà » = ok).
+        c_org = _api("POST", "/orgs", f'{{"username":"{org}"}}')
+        c_repo = _api(
+            "POST", f"/orgs/{org}/repos",
+            f'{{"name":"{repo}","auto_init":true,"default_branch":"main"}}',
+        )  # fmt: skip
+        return _seed_api_ok(c_org) and _seed_api_ok(c_repo)
+
+    def org_repo_apps() -> bool:
+        # 2 — org/repo déclaratif cluster/apps.
+        return _ensure_org_repo(config.org_cluster, config.repo_apps)
+
+    def org_repo_atlas() -> bool:
+        # 3 — org/repo de code atlas/atlas.
+        return _ensure_org_repo(config.org_atlas, config.repo_atlas)
+
+    def push_atlas_tree() -> bool:
+        # 4 — push GIT de l'arbre atlas figé (révision + digest injecté).
+        return _git_push_atlas_tree(config, ns, state.get("admin_pw", ""))
+
+    def push_citation() -> bool:
+        # 5 — rendu + push apps/citation.yaml (repoURL/targetRevision injectés) via Contents API.
+        try:
+            with open(_CITATION_EXAMPLE, encoding="utf-8") as fh:
+                example = fh.read()
+        except OSError:
+            print(f"  ✗ patron introuvable : {_CITATION_EXAMPLE}")
+            return False
+        try:
+            rendered = _seed.render_citation_declaration(
+                example, config.atlas_repo_url(), config.citation_revision or ""
+            )
+        except _seed.SeedError as exc:
+            print(f"  ✗ {exc}")
+            return False
+        return _seed_put_contents_file(
+            config, state, ns, pod, config.org_cluster, config.repo_apps,
+            "apps/citation.yaml", rendered, "seed: apps/citation.yaml (ADR 0094)",
+        )  # fmt: skip
+
+    def appproject_root() -> bool:
+        # 6 — AppProject cluster-apps + Application racine (repoURL/sourceRepos injectés).
+        proj_src = f"{config.svc}/{config.org_cluster}/**"
+        apps_repo_url = config.apps_repo_url()
+        try:
+            with open(_APPPROJECT_EXAMPLE, encoding="utf-8") as fh:
+                proj = fh.read()
+            with open(_ROOT_APP_EXAMPLE, encoding="utf-8") as fh:
+                root = fh.read()
+        except OSError as exc:
+            print(f"  ✗ patron App-of-Apps introuvable : {exc}")
+            return False
+        proj = re.sub(
+            r"(?m)^(\s+- )http://gitea-http\.gitea\.svc\.cluster\.local/\*\*$",
+            rf"\g<1>{proj_src}", proj,
+        )  # fmt: skip
+        root = re.sub(r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {apps_repo_url}", root)
+        if proj_src not in proj:
+            print("  ✗ injection sourceRepos ratée dans l'AppProject")
+            return False
+        if f"repoURL: {apps_repo_url}" not in root:
+            print("  ✗ injection repoURL ratée dans l'Application racine")
+            return False
+        a1 = _kubectl_apply_stdin(proj)
+        a2 = _kubectl_apply_stdin(root)
+        return bool(a1 and a1.returncode == 0 and a2 and a2.returncode == 0)
+
+    handlers = {
+        "admin-token": admin_token,
+        "org-repo-apps": org_repo_apps,
+        "org-repo-atlas": org_repo_atlas,
+        "push-atlas-tree": push_atlas_tree,
+        "push-citation": push_citation,
+        "appproject-root": appproject_root,
+    }
+
+    def do(step: str) -> bool:
+        handler = handlers.get(step)
+        if handler is None:
+            raise _path.PathError(f"seed citation : étape banc-citation inconnue `{step}` (façade)")
+        return handler()
+
+    return do
+
+
+def _seed_put_contents_file(config, state, ns, pod, org, repo, repo_path, content, message) -> bool:
+    """PUT/POST idempotent d'un fichier via la Contents API Gitea (create-or-update).
+
+    Encode le CONTENU (str) en base64, lit le SHA existant (GET → PUT-avec-sha si présent,
+    POST sinon), VÉRIFIE `"commit"` dans la réponse (un push raté laisse l'ancienne version →
+    Argo CD déploierait un manifeste périmé → fail-fast False). Parité push_contents_file
+    (seed-app-of-apps.sh). L'exec Gitea (`-w '\\n%{http_code}'`) sépare le CORPS (SHA/commit)
+    du code HTTP — comme `_api_full` du seed banc, autonome (Contents API a besoin du corps)."""
+    content_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    contents_path = f"/repos/{org}/{repo}/contents/{repo_path}"
+    api_base = f"{config.api}/api/v1"
+
+    def _exec(method: str, body: str | None = None):
+        argv = [
+            "curl", "-sS", "-w", "\n%{http_code}", "-X", method,
+            "-H", f"Authorization: token {state.get('token', '')}",
+            "-H", "Content-Type: application/json", f"{api_base}{contents_path}",
+        ]  # fmt: skip
+        if body is not None:
+            argv += ["-d", body]
+        out = _gitea_exec(ns, pod(), argv)
+        if not (out and out.returncode == 0):
+            return ""
+        return (out.stdout or "").rpartition("\n")[0]  # corps (avant la dernière ligne = code)
+
+    sha = _seed_contents_sha(_exec("GET"))
+    if sha:
+        resp = _exec("PUT", json.dumps({"content": content_b64, "sha": sha, "message": message}))
+    else:
+        resp = _exec("POST", json.dumps({"content": content_b64, "message": message}))
+    return _seed_resp_has_commit(resp)
+
+
 def _seed_gen_secret() -> str:
     """Secret aléatoire (32 alnum) — parité `gen_secret()` de gitea-init.sh (jamais versionné,
     ADR 0023 ; vit uniquement dans le cluster). `secrets` (stdlib) plutôt que /dev/urandom."""
@@ -3625,27 +3989,49 @@ def _e2e_hook_impl(name: str) -> Callable[..., None] | None:
     return globals().get(attr) if attr else None
 
 
+# Phases DÉLÉGUÉES de seed → (kind run_seed, NOM du constructeur do, libellé). Deux flux, MÊME
+# garde banc (`_assert_bench_target`) : `gitops-seed` (jouet atlas-workflows) et
+# `gitops-seed-citation` (le VRAI flux App-of-Apps citation joué au banc, ADR 0095 §1.a). Le
+# seed PROD (`kind='prod'`) N'EST PAS monté au banc — il se prouve au rebuild dirqual
+# (garde `assert_prod_target`).
+#
+# Le `do` est le NOM (résolu TARDIVEMENT via `globals()` à l'appel, comme `_E2E_HOOK_IMPL`) —
+# PAS la fonction capturée à l'import : sinon un patch de test sur l'attribut module (ex.
+# `_seed_do_banc`) ne prendrait pas effet (la référence figée du dict masquerait le stub).
+_SEED_PHASE_ROUTING: dict[str, tuple[str, str, str]] = {
+    "gitops-seed": ("banc", "_seed_do_banc", "gitea-init, jouet atlas-workflows"),
+    "gitops-seed-citation": (
+        "banc-citation",
+        "_seed_do_banc_citation",
+        "app-of-apps citation réel",
+    ),
+}
+
+
 def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult:
-    """Monte une phase DÉLÉGUÉE (seed) : route `gitops-seed` vers `seed.run_seed('banc', …)`.
+    """Monte une phase DÉLÉGUÉE de seed : route vers `seed.run_seed(<kind>, …)` sous garde BANC.
 
-    BRANCHE la garde BANC (`_assert_bench_target`, cible = banc Lima) et le `do(step)` RÉEL
-    (`_seed_do_banc`, porté de gitea-init.sh). Mappe les verdicts du seed sur le moule du
-    moteur de chemin (FAIL-FAST, AUCUN fallback, ADR 0046) :
-      - `SeedGuardRefused` (garde banc refuse une cible prod) → `_path.IsolationRefused` (le
-        moteur la re-lève → `_run_path_engine` la mappe en `_UsageError` → code 2) ;
-      - `SeedError` (étape KO) → `_path.PathError` (fail-fast → code 1, aucun fallback).
-    Un succès → `_SeedLaunchResult(ok=True)` (le moteur l'intègre comme une phase montée).
+    Deux phases portées (`_SEED_PHASE_ROUTING`) : `gitops-seed` (kind `banc`, jouet) et
+    `gitops-seed-citation` (kind `banc-citation`, le VRAI flux App-of-Apps citation prouvé au
+    banc AVANT la prod, ADR 0095 §1.a). Les DEUX branchent la garde BANC (`_assert_bench_target`,
+    cible = banc Lima) et un `do(step)` RÉEL. Mappe les verdicts du seed (FAIL-FAST, AUCUN
+    fallback, ADR 0046) :
+      - `SeedGuardRefused` (garde banc refuse une cible prod) → `_path.IsolationRefused` (code 2) ;
+      - `SeedError` (étape KO) → `_path.PathError` (fail-fast → code 1).
+    Un succès → `_SeedLaunchResult(ok=True)`.
 
-    Le seed PROD (`kind='prod'`, app-of-apps sur dirqual) N'EST PAS monté ici : le banc
-    mono-nœud teste `'banc'` ; la prod se prouve au rebuild dirqual (garde `assert_prod_target`
-    + `do()` prod à câbler+prouver, _SEED_BANC_TODO / seed.banc_todo). On ne fabrique PAS un
-    faux montage prod (honnêteté ADR 0034) — `run_seed('prod', …)` reste accessible côté
-    `nestor/seed.py`, sans montage façade tant que la preuve dirqual n'est pas en main."""
+    Le seed PROD (`kind='prod'`, app-of-apps sur dirqual) N'EST PAS monté ici (garde
+    `assert_prod_target`, preuve dirqual différée). On ne fabrique PAS un faux montage prod
+    (honnêteté ADR 0034) — `run_seed('prod', …)` reste accessible côté `nestor/seed.py`."""
     _ = derived  # le seed lit la config du YAML (SeedConfig.from_topology), pas le faisceau -e
-    if phase != "gitops-seed":
+    routing = _SEED_PHASE_ROUTING.get(phase)
+    if routing is None:
         raise _path.PathError(
-            f"phase déléguée `{phase}` : aucun câblage seed connu (seul `gitops-seed` est porté)"
+            f"phase déléguée `{phase}` : aucun câblage seed connu "
+            f"(portées : {', '.join(sorted(_SEED_PHASE_ROUTING))})"
         )
+    kind, do_builder_name, blurb = routing
+    do_builder = globals()[do_builder_name]  # résolution TARDIVE (patchable en test)
     config = _seed.SeedConfig.from_topology(topo)
     # GATE avant le seed : Gitea ET Argo CD doivent être Ready (parité run-phases.sh:1082-1085).
     # Sans cette attente, le 1er geste (`gitea admin user create` via exec) tape un pod qui
@@ -3658,11 +4044,11 @@ def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult
                 f"seed gitops (banc) : {ns_dep}/{dep} non Ready avant le seed "
                 f"(rollout status timeout {to}) — le socle GitOps doit être prêt (ADR 0046)"
             )
-    do = _seed_do_banc(topo, config)
-    print(f"→ {phase} : seed des DONNÉES via nestor/seed.py (gitea-init, garde banc)…")
+    do = do_builder(topo, config)
+    print(f"→ {phase} : seed des DONNÉES via nestor/seed.py ({blurb}, garde banc)…")
     try:
         _seed.run_seed(
-            "banc",
+            kind,
             config,
             assert_target=lambda: _assert_bench_target(f"nestor up ({phase})"),
             do=do,
@@ -3674,7 +4060,7 @@ def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult
     except _seed.SeedError as exc:
         # Étape KO → fail-fast (ADR 0046), AUCUN fallback : remonte en PathError (code 1).
         raise _path.PathError(f"seed gitops (banc) : {exc}") from exc
-    return _SeedLaunchResult(ok=True, message="seed banc gitops appliqué")
+    return _SeedLaunchResult(ok=True, message=f"seed banc gitops appliqué ({phase})")
 
 
 def _run_path_engine(
@@ -4081,10 +4467,10 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict, stack_name: str)
     # On DÉRIVE de `playbook is None` (pas d'une liste codée) : sinon le menu propose une
     # couche que `next` refuse ensuite de monter — incohérent.
     if playbook_rel is None:
-        if phase == "gitops-seed":
-            # Phase DÉLÉGUÉE seed : route vers le câblage Python (parité _run_path_engine), pas
-            # un arm bash (retiré). Mappe les verdicts du moteur (PathError/IsolationRefused →
-            # fail-fast / usage) comme `_run_path_engine`.
+        if phase in _SEED_PHASE_ROUTING:
+            # Phase DÉLÉGUÉE seed (gitops-seed / gitops-seed-citation) : route vers le câblage
+            # Python (parité _run_path_engine), pas un arm bash (retiré). Mappe les verdicts du
+            # moteur (PathError/IsolationRefused → fail-fast / usage) comme `_run_path_engine`.
             _assert_bench_target(f"nestor next ({phase})")
             print(f"→ {phase} : {_quoi_couche(phase)} via nestor/seed.py…")
             try:
