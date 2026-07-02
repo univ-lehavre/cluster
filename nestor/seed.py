@@ -181,6 +181,24 @@ _PROD_STEPS = (
     "appproject-root",  # AppProject cluster-apps + Application racine
 )
 
+# ── Variante « banc-citation » : le VRAI flux App-of-Apps citation, joué AU BANC.
+#    C'est l'étape 1 « premier pas » de l'ADR 0095 (§1.a) prouvée au banc mono-nœud
+#    local-path (ADR 0085) AVANT la prod, comme l'exige ADR 0034. Elle réutilise la
+#    SÉQUENCE `_PROD_STEPS` — car le flux citation EST le flux App-of-Apps (org/repo
+#    atlas, push de l'arbre atlas figé, apps/citation.yaml par digest, AppProject +
+#    racine) ; ce qui DIFFÈRE de la prod n'est PAS l'ordre des étapes mais deux choses
+#    INJECTÉES par la façade (topology.py), jamais gravées ici :
+#      • la GARDE — `_assert_bench_target` (cible = banc Lima), OPPOSÉE à `assert_prod_target`
+#        de la prod. On ne rend JAMAIS la garde prod franchissable par paramètre (ADR
+#        0053/0084) : c'est une 3e variante à part entière, garde banc en propre.
+#      • la CIBLE de déploiement — l'overlay kustomize `overlays/bench` (Secret SeaweedFS,
+#        pas d'OBC Ceph) au lieu d'`overlays/prod` : au banc local-path la StorageClass
+#        `rook-ceph-datalake` n'existe pas ; atlas fournit DÉJÀ cet overlay bench (frontière
+#        ADR 0094 : cluster CHOISIT l'overlay, atlas FOURNIT les deux).
+#    Partager la séquence garantit qu'une preuve banc VALIDE réellement le chemin prod
+#    (même ordre, mêmes gardes de digest) — pas un chemin cousin qui divergerait.
+_BANC_CITATION_STEPS = _PROD_STEPS
+
 
 def seed_steps(kind: str) -> tuple[str, ...]:
     """Séquence ORDONNÉE des étapes du seed `kind` (PUR). Copie défensive."""
@@ -188,7 +206,9 @@ def seed_steps(kind: str) -> tuple[str, ...]:
         return tuple(_BANC_STEPS)
     if kind == "prod":
         return tuple(_PROD_STEPS)
-    raise SeedError(f"seed kind inconnu : {kind!r} (attendu : banc | prod)")
+    if kind == "banc-citation":
+        return tuple(_BANC_CITATION_STEPS)
+    raise SeedError(f"seed kind inconnu : {kind!r} (attendu : banc | prod | banc-citation)")
 
 
 def run_seed(
@@ -203,10 +223,13 @@ def run_seed(
     Même moule que `path.run_path` / `bootstrap.run_bootstrap` : toute l'I/O INJECTÉE,
     la LOGIQUE (garde opposée banc/prod + ordre des étapes) testable sans cluster.
 
-    - `assert_target()` : LA GARDE. Pour `kind="banc"` la façade y branche
-      `_assert_bench_target` (cible = banc) ; pour `kind="prod"`, `assert_prod_target`
-      (cible = cluster prod attendu). DEUX gardes OPPOSÉES, comme l'exige le LOT 8 — un
-      seed banc REFUSE la prod, un seed prod REFUSE le banc. Un refus lève (→ SeedGuardRefused).
+    - `assert_target()` : LA GARDE. Pour `kind="banc"` ET `kind="banc-citation"` la façade
+      y branche `_assert_bench_target` (cible = banc) ; pour `kind="prod"`, `assert_prod_target`
+      (cible = cluster prod attendu). DEUX familles de gardes OPPOSÉES, comme l'exige le LOT 8 —
+      un seed banc/banc-citation REFUSE la prod, un seed prod REFUSE le banc. Un refus lève
+      (→ SeedGuardRefused). `banc-citation` joue la SÉQUENCE prod (le vrai flux App-of-Apps)
+      mais sous garde BANC — la garde prod reste `cluster-prod`-only, jamais assouplie
+      (ADR 0053/0084).
     - `do(step) -> bool` : exécute UNE étape (kubectl exec Gitea CLI, curl API, git push…) ;
       True = ok. STUB en test (zéro appel Gitea réel) ; la façade y branche le réel (à
       câbler+prouver, `_BANC_TODO`). Une étape KO → fail-fast (SeedError).
@@ -258,8 +281,12 @@ _BANC_TODO = (
     "câblage do(step) banc sur gitea-init réel (kubectl exec/curl API) — à prouver au banc",
     "câblage do(step) prod sur seed-app-of-apps réel (git push port-forward, kubectl apply) "
     "— à prouver sur dirqual",
-    "brancher _assert_bench_target (banc) / assert_prod_target (prod) en façade (topology.py)",
-    "run banc gitea-init + run prod app-of-apps consignés — PREUVE DÉFINITIVE, reste à faire",
+    "câblage do(step) banc-citation en façade : do() du flux _PROD_STEPS ciblant l'overlay "
+    "bench + injection digest, garde _assert_bench_target — à prouver au banc (ADR 0095 §1.a)",
+    "brancher _assert_bench_target (banc/banc-citation) / assert_prod_target (prod) en façade "
+    "(topology.py)",
+    "run banc gitea-init + run banc-citation (citation réel) + run prod app-of-apps consignés "
+    "— PREUVE DÉFINITIVE, reste à faire",
 )
 
 
