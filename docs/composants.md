@@ -262,6 +262,31 @@ en local (tutoriel [Monter le banc local](banc-local.md#3-pousser-sur-gitea)) et
 qu'invoque le
 [mode d'emploi de branchement](se-brancher.md#déployer--la-boucle-gitops).
 
+### Argo Workflows + Argo Events (build événementiel)
+
+La boucle ci-dessus garde une **étape manuelle** : le _build + push_ de l'image
+(1.). La **cible événementielle**
+([ADR 0095](decisions/0095-build-applicatif-evenementiel-in-cluster.md) §1.b)
+l'automatise — un `git push` de **code** applicatif suffit, sans geste :
+
+- [**Argo Events**](/cluster/platform/argo-events/) capte un **2ᵉ webhook**
+  Gitea (distinct du webhook #1 déploiement) via un `EventSource`, le route par
+  un **`EventBus` NATS**, et le matérialise en `Sensor` qui **dérive la
+  code-location du chemin** (`dataops/<X>-dagster/`, jamais énuméré) et **soumet
+  un `Workflow`**.
+- [**Argo Workflows**](/cluster/platform/argo-workflows/) exécute ce `Workflow`
+  **in-pod** (BuildKit rootless, sur un worker) : clone `@SHA` → build → push
+  `registry:80` → lit le **digest** → write-back `apps/<app>.yaml` **par
+  `@sha256`** dans le dépôt `cluster/apps` — que le webhook #1 → **Argo CD**
+  réconcilie.
+
+Ces deux opérateurs sont de l'**INFRA** (posés par
+Ansible/`kubectl apply --server-side`, **pas** réconciliés par Argo CD — même
+frontière anti-bootstrap qu'Argo CD lui-même). Le **build reste
+containerd-natif** (BuildKit/nerdctl, **pas** Kaniko). Détail et mise en œuvre
+incrémentale :
+[plan build événementiel](/cluster/docs/plans/plan-build-evenementiel-gitops/).
+
 ## Chaîne DataOps
 
 ### PostgreSQL via CloudNativePG
