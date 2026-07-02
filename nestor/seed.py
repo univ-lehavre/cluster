@@ -25,6 +25,7 @@ lus de l'env. Les valeurs d'exemple (ADR 0023) restent les défauts quand le blo
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -269,6 +270,46 @@ def citation_image_ref(image_name: str, digest: str) -> str:
             f"digest citation invalide : {digest!r} (attendu `sha256:<hex>`, ADR 0095 §2)"
         )
     return f"{image_name}@{digest}"
+
+
+# Jetons d'injection qu'atlas EXPOSE délibérément (frontière ADR 0094 : atlas FOURNIT les
+# trous, cluster les REMPLIT ; cluster n'édite aucun champ qu'atlas n'a pas prévu d'offrir).
+_PLACEHOLDER_DIGEST = "__CITATION_IMAGE_DIGEST__"  # → le sha256 seul (Kustomize images[].digest)
+_PLACEHOLDER_IMAGE = "__CITATION_IMAGE__"  # → la ref complète (env DAGSTER_CURRENT_IMAGE)
+
+
+def substitute_citation_placeholders(text: str, image_name: str, digest: str) -> tuple[str, int]:
+    """Remplace, dans UN contenu de fichier, les 2 placeholders d'image citation (PUR).
+
+    Porte `substitute_image_digest` de seed-app-of-apps.sh SANS l'I/O (le bash faisait
+    grep/sed sur le clone ; ici on transforme du TEXTE, la façade lit/écrit les fichiers).
+    Renvoie `(texte_transformé, nb_substitutions)`. L'ORDRE importe : `__CITATION_IMAGE_DIGEST__`
+    d'abord (sinon la substitution du préfixe `__CITATION_IMAGE__` l'amputerait) — parité du
+    commentaire bash. `digest` doit être un `sha256:…` (validé par `citation_image_ref`)."""
+    ref = citation_image_ref(image_name, digest)  # valide le digest AVANT toute substitution
+    n = text.count(_PLACEHOLDER_DIGEST) + text.count(_PLACEHOLDER_IMAGE)
+    # DIGEST d'abord (le sha256 seul), puis IMAGE (la ref complète) — ordre critique.
+    text = text.replace(_PLACEHOLDER_DIGEST, digest)
+    text = text.replace(_PLACEHOLDER_IMAGE, ref)
+    return text, n
+
+
+def render_citation_declaration(example_text: str, atlas_repo_url: str, revision: str) -> str:
+    """Rend `apps/citation.yaml` depuis le patron `*.example` (PUR, ADR 0023).
+
+    Porte `push_citation_declaration` (seed-app-of-apps.sh) sans l'I/O : injecte le
+    `repoURL` atlas réel et le `targetRevision` (SHA figé) dans les lignes `spec.source.*`
+    (indentation 4 espaces, comme le `sed` ancré du bash) ; le `path:` (overlay) reste tel
+    quel. Lève `SeedError` si UNE des deux injections ne matche pas (garde anti-injection
+    ratée, parité des `grep -q` du bash — on ne pousse pas une déclaration à valeurs
+    d'exemple)."""
+    out = re.sub(r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {atlas_repo_url}", example_text)
+    out = re.sub(r"(?m)^( {4})targetRevision:.*$", rf"\g<1>targetRevision: {revision}", out)
+    if f"repoURL: {atlas_repo_url}" not in out:
+        raise SeedError("injection repoURL ratée dans citation.yaml (motif non matché)")
+    if f"targetRevision: {revision}" not in out:
+        raise SeedError("injection targetRevision ratée dans citation.yaml (motif non matché)")
+    return out
 
 
 # ── CE QUI RESTE À CÂBLER + PROUVER AU CLUSTER (TODO explicites, ADR 0034) ────────

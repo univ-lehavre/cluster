@@ -438,6 +438,16 @@ _DELEGATED_PHASES: dict[str, PhasePlan] = {
         gate_kind=gate_kind_for("gitops-seed"),  # "presence" (Application atlas-workflows)
         note="init Gitea (DONNÉES, gitea-init.sh) — porté par nestor/seed.py au lot 8, pas ici",
     ),
+    # gitops-seed-citation (ADR 0095 §1.a) : le VRAI flux App-of-Apps citation joué AU BANC
+    # (seed.run_seed('banc-citation'), garde banc). DONNÉES (git push arbre atlas + apply
+    # Applications) portées par nestor/seed.py + façade _seed_do_banc_citation, pas un play.
+    "gitops-seed-citation": PhasePlan(
+        phase="gitops-seed-citation",
+        playbook=None,
+        extravars_keys=(),
+        gate_kind=gate_kind_for("gitops-seed-citation"),  # "none" (GitOps, pas un signal de couche)
+        note="app-of-apps citation réel (git push atlas + Applications) — nestor/seed.py, pas ici",
+    ),
 }
 
 # Phases AMONT à orchestration non-Ansible (provisioning VM / socle k8s+CNI) : portées

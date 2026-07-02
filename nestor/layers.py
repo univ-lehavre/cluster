@@ -64,6 +64,8 @@ _QUEUE_PHASES = frozenset(
         "dataops",
         "mlflow",
         "gitops-seed",
+        "gitops-seed-citation",
+        "citation",
         "portal",
     }
 )
