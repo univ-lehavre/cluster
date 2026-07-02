@@ -74,12 +74,26 @@ def _engine(*a, **k):
         return cli._run_path_engine(*a, **k)
 
 
+_REAL_RUNS_HISTORY = cli._RUNS_HISTORY
+_FAKE_RUNS_HISTORY = ""
+
+
 def setUpModule():
+    global _FAKE_RUNS_HISTORY
     cli.subprocess.run = _deny_run
+    # Redirige la consignation runs-history vers un fichier JETABLE : un `_engine` réussi de
+    # bout en bout déclenche `_record_run` (topology.py) qui APPEND au fichier — sans ce
+    # détour, les tests POLLUERAIENT le vrai `bench/lima/runs-history.yaml` versionné.
+    fd, _FAKE_RUNS_HISTORY = tempfile.mkstemp(suffix="-runs-history.yaml")
+    os.close(fd)
+    cli._RUNS_HISTORY = _FAKE_RUNS_HISTORY
 
 
 def tearDownModule():
     cli.subprocess.run = _REAL_SUBPROCESS_RUN
+    cli._RUNS_HISTORY = _REAL_RUNS_HISTORY
+    if _FAKE_RUNS_HISTORY and os.path.exists(_FAKE_RUNS_HISTORY):
+        os.unlink(_FAKE_RUNS_HISTORY)
 
 
 def _tmp(content: str) -> str:
