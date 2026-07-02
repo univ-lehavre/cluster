@@ -4,6 +4,8 @@ Services transverses du cluster (au-delà du bootstrap K8s et du stockage Ceph).
 
 | Composant                                                            | Rôle                                                            |
 | -------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [`argo-events/`](/cluster/platform/argo-events/)                     | Webhook Gitea → Sensor (chaîne événementielle, cf. ADR 0095)    |
+| [`argo-workflows/`](/cluster/platform/argo-workflows/)               | Build in-pod (BuildKit) de la chaîne événementielle (ADR 0095)  |
 | [`argocd/`](/cluster/platform/argocd/)                               | GitOps applicatif (Argo CD v3.4.3, cf. ADR 0022)                |
 | [`cert-manager/`](/cluster/platform/cert-manager/)                   | TLS de bordure via CA interne (cf. ADR 0021)                    |
 | [`cloudnative-pg/`](/cluster/platform/cloudnative-pg/)               | PostgreSQL managé (socle DataOps — cf. ADR 0024)                |
