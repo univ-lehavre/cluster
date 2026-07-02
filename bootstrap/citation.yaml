@@ -115,12 +115,18 @@
 
     # Projet dbt frère (COPY citation-dbt /opt/dagster/citation-dbt), requis au build
     # (dbt parse hors-ligne) — copié à la racine du contexte, hors de citation-dagster/.
-    - name: Copy the citation-dbt project into the build context
-      ansible.builtin.copy:
+    # `synchronize` (rsync) plutôt que `copy` : le projet dbt contient `logs/` (~54 Mo) et
+    # `target/` (artefacts régénérés par `dbt parse` AU BUILD) — inutiles au build et
+    # transférés fichier-par-fichier par `copy` (module lent → play bloqué ~minutes, vécu
+    # au banc). rsync avec `--exclude` ne transfère que le nécessaire (delta + exclusions).
+    - name: Copy the citation-dbt project into the build context (sans logs/target)
+      ansible.posix.synchronize:
         src: '{{ citation_repo_dir }}/dataops/citation-dbt/'
         dest: '{{ citation_build_workdir }}/citation-dbt/'
-        mode: '0644'
-        directory_mode: '0755'
+        rsync_opts:
+          - '--exclude=logs/'
+          - '--exclude=target/'
+          - '--exclude=__pycache__/'
       become: true
 
     # Build (les 2 arches, build_all_arch) de l'image maison citation → registry:80, puis

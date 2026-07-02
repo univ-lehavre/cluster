@@ -102,18 +102,54 @@ Dépendances posées avec lui :
 ### Écart banc (CP = builder)
 
 Au **banc Lima mono-nœud**, le control-plane **EST** le seul nœud : le
-`nodeSelector` `DoesNotExist` ne matcherait aucun nœud (pod `Pending`). Un
-**overlay/patch banc l'assouplit** (retire le `nodeSelector`), exactement comme
-le scénario 34 documente « au banc, le CP est aussi le builder ». Le manifeste
-versionné garde la posture **prod** correcte ; le banc la patche.
+`nodeSelector` `DoesNotExist` ne matcherait aucun nœud (pod `Pending`). Le
+manifeste versionné garde la posture **prod** correcte (builder sur worker,
+invariant 5) ; **au banc on RETIRE le `nodeSelector`** après avoir appliqué le
+`WorkflowTemplate`.
 
-### Placeholders / TODO d'intégration
+Le dépôt n'a **aucune infra kustomize** (zéro `kustomization.yaml`/`overlays/` —
+les écarts banc/prod passent par des `values.bench.yaml` Helm ou des manifestes
+distincts). Pour un simple retrait de champ sur un CR, la voie **cohérente** est
+un `kubectl patch` documenté (pas un overlay kustomize créé pour ce seul cas) :
 
-- **Digest BuildKit** : `moby/buildkit:v0.18.2-rootless` est épinglé par digest
-  d'index multi-arch (résolu via crane, ADR 0006). Reste à **mirrorer au
-  registry interne** (ADR 0011) au banc air-gappé.
-- **Images publiques à mirrorer** (`alpine/git`, `crane`, `curl`) — au banc
-  air-gappé, mirrorer au registry interne + épingler par digest (ADR 0011).
+```bash
+# BANC UNIQUEMENT — mono-nœud : le CP est aussi le builder. À jouer APRÈS
+# `kubectl apply` du WorkflowTemplate, AVANT de soumettre un Workflow.
+kubectl patch -n argo workflowtemplate image-builder --type json \
+  -p '[{"op":"remove","path":"/spec/nodeSelector"}]'
+```
+
+Idempotent de fait : un second `patch remove` sur un `nodeSelector` déjà absent
+échoue (chemin introuvable) — soit on l'ignore, soit on ne le rejoue pas (le
+banc pose le `WorkflowTemplate` une fois). **Ne PAS** jouer ce patch en prod (le
+builder DOIT rester worker-only, SPOF unique).
+
+### Mirror des images publiques (banc air-gappé)
+
+Les **4 images publiques** du builder (`alpine/git`, `moby/buildkit`,
+`gcr.io/go-containerregistry/crane`, `curlimages/curl`) sont **épinglées par
+digest d'index multi-arch** (ADR 0006) **et tirées de `registry:80`** dans le
+manifeste (tag conservé pour lisibilité). Au banc air-gappé, un pod ne peut pas
+tirer d'Internet → elles doivent d'abord être **mirrorées au registry interne**
+(ADR 0011). Le play
+[`bootstrap/eventful-mirror.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/eventful-mirror.yaml)
+le fait node-side (pull public par digest → tag `registry:80/<img>:<tag>` →
+push), idempotent (skip si déjà présente). Les digests du play et du manifeste
+sont **liés** : un bump change les deux.
+
+```bash
+# Pré-requis banc air-gappé : mirrorer les 4 images publiques du builder.
+nestor ansible eventful-mirror.yaml   # inventaire dérivé de la stack active (ADR 0098)
+```
+
+> L'image `argocli` du **CronWorkflow** filet (`cronworkflow-reconcile.yaml`)
+> vient du **même registre**, épinglée par le digest du bundle
+> `argo-workflows.yaml` (v4.0.6) — elle se mirore **avec le bundle**
+> (workflow-controller/argocli, cf. « Déploiement » ci-dessus), pas via
+> `eventful-mirror.yaml`.
+
+### TODO d'intégration restant
+
 - **KSV-0014 / seccomp Unconfined** du step build-push (requis par BuildKit
   rootless) — à allowlister dans `.trivyignore.yaml` sur ce seul chemin à
   l'intégration.

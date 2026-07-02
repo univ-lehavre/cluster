@@ -1,0 +1,116 @@
+# code: language=ansible
+# Layer EVENTFUL-MIRROR (ADR 0011/0095 §1.b) — MIRROR node-side des images PUBLIQUES
+# de la chaîne événementielle vers le registry interne, pour un banc air-gappé.
+#
+# POURQUOI ce play — Le WorkflowTemplate `image-builder`
+# (platform/argo-workflows/workflowtemplate-builder.yaml) et le CronWorkflow filet
+# (cronworkflow-reconcile.yaml) référencent des images PUBLIQUES (`alpine/git`,
+# `moby/buildkit`, `gcr.io/go-containerregistry/crane`, `curlimages/curl`). Au banc
+# Lima MONO-NŒUD air-gappé, un pod ne peut PAS tirer d'Internet → ImagePullBackOff.
+# Ce play les MIRORE au registry interne (registry:80) : pull public par DIGEST →
+# tag registry:80/<img>:<tag> → push. Les manifestes tirent alors registry:80/<img>.
+#
+# ≠ platform-build-images — ce rôle BUILD (arm64) ou re-tague (x86) des images MAISON
+# de la chaîne DataOps. Ici on ne BUILD rien : ce sont des images UPSTREAM figées
+# qu'on RECOPIE telles quelles (pull → tag → push), sur TOUTE arche (le registry sert
+# aussi bien arm64 que amd64 par le digest d'index multi-arch). D'où un play autonome,
+# calqué sur bootstrap/citation.yaml (audit-log + force_handlers + registry node).
+#
+# ÉPINGLAGE (ADR 0006) — chaque image est tirée par DIGEST d'index multi-arch
+# (arm64+amd64 vérifiés crane, résolus 2026-07-02) ; le tag lisible est REPOSÉ côté
+# registry interne pour que les manifestes le conservent (`registry:80/<img>:<tag>`).
+# Ces digests DOIVENT rester en phase avec ceux gravés dans les manifestes du builder :
+# un bump d'image change LES DEUX (le manifeste ET la var ci-dessous).
+
+- name: Layer Eventful-mirror — mirror des images publiques du builder vers registry:80
+  hosts: cloud
+  vars:
+    # Registry interne cible (parité build_registry_host du rôle platform-build-images).
+    eventful_mirror_registry: registry:80
+    # Les 4 images PUBLIQUES du WorkflowTemplate `image-builder` — pull par digest
+    # d'index multi-arch (ADR 0006), tag lisible reposé au registry interne. `public`
+    # = référence upstream complète tirée ; `name`/`tag` = destination registry:80.
+    eventful_mirror_images:
+      - name: alpine/git
+        tag: 2.47.2
+        public: docker.io/alpine/git@sha256:062a01ad7a0eb17cff382bc5e26086b4d710e56dfdfdf001109a49b6d9bd378c
+      - name: moby/buildkit
+        tag: v0.18.2-rootless
+        public: docker.io/moby/buildkit@sha256:95da42806e4e3e3d3cb72f84286446ab5aa60e9c69c521e8b4c72d0c283b4593
+      - name: gcr.io/go-containerregistry/crane
+        tag: v0.20.3
+        public: gcr.io/go-containerregistry/crane@sha256:fc86bcad43a000c2a1ca926a1e167db26c053cebc3fa5d14285c72773fb8c11d
+      - name: curlimages/curl
+        tag: 8.11.1
+        public: docker.io/curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+  # GARDE D'ISOLATION (ADR 0053) : ce play SSH sur les nœuds (`cloud`) et pousse dans le
+  # registry → il DOIT vérifier EXPECTED_TARGET_KIND via audit-log AVANT toute tâche
+  # distante (comme citation/portal/dataops). force_handlers : filet restart containerd
+  # même si un pull/push échoue en aval (incident 2026-06-16, parité citation).
+  force_handlers: true
+  pre_tasks:
+    - name: Audit-log — record playbook execution (+ garde target_kind)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: eventful-mirror.yaml
+  tasks:
+    # Config containerd pour le registry interne AVANT le push (vers registry:80 en HTTP).
+    - name: Configuration containerd pour le registry interne
+      ansible.builtin.import_role:
+        name: platform-registry
+        tasks_from: node
+      tags: registry-node
+
+    # FLUSH (ADR 0051) : containerd doit avoir RELU sa config avant push HTTP. Cf. citation.
+    - name: Recharger containerd si sa config a changé (avant push)
+      ansible.builtin.meta: flush_handlers
+      tags: registry-node
+
+    # Pré-check de PRÉSENCE (parité tasks/image.yaml L12-18) : `nerdctl manifest inspect`
+    # sur le registry interne. Pilote le `when` du mirror ci-dessous (idempotence : une
+    # image déjà mirrorée a rc==0 → skip). Doit tourner même en --check (check_mode: false,
+    # ADR 0051). run_once : un seul nœud builder peuple le registry partagé.
+    - name: 'Check if mirror image already present in registry — {{ mirror.name }}'
+      ansible.builtin.command: >-
+        nerdctl manifest inspect {{ eventful_mirror_registry }}/{{ mirror.name }}:{{ mirror.tag }}
+      # become: true OBLIGATOIRE — la config `certs.d/registry:80/hosts.toml` (HTTP,
+      # skip_verify) est ROOT-only ; sans root, nerdctl l'ignore et tape registry:80 en
+      # HTTPS → « server gave HTTP response to HTTPS client ». Le rôle platform-build-images
+      # (importé avec become) marche pour ça ; ce play autonome doit le poser lui-même.
+      become: true
+      register: eventful_mirror_present
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      run_once: true
+      loop: '{{ eventful_mirror_images }}'
+      loop_control:
+        loop_var: mirror
+        label: '{{ mirror.name }}:{{ mirror.tag }}'
+
+    # Mirror des images ABSENTES : pull public (par DIGEST d'index multi-arch) → tag
+    # registry:80/<img>:<tag> → push. On boucle sur les résultats du pré-check et on saute
+    # celles déjà présentes (rc==0). Les 3 gestes tiennent dans une commande shell pour
+    # rester atomiques par image ; le tag REPOSE le tag lisible attendu par les manifestes.
+    # ⚠️ TOUTES les lignes du scalar `>-` DOIVENT être à la MÊME indentation : une ligne
+    # plus indentée fait CONSERVER son saut de ligne au folded scalar (`\n   registry:80…`
+    # → argv coupé, la commande échoue). D'où `dest` pré-calculé + une seule chaîne à plat.
+    - name: 'Mirror missing public builder images to {{ eventful_mirror_registry }}'
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - -c
+          - >-
+            nerdctl pull {{ item.mirror.public }}
+            && nerdctl tag {{ item.mirror.public }} {{ _dest }}
+            && nerdctl push {{ _dest }}
+      vars:
+        _dest: '{{ eventful_mirror_registry }}/{{ item.mirror.name }}:{{ item.mirror.tag }}'
+      become: true # cf. pré-check : certs.d HTTP root-only (sinon push HTTPS échoue)
+      changed_when: true
+      when: item.rc != 0
+      run_once: true
+      loop: '{{ eventful_mirror_present.results }}'
+      loop_control:
+        label: '{{ item.mirror.name }}:{{ item.mirror.tag }}'
