@@ -1248,7 +1248,20 @@ def cmd_destroy(args: argparse.Namespace) -> int:
     if rc != 0:
         print(f"échec de la destruction (run-phases.sh down rc={rc}).", file=sys.stderr)
         return 1
-    print(f"✓ stack `{stack}` détruite ({len(targets)} VM(s)).")
+    # Kubeconfig de la stack (ADR 0102 volet B) : le supprimer après les VMs — sinon il reste
+    # ORPHELIN (pointe le forward API 127.0.0.1:6443 d'un banc mort) et devient un « KUBECONFIG
+    # poison » si `eval`é dans un shell (kubectl tombe sur localhost:8080 / un cluster disparu).
+    # Cohérent avec « rien ne subsiste » : la stack détruite ne laisse pas son kubeconfig. Le
+    # prochain `up` le réécrit (fetch au bootstrap). N'est retiré QUE pour un banc (garde 0053).
+    kubeconfig = _bench_kubeconfig_path(stack)
+    removed_kc = ""
+    if topo.target_kind == "bench" and os.path.exists(kubeconfig):
+        try:
+            os.unlink(kubeconfig)
+            removed_kc = " + kubeconfig"
+        except OSError as exc:
+            _warn(f"kubeconfig `{os.path.relpath(kubeconfig, _ROOT)}` non supprimé : {exc}")
+    print(f"✓ stack `{stack}` détruite ({len(targets)} VM(s){removed_kc}).")
     return 0
 
 

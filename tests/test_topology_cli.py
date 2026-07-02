@@ -2588,6 +2588,24 @@ class Destroy(unittest.TestCase):
         self.assertIsNotNone(env, "destroy doit passer l'env dérivé (NODES_OVERRIDE)")
         self.assertIn("NODES_OVERRIDE", env)
 
+    def test_destroy_removes_stack_kubeconfig(self):
+        # ADR 0102 volet B : un `down` réussi supprime le kubeconfig de la stack — sinon il
+        # reste orphelin (forward mort) et devient un « KUBECONFIG poison » (kubectl → :8080).
+        # Topo BENCH (le kubeconfig d'une stack prod déclarée n'est PAS supprimé, cf. garde).
+        topo_path = _example_as_lima(self)
+        stack = cli._stack_id(topo_path)
+        kc = cli._bench_kubeconfig_path(stack)
+        os.makedirs(os.path.dirname(kc), exist_ok=True)
+        with open(kc, "w", encoding="utf-8") as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+        self.addCleanup(lambda: os.path.exists(kc) and os.unlink(kc))
+        self._stub_vms(["cp1"])
+        self._stub_down()  # down réussit (rc=0) → la suppression du kubeconfig est atteinte
+        code, out, _ = _capture(["destroy", "-f", topo_path, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertFalse(os.path.exists(kc), "le down doit supprimer le kubeconfig de la stack")
+        self.assertIn("kubeconfig", out)  # le message le mentionne
+
     def test_no_stack_vm_is_noop(self):
         # Aucune VM de la stack présente (cp9 = orpheline) → rien à détruire, code 0,
         # et l'orpheline n'est PAS touchée (destroy ≠ nettoyage d'orphelines).
