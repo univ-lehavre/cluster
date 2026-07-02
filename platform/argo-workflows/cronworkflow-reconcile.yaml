@@ -1,0 +1,91 @@
+# CronWorkflow `builder-reconcile` (ns argo) — FILET event-loss (ADR 0095
+# §Coût / plan build événementiel §SPOF, POINT DUR 4 ; étape 7).
+#
+# ── CE QU'IL EST (honnêteté ADR 0034/0052) ────────────────────────────────────
+# L'EventBus NATS tourne en `replicas: 1` (SPOF assumé, cf. eventbus-nats.yaml) :
+# un event push perdu pile pendant un redémarrage de NATS n'est JAMAIS construit,
+# car le build n'a PAS de polling natif (contrairement à Argo CD, ~3 min côté
+# déploiement). Ce CronWorkflow est le FILET de rattrapage : périodiquement, pour
+# chaque code-location connue, il compare le HEAD atlas au tag déployé (le sha12
+# lisible dans `apps/<cl>.yaml` de cluster/apps) et, s'ils DIFFÈRENT, SOUMET le
+# builder `image-builder`.
+#
+# ⚠️ CE N'EST PAS le rejeu `changed=0` d'Ansible (ADR 0052). C'est un rattrapage
+# à latence = la période du Cron (ci-dessous "*/30 * * * *"). Il garantit qu'un
+# push finit par être construit ; il ne prouve PAS l'idempotence. À consigner
+# aussi dans `bench/lima/RESULTS.md` au run banc.
+#
+# ── ÉTAT : SQUELETTE STRUCTURÉ (à compléter au banc) ──────────────────────────
+# Le corps `reconcile` est un SQUELETTE : le shell ci-dessous DÉCRIT la boucle
+# (énumérer les `apps/*.yaml`, lire le tag déployé, `git ls-remote` atlas HEAD,
+# comparer, `argo submit --from wt/image-builder` si écart) mais les commandes
+# concrètes (parsing du sha12 dans le manifeste, appel `argo`/API) restent à
+# CÂBLER ET PROUVER AU BANC (format réel des `apps/<cl>.yaml`, RBAC du SA pour
+# soumettre, image `argocli`/`git` mirrorée). NE PAS prétendre qu'il tourne.
+# TODO intégration (ADR 0011) : les images `alpine/git` + `argocli` sont
+# PUBLIQUES → à MIRRORER au registry:80 + épingler @sha256 (index multi-arch),
+# comme les steps du WorkflowTemplate `image-builder`.
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: builder-reconcile
+  namespace: argo
+spec:
+  # Période PRUDENTE — filet, pas temps réel. Compromis latence / charge (git
+  # ls-remote + lecture cluster/apps toutes les 30 min).
+  schedule: '*/30 * * * *'
+  concurrencyPolicy: Forbid # jamais deux réconciliations concurrentes.
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  workflowSpec:
+    entrypoint: reconcile
+    # SA autorisé à `argo submit` (créer des Workflows) — posé à l'intégration.
+    serviceAccountName: operate-workflow-sa
+    templates:
+      - name: reconcile
+        container:
+          # PUBLIQUE — à mirrorer + épingler @sha256 à l'intégration (ADR 0011).
+          # `argocli` porte à la fois `argo` (submit) et un git/curl utilitaires.
+          image: quay.io/argoproj/argocli:latest # TODO: mirrorer registry:80 + @sha256
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              # ── SQUELETTE — logique du filet event-loss (à câbler+prouver banc) ──
+              # Base intra-cluster du repo déclaratif cluster/apps (Contents API).
+              APPS_API="http://gitea-http.gitea.svc.cluster.local/api/v1/repos/cluster/apps"
+              ATLAS_GIT="http://gitea-http.gitea.svc.cluster.local/atlas/atlas.git"
+
+              # HEAD courant du code atlas (le SHA que la chaîne DEVRAIT avoir bâti).
+              head=$(git ls-remote "$ATLAS_GIT" refs/heads/main | cut -f1)
+              head12=$(printf '%s' "$head" | cut -c1-12)
+              echo "reconcile: atlas HEAD=$head12"
+
+              # TODO(banc) : énumérer les code-locations connues = les fichiers
+              # `apps/*.yaml` de cluster/apps (GET $APPS_API/contents/apps). Pour
+              # CHACUNE, lire le tag déployé (sha12 lisible dans le manifeste ou
+              # dérivé du digest) et comparer à $head12. Si DIFFÉRENT → un event a
+              # (peut-être) été perdu → resoumettre le builder :
+              #
+              #   for cl in $(list_code_locations); do
+              #     deployed12=$(read_deployed_sha12 "apps/${cl}.yaml")
+              #     if [ "$deployed12" != "$head12" ]; then
+              #       argo submit -n argo --from workflowtemplate/image-builder \
+              #         -p codeLocation="$cl" -p revision="$head" \
+              #         -p atlasRepoURL="$ATLAS_GIT" \
+              #         -p giteaWritebackURL="$APPS_API"
+              #     fi
+              #   done
+              #
+              # Sans le câblage réel (parsing + RBAC), on SORT en no-op explicite :
+              # le filet est STRUCTURÉ mais pas encore prouvé (honnêteté ADR 0034).
+              echo "reconcile: SQUELETTE (câblage list/compare/submit à prouver au banc)"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault

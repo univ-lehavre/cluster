@@ -1,0 +1,119 @@
+# POINT DUR 2 (ADR 0095 §0/§1.b) — AIR-GAP ASYMÉTRIQUE : SEUL le ns `argo` (le
+# builder BuildKit-in-pod) a un egress Internet. Le RUNTIME applicatif (ns
+# `dagster`) et le CHEMIN DE DÉPLOIEMENT (Argo CD, ns `argocd`) restent
+# air-gappés — ils ne sortent JAMAIS vers Internet (ADR 0003). Le builder est la
+# ZONE DE CONFIANCE DISTINCTE : il sort vers Internet (ciblé, tracé) parce qu'un
+# Dockerfile résout ses dépendances au build ; tout le reste reste fermé.
+#
+# Cibles Internet révélées par le Dockerfile citation
+# (atlas/dataops/citation-dagster/Dockerfile), toutes en 443 :
+#   - `deb.debian.org` / miroirs Debian        → `apt-get install rclone ca-certificates`
+#   - `pypi.org` / `files.pythonhosted.org`    → `pip install uv` + `uv pip install .`
+#   - `extensions.duckdb.org`                  → `duckdb INSTALL httpfs/postgres`
+#   - `huggingface.co` / `cdn-lfs*`            → `fetch_model.py` (modèle ONNX)
+#
+# CHOIX (calque dagster/allow-internet-egress) : on NE filtre PAS par IP de
+# destination. Ces hôtes (PyPI, HuggingFace CDN, miroirs Debian) n'ont pas d'IP
+# fixe et leurs plages ont un churn régulier → un filtrage FQDN/IP ajoute de la
+# complexité pour un gain marginal sur réseau privé (ADR 0003). La BORNE DE
+# SÉCURITÉ, ici, ce sont : (1) le PORT 443 SEUL, et (2) le fait que ce SEUL ns
+# `argo` porte cet egress Internet (les autres ns restent default-deny).
+#
+# podSelector {} : le pod builder est éphémère (Workflow instancié par SHA) ;
+# suivre l'idiome des egress du dépôt (tous en podSelector {}), portée = ns argo.
+#
+# ⚠️ IDIOME CILIUM — `ipBlock: 0.0.0.0/0` EXCLUT les IPs des pods du cluster
+# (entités réservées). L'egress Internet (443) ci-dessous NE COUVRE donc PAS le
+# registry ni Gitea (pods internes) : ceux-ci sont ouverts SÉPARÉMENT par
+# `namespaceSelector` (calque argocd/allow-reposerver-gitea-egress). Même piège
+# pour l'API server (entité réservée) : ouvert sans `to:` (calque
+# dagster/allow-apiserver-egress) car un `ipBlock` l'exclurait.
+---
+# (1) EGRESS INTERNET CIBLÉ — build only, port 443 (voir en-tête pour les cibles).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-build-egress
+  namespace: argo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443 # HTTPS — apt (deb.debian.org), PyPI, DuckDB CDN, HuggingFace
+---
+# (2) DNS (CoreDNS / kube-system) — INDISPENSABLE sous default-deny, sinon le
+# builder ne résout ni `registry`, ni `gitea`, ni les hôtes Internet du build.
+# Calque dagster/allow-dns.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: argo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# (3) REGISTRY interne (ns `registry`, port 80) — le PUSH de l'image buildée
+# (registry:80/<app>:<sha12>, ADR 0011). Via namespaceSelector car un
+# `ipBlock: 0.0.0.0/0` exclut les pods internes (voir en-tête). Calque
+# dagster/allow-registry-egress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-registry-egress
+  namespace: argo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: registry
+      ports:
+        - protocol: TCP
+          port: 80
+---
+# (4) GITEA (ns `gitea`) — le CLONE du contexte atlas@SHA (step clone) ET le
+# write-back de `apps/<app>.yaml` par digest (step write-back, Contents API).
+# PORT 3000 = port RÉEL du POD gitea après DNAT du Service (sous Cilium la
+# NetworkPolicy filtre le port du pod de destination, pas celui du Service) ; on
+# ouvre aussi 80 pour robustesse selon le datapath. Calque
+# argocd/allow-reposerver-gitea-egress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gitea-egress
+  namespace: argo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gitea
+      ports:
+        - protocol: TCP
+          port: 3000 # port du POD gitea (cible réelle après DNAT du Service)
+        - protocol: TCP
+          port: 80 # Service gitea-http (robustesse selon le datapath)

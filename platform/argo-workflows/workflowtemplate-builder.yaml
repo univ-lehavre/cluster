@@ -1,0 +1,289 @@
+# WorkflowTemplate `image-builder` (étape 6, ADR 0095 §1.b) — la traduction
+# IN-POD du build node-side (rôle platform-build-images) : clone atlas@SHA →
+# build BuildKit rootless sur un WORKER → push registry:80 → lit le DIGEST →
+# write-back `apps/<app>.yaml` par digest dans `cluster/apps`.
+#
+# Paramétré générique (ADR 0023) : `codeLocation` (ex. `citation`), `revision`
+# (SHA git), `atlasRepoURL` (clone), `giteaWritebackURL` (Contents API). Aucune
+# valeur d'instance codée en dur.
+#
+# ── QUATRE POINTS DURS traités par cette chaîne (détail par step ci-dessous) ──
+#  1. buildkitd.toml insecure → ConfigMap `buildkitd-config` montée dans build-push.
+#  2. Egress build ciblé / air-gap asymétrique → NetworkPolicy allow-build-egress
+#     (ns argo SEUL ; le runtime dagster + Argo CD restent air-gappés).
+#  3. Token Gitea scopé cluster/apps → Secret `gitea-writeback-token` (patron
+#     *.example), monté dans write-back seulement.
+#  4. Builder sur WORKER, jamais le control-plane (SPOF) → nodeSelector ci-dessous.
+#
+# ── DETTES / RÉSERVES tracées honnêtement (ADR 0095 §Coût / plan §SPOF) ──
+#  - Registry `replicas:1` sur le chemin build (push) ET deploy (pull), PVC RWO —
+#    SPOF amplifié (ADR 0011).
+#  - Build NON bit-reproductible : apt / base `python:*-slim` non lockés ; un
+#    rebuild du même SHA peut produire un digest différent. Traçabilité
+#    commit→image OK, bit-repro NON (tension ADR 0052).
+#  - Digest SINGLE-ARCH : un build in-pod mono-arch produit un digest de manifest,
+#    pas d'index multi-arch (ADR 0006). Acceptable prod x86-only (ADR 0095 §2).
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: image-builder
+  namespace: argo
+spec:
+  entrypoint: main
+  arguments:
+    parameters:
+      - name: codeLocation # ex. `citation` — nom de la code-location atlas (générique)
+      - name: revision # SHA git — tag lisible + révision clonée
+      - name: atlasRepoURL # ex. http://gitea-http.gitea.svc.cluster.local/atlas/atlas.git
+      - name: giteaWritebackURL # base Contents API cluster/apps, ex. http://gitea-http.gitea.svc.cluster.local/api/v1/repos/cluster/apps
+
+  # POINT DUR 4 — le builder tourne sur un WORKER, JAMAIS le control-plane (SPOF
+  # unique, invariant 5 ADR 0095). L'audit prouve qu'un worker l'absorbe (~90 %
+  # RAM libre).
+  #
+  # ⚠️ ÉCART BANC — au banc Lima MONO-NŒUD, le control-plane EST le seul nœud :
+  # ce nodeSelector `DoesNotExist` NE MATCHE AUCUN NŒUD → le pod resterait
+  # Pending. Un overlay/patch banc l'ASSOUPLIT (retire le nodeSelector), tout
+  # comme le scénario 34 documente « au banc, le CP est aussi le builder ». On
+  # GARDE le nodeSelector ici (posture prod correcte) ; le banc le patche.
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: DoesNotExist
+
+  # Volume partagé clone → build (le contexte atlas cloné, lu par buildctl).
+  volumes:
+    - name: workspace
+      emptyDir: {}
+    # POINT DUR 1 — buildkitd.toml (registry:80 http/insecure) monté dans build-push.
+    - name: buildkitd-config
+      configMap:
+        name: buildkitd-config
+    # POINT DUR 3 — token Gitea scopé cluster/apps, monté dans write-back seulement.
+    - name: gitea-writeback-token
+      secret:
+        secretName: gitea-writeback-token
+
+  templates:
+    # ─────────────────────────────────────────────────────────────────────────
+    # Orchestration : 4 steps SÉQUENTIELS (clone → build-push → digest → write-back).
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: main
+      steps:
+        - - name: clone
+            template: clone
+        - - name: build-push
+            template: build-push
+        - - name: digest
+            template: digest
+        - - name: write-back
+            template: write-back
+            arguments:
+              parameters:
+                - name: digest
+                  value: '{{steps.digest.outputs.parameters.digest}}'
+
+    # ── STEP 1 — clone atlas@revision dans /work (contexte de build). ──────────
+    # TODO intégration (ADR 0011) : `alpine/git` est une image PUBLIQUE — au banc
+    # air-gappé elle doit être MIRRORÉE au registry interne (registry:80), sinon
+    # ImagePullBackOff. Épingler par digest d'index multi-arch à l'intégration.
+    - name: clone
+      container:
+        image: alpine/git:latest # TODO: mirrorer au registry:80 + épingler @sha256 (index multi-arch)
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            git clone --depth 1 "{{workflow.parameters.atlasRepoURL}}" /work
+            cd /work
+            git fetch --depth 1 origin "{{workflow.parameters.revision}}"
+            git checkout "{{workflow.parameters.revision}}"
+        volumeMounts:
+          - name: workspace
+            mountPath: /work
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          seccompProfile:
+            type: RuntimeDefault
+
+    # ── STEP 2 — build + push (BuildKit rootless). ────────────────────────────
+    # Contexte de build = `dataops/` avec `-f citation-dagster/Dockerfile` (le
+    # Dockerfile citation embarque le projet dbt frère : contexte multi-dossier,
+    # cf. Dockerfile atlas). Ici générique via `{{codeLocation}}` :
+    #   context = /work/dataops ; dockerfile = /work/dataops/<codeLocation>-dagster ; filename = Dockerfile.
+    #
+    # POINT DUR 1 — buildkitd.toml monté à /home/user/.config/buildkit/buildkitd.toml
+    # (chemin de config par défaut de l'image rootless, uid 1000) → push HTTP
+    # `registry:80` OK (sans lui : handshake TLS sur du HTTP → échec).
+    - name: build-push
+      container:
+        # Épinglé par DIGEST d'index multi-arch (arm64+amd64 vérifiés crane, ADR 0006),
+        # résolu 2026-07-02. TODO intégration (ADR 0011) : mirrorer au registry:80.
+        image: moby/buildkit:v0.18.2-rootless@sha256:95da42806e4e3e3d3cb72f84286446ab5aa60e9c69c521e8b4c72d0c283b4593
+        command: [buildctl-daemonless.sh]
+        args:
+          - build
+          - --frontend
+          - dockerfile.v0
+          - --local
+          - context=/work/dataops
+          - --local
+          - dockerfile=/work/dataops/{{workflow.parameters.codeLocation}}-dagster
+          - --opt
+          - filename=Dockerfile
+          - --output
+          - type=image,name=registry:80/{{workflow.parameters.codeLocation}}:{{workflow.parameters.revision}},push=true
+        env:
+          # BuildKit rootless dans un Pod : pas de sandbox de process (Kubernetes
+          # n'a pas l'équivalent de systempaths=unconfined). Requis avec le
+          # securityContext Unconfined ci-dessous (doc buildkit rootless k8s).
+          - name: BUILDKITD_FLAGS
+            value: --oci-worker-no-process-sandbox
+        volumeMounts:
+          - name: workspace
+            mountPath: /work
+          - name: buildkitd-config
+            mountPath: /home/user/.config/buildkit
+            readOnly: true
+      # BuildKit rootless en k8s exige seccomp ET AppArmor Unconfined sur CE
+      # conteneur (il crée des user-namespaces imbriqués que les profils par
+      # défaut interdisent). Justifié : c'est le prix du build rootless (vs Kaniko
+      # root, écarté ADR 0095). Cantonné au SEUL pod builder du ns argo.
+      # (KSV-0014 / seccomp non-RuntimeDefault → à allowlister .trivyignore.yaml
+      #  sur ce seul chemin à l'intégration.)
+      metadata:
+        annotations:
+          # Legacy (k8s < 1.30) — AppArmor Unconfined sur le conteneur du daemon.
+          container.apparmor.security.beta.kubernetes.io/build-push: unconfined
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: Unconfined # requis : BuildKit rootless crée des user-namespaces imbriqués
+        # k8s >= 1.30 — champ natif (double la legacy annotation ci-dessus).
+        appArmorProfile:
+          type: Unconfined
+
+    # ── STEP 3 — lire le DIGEST poussé. ───────────────────────────────────────
+    # En Pod on ne peut pas `nerdctl image inspect` (pas de containerd du nœud) →
+    # `crane digest` interroge le registry (insecure car registry:80 est HTTP).
+    # Garde de parité avec l'étape 1 : le digest DOIT matcher ^sha256:[0-9a-f]{64}$
+    # (un push raté ne doit pas écrire un digest vide → Argo CD déploierait un
+    # manifeste périmé). Écrit dans un output param consommé par write-back.
+    # TODO intégration (ADR 0011) : `gcr.io/go-containerregistry/crane` PUBLIQUE →
+    # mirrorer au registry:80 + épingler @sha256 (index multi-arch).
+    - name: digest
+      container:
+        image: gcr.io/go-containerregistry/crane:latest # TODO: mirrorer + épingler @sha256
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            d=$(crane digest --insecure "registry:80/{{workflow.parameters.codeLocation}}:{{workflow.parameters.revision}}")
+            echo "$d" | grep -qE '^sha256:[0-9a-f]{64}$' \
+              || { echo "digest invalide ou vide: <${d:-∅}>" >&2; exit 1; }
+            printf '%s' "$d" > /tmp/digest
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          seccompProfile:
+            type: RuntimeDefault
+      outputs:
+        parameters:
+          - name: digest
+            valueFrom:
+              path: /tmp/digest
+
+    # ── STEP 4 — write-back `apps/<codeLocation>.yaml` par digest dans cluster/apps. ──
+    # Réutilise le PATRON `push_contents_file` de bootstrap/seed-app-of-apps.sh :
+    # base64 du contenu, GET du sha existant (create-or-update idempotent), PUT si
+    # présent sinon POST, VÉRIFIE "commit" dans la réponse (un PUT/POST raté ne
+    # doit pas laisser l'ancien manifeste — drift ADR 0095 §1.a).
+    #
+    # POINT DUR 3 — token monté depuis le Secret `gitea-writeback-token` (scopé
+    # cluster/apps, write:repository), lu dans l'en-tête Authorization.
+    #
+    # NOTE FRONTIÈRE (ADR 0094) — le manifeste écrit ici référence l'image PAR
+    # DIGEST `registry:80/<codeLocation>@<digest>`. La SUBSTITUTION du digest dans
+    # l'overlay atlas suit la logique de nestor/seed.py `substitute_citation_
+    # placeholders` (le seed est propriétaire du placeholder ; ici le builder
+    # écrit la déclaration Application par digest, cluster/apps = seule surface écrite).
+    # TODO intégration (ADR 0011) : `curlimages/curl` PUBLIQUE → mirrorer + épingler @sha256.
+    - name: write-back
+      inputs:
+        parameters:
+          - name: digest
+      container:
+        image: curlimages/curl:latest # TODO: mirrorer au registry:80 + épingler @sha256
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            digest="{{inputs.parameters.digest}}"
+            cl="{{workflow.parameters.codeLocation}}"
+            base="{{workflow.parameters.giteaWritebackURL}}"        # …/api/v1/repos/cluster/apps
+            token="$(cat /var/run/gitea/token)"
+            rpath="apps/${cl}.yaml"
+            image_ref="registry:80/${cl}@${digest}"
+
+            # Le fichier apps/<cl>.yaml : une Application Argo CD référençant l'image PAR DIGEST.
+            manifest=$(cat <<YAML
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            metadata:
+              name: ${cl}
+              namespace: argocd
+            spec:
+              project: cluster-apps
+              source:
+                repoURL: http://gitea-http.gitea.svc.cluster.local/atlas/atlas.git
+                targetRevision: "{{workflow.parameters.revision}}"
+                path: dataops/${cl}-dagster/deploy/overlays/bench
+                kustomize:
+                  images:
+                    - ${image_ref}
+              destination:
+                server: https://kubernetes.default.svc
+                namespace: dagster
+              syncPolicy:
+                automated:
+                  selfHeal: true
+                  prune: true
+            YAML
+            )
+            content=$(printf '%s' "$manifest" | base64 | tr -d '\n')
+            auth="Authorization: token ${token}"
+
+            # GET du sha existant (create-or-update idempotent, patron push_contents_file).
+            sha=$(curl -fsS -H "$auth" "${base}/contents/${rpath}" 2>/dev/null \
+              | grep -oE '"sha":"[a-f0-9]+"' | head -1 | cut -d'"' -f4 || true)
+            if [ -n "${sha}" ]; then
+              body="{\"content\":\"${content}\",\"sha\":\"${sha}\",\"message\":\"builder: ${cl} @ ${digest}\"}"
+              resp=$(curl -fsS -X PUT -H "$auth" -H 'Content-Type: application/json' \
+                -d "${body}" "${base}/contents/${rpath}")
+            else
+              body="{\"content\":\"${content}\",\"message\":\"builder: ${cl} @ ${digest}\"}"
+              resp=$(curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+                -d "${body}" "${base}/contents/${rpath}")
+            fi
+            printf '%s' "$resp" | grep -q '"commit"' \
+              || { echo "write-back Contents API de ${rpath} ÉCHOUÉ — réponse: ${resp}" >&2; exit 1; }
+            echo "write-back OK: ${rpath} → ${image_ref}"
+        volumeMounts:
+          - name: gitea-writeback-token
+            mountPath: /var/run/gitea
+            readOnly: true
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          seccompProfile:
+            type: RuntimeDefault

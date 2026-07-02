@@ -10,6 +10,10 @@ storage/ceph/toolbox.yaml
 platform/cert-manager/cert-manager.yaml
 platform/argocd/argocd.yaml
 
+# Vendored upstream Argo Workflows / Argo Events bundles (épinglés par digest)
+platform/argo-workflows/argo-workflows.yaml
+platform/argo-events/argo-events.yaml
+
 # Vendored upstream monitoring (helm template figé, épinglé par digest — palier 2)
 platform/kube-prometheus-stack/crds.yaml
 platform/kube-prometheus-stack/kube-prometheus-stack.yaml
