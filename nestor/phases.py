@@ -415,6 +415,12 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     # ── portal : portail d'accès aux UI (NodePort L4, lecture seule). NI stockage
     #    NI S3 → aucun -e dérivé (run-phases.sh:1184 ne passe que dataops_k8s_host). ─
     "portal": _plan("portal", extravars_keys=()),
+    # ── citation : BUILD de l'image applicative de la code-location atlas `citation`
+    #    (ADR 0094/0095 §1.a). Layer node-side pure (build+push+lit digest) — le
+    #    DÉPLOIEMENT est GitOps (Argo CD tire par digest), pas un signal de couche ici.
+    #    `citation_repo_dir` (chemin du dépôt atlas EXTERNE) est une valeur d'instance
+    #    injectée (ADR 0023) — passée en -e ; le play garde son absence. ────────────
+    "citation": _plan("citation", extravars_keys=("citation_repo_dir",)),
 }
 
 # ── Phases NON PORTÉES dans cette table (déléguées / stubées ailleurs) ────────
