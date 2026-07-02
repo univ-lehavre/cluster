@@ -817,3 +817,62 @@ sans table ni pont bash. Débloque
 [#389](https://github.com/univ-lehavre/cluster/issues/389) (wipe node-side par
 `node_exec`, objectif zéro-table atteint) et
 [#372](https://github.com/univ-lehavre/cluster/issues/372).
+
+## Chaîne événementielle + code-location citation RÉELLE déployée et sa chaîne applicative matérialisée (ADR 0095 §1.b, 2026-07-02)
+
+> **✅ Validé sur banc Lima arm64 mono-nœud local-path (2026-07-02).** La cible
+> événementielle
+> d'[ADR 0095](/cluster/docs/decisions/0095-build-applicatif-evenementiel-in-cluster/)
+> §1.b est **montée et debout** au banc, la **vraie** code-location `citation`
+> (dépôt atlas, plus le jouet) est **déployée par GitOps**, et sa **chaîne
+> applicative** (transformation → apprentissage → MLflow → Great Expectations →
+> Evidently) est **matérialisée avec succès**.
+
+**Infra événementielle debout.** Bundles vendorés Argo Workflows v4.0.6 + Argo
+Events v1.9.10 (`kubectl apply --server-side`), puis les CR : `EventBus` NATS
+natif (3 pods STAN Running), `EventSource` webhook `gitea-push` (Service
+`gitea-push-eventsource-svc:12000`), `Sensor` `code-location-build`, le
+`WorkflowTemplate` `image-builder` (BuildKit rootless), les NetworkPolicies. Les
+4 images publiques du builder (alpine/git, moby/buildkit, crane, curl) mirrorées
+au registry interne par `bootstrap/eventful-mirror.yaml`.
+
+**Code-location citation déployée par GitOps.** Le build node-side
+(`bootstrap/citation.yaml`) fabrique `registry:80/citation-dagster:dev` (image
+1.8 Go, Dockerfile atlas complet : apt/uv/DuckDB/modèle ONNX/dbt parse). Le seed
+**banc-citation** (`nestor/seed.py` variante `banc-citation`, façade
+`_seed_do_banc_citation`) crée `atlas/atlas` sur Gitea, y pousse l'arbre atlas
+figé, pose le **webhook #2**, rend `apps/citation.yaml` (overlay **bench** —
+SeaweedFS, pas d'OBC Ceph) et crée l'`Application` Argo CD. Résultat : pod
+`citation-dagster` **Running**, serveur gRPC `citation_dagster.definitions`
+démarré, code-location **`citation` chargée** dans le workspace Dagster (33
+assets).
+
+**Chaîne applicative matérialisée.** Données OpenAlex synthétiques (fixtures
+`fixtures/openalex-sample`) chargées dans SeaweedFS
+(`raw/{works,authors,merged_ids}`), puis `transform_job` lancé :
+**`RUN_SUCCESS`, 20 steps réussis, 0 échec** — transformation dbt
+(`stg_*`/`curated_*`/`marts_*`), apprentissage (`pair_uplift_model`,
+`researcher_embeddings`, `index_load` pgvector), **MLflow** (run tracké
+`http://mlflow.mlflow:5000/#/experiments/1/...`), **Great Expectations**
+(`ge_author_recommendations`, `ge_pair_uplift_predictions`, `ge_index_load` —
+tous **passed**), **Evidently** (`evidently_uplift_drift` — **passed**).
+
+**Correctifs révélés par le banc (honnêteté des Runs, ADR 0052)** — chacun rendu
+au code (ADR 0046) : `become` absent du play mirror (certs.d HTTP root-only) ;
+folded scalar YAML coupant l'argv nerdctl ; port du Service `gitea-http` codé
+(banc=80/prod=3000) → dérivé ; `render_citation_declaration` pointait
+`overlays/prod` (OBC Ceph absent au banc) → overlay `bench` ; copie
+`citation-dbt` bloquée sur `logs/` (54 Mo) → rsync avec `--exclude`. Gestes
+encore posés à la main au banc, **à câbler dans le montage** (ADR 0046, en
+cours) : SA/RBAC `operate-workflow-sa`, NetworkPolicy egress API server du ns
+`argo`, Secret HMAC `gitea-webhook-build-hmac`, reload du webserver Dagster
+(workspace).
+
+**Réserve honnête (ADR 0034).** Le **déclenchement 100 % événementiel** (un
+`git push` atlas → webhook #2 → Sensor → Workflow → build → déploiement, zéro
+geste) N'est PAS encore prouvé de bout en bout : le build node-side et la
+matérialisation ont été lancés manuellement (playbook, GraphQL). Toutes les
+BRIQUES du chemin événementiel sont montées et Running ; le run e2e « push → pod
+» reste à consigner. De même, l'**ingestion** (`raw_snapshot`, remote rclone
+`openalex:` externe) est court-circuitée par les fixtures — la transformation et
+l'aval sont prouvés, pas le pull OpenAlex réel.
