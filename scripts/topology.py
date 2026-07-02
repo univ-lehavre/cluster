@@ -3451,15 +3451,93 @@ def _chain_emit_and_verify_banc(*, sleep=time.sleep) -> None:
     )
 
 
+def _egress_probe_code(*, timeout: int = 120) -> str:
+    """Code HTTP curl d'une sortie HTTPS vers une IP publique depuis un pod ÉPHÉMÈRE du ns
+    `dagster` (preuve du FLUX egress Internet, pas d'un service S3 précis). Port de
+    `egress_probe_code` (run-phases.sh historique, ee1afc3^:982). On vise une IP LITTÉRALE
+    stable (Cloudflare `1.1.1.1`) pour ne PAS dépendre du DNS ni d'un endpoint AWS mouvant.
+
+    curl imprime LUI-MÊME `000` via `-w '%{http_code}'` quand la connexion n'aboutit pas
+    (timeout/refus) — PAS de fallback `|| 000` (curl a déjà imprimé 000 → la valeur doublerait
+    en `000000`, faux verdict ; leçon L59). On NORMALISE : toute sortie non « 3 chiffres » (pod
+    qui ne démarre pas, kubectl injoignable) est ramenée à `000`. `timeout=120` : le pod doit
+    démarrer + requêter + être nettoyé (le défaut 8 s ne suffit pas)."""
+    from nestor import phases as _phases
+
+    out = _kubectl(
+        "-n",
+        _phases.EGRESS_NAMESPACE,
+        "run",
+        f"egress-probe-{os.getpid()}",
+        "--rm",
+        "-i",
+        "--restart=Never",
+        f"--image={_phases.EGRESS_PROBE_IMAGE}",
+        "--quiet",
+        "--",
+        "curl",
+        "-sS",
+        "-o",
+        "/dev/null",
+        "--max-time",
+        "8",
+        "-w",
+        "%{http_code}",
+        _phases.EGRESS_PROBE_TARGET,
+        timeout=timeout,
+    )
+    code = (out.stdout.strip() if out and out.returncode == 0 else "") or ""
+    return code if len(code) == 3 and code.isdigit() else "000"
+
+
+def _egress_internet_check_banc(*, sleep=time.sleep) -> None:
+    """PREUVE de la NetworkPolicy `allow-internet-egress` (#256) : un run du ns `dagster` peut
+    sortir sur Internet (443) AVEC la policy, et est bloqué SANS (default-deny mord). Port
+    FIDÈLE de `dataops_egress_internet_check` (run-phases.sh historique, ee1afc3^:1004), câblé
+    ici en façade (le moteur substitue cette impl au STUB du registre via `_E2E_HOOK_IMPL`).
+
+    Méthode : (1) probe AVEC la NP (déjà déployée par la phase dataops) → doit aboutir ;
+    (2) RETIRE la NP, re-probe → doit timeouter (`000`) ; (3) RÉAPPLIQUE la NP depuis le
+    manifeste VERSIONNÉ (corriger l'état, jamais l'inventer — ADR 0046). La réapplication est
+    GARANTIE par un `try/finally` (équivalent du `trap RETURN` bash) : la NP revient même si le
+    probe lève au milieu. Verdict par la fonction PURE `classify_egress_probe` — `ok` silencieux,
+    `skip` non bloquant, `fail` LÈVE (jamais un faux vert, honnêteté ADR 0034)."""
+    from nestor import phases as _phases
+
+    _ = sleep  # signature homogène (cf. _chain_emit_and_verify_banc) ; le probe borne lui-même
+    manifest = os.path.join(_ROOT, _phases.EGRESS_NP_MANIFEST)
+
+    def _restore_np() -> None:
+        # Réapplique la NP depuis le fichier versionné (best-effort : ne masque pas l'erreur
+        # de probe par une erreur de réapply — comme le `|| true` du trap bash).
+        _kubectl("apply", "-f", manifest)
+
+    with_np = _egress_probe_code()  # 1. état nominal (NP posée par le play dataops)
+    try:
+        # 2. bascule SANS la NP → re-probe (doit timeouter).
+        _kubectl("delete", "-f", manifest, "--ignore-not-found")
+        without_np = _egress_probe_code()
+    finally:
+        _restore_np()  # 3. trap de garantie : la NP revient quoi qu'il arrive (ADR 0046)
+
+    status, message = _phases.classify_egress_probe(with_np, without_np)
+    if status == "ok":
+        print(f"    ✓ {message}")
+        return
+    if status == "skip":
+        print(f"    {message}")  # probe non exécutée : non bloquant (parité bash `log`)
+        return
+    raise _phases.E2EHookStubbed(f"{message} — NP allow-internet-egress à vérifier")
+
+
 # Implémentations RÉELLES (façade) des hooks e2e, substituées au STUB du registre
-# `phases.E2E_HOOKS` par le moteur (`launch`). SEUL `dataops_chain_emit_and_verify` est
-# câblé ; `dataops_egress_internet_check` reste STUBÉ (absent d'ici → le moteur joue le
-# stub du registre, qui LÈVE — hors périmètre, à câbler+prouver au banc). On mappe vers le
-# NOM de la fonction façade (pas une référence directe) pour une résolution TARDIVE via
-# `_e2e_hook_impl` — un test/patch de `_chain_emit_and_verify_banc` (attribut module) est
-# alors honoré (une référence figée dans le dict l'ignorerait).
+# `phases.E2E_HOOKS` par le moteur (`launch`). Les DEUX hooks dataops sont CÂBLÉS ici
+# (chain_emit + egress). On mappe vers le NOM de la fonction façade (pas une référence
+# directe) pour une résolution TARDIVE via `_e2e_hook_impl` — un test/patch de la fonction
+# façade (attribut module) est alors honoré (une référence figée dans le dict l'ignorerait).
 _E2E_HOOK_IMPL: dict[str, str] = {
     "dataops_chain_emit_and_verify": "_chain_emit_and_verify_banc",
+    "dataops_egress_internet_check": "_egress_internet_check_banc",
 }
 
 
@@ -3468,7 +3546,7 @@ def _e2e_hook_impl(name: str) -> Callable[..., None] | None:
 
     Résolution TARDIVE : on lit l'attribut module nommé dans `_E2E_HOOK_IMPL` au moment de
     l'appel (via `globals()`), pour qu'un patch de test sur la fonction façade soit pris en
-    compte. Un hook absent de la table (egress) → None : l'appelant joue le STUB du registre."""
+    compte. Un hook absent de la table → None : l'appelant joue le STUB du registre (défaut)."""
     attr = _E2E_HOOK_IMPL.get(name)
     return globals().get(attr) if attr else None
 
@@ -3616,9 +3694,9 @@ def _run_path_engine(
             # (un passage) n'a pas `.ok` (propre à IdempotenceResult) : succès = rc==0.
             # On route CHAQUE hook (par NOM) vers son IMPLÉMENTATION RÉELLE de façade
             # (`_E2E_HOOK_IMPL`, I/O kubectl) si elle existe, sinon vers le STUB du registre
-            # (`phases.E2E_HOOKS`, qui LÈVE E2EHookStubbed). Aujourd'hui :
-            #   - `dataops_chain_emit_and_verify` → CÂBLÉ (`_chain_emit_and_verify_banc`) ;
-            #   - `dataops_egress_internet_check` → STUB (lève — hors périmètre, à câbler au banc).
+            # (`phases.E2E_HOOKS`, qui LÈVE E2EHookStubbed). Les DEUX hooks dataops sont CÂBLÉS :
+            #   - `dataops_chain_emit_and_verify` → `_chain_emit_and_verify_banc` ;
+            #   - `dataops_egress_internet_check` → `_egress_internet_check_banc` (probe NP 443).
             if result.rc == 0:
                 for name in _phases.phase_plan(phase).e2e_hooks:
                     impl = _e2e_hook_impl(name) or _phases.E2E_HOOKS[name]
