@@ -94,6 +94,7 @@ from nestor.scaffold import (
     validate_name,
 )
 from nestor.seed import (
+    CodeLocationSpec,
     SeedConfig,
     SeedError,
     SeedGuardRefused,
@@ -184,6 +185,7 @@ __all__ = [
     "apply_context",
     "context_plan",
     # seed (LOT 8, ADR 0097 §2/§3) : seed des données post-bootstrap (gardes banc/prod)
+    "CodeLocationSpec",
     "SeedConfig",
     "SeedError",
     "SeedGuardRefused",
