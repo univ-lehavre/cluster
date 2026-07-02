@@ -51,8 +51,9 @@ _DEFAULTS = {
     "repo_atlas": "atlas",
     # Cible prod attendue (garde anti-mauvaise-cible, seed-app-of-apps.sh:157).
     "expected_cluster": "cluster-prod",
-    # Image citation (ADR 0095) — nom générique cible des substitutions de digest.
-    "citation_image_name": "registry:80/citation-dagster",
+    # Registry intra-cluster (ADR 0095/0023) : préfixe DÉRIVÉ des noms d'image code-location
+    # (`<registry>/<name>-dagster`). Un code-location NOUVEAU n'exige AUCUN champ ici.
+    "registry": "registry:80",
 }
 
 
@@ -65,6 +66,35 @@ class SeedGuardRefused(SeedError):
 
     Sous-classe distincte pour que l'appelant/les tests distinguent un REFUS de sécurité
     (cible non prouvée) d'un échec d'étape ordinaire — un refus = on n'a RIEN muté."""
+
+
+@dataclass(frozen=True)
+class CodeLocationSpec:
+    """UNE code-location applicative atlas à seeder (ex : `citation`, `mediawatch`).
+
+    Le seed n'est PLUS mono-citation : il porte une LISTE de ces specs (frontière ADR 0094 :
+    atlas FOURNIT des code-locations `dataops/<name>-dagster/`, cluster les INSTANCIE). Le
+    Sensor Argo Events (sensor-code-location.example.yaml) dérive DÉJÀ le `codeLocation` du
+    chemin `dataops/<name>-dagster/` ; le SEED s'aligne sur ce modèle GÉNÉRIQUE.
+
+    - `name`      : le nom court GÉNÉRIQUE (`citation`, `mediawatch`, ADR 0023) — signal
+                    canonique dont dérivent l'image, les placeholders et le path de l'overlay.
+    - `revision`  : le SHA git figé (`code-location.manifest.yaml:revision`, ADR 0094 §3).
+    - `image_digest` : le digest immuable `sha256:…` (ADR 0095 §2). None au banc (overlay
+                    `bench` sans placeholder de digest) → substitution best-effort (no-op)."""
+
+    name: str
+    revision: str | None = None
+    image_digest: str | None = None
+    registry: str = _DEFAULTS["registry"]
+
+    @property
+    def image_name(self) -> str:
+        """Nom d'image DÉRIVÉ du name (`<registry>/<name>-dagster`) — jamais codé en dur.
+
+        Convention atlas : `dataops/<name>-dagster/` ⇒ image `<registry>/<name>-dagster`
+        (parité citation/mediawatch). Un code-location NOUVEAU n'exige aucun champ image."""
+        return f"{self.registry}/{self.name}-dagster"
 
 
 @dataclass(frozen=True)
@@ -90,18 +120,29 @@ class SeedConfig:
     org_atlas: str = _DEFAULTS["org_atlas"]
     repo_atlas: str = _DEFAULTS["repo_atlas"]
     expected_cluster: str = _DEFAULTS["expected_cluster"]
-    # atlas (prod) : code applicatif figé à une révision + digest immuable (ADR 0094/0095).
+    # atlas (prod) : dépôt de code atlas COMMUN à toutes les code-locations (frontière 0094).
     atlas_repo_dir: str | None = None
-    citation_revision: str | None = None
-    citation_image_digest: str | None = None
-    citation_image_name: str = _DEFAULTS["citation_image_name"]
+    # LISTE des code-locations à seeder (citation, mediawatch…). PLUS de champs mono
+    # `citation_*` : le seed est MULTI-code-location (ADR 0094/0095). Vide si le bloc atlas
+    # ne déclare rien (un run banc-citation sans code-location déclarée échouera à l'étape
+    # push-atlas-tree, honnête). `field(default_factory=tuple)` → immuable, hashable.
+    code_locations: tuple[CodeLocationSpec, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_topology(cls, topo: Any) -> SeedConfig:
         """Construit une SeedConfig depuis les blocs `gitea:`/`atlas:` d'une Topology (PUR).
 
         LIT le YAML, jamais l'env (ADR 0097 §3). Un bloc/champ absent → défaut générique
-        (ADR 0023). C'est l'unique pont topologie → seed : aucune autre source."""
+        (ADR 0023). C'est l'unique pont topologie → seed : aucune autre source.
+
+        CODE-LOCATIONS (multi, ADR 0094/0095) — deux formes lues, avec RÉTROCOMPAT :
+          • FORME MULTI (préférée) : `atlas.code_locations: [{name, revision, image_digest}, …]`
+            — une entrée par code-location (citation ET mediawatch…). Le `name` dérive l'image
+            et le path d'overlay ; aucun champ image en dur.
+          • FORME MONO (héritée, banc.yaml existant) : `atlas.{citation_revision,
+            citation_image_digest}` (SANS `code_locations`) → RECONSTRUITE en UNE code-location
+            `name='citation'`. Ne casse NI les topos existantes NI le banc prouvé.
+        Si `code_locations` est présent, il PRIME (la forme mono héritée est ignorée)."""
         gitea = getattr(topo, "gitea", {}) or {}
         atlas = getattr(topo, "atlas", {}) or {}
 
@@ -123,9 +164,7 @@ class SeedConfig:
             repo_atlas=g("repo_atlas"),
             expected_cluster=atlas.get("expected_cluster", _DEFAULTS["expected_cluster"]),
             atlas_repo_dir=atlas.get("repo_dir"),
-            citation_revision=atlas.get("citation_revision"),
-            citation_image_digest=atlas.get("citation_image_digest"),
-            citation_image_name=atlas.get("citation_image_name", _DEFAULTS["citation_image_name"]),
+            code_locations=_code_locations_from_atlas(atlas),
         )
 
     # ── URLs dérivées (PUR) — parité des deux scripts bash ───────────────────────
@@ -140,6 +179,40 @@ class SeedConfig:
     def apps_repo_url(self) -> str:
         """repoURL intra-cluster du dépôt déclaratif cluster/apps (prod)."""
         return f"{self.svc}/{self.org_cluster}/{self.repo_apps}.git"
+
+
+def _code_locations_from_atlas(atlas: dict[str, Any]) -> tuple[CodeLocationSpec, ...]:
+    """Dérive la LISTE de CodeLocationSpec du bloc `atlas` YAML (PUR, avec rétrocompat).
+
+    FORME MULTI `atlas.code_locations: [{name, revision, image_digest}, …]` → une spec par
+    entrée (PRIME si présente). FORME MONO héritée `atlas.{citation_revision,
+    citation_image_digest}` → UNE spec `name='citation'` (rétrocompat banc.yaml). Aucune des
+    deux → tuple vide. Une entrée `code_locations` SANS `name` lève (un code-location doit
+    porter son nom : c'est le signal canonique dont dérivent image/overlay, ADR 0094)."""
+    entries = atlas.get("code_locations")
+    if entries:
+        specs = []
+        for entry in entries:
+            name = (entry or {}).get("name")
+            if not name:
+                raise SeedError(
+                    f"code-location sans `name` dans atlas.code_locations : {entry!r} "
+                    "(le name est le signal canonique dont dérivent image/overlay, ADR 0094)"
+                )
+            specs.append(
+                CodeLocationSpec(
+                    name=name,
+                    revision=entry.get("revision"),
+                    image_digest=entry.get("image_digest"),
+                )
+            )
+        return tuple(specs)
+    # Rétrocompat : bloc mono `citation_*` (SANS code_locations) → 1 code-location `citation`.
+    revision = atlas.get("citation_revision")
+    digest = atlas.get("citation_image_digest")
+    if revision is not None or digest is not None:
+        return (CodeLocationSpec(name="citation", revision=revision, image_digest=digest),)
+    return ()
 
 
 @dataclass
@@ -178,7 +251,10 @@ _PROD_STEPS = (
     "org-repo-apps",  # org/repo déclaratif cluster/apps
     "org-repo-atlas",  # org/repo de code atlas/atlas
     "push-atlas-tree",  # push GIT de l'arbre atlas figé (révision + digest injecté)
-    "push-citation",  # rendu + push apps/citation.yaml (repoURL/targetRevision injectés)
+    # push-citation : nom HISTORIQUE d'une étape désormais MULTI-code-location — son handler
+    # façade BOUCLE sur `config.code_locations` (rend/pousse apps/<name>.yaml pour chacun).
+    # Une seule étape (la boucle est dans le handler, pas dans les steps → ordre stable).
+    "push-citation",  # rendu + push apps/<name>.yaml pour CHAQUE code-location (repoURL/rev)
     "appproject-root",  # AppProject cluster-apps + Application racine
 )
 
@@ -216,7 +292,7 @@ _BANC_CITATION_STEPS = (
     "org-repo-atlas",  # org/repo de code atlas/atlas
     "push-atlas-tree",  # push GIT de l'arbre atlas figé (révision + digest injecté)
     "webhook-build",  # WEBHOOK #2 (BUILD, ADR 0095 §1.b) → EventSource — APRÈS repo atlas
-    "push-citation",  # rendu + push apps/citation.yaml (repoURL/targetRevision injectés)
+    "push-citation",  # rendu + push apps/<name>.yaml pour CHAQUE code-location (handler boucle)
     "appproject-root",  # AppProject cluster-apps + Application racine
 )
 
@@ -294,51 +370,89 @@ def citation_image_ref(image_name: str, digest: str) -> str:
 
 # Jetons d'injection qu'atlas EXPOSE délibérément (frontière ADR 0094 : atlas FOURNIT les
 # trous, cluster les REMPLIT ; cluster n'édite aucun champ qu'atlas n'a pas prévu d'offrir).
-_PLACEHOLDER_DIGEST = "__CITATION_IMAGE_DIGEST__"  # → le sha256 seul (Kustomize images[].digest)
-_PLACEHOLDER_IMAGE = "__CITATION_IMAGE__"  # → la ref complète (env DAGSTER_CURRENT_IMAGE)
+# Ils sont PROPRES à chaque code-location — atlas nomme `__CITATION_IMAGE__` /
+# `__MEDIAWATCH_IMAGE__` (préfixe = nom en MAJUSCULES). On les DÉRIVE du nom, jamais énumérés.
+def _placeholders_for(code_location_name: str) -> tuple[str, str]:
+    """(placeholder_digest, placeholder_image) DÉRIVÉS du nom de code-location (PUR).
+
+    `citation` → `(__CITATION_IMAGE_DIGEST__, __CITATION_IMAGE__)` ; `mediawatch` de même.
+    Parité des jetons posés par atlas dans `deploy/overlays/prod/` (kustomization + patch)."""
+    prefix = code_location_name.upper().replace("-", "_")
+    return f"__{prefix}_IMAGE_DIGEST__", f"__{prefix}_IMAGE__"
 
 
-def substitute_citation_placeholders(text: str, image_name: str, digest: str) -> tuple[str, int]:
-    """Remplace, dans UN contenu de fichier, les 2 placeholders d'image citation (PUR).
+def substitute_image_placeholders(
+    text: str, code_location_name: str, image_name: str, digest: str
+) -> tuple[str, int]:
+    """Remplace, dans UN contenu de fichier, les 2 placeholders d'image d'un code-location (PUR).
 
-    Porte `substitute_image_digest` de seed-app-of-apps.sh SANS l'I/O (le bash faisait
-    grep/sed sur le clone ; ici on transforme du TEXTE, la façade lit/écrit les fichiers).
-    Renvoie `(texte_transformé, nb_substitutions)`. L'ORDRE importe : `__CITATION_IMAGE_DIGEST__`
-    d'abord (sinon la substitution du préfixe `__CITATION_IMAGE__` l'amputerait) — parité du
-    commentaire bash. `digest` doit être un `sha256:…` (validé par `citation_image_ref`)."""
+    GÉNÉRIQUE (multi-code-location) : les jetons sont DÉRIVÉS de `code_location_name`
+    (`__<NAME>_IMAGE_DIGEST__` / `__<NAME>_IMAGE__`) — parité citation ET mediawatch. Porte
+    `substitute_image_digest` de seed-app-of-apps.sh SANS l'I/O (le bash faisait grep/sed sur
+    le clone ; ici on transforme du TEXTE, la façade lit/écrit les fichiers). Renvoie
+    `(texte_transformé, nb_substitutions)`. L'ORDRE importe : le placeholder DIGEST d'abord
+    (sinon la substitution du préfixe `__<NAME>_IMAGE__` l'amputerait) — parité du commentaire
+    bash. `digest` doit être un `sha256:…` (validé par `citation_image_ref`)."""
     ref = citation_image_ref(image_name, digest)  # valide le digest AVANT toute substitution
-    n = text.count(_PLACEHOLDER_DIGEST) + text.count(_PLACEHOLDER_IMAGE)
+    ph_digest, ph_image = _placeholders_for(code_location_name)
+    n = text.count(ph_digest) + text.count(ph_image)
     # DIGEST d'abord (le sha256 seul), puis IMAGE (la ref complète) — ordre critique.
-    text = text.replace(_PLACEHOLDER_DIGEST, digest)
-    text = text.replace(_PLACEHOLDER_IMAGE, ref)
+    text = text.replace(ph_digest, digest)
+    text = text.replace(ph_image, ref)
     return text, n
 
 
-def render_citation_declaration(
-    example_text: str, atlas_repo_url: str, revision: str, *, overlay: str | None = None
-) -> str:
-    """Rend `apps/citation.yaml` depuis le patron `*.example` (PUR, ADR 0023).
+# Alias rétrocompat (mono-citation) — même signature enrichie du nom de code-location figé
+# à `citation`. Conservé le temps qu'un appelant migre ; la façade utilise déjà le générique.
+def substitute_citation_placeholders(text: str, image_name: str, digest: str) -> tuple[str, int]:
+    """DÉPRÉCIÉ : `substitute_image_placeholders(text, 'citation', image_name, digest)`."""
+    return substitute_image_placeholders(text, "citation", image_name, digest)
 
-    Porte `push_citation_declaration` (seed-app-of-apps.sh) sans l'I/O : injecte le
-    `repoURL` atlas réel et le `targetRevision` (SHA figé) dans les lignes `spec.source.*`
-    (indentation 4 espaces, comme le `sed` ancré du bash). Lève `SeedError` si UNE des deux
-    injections ne matche pas (garde anti-injection ratée, parité des `grep -q` du bash).
+
+def render_code_location_declaration(
+    example_text: str,
+    code_location_name: str,
+    atlas_repo_url: str,
+    revision: str,
+    *,
+    overlay: str | None = None,
+) -> str:
+    """Rend `apps/<name>.yaml` depuis le patron GÉNÉRIQUE de code-location (PUR, ADR 0023).
+
+    Le patron `citation.example.yaml` sert de PATRON GÉNÉRIQUE (ADR 0023) : il pointe
+    `citation-dagster` (name + path). On le RÉÉCRIT pour `code_location_name` — `citation`
+    reste un no-op, `mediawatch` réécrit `citation-dagster`→`mediawatch-dagster` PARTOUT
+    (metadata.name ET le path `dataops/<name>-dagster/…`). C'est l'alignement sur le Sensor
+    Argo Events qui dérive DÉJÀ le `codeLocation` du chemin `dataops/<name>-dagster/`.
+
+    Porte `push_citation_declaration` (seed-app-of-apps.sh) sans l'I/O : injecte le `repoURL`
+    atlas réel et le `targetRevision` (SHA figé) dans les lignes `spec.source.*` (indentation
+    4 espaces, comme le `sed` ancré du bash). Lève `SeedError` si UNE injection ne matche pas
+    (garde anti-injection ratée, parité des `grep -q` du bash), ou si le nom du code-location
+    n'apparaît pas dans le rendu (garde : la réécriture `<name>-dagster` DOIT avoir mordu).
 
     `overlay` (banc-citation : `bench`) RÉÉCRIT le `path:` de l'overlay kustomize — le patron
     pointe `overlays/prod` (SC Ceph, OBC) ; au banc local-path il faut `overlays/bench` (Secret
     SeaweedFS, pas d'OBC — décision D2). None = on garde le path du patron (prod)."""
-    out = re.sub(r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {atlas_repo_url}", example_text)
+    # 1) Réécriture GÉNÉRIQUE `citation-dagster` → `<name>-dagster` (metadata.name + path).
+    #    `citation` = no-op ; tout autre nom instancie le patron pour SA code-location.
+    target = f"{code_location_name}-dagster"
+    out = example_text.replace("citation-dagster", target)
+    # 2) Injections d'instance (repoURL + targetRevision figé), ancrées 4 espaces.
+    out = re.sub(r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {atlas_repo_url}", out)
     out = re.sub(r"(?m)^( {4})targetRevision:.*$", rf"\g<1>targetRevision: {revision}", out)
     if overlay is not None:
         out = re.sub(
             r"(?m)^( {4})path: (.*/deploy/overlays/)\w+$", rf"\g<1>path: \g<2>{overlay}", out
         )
         if f"/deploy/overlays/{overlay}" not in out:
-            raise SeedError(f"injection overlay `{overlay}` ratée dans citation.yaml (non matché)")
+            raise SeedError(f"injection overlay `{overlay}` ratée dans {target}.yaml (non matché)")
     if f"repoURL: {atlas_repo_url}" not in out:
-        raise SeedError("injection repoURL ratée dans citation.yaml (motif non matché)")
+        raise SeedError("injection repoURL ratée (motif non matché)")
     if f"targetRevision: {revision}" not in out:
-        raise SeedError("injection targetRevision ratée dans citation.yaml (motif non matché)")
+        raise SeedError("injection targetRevision ratée (motif non matché)")
+    if target not in out:
+        raise SeedError(f"réécriture `{target}` ratée : nom du code-location absent du rendu")
     return out
 
 

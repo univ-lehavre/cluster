@@ -3296,21 +3296,28 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
 
     Porte `push_atlas_tree` de seed-app-of-apps.sh (façade banc-citation, ADR 0095 §1.a) :
       1. clone LOCAL figé du dépôt atlas (`config.atlas_repo_dir`) → branche `main` sur la
-         révision exacte (`config.citation_revision`) ; on ne pousse JAMAIS le checkout de
-         travail ;
-      2. substitution du DIGEST dans l'overlay prod du CLONE (jamais le dépôt source —
-         frontière ADR 0094) via `_seed.substitute_citation_placeholders` (logique pure) ;
+         révision de la 1re code-location (le dépôt atlas est COMMUN ; on épingle son arbre à
+         une révision figée) ; on ne pousse JAMAIS le checkout de travail ;
+      2. substitution du DIGEST dans l'overlay prod du CLONE pour CHAQUE code-location
+         (`dataops/<name>-dagster/deploy/overlays/prod`, jamais le dépôt source — frontière
+         ADR 0094) via `_seed.substitute_image_placeholders` (logique pure) ; un code-location
+         sans digest est WARN + SKIP (best-effort, ne casse pas les autres) ;
       3. `kubectl port-forward svc/gitea-http :3000` (tunnel k8s — CONTOURNE le piège DNS
          FQDN côté hôte, cf. gitea-init) puis `git push --force main:main` avec un askpass
          (creds jamais dans l'URL/les logs).
     Idempotent (un rejeu re-pousse le même SHA). Renvoie False (fail-fast) sur tout échec."""
     repo_dir = config.atlas_repo_dir
-    revision = config.citation_revision
+    code_locations = config.code_locations
+    if not code_locations:
+        print("  ✗ aucune code-location déclarée (config atlas.code_locations / citation_*)")
+        return False
+    # Le dépôt atlas est COMMUN : on épingle son arbre à la révision de la 1re code-location.
+    revision = code_locations[0].revision
     if not repo_dir or not os.path.isdir(os.path.join(repo_dir, ".git")):
         print(f"  ✗ dépôt atlas introuvable : {repo_dir!r} (config atlas.repo_dir)")
         return False
     if not revision:
-        print("  ✗ citation_revision non fournie (config atlas.citation_revision)")
+        print("  ✗ revision non fournie (config atlas.code_locations[0].revision)")
         return False
 
     def _git(*argv: str, cwd: str | None = None, env: dict | None = None):
@@ -3341,18 +3348,24 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
             return False
         _git("-C", clone, "checkout", "--quiet", "main")
 
-        # Substitution du digest dans l'overlay prod DU CLONE (ADR 0095 §2 / frontière 0094).
-        digest = config.citation_image_digest
-        overlay = os.path.join(clone, "dataops", "citation-dagster", "deploy", "overlays", "prod")
-        if digest:
+        # Substitution du digest dans l'overlay prod DU CLONE, POUR CHAQUE code-location
+        # (ADR 0095 §2 / frontière 0094). Best-effort par CL : un CL sans digest est WARN +
+        # SKIP (au banc l'overlay bench n'a pas de placeholder → normal), sans casser les autres.
+        for cl in code_locations:
+            overlay = os.path.join(
+                clone, "dataops", f"{cl.name}-dagster", "deploy", "overlays", "prod"
+            )
+            if not cl.image_digest:
+                print(
+                    f"  ! digest non fourni pour `{cl.name}` — overlay poussé avec le tag "
+                    "d'exemple (tag mutable, NON conforme ADR 0095 §2 — preuve seule)"
+                )
+                continue
             if not os.path.isdir(overlay):
                 print(f"  ✗ overlay prod introuvable dans le clone : {overlay}")
                 return False
-            if not _substitute_digest_in_tree(overlay, config.citation_image_name, digest):
+            if not _substitute_digest_in_tree(overlay, cl.name, cl.image_name, cl.image_digest):
                 return False
-        else:
-            print("  ! CITATION_IMAGE_DIGEST non fourni — overlay poussé avec le tag d'exemple")
-            print("    (déploiement par tag mutable, NON conforme ADR 0095 §2 — preuve seule)")
 
         # Port-forward vers gitea-http (tunnel k8s, contourne le piège DNS FQDN). Le PORT du
         # Service DIFFÈRE selon la topo (banc: 80 ; prod: 3000) → on le LIT (jamais codé) :
@@ -3400,13 +3413,16 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
     return True
 
 
-def _substitute_digest_in_tree(overlay_dir: str, image_name: str, digest: str) -> bool:
-    """Applique `_seed.substitute_citation_placeholders` à CHAQUE fichier de l'overlay clone.
+def _substitute_digest_in_tree(
+    overlay_dir: str, code_location_name: str, image_name: str, digest: str
+) -> bool:
+    """Applique `_seed.substitute_image_placeholders` à CHAQUE fichier de l'overlay clone.
 
-    Garde de frontière (ADR 0094) : au moins UN placeholder doit être présent sur l'ensemble
-    (sinon atlas n'a pas factorisé → on refuse de deviner la structure interne, pas de
-    déploiement par tag mutable en douce). Renvoie False (fail-fast) si aucun placeholder,
-    digest invalide, ou I/O échouée."""
+    Les placeholders sont PROPRES au code-location (`__<NAME>_IMAGE_DIGEST__` / `__<NAME>_IMAGE__`,
+    dérivés de `code_location_name`). Garde de frontière (ADR 0094) : au moins UN placeholder doit
+    être présent sur l'ensemble (sinon atlas n'a pas factorisé → on refuse de deviner la structure
+    interne, pas de déploiement par tag mutable en douce). Renvoie False (fail-fast) si aucun
+    placeholder, digest invalide, ou I/O échouée."""
     total = 0
     try:
         for root, _dirs, files in os.walk(overlay_dir):
@@ -3414,7 +3430,9 @@ def _substitute_digest_in_tree(overlay_dir: str, image_name: str, digest: str) -
                 path = os.path.join(root, name)
                 with open(path, encoding="utf-8") as fh:
                     text = fh.read()
-                new_text, n = _seed.substitute_citation_placeholders(text, image_name, digest)
+                new_text, n = _seed.substitute_image_placeholders(
+                    text, code_location_name, image_name, digest
+                )
                 if n:
                     with open(path, "w", encoding="utf-8") as fh:
                         fh.write(new_text)
@@ -3426,9 +3444,10 @@ def _substitute_digest_in_tree(overlay_dir: str, image_name: str, digest: str) -
         print(f"  ✗ substitution digest — I/O overlay : {exc}")
         return False
     if total == 0:
+        prefix = code_location_name.upper().replace("-", "_")
         print(
-            "  ✗ placeholders d'image absents de l'overlay atlas — atlas doit factoriser "
-            "__CITATION_IMAGE_DIGEST__/__CITATION_IMAGE__ (frontière ADR 0094, audit #499)"
+            f"  ✗ placeholders d'image absents de l'overlay `{code_location_name}` — atlas doit "
+            f"factoriser __{prefix}_IMAGE_DIGEST__/__{prefix}_IMAGE__ (frontière ADR 0094, #499)"
         )
         return False
     return True
@@ -3565,26 +3584,37 @@ def _seed_do_banc_citation(topo: Topology, config) -> Callable[[str], bool]:
         return _seed_ensure_build_webhook(config, lambda path, body: _api("POST", path, body))
 
     def push_citation() -> bool:
-        # 5 — rendu + push apps/citation.yaml (repoURL/targetRevision injectés) via Contents API.
+        # 5 — rendu + push apps/<name>.yaml POUR CHAQUE code-location (repoURL/targetRevision
+        # injectés) via Contents API. Le patron GÉNÉRIQUE `citation.example.yaml` est réécrit
+        # `citation-dagster`→`<name>-dagster` par `render_code_location_declaration`. La boucle
+        # MULTI-code-location vit ICI (façade I/O), pas dans les steps (ordre stable). Fail-fast
+        # dès qu'un CL échoue (aucun faux-vert, ADR 0046).
+        if not config.code_locations:
+            print("  ✗ aucune code-location déclarée (config atlas.code_locations / citation_*)")
+            return False
         try:
             with open(_CITATION_EXAMPLE, encoding="utf-8") as fh:
                 example = fh.read()
         except OSError:
             print(f"  ✗ patron introuvable : {_CITATION_EXAMPLE}")
             return False
-        try:
-            # overlay=bench : au banc mono-nœud local-path, l'Application déploie l'overlay
-            # bench (SeaweedFS, pas d'OBC Ceph) — le patron pointe overlays/prod (décision D2).
-            rendered = _seed.render_citation_declaration(
-                example, config.atlas_repo_url(), config.citation_revision or "", overlay="bench"
-            )
-        except _seed.SeedError as exc:
-            print(f"  ✗ {exc}")
-            return False
-        return _seed_put_contents_file(
-            config, state, ns, pod, config.org_cluster, config.repo_apps,
-            "apps/citation.yaml", rendered, "seed: apps/citation.yaml (ADR 0094)",
-        )  # fmt: skip
+        for cl in config.code_locations:
+            try:
+                # overlay=bench : au banc mono-nœud local-path, l'Application déploie l'overlay
+                # bench (SeaweedFS, pas d'OBC Ceph) — le patron pointe overlays/prod (décision D2).
+                rendered = _seed.render_code_location_declaration(
+                    example, cl.name, config.atlas_repo_url(), cl.revision or "", overlay="bench"
+                )
+            except _seed.SeedError as exc:
+                print(f"  ✗ {exc}")
+                return False
+            ok = _seed_put_contents_file(
+                config, state, ns, pod, config.org_cluster, config.repo_apps,
+                f"apps/{cl.name}.yaml", rendered, f"seed: apps/{cl.name}.yaml (ADR 0094)",
+            )  # fmt: skip
+            if not ok:
+                return False
+        return True
 
     def appproject_root() -> bool:
         # 6 — AppProject cluster-apps + Application racine (repoURL/sourceRepos injectés).
