@@ -50,8 +50,10 @@ fi
 # (un NodePort répond sur n'importe quel nœud). Sondée depuis un pod, donc l'IP
 # interne du cluster suffit (pas besoin de l'IP routable du poste de contrôle).
 node_ip=$(kubectl get nodes \
-    -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+    -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)
 if [ -z "${node_ip}" ]; then
+    # `|| true` ci-dessus : sous `set -e`, un cluster injoignable ferait avorter la
+    # substitution AVANT ce garde — on veut le message explicite + exit 1 propre.
     log "✗ aucune InternalIP de nœud — cluster injoignable ?"
     exit 1
 fi
@@ -87,9 +89,12 @@ while IFS=$'\t' read -r service ns id; do
     total=$((total + 1))
     svc=$(nodeport_svc "${service}")
 
-    # nodePort RÉEL attribué par k8s (jamais figé, ADR 0092).
+    # nodePort RÉEL attribué par k8s (jamais figé, ADR 0092). `|| true` : si le Service OU
+    # son NAMESPACE est absent (ex. rook-ceph sur un banc local-path), kubectl sort en erreur
+    # → sous `set -e` la substitution ferait AVORTER le script (rc=1) AVANT le test « absent »
+    # ci-dessous. On neutralise donc le rc : un endpoint non déployé est un skip, pas un échec.
     nodeport=$(kubectl -n "${ns}" get svc "${svc}" \
-        -o 'jsonpath={.spec.ports[0].nodePort}' 2>/dev/null)
+        -o 'jsonpath={.spec.ports[0].nodePort}' 2>/dev/null || true)
     if [ -z "${nodeport}" ]; then
         # Service NodePort absent (UI non déployée ou pas encore exposée) — pas
         # un échec dur : le contrat couvre tous les profils, ce déploiement peut
@@ -97,6 +102,11 @@ while IFS=$'\t' read -r service ns id; do
         log "· ${id} : Service NodePort ${ns}/${svc} absent — ignoré (UI non déployée)."
         continue
     fi
+    # PORT côté Service (≠ nodePort) : c'est CE port que `port-forward svc/…` cible (il se
+    # branche sur le Service, pas sur le mapping NodePort du nœud). Le `nodePort` reste affiché
+    # comme l'accès L4 réel (ADR 0092) que la sonde valide indirectement.
+    svc_port=$(kubectl -n "${ns}" get svc "${svc}" \
+        -o 'jsonpath={.spec.ports[0].port}' 2>/dev/null || true)
     found=$((found + 1))
 
     # Schéma : k8s-dashboard est en HTTPS (Kong termine le TLS) → https + -k.
@@ -104,22 +114,29 @@ while IFS=$'\t' read -r service ns id; do
     if [ "${id}" = k8s-dashboard-ui ]; then
         scheme=https; insecure=-k
     fi
-    url="${scheme}://${node_ip}:${nodeport}/"
 
-    # Sonde DANS le cluster depuis un pod éphémère : le data path L4 (NodeIP:nodePort
-    # → endpoints, eBPF Cilium) répond aussi en interne. alpine/curl rend le code
-    # HTTP, 000 si pas de réponse (timeout/RST).
-    # shellcheck disable=SC2086
-    code=$(kubectl -n "${ns}" run ui-probe-$$-"${RANDOM}" --rm -i --restart=Never \
-        --image=alpine/curl --quiet --command -- \
-        curl -s ${insecure} -o /dev/null -w '%{http_code}' --max-time 12 "${url}" 2>/dev/null \
-        | grep -oE '[0-9]+' | head -1)
+    # Sonde via `kubectl port-forward` DEPUIS L'HÔTE (le poste de contrôle), PAS un pod-probe
+    # intra-cluster : les ns d'UI appliquent un default-deny qui DROP l'egress d'un pod-sonde
+    # (timeout, vécu au banc sur gitea/portal), et l'image curl externe peut manquer au registry
+    # air-gap. Le port-forward passe par l'API server (toujours joignable) → robuste, et c'est
+    # l'ACCÈS RÉEL d'un opérateur au NodePort L4 (ADR 0092). Pattern éprouvé du scénario 32.
+    pf_port=$((18100 + total))
+    kubectl -n "${ns}" port-forward "svc/${svc}" "${pf_port}:${svc_port}" \
+        >/tmp/ui-pf-$$.log 2>&1 &
+    pf_pid=$!
+    sleep 3
+    # `|| true` : curl sort en erreur (28=timeout, 7=refus) si l'UI ne répond pas → sous
+    # `set -e`+`pipefail` la substitution avorterait AVANT le test « 000 » (faux rc global).
+    code=$(curl -s ${insecure} -o /dev/null -w '%{http_code}' --max-time 12 \
+        "${scheme}://localhost:${pf_port}/" 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
+    kill "${pf_pid}" 2>/dev/null || true
+    wait "${pf_pid}" 2>/dev/null || true
     code=${code:-000}
 
     if [ "${code}" != 000 ]; then
-        log "✓ ${id} : HTTP ${code} sur ${url} — NodePort L4 atteignable."
+        log "✓ ${id} : HTTP ${code} via ${ns}/${svc} (nodePort ${nodeport}) — UI atteignable."
     else
-        log "✗ ${id} : aucune réponse (000) sur ${url} — NodePort L4 mort."
+        log "✗ ${id} : aucune réponse (000) via ${ns}/${svc} (nodePort ${nodeport}) — UI muette."
         fails=$((fails + 1))
     fi
 done <<EOF

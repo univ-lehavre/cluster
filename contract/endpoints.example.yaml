@@ -33,6 +33,10 @@ endpoints:
     fqdn: pg-rw.postgres.svc.cluster.local
     port: 5432
     protocol: tcp
+    # La NetworkPolicy `allow-postgres-ingress` (default-deny + allow ciblé) n'ouvre 5432
+    # QU'aux consommateurs déclarés (dagster/marquez/mlflow/citation-serving) : sonder depuis
+    # le ns `default` serait bloqué à raison → faux « muet ». On sonde donc depuis un ns AUTORISÉ.
+    probe_from: dagster
     auth: secret-role # Secret `pg-role-<rôle>` (cf. namespaces-secrets)
     role: primary read-write
     source: platform/cloudnative-pg/cluster.yaml # Service généré par l'operator CNPG
@@ -46,6 +50,7 @@ endpoints:
     fqdn: pg-ro.postgres.svc.cluster.local
     port: 5432
     protocol: tcp
+    probe_from: dagster # NP allow-postgres-ingress : sonder depuis un ns autorisé (cf. postgres-rw)
     auth: secret-role
     role: replicas read-only
     source: platform/cloudnative-pg/cluster.yaml
@@ -57,6 +62,7 @@ endpoints:
     fqdn: pg-rw.postgres.svc.cluster.local
     port: 5432
     protocol: tcp
+    probe_from: dagster # NP allow-postgres-ingress : sonder depuis un ns autorisé (cf. postgres-rw)
     auth: secret-role # Secret `pg-role-cache`
     role: cache
     source: platform/cloudnative-pg/cluster.yaml
