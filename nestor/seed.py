@@ -184,11 +184,22 @@ _PROD_STEPS = (
 
 # ── Variante « banc-citation » : le VRAI flux App-of-Apps citation, joué AU BANC.
 #    C'est l'étape 1 « premier pas » de l'ADR 0095 (§1.a) prouvée au banc mono-nœud
-#    local-path (ADR 0085) AVANT la prod, comme l'exige ADR 0034. Elle réutilise la
-#    SÉQUENCE `_PROD_STEPS` — car le flux citation EST le flux App-of-Apps (org/repo
-#    atlas, push de l'arbre atlas figé, apps/citation.yaml par digest, AppProject +
-#    racine) ; ce qui DIFFÈRE de la prod n'est PAS l'ordre des étapes mais deux choses
-#    INJECTÉES par la façade (topology.py), jamais gravées ici :
+#    local-path (ADR 0085) AVANT la prod, comme l'exige ADR 0034. Elle REPREND la SÉQUENCE
+#    `_PROD_STEPS` (le flux citation EST le flux App-of-Apps : org/repo atlas, push de
+#    l'arbre atlas figé, apps/citation.yaml par digest, AppProject + racine) MAIS y AJOUTE
+#    une étape `webhook-build` — le WEBHOOK #2 (BUILD) de la chaîne événementielle
+#    (ADR 0095 §1.b) qui, au banc, arme le déclencheur « git push atlas → build in-pod ».
+#
+#    POURQUOI banc-citation DIVERGE de prod ici : le webhook #2 est un geste BANC de la
+#    preuve événementielle (Argo Events/Workflows montés au banc, ADR 0095 §1.b). En PROD
+#    le webhook #2 se posera lors du rebuild dirqual dans un flux dédié (garde
+#    `assert_prod_target`) — on NE le grave donc PAS dans `_PROD_STEPS`. La séquence
+#    banc-citation n'est plus un alias de `_PROD_STEPS` : c'est un tuple propre.
+#
+#    L'ORDRE : `webhook-build` vient APRÈS `push-atlas-tree` (le repo de CODE atlas doit
+#    EXISTER avant d'y poser le hook) et avant `push-citation` (peu importe vis-à-vis de
+#    citation ; ce qui compte est la dépendance repo-atlas). Ce qui DIFFÈRE encore de la
+#    prod est INJECTÉ par la façade (topology.py), jamais gravé ici :
 #      • la GARDE — `_assert_bench_target` (cible = banc Lima), OPPOSÉE à `assert_prod_target`
 #        de la prod. On ne rend JAMAIS la garde prod franchissable par paramètre (ADR
 #        0053/0084) : c'est une 3e variante à part entière, garde banc en propre.
@@ -196,9 +207,18 @@ _PROD_STEPS = (
 #        pas d'OBC Ceph) au lieu d'`overlays/prod` : au banc local-path la StorageClass
 #        `rook-ceph-datalake` n'existe pas ; atlas fournit DÉJÀ cet overlay bench (frontière
 #        ADR 0094 : cluster CHOISIT l'overlay, atlas FOURNIT les deux).
-#    Partager la séquence garantit qu'une preuve banc VALIDE réellement le chemin prod
-#    (même ordre, mêmes gardes de digest) — pas un chemin cousin qui divergerait.
-_BANC_CITATION_STEPS = _PROD_STEPS
+#    Partager le CŒUR de séquence (mêmes étapes App-of-Apps, même ordre, mêmes gardes de
+#    digest) garantit qu'une preuve banc VALIDE le chemin prod — le seul ajout est le
+#    webhook événementiel banc, absent de la prod.
+_BANC_CITATION_STEPS = (
+    "admin-token",  # admin + token API (idempotent)
+    "org-repo-apps",  # org/repo déclaratif cluster/apps
+    "org-repo-atlas",  # org/repo de code atlas/atlas
+    "push-atlas-tree",  # push GIT de l'arbre atlas figé (révision + digest injecté)
+    "webhook-build",  # WEBHOOK #2 (BUILD, ADR 0095 §1.b) → EventSource — APRÈS repo atlas
+    "push-citation",  # rendu + push apps/citation.yaml (repoURL/targetRevision injectés)
+    "appproject-root",  # AppProject cluster-apps + Application racine
+)
 
 
 def seed_steps(kind: str) -> tuple[str, ...]:
@@ -322,8 +342,10 @@ _BANC_TODO = (
     "câblage do(step) banc sur gitea-init réel (kubectl exec/curl API) — à prouver au banc",
     "câblage do(step) prod sur seed-app-of-apps réel (git push port-forward, kubectl apply) "
     "— à prouver sur dirqual",
-    "câblage do(step) banc-citation en façade : do() du flux _PROD_STEPS ciblant l'overlay "
+    "câblage do(step) banc-citation en façade : do() du flux App-of-Apps ciblant l'overlay "
     "bench + injection digest, garde _assert_bench_target — à prouver au banc (ADR 0095 §1.a)",
+    "run banc de l'étape `webhook-build` (webhook #2 → EventSource Argo Events) : nom réel du "
+    "Service EventSource, format du payload push, dédup /hooks — à PROUVER au banc (ADR 0095 §1.b)",
     "brancher _assert_bench_target (banc/banc-citation) / assert_prod_target (prod) en façade "
     "(topology.py)",
     "run banc gitea-init + run banc-citation (citation réel) + run prod app-of-apps consignés "

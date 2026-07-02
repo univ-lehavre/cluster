@@ -82,12 +82,16 @@ spec:
                   value: '{{steps.digest.outputs.parameters.digest}}'
 
     # ── STEP 1 — clone atlas@revision dans /work (contexte de build). ──────────
-    # TODO intégration (ADR 0011) : `alpine/git` est une image PUBLIQUE — au banc
-    # air-gappé elle doit être MIRRORÉE au registry interne (registry:80), sinon
-    # ImagePullBackOff. Épingler par digest d'index multi-arch à l'intégration.
+    # RÉSOLU intégration (ADR 0011) : `alpine/git` est une image PUBLIQUE → MIRRORÉE
+    # au registry interne (registry:80) par `bootstrap/eventful-mirror.yaml` au banc
+    # air-gappé, sinon ImagePullBackOff. Référence par TAG (pas @sha256) : le mirror
+    # node-side (pull index@sha256 → tag → push) repose un manifest SINGLE-ARCH sous ce
+    # tag (le digest d'index NE survit PAS au push mono-arch), comme platform-build-images
+    # qui référence ses images retaguées par tag. Écart single-arch banc assumé (ADR 0095
+    # §2 ; arm64). Le digest d'index d'origine vit dans eventful-mirror.yaml (pull).
     - name: clone
       container:
-        image: alpine/git:latest # TODO: mirrorer au registry:80 + épingler @sha256 (index multi-arch)
+        image: registry:80/alpine/git:2.47.2
         command: [sh, -c]
         args:
           - |
@@ -120,8 +124,10 @@ spec:
     - name: build-push
       container:
         # Épinglé par DIGEST d'index multi-arch (arm64+amd64 vérifiés crane, ADR 0006),
-        # résolu 2026-07-02. TODO intégration (ADR 0011) : mirrorer au registry:80.
-        image: moby/buildkit:v0.18.2-rootless@sha256:95da42806e4e3e3d3cb72f84286446ab5aa60e9c69c521e8b4c72d0c283b4593
+        # résolu 2026-07-02. RÉSOLU intégration (ADR 0011) : MIRRORÉ au registry:80 par
+        # `bootstrap/eventful-mirror.yaml` (comme les 3 autres images publiques du builder) —
+        # au banc air-gappé même buildkit doit venir du registry interne.
+        image: registry:80/moby/buildkit:v0.18.2-rootless
         command: [buildctl-daemonless.sh]
         args:
           - build
@@ -173,11 +179,12 @@ spec:
     # Garde de parité avec l'étape 1 : le digest DOIT matcher ^sha256:[0-9a-f]{64}$
     # (un push raté ne doit pas écrire un digest vide → Argo CD déploierait un
     # manifeste périmé). Écrit dans un output param consommé par write-back.
-    # TODO intégration (ADR 0011) : `gcr.io/go-containerregistry/crane` PUBLIQUE →
-    # mirrorer au registry:80 + épingler @sha256 (index multi-arch).
+    # RÉSOLU intégration (ADR 0011) : `gcr.io/go-containerregistry/crane` PUBLIQUE →
+    # MIRRORÉE au registry:80 par `bootstrap/eventful-mirror.yaml`, épinglée par digest
+    # d'index multi-arch (arm64+amd64 vérifiés crane, ADR 0006), tag conservé.
     - name: digest
       container:
-        image: gcr.io/go-containerregistry/crane:latest # TODO: mirrorer + épingler @sha256
+        image: registry:80/gcr.io/go-containerregistry/crane:v0.20.3
         command: [sh, -c]
         args:
           - |
@@ -214,13 +221,15 @@ spec:
     # l'overlay atlas suit la logique de nestor/seed.py `substitute_citation_
     # placeholders` (le seed est propriétaire du placeholder ; ici le builder
     # écrit la déclaration Application par digest, cluster/apps = seule surface écrite).
-    # TODO intégration (ADR 0011) : `curlimages/curl` PUBLIQUE → mirrorer + épingler @sha256.
+    # RÉSOLU intégration (ADR 0011) : `curlimages/curl` PUBLIQUE → MIRRORÉE au
+    # registry:80 par `bootstrap/eventful-mirror.yaml`, épinglée par digest d'index
+    # multi-arch (arm64+amd64 vérifiés crane, ADR 0006), tag conservé.
     - name: write-back
       inputs:
         parameters:
           - name: digest
       container:
-        image: curlimages/curl:latest # TODO: mirrorer au registry:80 + épingler @sha256
+        image: registry:80/curlimages/curl:8.11.1
         command: [sh, -c]
         args:
           - |

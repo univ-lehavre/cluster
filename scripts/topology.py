@@ -2996,9 +2996,9 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
     la cible SÛRE (`_kubectl`/`_kubectl_env`) ; le pod est résolu une fois au 1er besoin."""
     ns, argocd_ns = config.ns, config.argocd_ns
     org, repo = config.org, config.repo
-    # Repo de CODE atlas (org_atlas/repo_atlas) — cible du webhook #2 (build), DISTINCT du
-    # repo des workflows (org/repo) ciblé par le webhook #1 (déploiement). ADR 0095 §1.b.
-    org_atlas, repo_atlas = config.org_atlas, config.repo_atlas
+    # Le webhook #2 (build) vise le repo de CODE atlas (`config.org_atlas/repo_atlas`, ADR
+    # 0095 §1.b), DISTINCT du repo des workflows (org/repo) ciblé par le webhook #1
+    # (déploiement) : `_seed_ensure_build_webhook` lit ces champs de `config` directement.
     api_base = f"{config.api}/api/v1"
     state: dict[str, str] = {}
 
@@ -3245,60 +3245,11 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
     def webhook_build() -> bool:
         # WEBHOOK #2 (BUILD, cible événementielle ADR 0095 §1.b / étape 7 du plan). DISTINCT
         # du #1 (webhook() ci-dessus, DÉPLOIEMENT → argocd-server) : le #2 vise le repo de
-        # CODE atlas (`org_atlas/repo_atlas`, ADR 0023) et pointe vers l'endpoint de
-        # l'EventSource Argo Events `gitea-push` (platform/argo-events/eventsource-gitea.
-        # example.yaml). Un `git push` atlas déclenche ainsi le Sensor `code-location-build`
-        # → soumission du WorkflowTemplate `image-builder`.
-        #
-        # Le SECRET HMAC est PARTAGÉ entre le hook Gitea et l'EventSource : on lit/crée le
-        # Secret `gitea-webhook-build-hmac` (ns `argo-events`, clé `secret`) — le MÊME que
-        # l'EventSource référence via `webhook.push.authSecret`. Idempotent (parité
-        # webhook_secret : create s'il manque, puis relit). Sans partage, l'EventSource
-        # rejetterait le payload signé par Gitea.
-        #
-        # _BANC : la DÉDUP par URL (compter les hooks existants) dépend du format de réponse
-        # réel de `GET /hooks` — ici on POST best-effort (Gitea refuse un doublon, idempotent
-        # de fait). Le nom réel du Service EventSource (`<eventsource>-eventsource-svc`) et le
-        # format du payload push (body.after/commits[].modified) restent à PROUVER au banc
-        # (_SEED_BANC_TODO). L'URL du hook est intra-cluster (résolue par Gitea, pas l'hôte).
-        es_ns = "argo-events"
-        hmac_secret = "gitea-webhook-build-hmac"
-        chk = _kubectl("-n", es_ns, "get", "secret", hmac_secret)
-        if not (chk and chk.returncode == 0):
-            _kubectl(
-                "-n",
-                es_ns,
-                "create",
-                "secret",
-                "generic",
-                hmac_secret,
-                "--from-literal=secret=" + _seed_gen_secret(),
-            )
-        got = _kubectl(
-            "-n",
-            es_ns,
-            "get",
-            "secret",
-            hmac_secret,
-            "-o",
-            "jsonpath={.data.secret}",
-        )
-        hmac = _b64decode(got.stdout.strip()) if got and got.returncode == 0 else ""
-        if not hmac:
-            return False
-        # Endpoint de l'EventSource `gitea-push` (Service `<eventsource>-eventsource-svc`,
-        # port/endpoint de eventsource-gitea.example.yaml). Résolu PAR Gitea DANS le cluster.
-        es_url = f"http://gitea-push-eventsource-svc.{es_ns}.svc.cluster.local:12000/push"
-        body = (
-            '{"type":"gitea","active":true,"events":["push"],"config":{"url":"'
-            + es_url
-            + '","content_type":"json","secret":"'
-            + hmac
-            + '"}}'
-        )
-        # Cible = repo de CODE atlas (org_atlas/repo_atlas), PAS org/repo des workflows.
-        _, c_hook = _api("POST", f"/repos/{org_atlas}/{repo_atlas}/hooks", body)
-        return _seed_api_ok(c_hook)
+        # CODE atlas et pointe vers l'endpoint de l'EventSource Argo Events `gitea-push`
+        # (Sensor → soumission du WorkflowTemplate `image-builder`). Le geste (Secret HMAC
+        # partagé + POST du hook) est PARTAGÉ avec le seed banc-citation via
+        # `_seed_ensure_build_webhook` ; on n'injecte que le POST (le corps est ignoré ici).
+        return _seed_ensure_build_webhook(config, lambda path, body: _api("POST", path, body)[1])
 
     def application() -> bool:
         # 7/7 — Application Argo CD `atlas-workflows` (repoURL Gitea injecté, valeur de
@@ -3598,6 +3549,15 @@ def _seed_do_banc_citation(topo: Topology, config) -> Callable[[str], bool]:
         # 4 — push GIT de l'arbre atlas figé (révision + digest injecté).
         return _git_push_atlas_tree(config, ns, state.get("admin_pw", ""))
 
+    def webhook_build() -> bool:
+        # 4bis — WEBHOOK #2 (BUILD, ADR 0095 §1.b) sur le repo de CODE atlas → EventSource
+        # Argo Events `gitea-push` (Sensor → soumission du WorkflowTemplate `image-builder`).
+        # APRÈS push-atlas-tree (le repo atlas doit exister avant qu'on y pose le hook). Geste
+        # PARTAGÉ avec le seed banc jouet via `_seed_ensure_build_webhook` (Secret HMAC partagé
+        # `gitea-webhook-build-hmac` + POST du hook) ; on n'injecte que le POST. C'est le
+        # déclencheur « git push atlas → build → pod » de la preuve banc événementielle.
+        return _seed_ensure_build_webhook(config, lambda path, body: _api("POST", path, body))
+
     def push_citation() -> bool:
         # 5 — rendu + push apps/citation.yaml (repoURL/targetRevision injectés) via Contents API.
         try:
@@ -3650,6 +3610,7 @@ def _seed_do_banc_citation(topo: Topology, config) -> Callable[[str], bool]:
         "org-repo-apps": org_repo_apps,
         "org-repo-atlas": org_repo_atlas,
         "push-atlas-tree": push_atlas_tree,
+        "webhook-build": webhook_build,
         "push-citation": push_citation,
         "appproject-root": appproject_root,
     }
@@ -3712,6 +3673,54 @@ def _b64decode(b64: str) -> str:
         return base64.b64decode(b64).decode("utf-8")
     except (ValueError, UnicodeDecodeError):
         return ""
+
+
+# ── WEBHOOK #2 (BUILD) — geste PARTAGÉ entre les deux seeds banc ──────────────────
+# Namespace de l'EventSource Argo Events + nom du Secret HMAC partagé (le MÊME que
+# l'EventSource `gitea-push` référence via `webhook.push.authSecret`, cf.
+# platform/argo-events/eventsource-gitea.example.yaml). Endpoint = Service dérivé
+# `<eventsource>-eventsource-svc` (convention Argo Events), port 12000, chemin /push.
+_SEED_EVENTSOURCE_NS = "argo-events"
+_SEED_BUILD_HMAC_SECRET = "gitea-webhook-build-hmac"
+_SEED_EVENTSOURCE_URL = (
+    f"http://gitea-push-eventsource-svc.{_SEED_EVENTSOURCE_NS}.svc.cluster.local:12000/push"
+)
+
+
+def _seed_ensure_build_webhook(config, post_hook: Callable[[str, str], str]) -> bool:
+    """Pose le WEBHOOK #2 (BUILD, ADR 0095 §1.b) sur le repo de CODE atlas — geste PARTAGÉ.
+
+    DISTINCT du webhook #1 (DÉPLOIEMENT → argocd-server) : le #2 vise `org_atlas/repo_atlas`
+    et pointe vers l'endpoint de l'EventSource Argo Events `gitea-push` (Sensor → soumission
+    du WorkflowTemplate `image-builder`). Le secret HMAC est PARTAGÉ entre le hook Gitea et
+    l'EventSource : on lit/crée le Secret `gitea-webhook-build-hmac` (ns `argo-events`, clé
+    `secret`) — sans partage, l'EventSource rejetterait le payload signé par Gitea. Idempotent
+    (create s'il manque, puis relit) ; l'I/O API est INJECTÉE par `post_hook(path, body) -> code`
+    (chaque seed a son propre wrapper `_api`). Renvoie True si le hook est posé (2xx ou doublon).
+
+    _BANC : la DÉDUP par URL (`GET /hooks`) et le format réel du payload push restent à PROUVER
+    au banc (_SEED_BANC_TODO) — ici on POST best-effort (Gitea refuse un doublon, idempotent)."""
+    es_ns, hmac_secret = _SEED_EVENTSOURCE_NS, _SEED_BUILD_HMAC_SECRET
+    chk = _kubectl("-n", es_ns, "get", "secret", hmac_secret)
+    if not (chk and chk.returncode == 0):
+        _kubectl(
+            "-n", es_ns, "create", "secret", "generic", hmac_secret,
+            "--from-literal=secret=" + _seed_gen_secret(),
+        )  # fmt: skip
+    got = _kubectl("-n", es_ns, "get", "secret", hmac_secret, "-o", "jsonpath={.data.secret}")
+    hmac = _b64decode(got.stdout.strip()) if got and got.returncode == 0 else ""
+    if not hmac:
+        return False
+    body = (
+        '{"type":"gitea","active":true,"events":["push"],"config":{"url":"'
+        + _SEED_EVENTSOURCE_URL
+        + '","content_type":"json","secret":"'
+        + hmac
+        + '"}}'
+    )
+    # Cible = repo de CODE atlas (org_atlas/repo_atlas), PAS org/repo des workflows.
+    code = post_hook(f"/repos/{config.org_atlas}/{config.repo_atlas}/hooks", body)
+    return _seed_api_ok(code)
 
 
 def _seed_application_manifest(config) -> str:
