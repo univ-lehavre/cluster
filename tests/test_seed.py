@@ -53,7 +53,9 @@ class Config(unittest.TestCase):
         # Champs non surchargés gardent le défaut.
         self.assertEqual(cfg.repo, "workflows")
 
-    def test_atlas_block_overrides(self):
+    def test_atlas_block_overrides_retrocompat_mono_citation(self):
+        # RÉTROCOMPAT : le bloc mono `citation_*` (banc.yaml existant, SANS code_locations)
+        # → UNE code-location name='citation' portant révision + digest. Ne casse pas le banc.
         cfg = seed.SeedConfig.from_topology(
             _topo(
                 atlas={
@@ -66,8 +68,56 @@ class Config(unittest.TestCase):
         )
         self.assertEqual(cfg.expected_cluster, "prod-x")
         self.assertEqual(cfg.atlas_repo_dir, "/tmp/atlas")
-        self.assertEqual(cfg.citation_revision, "abc1234")
-        self.assertEqual(cfg.citation_image_digest, "sha256:dead")
+        # 1 seule code-location, name='citation', dérivée du bloc mono hérité.
+        self.assertEqual(len(cfg.code_locations), 1)
+        (cl,) = cfg.code_locations
+        self.assertEqual(cl.name, "citation")
+        self.assertEqual(cl.revision, "abc1234")
+        self.assertEqual(cl.image_digest, "sha256:dead")
+        # image_name DÉRIVÉ du name (jamais codé en dur).
+        self.assertEqual(cl.image_name, "registry:80/citation-dagster")
+
+    def test_atlas_code_locations_list_multi(self):
+        # FORME MULTI (préférée) : citation ET mediawatch dans atlas.code_locations.
+        cfg = seed.SeedConfig.from_topology(
+            _topo(
+                atlas={
+                    "repo_dir": "/tmp/atlas",
+                    "code_locations": [
+                        {"name": "citation", "revision": "abc1234", "image_digest": "sha256:c0"},
+                        {"name": "mediawatch", "revision": "fe6b0793", "image_digest": "sha256:m0"},
+                    ],
+                }
+            )
+        )
+        self.assertEqual([cl.name for cl in cfg.code_locations], ["citation", "mediawatch"])
+        cit, med = cfg.code_locations
+        self.assertEqual(cit.revision, "abc1234")
+        self.assertEqual(med.revision, "fe6b0793")
+        self.assertEqual(med.image_digest, "sha256:m0")
+        # image_name dérivé du name pour chaque CL.
+        self.assertEqual(med.image_name, "registry:80/mediawatch-dagster")
+
+    def test_atlas_code_locations_prime_over_mono(self):
+        # Si `code_locations` est présent, il PRIME (la forme mono héritée est ignorée).
+        cfg = seed.SeedConfig.from_topology(
+            _topo(
+                atlas={
+                    "citation_revision": "IGNORED",
+                    "code_locations": [{"name": "mediawatch", "revision": "fe6b0793"}],
+                }
+            )
+        )
+        self.assertEqual([cl.name for cl in cfg.code_locations], ["mediawatch"])
+
+    def test_atlas_code_location_without_name_raises(self):
+        # Un code-location sans `name` (signal canonique) → SeedError (pas de devinette).
+        with self.assertRaises(seed.SeedError):
+            seed.SeedConfig.from_topology(_topo(atlas={"code_locations": [{"revision": "abc"}]}))
+
+    def test_atlas_absent_yields_no_code_locations(self):
+        # Bloc atlas vide → aucune code-location (tuple vide, pas de crash).
+        self.assertEqual(seed.SeedConfig.from_topology(_topo()).code_locations, ())
 
     def test_derived_urls(self):
         cfg = seed.SeedConfig.from_topology(
@@ -246,12 +296,15 @@ class DigestRef(unittest.TestCase):
 
 
 class SubstitutePlaceholders(unittest.TestCase):
-    """Substitution des 2 jetons d'injection atlas (PUR, frontière ADR 0094)."""
+    """Substitution GÉNÉRIQUE des 2 jetons d'injection atlas par code-location (frontière 0094).
+
+    Les jetons sont DÉRIVÉS du nom de code-location (`__<NAME>_IMAGE_DIGEST__` / `__<NAME>_IMAGE__`)
+    — parité citation ET mediawatch (multi-code-location)."""
 
     def test_both_placeholders_substituted(self):
         text = "digest: __CITATION_IMAGE_DIGEST__\nenv: __CITATION_IMAGE__\n"
-        out, n = seed.substitute_citation_placeholders(
-            text, "registry:80/citation-dagster", "sha256:abcd"
+        out, n = seed.substitute_image_placeholders(
+            text, "citation", "registry:80/citation-dagster", "sha256:abcd"
         )
         self.assertEqual(n, 2)
         self.assertIn("digest: sha256:abcd", out)
@@ -259,34 +312,65 @@ class SubstitutePlaceholders(unittest.TestCase):
         # Aucun placeholder résiduel.
         self.assertNotIn("__CITATION_IMAGE", out)
 
+    def test_mediawatch_placeholders_derived_from_name(self):
+        # Les jetons mediawatch sont __MEDIAWATCH_IMAGE__ (préfixe = nom en MAJUSCULES) — parité
+        # des overlays atlas (dataops/mediawatch-dagster/deploy/overlays/prod).
+        text = "digest: __MEDIAWATCH_IMAGE_DIGEST__\nenv: __MEDIAWATCH_IMAGE__\n"
+        out, n = seed.substitute_image_placeholders(
+            text, "mediawatch", "registry:80/mediawatch-dagster", "sha256:beef"
+        )
+        self.assertEqual(n, 2)
+        self.assertIn("digest: sha256:beef", out)
+        self.assertIn("env: registry:80/mediawatch-dagster@sha256:beef", out)
+        # Le jeton mediawatch NE touche PAS un placeholder citation (isolation par code-location).
+        cit = "__CITATION_IMAGE__"
+        out2, n2 = seed.substitute_image_placeholders(
+            cit, "mediawatch", "registry:80/mediawatch-dagster", "sha256:beef"
+        )
+        self.assertEqual(n2, 0)
+        self.assertEqual(out2, cit)
+
     def test_order_digest_before_image_no_amputation(self):
         # __CITATION_IMAGE_DIGEST__ traité AVANT __CITATION_IMAGE__ : le sha256 seul ne doit
         # PAS être amputé par la substitution du préfixe __CITATION_IMAGE__.
         text = "__CITATION_IMAGE_DIGEST__"
-        out, n = seed.substitute_citation_placeholders(
-            text, "registry:80/citation-dagster", "sha256:dead"
+        out, n = seed.substitute_image_placeholders(
+            text, "citation", "registry:80/citation-dagster", "sha256:dead"
         )
         self.assertEqual(out, "sha256:dead")
         self.assertEqual(n, 1)
 
     def test_no_placeholder_returns_zero(self):
-        out, n = seed.substitute_citation_placeholders(
-            "rien à injecter", "registry:80/citation-dagster", "sha256:abcd"
+        out, n = seed.substitute_image_placeholders(
+            "rien à injecter", "citation", "registry:80/citation-dagster", "sha256:abcd"
         )
         self.assertEqual(n, 0)
         self.assertEqual(out, "rien à injecter")
 
     def test_bad_digest_rejected_before_substitution(self):
         with self.assertRaises(seed.SeedError):
-            seed.substitute_citation_placeholders(
-                "__CITATION_IMAGE__", "registry:80/citation-dagster", "0.0.0"
+            seed.substitute_image_placeholders(
+                "__CITATION_IMAGE__", "citation", "registry:80/citation-dagster", "0.0.0"
             )
 
+    def test_retrocompat_alias_defaults_to_citation(self):
+        # L'alias mono `substitute_citation_placeholders` fige le nom à 'citation'.
+        out, n = seed.substitute_citation_placeholders(
+            "env: __CITATION_IMAGE__\n", "registry:80/citation-dagster", "sha256:abcd"
+        )
+        self.assertEqual(n, 1)
+        self.assertIn("registry:80/citation-dagster@sha256:abcd", out)
 
-class RenderCitationDeclaration(unittest.TestCase):
-    """Rendu de apps/citation.yaml depuis le patron *.example (PUR, ADR 0023)."""
+
+class RenderCodeLocationDeclaration(unittest.TestCase):
+    """Rendu GÉNÉRIQUE de apps/<name>.yaml depuis le patron *.example (PUR, ADR 0023).
+
+    Le patron `citation.example.yaml` sert de PATRON GÉNÉRIQUE : réécrit `citation-dagster`
+    → `<name>-dagster` (metadata.name ET path) pour instancier n'importe quel code-location."""
 
     _EXAMPLE = (
+        "metadata:\n"
+        "  name: citation-dagster\n"
         "spec:\n"
         "  source:\n"
         "    repoURL: http://example/atlas.git\n"
@@ -295,18 +379,47 @@ class RenderCitationDeclaration(unittest.TestCase):
     )
 
     def test_injects_repourl_and_revision(self):
-        out = seed.render_citation_declaration(
-            self._EXAMPLE, "http://gitea/atlas/atlas.git", "c98feea9"
+        out = seed.render_code_location_declaration(
+            self._EXAMPLE, "citation", "http://gitea/atlas/atlas.git", "c98feea9"
         )
         self.assertIn("repoURL: http://gitea/atlas/atlas.git", out)
         self.assertIn("targetRevision: c98feea9", out)
         # Sans overlay explicite, le path du patron (prod) n'est PAS touché.
         self.assertIn("path: dataops/citation-dagster/deploy/overlays/prod", out)
 
+    def test_citation_name_is_noop_rewrite(self):
+        # `citation` : la réécriture citation-dagster→citation-dagster est un no-op.
+        out = seed.render_code_location_declaration(
+            self._EXAMPLE, "citation", "http://gitea/atlas/atlas.git", "c98feea9"
+        )
+        self.assertIn("name: citation-dagster", out)
+        self.assertIn("path: dataops/citation-dagster/deploy/overlays/prod", out)
+
+    def test_mediawatch_rewrites_name_and_path(self):
+        # `mediawatch` : le patron générique est réécrit citation-dagster→mediawatch-dagster
+        # PARTOUT (metadata.name ET path dataops/mediawatch-dagster/…).
+        out = seed.render_code_location_declaration(
+            self._EXAMPLE, "mediawatch", "http://gitea/atlas/atlas.git", "fe6b0793"
+        )
+        self.assertIn("name: mediawatch-dagster", out)
+        self.assertIn("path: dataops/mediawatch-dagster/deploy/overlays/prod", out)
+        self.assertIn("targetRevision: fe6b0793", out)
+        # Plus AUCUNE trace de citation dans le rendu mediawatch.
+        self.assertNotIn("citation-dagster", out)
+
+    def test_mediawatch_with_bench_overlay(self):
+        # mediawatch + overlay bench : name ET path réécrits, overlay bench.
+        out = seed.render_code_location_declaration(
+            self._EXAMPLE, "mediawatch", "http://gitea/atlas/atlas.git", "fe6b0793", overlay="bench"
+        )
+        self.assertIn("name: mediawatch-dagster", out)
+        self.assertIn("path: dataops/mediawatch-dagster/deploy/overlays/bench", out)
+        self.assertNotIn("overlays/prod", out)
+
     def test_overlay_rewrites_path_to_bench(self):
         # banc-citation : le path prod du patron est réécrit vers bench (décision D2).
-        out = seed.render_citation_declaration(
-            self._EXAMPLE, "http://gitea/atlas/atlas.git", "c98feea9", overlay="bench"
+        out = seed.render_code_location_declaration(
+            self._EXAMPLE, "citation", "http://gitea/atlas/atlas.git", "c98feea9", overlay="bench"
         )
         self.assertIn("path: dataops/citation-dagster/deploy/overlays/bench", out)
         self.assertNotIn("overlays/prod", out)
@@ -314,8 +427,9 @@ class RenderCitationDeclaration(unittest.TestCase):
     def test_overlay_not_matched_raises(self):
         # Un patron sans ligne path overlays/ + overlay demandé → garde (motif non matché).
         with self.assertRaises(seed.SeedError):
-            seed.render_citation_declaration(
+            seed.render_code_location_declaration(
                 "spec:\n  source:\n    repoURL: http://x/a.git\n    targetRevision: abc1234\n",
+                "citation",
                 "http://x/a.git",
                 "abc1234",
                 overlay="bench",
@@ -324,7 +438,7 @@ class RenderCitationDeclaration(unittest.TestCase):
     def test_failed_injection_raises(self):
         # Patron sans les lignes ciblées (indentation absente) → garde anti-injection ratée.
         with self.assertRaises(seed.SeedError):
-            seed.render_citation_declaration("spec: {}\n", "http://x/a.git", "abc1234")
+            seed.render_code_location_declaration("spec: {}\n", "citation", "http://x/a.git", "abc")
 
 
 class Honesty(unittest.TestCase):

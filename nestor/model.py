@@ -135,9 +135,11 @@ class Topology:
     #   gitea   : {org, repo, ns, admin_user, admin_email, svc, api,
     #             org_cluster, repo_apps, org_atlas, repo_atlas} (ex-GITEA_*).
     #   cilium  : {cluster_name, cluster_id} (ex-CILIUM_CLUSTER_*).
-    #   atlas   : {repo_dir, citation_revision, citation_image_digest,
-    #             citation_image_name, expected_cluster} (ex-ATLAS_REPO_DIR/CITATION_*/
-    #             EXPECTED_CLUSTER du seed prod).
+    #   atlas   : {repo_dir, expected_cluster, code_locations} où code_locations est une
+    #             LISTE de {name, revision, image_digest} (multi-code-location : citation,
+    #             mediawatch…). RÉTROCOMPAT : {citation_revision, citation_image_digest}
+    #             (sans code_locations) → 1 code-location name='citation' (SeedConfig.
+    #             from_topology). Ex-ATLAS_REPO_DIR/CITATION_*/EXPECTED_CLUSTER du seed prod.
     #   portal  : {contract, listen_port, seuil_jours} (ex-PORTAL_*/SEUIL_JOURS Python).
     ceph: dict[str, Any] = field(default_factory=dict)
     ha: dict[str, Any] = field(default_factory=dict)

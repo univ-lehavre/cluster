@@ -1,0 +1,129 @@
+# code: language=ansible
+# Layer CODE-LOCATION-BUILD — build de l'image applicative d'UNE code-location atlas
+# (ADR 0023 valeurs génériques ; ADR 0094/0095 §1.a « premier pas »). GÉNÉRIQUE : le nom
+# de la code-location est le paramètre `code_location` (défaut `citation` — rétrocompat du
+# play mono `bootstrap/citation.yaml`). Toute code-location `dataops/<name>-dagster/` du
+# dépôt atlas suit le MÊME moule (contexte multi-dossier `dataops/`, dbt frère `<name>-dbt/`).
+#
+# UNE SEULE étape (nœuds) — le DÉPLOIEMENT n'est PAS Ansible mais GitOps (Argo CD tire
+# l'overlay atlas par DIGEST, ADR 0095 §2). Ce play BUILD + PUSH l'image maison vers le
+# registry interne ; le seed publie ensuite le digest exposé dans cluster/apps (frontière
+# ADR 0094 : cluster FABRIQUE + connaît le digest ; le déploiement passe par App-of-Apps).
+#
+# CONTEXTE DE BUILD MULTI-DOSSIER (cas portal) : le Dockerfile <name> (dépôt atlas,
+# dataops/<name>-dagster/Dockerfile) a pour contexte `dataops/` — il embarque la
+# code-location `<name>-dagster/` ET le projet dbt frère `<name>-dbt/`. On RÉPLIQUE
+# node-side, sous build_workdir/<name>/, l'arborescence attendue par le Dockerfile AVANT
+# d'importer platform-build-images (générique, inchangé).
+#
+# SOURCES = dépôt atlas EXTERNE. `citation_repo_dir` (chemin du dépôt atlas sur l'HÔTE,
+# COMMUN à toutes les code-locations) est une valeur d'INSTANCE (ADR 0023) : injectée via
+# `-e citation_repo_dir=…` ou le bloc `atlas.repo_dir` de la topo. Un garde échoue si absent.
+
+- name: Layer Code-location build — étape nœuds (registry + build image applicative)
+  hosts: cloud
+  vars:
+    # code_location : le nom (citation, mediawatch…). Défaut citation (rétrocompat).
+    code_location: citation
+    cl_build_workdir: '/tmp/dataops-build/{{ code_location }}'
+    cl_src_dir: '{{ citation_repo_dir }}/dataops/{{ code_location }}-dagster'
+    cl_dbt_dir: '{{ citation_repo_dir }}/dataops/{{ code_location }}-dbt'
+  # GARDE D'ISOLATION (ADR 0053) : SSH sur les nœuds + push registry → vérifie
+  # EXPECTED_TARGET_KIND via audit-log AVANT toute tâche distante. force_handlers : filet
+  # restart containerd même si un build échoue (incident 2026-06-16, parité citation).
+  force_handlers: true
+  pre_tasks:
+    - name: Audit-log — record playbook execution (+ garde target_kind)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: code-location-build.yaml
+
+    - name: "Garde : citation_repo_dir fourni (dépôt atlas sur l'hôte)"
+      ansible.builtin.assert:
+        that:
+          - citation_repo_dir is defined
+          - citation_repo_dir | length > 0
+        fail_msg: >-
+          `citation_repo_dir` est requis : chemin LOCAL du dépôt atlas sur l'hôte de
+          contrôle (il ne vit pas dans cluster, ADR 0023). Le fournir via
+          `-e citation_repo_dir=/chemin/vers/atlas` ou le bloc `atlas.repo_dir` de la topo.
+      run_once: true
+      delegate_to: localhost
+  tasks:
+    - name: Configuration containerd pour le registry interne
+      ansible.builtin.import_role:
+        name: platform-registry
+        tasks_from: node
+      tags: registry-node
+
+    - name: Recharger containerd si sa config a changé (avant build/push)
+      ansible.builtin.meta: flush_handlers
+      tags: registry-node
+
+    # ── Contexte de build préparé node-side (cas multi-dossier, cf. en-tête) ──────
+    - name: Ensure the code-location build context tree exists
+      ansible.builtin.file:
+        path: '{{ cl_build_workdir }}/{{ item }}'
+        state: directory
+        mode: '0755'
+      loop:
+        - '{{ code_location }}-dagster'
+      become: true
+
+    - name: Copy the code-location Dockerfile to the build context root
+      ansible.builtin.copy:
+        src: '{{ cl_src_dir }}/Dockerfile'
+        dest: '{{ cl_build_workdir }}/Dockerfile'
+        mode: '0644'
+      become: true
+
+    - name: Copy the code-location package files into the build context
+      ansible.builtin.copy:
+        src: '{{ cl_src_dir }}/{{ item }}'
+        dest: '{{ cl_build_workdir }}/{{ code_location }}-dagster/{{ item }}'
+        mode: '0644'
+      loop:
+        - pyproject.toml
+        - uv.lock
+        - README.md
+      become: true
+
+    - name: Copy the code-location source directories into the build context
+      ansible.builtin.copy:
+        src: '{{ cl_src_dir }}/{{ item }}/'
+        dest: '{{ cl_build_workdir }}/{{ code_location }}-dagster/{{ item }}/'
+        mode: '0644'
+        directory_mode: '0755'
+      loop:
+        - src
+        - scripts
+      become: true
+
+    # Projet dbt frère — rsync (sans logs/target lourds, régénérés au build). Cf. citation.
+    - name: Copy the dbt project into the build context (sans logs/target)
+      ansible.posix.synchronize:
+        src: '{{ cl_dbt_dir }}/'
+        dest: '{{ cl_build_workdir }}/{{ code_location }}-dbt/'
+        rsync_opts:
+          - '--exclude=logs/'
+          - '--exclude=target/'
+          - '--exclude=__pycache__/'
+      become: true
+
+    # Build (2 arches) de l'image maison <name>-dagster → registry:80 + lecture du digest
+    # (gitops_writeback). build_images DÉRIVÉE à la volée depuis `code_location` (pas de
+    # liste versionnée par CL) : image 100 % maison, tag :dev mutable, digest write-back.
+    - name: Build de l'image applicative (code-location + dbt embarqués)
+      ansible.builtin.import_role:
+        name: platform-build-images
+      vars:
+        build_images:
+          - name: '{{ code_location }}-dagster'
+            tag: dev
+            build_context: '{{ cl_build_workdir }}'
+            dockerfile: '{{ cl_build_workdir }}/Dockerfile'
+            build_all_arch: true
+            force_rebuild: true
+            gitops_writeback: true
+      tags: build-images
