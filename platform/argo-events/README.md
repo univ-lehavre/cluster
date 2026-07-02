@@ -77,7 +77,7 @@ chemin (`dataops/<name>-dagster/…` → `<name>`) et `revision` de `body.after`
 `dataops/newthing-dagster/…` donne `codeLocation=newthing` →
 `apps/newthing.yaml` → Application `newthing`, **sans énumération ni geste**.
 Garde-fou amont :
-[`check_code_location_manifest.py`](/cluster/scripts/check_code_location_manifest.py)
+[`check_code_location_manifest.py`](https://github.com/univ-lehavre/cluster/blob/main/scripts/check_code_location_manifest.py)
 échoue bruyamment sur un manifeste incohérent.
 
 **Filet event-loss** :
@@ -88,8 +88,8 @@ rattrapage à latence = période du Cron, **PAS** le rejeu `changed=0` d'Ansible
 (ADR 0052).
 
 **Webhook #2 au seed** : le handler `webhook_build()`
-([`scripts/topology.py`](/cluster/scripts/topology.py)) pose ce hook Gitea sur
-le repo **atlas/atlas** vers l'endpoint de l'EventSource
+([`scripts/topology.py`](https://github.com/univ-lehavre/cluster/blob/main/scripts/topology.py))
+pose ce hook Gitea sur le repo **atlas/atlas** vers l'endpoint de l'EventSource
 (`gitea-push-eventsource-svc.argo-events.svc.cluster.local:12000/push`), avec le
 secret HMAC partagé `gitea-webhook-build-hmac`. Câblé mais pas encore dans la
 séquence de seed (à brancher quand le socle événementiel est monté — cf.
