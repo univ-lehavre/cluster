@@ -7,10 +7,11 @@
 # restreint pas (idiome du dépôt, cf. allow-registry ; le cluster est isolé,
 # ADR 0003).
 #
-# Egress (air-gapped, ADR 0044) : PAS d'Internet. Uniquement le webhook
-# Gitea → argocd-server (déclenchement réactif de la réconciliation sur push).
-# DNS couvert par allow-dns-egress. Gitea n'appelle pas l'API K8s → pas d'egress
-# 6443 (minimalisme default-deny, ADR 0019).
+# Egress (air-gapped, ADR 0044) : PAS d'Internet. DEUX webhooks Gitea (ADR 0095 §1.b) :
+#   #1 Gitea → argocd-server (déclenche la réconciliation Argo CD sur push cluster/apps) ;
+#   #2 Gitea → EventSource Argo Events (déclenche le BUILD événementiel sur push atlas).
+# DNS couvert par allow-dns-egress. Gitea n'appelle pas l'API K8s → pas d'egress 6443
+# (minimalisme default-deny, ADR 0019).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -28,8 +29,8 @@ spec:
         - protocol: TCP
           port: 3000
   egress:
-    # Webhook Gitea → argocd-server (port du POD, 8080 ; le Service mappe
-    # 80→8080). Déclenche la réconciliation Argo CD au push (ADR 0044).
+    # Webhook #1 Gitea → argocd-server (port du POD, 8080 ; le Service mappe
+    # 80→8080). Déclenche la réconciliation Argo CD au push cluster/apps (ADR 0044).
     - to:
         - namespaceSelector:
             matchLabels:
@@ -40,3 +41,18 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # Webhook #2 Gitea → EventSource Argo Events (:12000). Déclenche le BUILD
+    # événementiel sur push du CODE atlas (ADR 0095 §1.b). Sans cette règle, le POST
+    # du webhook #2 timeoute (default-deny egress du ns gitea) → la chaîne ne se
+    # déclenche jamais (PROUVÉ AU BANC 2026-07-02 : connect timeout, HTTP 000). Le
+    # podSelector cible le pod EventSource (Service `<eventsource>-eventsource-svc`).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argo-events
+          podSelector:
+            matchLabels:
+              eventsource-name: gitea-push
+      ports:
+        - protocol: TCP
+          port: 12000
