@@ -92,9 +92,15 @@ except ModuleNotFoundError:  # pragma: no cover - module du dépôt
 # ne passent pas par la famille 2.
 # ─────────────────────────────────────────────────────────────────────────────
 EXPECTED_NON_GRAPH_ROLES: dict[str, str] = {
-    # (aucun rôle platform-* hors graphe aujourd'hui : tout platform-* est porté
-    # par ≥1 Component. Entrée d'EXEMPLE de la forme attendue — à compléter si un
-    # futur rôle platform-* socle devait exister, avec sa justification par chemin.)
+    # platform-eventful (ADR 0095 §1.b) : rôle qui monte la chaîne événementielle (Argo
+    # Workflows + Argo Events) via bootstrap/eventful.yaml. Enregistré comme PHASE dans
+    # plan.py/phases.py (montable `nestor ansible bootstrap/eventful.yaml`), mais PAS ENCORE
+    # comme Component(role='platform-eventful') du graphe atomique — son enregistrement
+    # graphe complet (Component + deps argocd/gitea/registry/build-images + LAYER_SIGNAL sur
+    # une feuille + PHASE_COMPONENTS + _QUEUE_PHASES/VALID_LAYERS) est un TODO (montabilité
+    # par le graphe/resolve_layers). Allowlisté ici en attendant, sans bloquer le check.
+    "platform-eventful": "chaîne événementielle ADR 0095 §1.b — phase enregistrée "
+    "(plan.py/phases.py) ; Component graphe à ajouter (TODO montabilité graphe/layers)",
 }
 
 # Mots-clés des tâches qui IMPORTENT un rôle (playbook ou rôle→rôle). On scanne

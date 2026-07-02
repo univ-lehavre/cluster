@@ -35,8 +35,11 @@ metadata:
   namespace: argo
 spec:
   # Période PRUDENTE — filet, pas temps réel. Compromis latence / charge (git
-  # ls-remote + lecture cluster/apps toutes les 30 min).
-  schedule: '*/30 * * * *'
+  # ls-remote + lecture cluster/apps toutes les 30 min). CRD Argo Workflows v4 :
+  # `schedules` (LISTE), pas `schedule` (singulier, retiré) — sinon apply 422
+  # « spec.schedules: Required value » (prouvé au montage banc 2026-07-02).
+  schedules:
+    - '*/30 * * * *'
   concurrencyPolicy: Forbid # jamais deux réconciliations concurrentes.
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 3

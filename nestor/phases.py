@@ -421,6 +421,21 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     #    `citation_repo_dir` (chemin du dépôt atlas EXTERNE) est une valeur d'instance
     #    injectée (ADR 0023) — passée en -e ; le play garde son absence. ────────────
     "citation": _plan("citation", extravars_keys=("citation_repo_dir",)),
+    # ── eventful : chaîne événementielle (ADR 0095 §1.b) — Argo Workflows (build in-pod)
+    #    + Argo Events (webhook#2 → EventBus NATS → Sensor). Play k8s (localhost) qui
+    #    APPLIQUE des manifestes figés (bundles server-side + CR + NetworkPolicies +
+    #    NodePort). Aucun -e dérivé du profil : les namespaces/retries sont des defaults du
+    #    rôle, et le PATCH BANC du nodeSelector est dérivé de EXPECTED_TARGET_KIND (env posé
+    #    par le runner), PAS du faisceau derive_run_params. Gate = controllers Ready
+    #    (workflow-controller/argo-server/controller-manager) — cf. le rôle ; ici la table
+    #    n'a pas de signal de graphe (eventful pas encore dans graph.LAYER_SIGNAL, cf. TODO
+    #    d'enregistrement graphe) → gate_kind "none", à enrichir avec le Component graphe. ─
+    "eventful": _plan(
+        "eventful",
+        extravars_keys=(),
+        note="chaîne événementielle (Argo Workflows/Events) ; patch banc nodeSelector "
+        "dérivé de EXPECTED_TARGET_KIND (env, pas -e) ; graph.LAYER_SIGNAL à ajouter (TODO)",
+    ),
 }
 
 # ── Phases NON PORTÉES dans cette table (déléguées / stubées ailleurs) ────────
