@@ -1,0 +1,26 @@
+# POINT DUR 1 (ADR 0095 §1.b) — buildkitd rootless en Pod n'hérite PAS du
+# hosts.toml containerd DU NŒUD.
+#
+# Le build node-side (rôle platform-build-images) pousse vers `registry:80` en
+# HTTP parce que le nœud a un `/etc/containerd/certs.d/registry:80/hosts.toml`
+# (server http://…, skip_verify = true — ADR 0011, registry HTTP sans TLS). Un
+# `buildkitd` rootless dans un Pod tourne dans son propre namespace utilisateur
+# et n'a AUCUN accès à ce fichier du nœud : sans configuration explicite il tente
+# un handshake TLS sur `registry:80` (HTTP) et le `push` échoue.
+#
+# Ce ConfigMap RÉPLIQUE, côté Pod, ce que certs.d/hosts.toml fait côté nœud : il
+# déclare `registry:80` en `http = true` / `insecure = true`. Monté dans le
+# conteneur builder à `/home/user/.config/buildkit/buildkitd.toml` (chemin de
+# config par défaut de l'image rootless, uid 1000), lu par `buildctl` au build.
+#
+# Valeurs génériques (ADR 0023) : `registry:80` = registry interne HTTP.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: buildkitd-config
+  namespace: argo
+data:
+  buildkitd.toml: |
+    [registry."registry:80"]
+      http = true
+      insecure = true
