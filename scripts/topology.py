@@ -3343,7 +3343,11 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
                     '  *[Pp]assword*) printf "%s" "${GIT_ASKPASS_PASS}" ;;\n'
                     "esac\n"
                 )
-            os.chmod(askpass, 0o755)
+            # 0o700 (owner-only rwx), PAS 0o755 : le helper est exécuté par git dans le
+            # MÊME process/user (via GIT_ASKPASS) — inutile de le rendre world-readable, et
+            # un askpass qui touche à l'auth ne doit pas être lisible par d'autres (CodeQL
+            # py/overly-permissive-file-permissions). Le workdir est déjà un mkdtemp privé.
+            os.chmod(askpass, 0o700)
             push_url = f"http://127.0.0.1:{lport}/{config.org_atlas}/{config.repo_atlas}.git"
             env = {
                 **os.environ,
