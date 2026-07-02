@@ -18,15 +18,19 @@
 # ci-dessous. L'URL que Gitea appellera :
 #   http://gitea-push-eventsource-svc.argo-events.svc.cluster.local:12000/push
 #
-# ── PATRON *.example (ADR 0023) ───────────────────────────────────────────────
-# Ce fichier est un GABARIT versionné. Le secret HMAC de validation du webhook
-# (partagé entre Gitea et l'EventSource) N'EST PAS gravé ici : il est référencé
-# depuis un Secret `gitea-webhook-build-hmac` (clé `secret`), GÉNÉRÉ au seed
-# (`gen_secret`, jamais versionné) — le MÊME secret que `webhook_build()` du seed
-# pose côté hook Gitea. Sans ce secret partagé, l'EventSource rejette les payloads
-# (protection contre un POST forgé). Gitea signe le corps en HMAC-SHA256 dans
-# l'en-tête `X-Gitea-Signature` ; `webhook.<name>.authSecret` fait valider cette
-# signature par l'EventSource.
+# ── SÉCURITÉ : ISOLATION RÉSEAU, pas signature HMAC (PROUVÉ AU BANC 2026-07-02) ──
+# PAS d'`authSecret` : dans Argo Events, `webhook.authSecret` compare le header
+# `Authorization` à la valeur LITTÉRALE du secret — or Gitea ne pose PAS ce header,
+# il signe le corps en HMAC-SHA256 dans `X-Gitea-Signature` (protocole DIFFÉRENT).
+# Avec `authSecret`, TOUT payload Gitea est rejeté « invalid auth header » (vécu au
+# banc) : les deux ne parlent pas le même langage d'auth. La sécurité vient donc de
+# l'ISOLATION RÉSEAU (ADR 0003, air-gap) : SEUL Gitea peut POSTer sur cet endpoint —
+# la NetworkPolicy `allow-gitea` n'ouvre l'egress `:12000` que du pod Gitea, et
+# `GITEA__webhook__ALLOWED_HOST_LIST` restreint la destination des webhooks Gitea à
+# cet hôte. Un POST forgé devrait d'abord être un pod Gitea compromis (surface déjà
+# couverte). Le Secret `gitea-webhook-build-hmac` reste posé par le seed (webhook
+# #2) mais n'est PAS utilisé ici (garder pour un durcissement HMAC futur si Argo
+# Events supporte la vérif `X-Gitea-Signature` nativement).
 apiVersion: argoproj.io/v1alpha1
 kind: EventSource
 metadata:
@@ -46,8 +50,5 @@ spec:
       port: '12000'
       endpoint: /push
       method: POST
-      # Validation HMAC — Secret GÉNÉRÉ au seed (patron *.example, ADR 0023).
-      # Le seed pose le MÊME secret côté hook Gitea (`webhook_build()`).
-      authSecret:
-        name: gitea-webhook-build-hmac
-        key: secret
+      # PAS d'authSecret (cf. en-tête) : incompatible avec la signature Gitea
+      # (X-Gitea-Signature). Sécurité = isolation réseau (seul Gitea peut POSTer).
