@@ -235,6 +235,70 @@ class DigestRef(unittest.TestCase):
             seed.citation_image_ref("registry:80/citation-dagster", "0.0.0")
 
 
+class SubstitutePlaceholders(unittest.TestCase):
+    """Substitution des 2 jetons d'injection atlas (PUR, frontière ADR 0094)."""
+
+    def test_both_placeholders_substituted(self):
+        text = "digest: __CITATION_IMAGE_DIGEST__\nenv: __CITATION_IMAGE__\n"
+        out, n = seed.substitute_citation_placeholders(
+            text, "registry:80/citation-dagster", "sha256:abcd"
+        )
+        self.assertEqual(n, 2)
+        self.assertIn("digest: sha256:abcd", out)
+        self.assertIn("env: registry:80/citation-dagster@sha256:abcd", out)
+        # Aucun placeholder résiduel.
+        self.assertNotIn("__CITATION_IMAGE", out)
+
+    def test_order_digest_before_image_no_amputation(self):
+        # __CITATION_IMAGE_DIGEST__ traité AVANT __CITATION_IMAGE__ : le sha256 seul ne doit
+        # PAS être amputé par la substitution du préfixe __CITATION_IMAGE__.
+        text = "__CITATION_IMAGE_DIGEST__"
+        out, n = seed.substitute_citation_placeholders(
+            text, "registry:80/citation-dagster", "sha256:dead"
+        )
+        self.assertEqual(out, "sha256:dead")
+        self.assertEqual(n, 1)
+
+    def test_no_placeholder_returns_zero(self):
+        out, n = seed.substitute_citation_placeholders(
+            "rien à injecter", "registry:80/citation-dagster", "sha256:abcd"
+        )
+        self.assertEqual(n, 0)
+        self.assertEqual(out, "rien à injecter")
+
+    def test_bad_digest_rejected_before_substitution(self):
+        with self.assertRaises(seed.SeedError):
+            seed.substitute_citation_placeholders(
+                "__CITATION_IMAGE__", "registry:80/citation-dagster", "0.0.0"
+            )
+
+
+class RenderCitationDeclaration(unittest.TestCase):
+    """Rendu de apps/citation.yaml depuis le patron *.example (PUR, ADR 0023)."""
+
+    _EXAMPLE = (
+        "spec:\n"
+        "  source:\n"
+        "    repoURL: http://example/atlas.git\n"
+        "    targetRevision: 0000000\n"
+        "    path: overlays/prod\n"
+    )
+
+    def test_injects_repourl_and_revision(self):
+        out = seed.render_citation_declaration(
+            self._EXAMPLE, "http://gitea/atlas/atlas.git", "c98feea9"
+        )
+        self.assertIn("repoURL: http://gitea/atlas/atlas.git", out)
+        self.assertIn("targetRevision: c98feea9", out)
+        # Le path (overlay) n'est PAS touché.
+        self.assertIn("path: overlays/prod", out)
+
+    def test_failed_injection_raises(self):
+        # Patron sans les lignes ciblées (indentation absente) → garde anti-injection ratée.
+        with self.assertRaises(seed.SeedError):
+            seed.render_citation_declaration("spec: {}\n", "http://x/a.git", "abc1234")
+
+
 class Honesty(unittest.TestCase):
     """La frontière code-écrit / preuve-cluster est DÉCLARÉE (ADR 0034)."""
 
