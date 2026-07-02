@@ -117,6 +117,18 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
         "build de l'image applicative citation (code-location atlas)",
         "image citation (build applicatif)",
     ),
+    # Eventful (ADR 0095 §1.b) : layer AUTONOME qui monte la CHAÎNE ÉVÉNEMENTIELLE
+    # (Argo Workflows build in-pod + Argo Events webhook#2→EventBus NATS→Sensor). Play
+    # k8s (localhost) qui APPLIQUE des manifestes figés (bundles server-side + CR +
+    # NetworkPolicies + NodePort) — le rôle platform-eventful traduit les gestes kubectl
+    # manuels du banc (ADR 0046). Le Secret HMAC (EventSource) et le token d'écriture
+    # (write-back) viennent du SEED, jamais gravés ici (ADR 0095 §Coût). Montée via le
+    # chemin générique `layers`.
+    "eventful": PhaseSpec(
+        "bootstrap/eventful.yaml",
+        "chaîne événementielle (Argo Workflows + Argo Events, git push → build)",
+        "chaîne événementielle (build in-pod)",
+    ),
     # hardening lance bootstrap/security/secure.yml AVEC --tags audit,detection et
     # un préflight d'env (phase_hardening, run-phases.sh) que `--apply` ne pose pas
     # — non lançable comme play unitaire ici, déléguée au chemin nommé run-phases.sh.
