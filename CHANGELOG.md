@@ -11,6 +11,61 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.49.0](https://github.com/univ-lehavre/cluster/compare/v2.48.0...v2.49.0) (2026-07-03)
+
+
+### Features
+
+* **banc:** intègre la chaîne événementielle au banc air-gappé ([93470e7](https://github.com/univ-lehavre/cluster/commit/93470e73358d491994d4c2e2b6f2b5a603a204eb))
+* **banc:** intègre la chaîne événementielle au banc air-gappé (mirror + patch + webhook[#2](https://github.com/univ-lehavre/cluster/issues/2)) ([cef9c8a](https://github.com/univ-lehavre/cluster/commit/cef9c8ae07f7441d9caf2510034e360437d81479))
+* **bootstrap:** build citation (D3) + plan détaillé de la cible événementielle ([412bb45](https://github.com/univ-lehavre/cluster/commit/412bb45afd09b1327b439626268d46ec3352e0cf))
+* **bootstrap:** layer citation — build node-side de l'image applicative (D3) ([2ad75a0](https://github.com/univ-lehavre/cluster/commit/2ad75a0b4bcbfabc7c81ee185a0c65a62bfb30c5))
+* **bootstrap:** play de build générique par code-location (mediawatch) ([e6b3fa3](https://github.com/univ-lehavre/cluster/commit/e6b3fa331e1fc49d947f557c404d84320f242ea5))
+* **bootstrap:** rôle platform-eventful — monte la chaîne événementielle (ADR 0046) ([89009d3](https://github.com/univ-lehavre/cluster/commit/89009d326ade18ff9bdfae78ce57e0e7c90c36d7))
+* **bootstrap:** rôle platform-eventful — monte la chaîne événementielle (ADR 0046) ([8f3a92a](https://github.com/univ-lehavre/cluster/commit/8f3a92ae316694d16c6d8b7a6cc16f484bba00f5))
+* **nestor:** câble le hook e2e dataops_egress_internet_check (portage bash prouvé) ([1d8c026](https://github.com/univ-lehavre/cluster/commit/1d8c02636918de4c548335512c2eb1be46505b13))
+* **nestor:** câble le hook e2e dataops_egress_internet_check (portage bash prouvé) ([5f5c864](https://github.com/univ-lehavre/cluster/commit/5f5c86404e13306e9239fe39b38906a747822f77))
+* **nestor:** façade seed banc-citation — publication du digest citation (§1.a) ([7737d7e](https://github.com/univ-lehavre/cluster/commit/7737d7e0f37197c3da7ff47f404dd0381178ba2b))
+* **nestor:** logique pure du seed citation (substitution digest + rendu déclaration) ([f228a1d](https://github.com/univ-lehavre/cluster/commit/f228a1db25dbf460ed0f409825d1ec9bb6682855))
+* **nestor:** publication du digest citation par le seed banc-citation (§1.a) ([c3cebb8](https://github.com/univ-lehavre/cluster/commit/c3cebb8ba798a2ac8883828ea0972404100f2912))
+* **nestor:** rend citation + gitops-seed-citation montables (graphe/layers) ([691c499](https://github.com/univ-lehavre/cluster/commit/691c4991be054aedfe2816274f0276a653c01990))
+* **nestor:** seed + build multi-code-location (débloque mediawatch) ([c21fde6](https://github.com/univ-lehavre/cluster/commit/c21fde6f0b2f6ec8d5488b8557f45938784f169d))
+* **nestor:** seed multi-code-location (citation + mediawatch), rétrocompat ([357d065](https://github.com/univ-lehavre/cluster/commit/357d06561288212c8ec4b4ee0807b82b9b11c910))
+* **nestor:** variante de seed banc-citation (flux prod joué au banc, garde banc) ([519a073](https://github.com/univ-lehavre/cluster/commit/519a073b576945a673c6c2005094fb6d432b21ec))
+* **nestor:** variante de seed banc-citation + révision du plan build-gitops ([d567632](https://github.com/univ-lehavre/cluster/commit/d567632a096f72e284894f7e4ca28e1adfb57114))
+* **platform:** builder buildkit-in-pod + egress build (cible §1.b étape 6) ([aa0f3d8](https://github.com/univ-lehavre/cluster/commit/aa0f3d8adb9107f4919547adf51faeafae607d46))
+* **platform:** chaîne de découverte Argo Events (cible §1.b étape 7) ([bd572da](https://github.com/univ-lehavre/cluster/commit/bd572da75b99c55e8bd2fc1a1bd9db0e0d0cf47d))
+* **platform:** vendore Argo Workflows + Argo Events (cible événementielle, étape 5) ([bfaee26](https://github.com/univ-lehavre/cluster/commit/bfaee26fff66eb57145af7396af5eca2300c9e35))
+* **platform:** vendore Argo Workflows v4.0.6 + Argo Events v1.9.10 (cible §1.b étape 5) ([5907016](https://github.com/univ-lehavre/cluster/commit/5907016bc3edf7dc235712d7ca827e6c34625715))
+
+
+### Bug Fixes
+
+* **banc:** citation-dbt copié en rsync sans logs/target (build bloqué au banc) ([aadd050](https://github.com/univ-lehavre/cluster/commit/aadd050253963c7fde32fdf8f6450fa3c7bb2c1c))
+* **banc:** eventful-mirror — become root + scalar à plat (prouvé au banc) ([58608b3](https://github.com/univ-lehavre/cluster/commit/58608b35b12941884a007a0c82a9236205ffd6f1))
+* **banc:** seed citation vise overlay bench + port gitea dérivé (prouvés au banc) ([14824b7](https://github.com/univ-lehavre/cluster/commit/14824b75b039def85bd8ca517339696c634e2638))
+* **bench:** scénario 28 sonde les UI via port-forward (default-deny) + set -e ([8a184aa](https://github.com/univ-lehavre/cluster/commit/8a184aa2f167b04a129081ba3a242461c9813bb9))
+* **bench:** scénario 31 sonde postgres depuis un ns autorisé (NetworkPolicy) ([c9d4c27](https://github.com/univ-lehavre/cluster/commit/c9d4c27b7507a5e22a5493165867d0da6529f58f))
+* **bench:** scénario 31 sonde postgres depuis un ns autorisé (NetworkPolicy) ([af36c5c](https://github.com/univ-lehavre/cluster/commit/af36c5cacfd8a6a4ca85a664f3d997f6e40ddcf4))
+* **eventful:** déblocage du déclenchement webhook [#2](https://github.com/univ-lehavre/cluster/issues/2) (PROUVÉ zéro-geste au banc) ([7fb0e79](https://github.com/univ-lehavre/cluster/commit/7fb0e79d4521e1763712c657e689b89e9bfda945))
+* **eventful:** débloque le déclenchement webhook [#2](https://github.com/univ-lehavre/cluster/issues/2) (zéro-geste prouvé au banc) ([0f26be4](https://github.com/univ-lehavre/cluster/commit/0f26be40294d359e73a30ee6bd4900e090851c00))
+* **nestor:** askpass en 0o700, pas 0o755 (alerte CodeQL high) ([0661236](https://github.com/univ-lehavre/cluster/commit/0661236c88aee67c8ad5920fc2c771b2f3bda605))
+* **nestor:** down supprime le kubeconfig de la stack (plus de résidu poison) ([8892de0](https://github.com/univ-lehavre/cluster/commit/8892de0a0e2f026752dfcfe5b5b80e6124d8a712))
+* **nestor:** down supprime le kubeconfig de la stack (plus de résidu poison) ([fa8cfdc](https://github.com/univ-lehavre/cluster/commit/fa8cfdcaced0ad29b54c6f29b3fe848a75e4f7c0))
+
+
+### Documentation
+
+* **argo-events:** liens .py en URL GitHub, pas URL site (docs:build) ([a07750d](https://github.com/univ-lehavre/cluster/commit/a07750d4d060f56f8bce8cff439e0a541824c6d8))
+* build vert (221 pages, 0 lien invalide), markdownlint/orphans/STATS/drifts OK. ([f3c883c](https://github.com/univ-lehavre/cluster/commit/f3c883c5d327a8eeb628eed500b3d04b02d96c05))
+* consigne la preuve banc citation + documente le build événementiel ([f3c883c](https://github.com/univ-lehavre/cluster/commit/f3c883c5d327a8eeb628eed500b3d04b02d96c05))
+* **contrat:** aligne contrat + guide dev-atlas + portail sur la chaîne événementielle ([2616252](https://github.com/univ-lehavre/cluster/commit/261625277be27f97945ce3ccf7c01598b23505a4))
+* **contrat:** aligne contrat/guide/portail sur la chaîne événementielle ([e53c8ec](https://github.com/univ-lehavre/cluster/commit/e53c8ec4c5824b7e290e80d98285b83e3b6af7d5))
+* **plan:** détaille la cible événementielle (étapes 5-8, zéro geste) ([8ed179a](https://github.com/univ-lehavre/cluster/commit/8ed179ac3d2414a23ffd3e9892509b32bd4c86b6))
+* **plan:** révise le plan build-gitops pour la bascule citation réelle au banc ([94672ea](https://github.com/univ-lehavre/cluster/commit/94672eaa554719992c48c81370ba50936eac546a))
+* **platform:** rend argo-workflows/ + argo-events/ atteignables (ADR 0029) ([5393f4e](https://github.com/univ-lehavre/cluster/commit/5393f4e0776c064b32441025a645c39cdcdb9c53))
+* preuve banc citation + composants événementiels (MAJ complète doc) ([46a4c71](https://github.com/univ-lehavre/cluster/commit/46a4c71e4737ec8e0df8da8d3d957bd2a833fdcc))
+
 ## [2.48.0](https://github.com/univ-lehavre/cluster/compare/v2.47.0...v2.48.0) (2026-07-02)
 
 
