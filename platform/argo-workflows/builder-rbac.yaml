@@ -1,0 +1,51 @@
+# ServiceAccount + RBAC `builder-sa` (ns argo) — exécution des Workflows de build
+# (ADR 0095 §1.b). PROUVÉ NÉCESSAIRE AU BANC 2026-07-02.
+#
+# POURQUOI ce fichier — un Workflow Argo lancé SANS serviceAccountName tourne avec le
+# SA `default` du ns argo, qui n'a AUCUN RBAC Argo Workflows → son EXECUTOR échoue :
+# « serviceaccount:argo:default cannot create workflowtaskresults.argoproj.io ». Le SA
+# `builder-sa` porte les deux capacités dont le builder a besoin :
+#   1. RBAC EXÉCUTEUR (workflowtaskresults) — que TOUT pod de Workflow patche pour
+#      remonter son résultat (patron standard Argo Workflows, workflow-rbac).
+#   2. SOUMISSION de Workflows (create workflows) — pour le CronWorkflow filet
+#      `builder-reconcile` qui resoumet `image-builder` (il partage ce SA).
+#
+# Ns `argo` (là où les Workflows tournent), distinct de `operate-workflow-sa` du ns
+# `argo-events` (que le Sensor utilise pour SOUMETTRE depuis argo-events). Le
+# WorkflowTemplate `image-builder` et le CronWorkflow `builder-reconcile` référencent
+# CE SA (serviceAccountName: builder-sa).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: builder-sa
+  namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: builder-executor
+  namespace: argo
+rules:
+  # Executor : chaque pod de Workflow patche son WorkflowTaskResult (obligatoire, sinon
+  # « cannot create workflowtaskresults » et le step échoue). Patron workflow-rbac Argo.
+  - apiGroups: ['argoproj.io']
+    resources: ['workflowtaskresults']
+    verbs: ['create', 'patch']
+  # Soumission (CronWorkflow filet builder-reconcile → `argo submit` image-builder).
+  - apiGroups: ['argoproj.io']
+    resources: ['workflows', 'workflowtemplates']
+    verbs: ['create', 'get', 'list', 'watch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: builder-executor-binding
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: builder-executor
+subjects:
+  - kind: ServiceAccount
+    name: builder-sa
+    namespace: argo

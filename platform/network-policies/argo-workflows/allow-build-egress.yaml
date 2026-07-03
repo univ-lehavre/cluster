@@ -6,30 +6,37 @@
 # Dockerfile résout ses dépendances au build ; tout le reste reste fermé.
 #
 # Cibles Internet révélées par le Dockerfile citation
-# (atlas/dataops/citation-dagster/Dockerfile), toutes en 443 :
-#   - `deb.debian.org` / miroirs Debian        → `apt-get install rclone ca-certificates`
-#   - `pypi.org` / `files.pythonhosted.org`    → `pip install uv` + `uv pip install .`
-#   - `extensions.duckdb.org`                  → `duckdb INSTALL httpfs/postgres`
-#   - `huggingface.co` / `cdn-lfs*`            → `fetch_model.py` (modèle ONNX)
+# (atlas/dataops/citation-dagster/Dockerfile) :
+#   - `deb.debian.org` / miroirs Debian        → `apt-get install rclone ca-certificates` (HTTP:80)
+#   - `pypi.org` / `files.pythonhosted.org`    → `pip install uv` + `uv pip install .`  (HTTPS:443)
+#   - `extensions.duckdb.org`                  → `duckdb INSTALL httpfs/postgres`        (HTTPS:443)
+#   - `huggingface.co` / `cdn-lfs*`            → `fetch_model.py` (modèle ONNX)          (HTTPS:443)
+#
+# DEUX PORTS (443 ET 80) — apt utilise HTTP:80 PAR DESIGN (les paquets Debian sont
+# signés GPG ; HTTP est le transport apt standard, la confiance vient de la signature,
+# pas du transport). `deb.debian.org` NE répond PAS en 443 par défaut → sans le port 80
+# la couche `apt-get` timeoute (PROUVÉ AU BANC 2026-07-02 : `Unable to connect to
+# deb.debian.org:http`, tandis que PyPI:443 répondait 200). Le reste (pip/DuckDB/HF) 443.
 #
 # CHOIX (calque dagster/allow-internet-egress) : on NE filtre PAS par IP de
 # destination. Ces hôtes (PyPI, HuggingFace CDN, miroirs Debian) n'ont pas d'IP
 # fixe et leurs plages ont un churn régulier → un filtrage FQDN/IP ajoute de la
 # complexité pour un gain marginal sur réseau privé (ADR 0003). La BORNE DE
-# SÉCURITÉ, ici, ce sont : (1) le PORT 443 SEUL, et (2) le fait que ce SEUL ns
-# `argo` porte cet egress Internet (les autres ns restent default-deny).
+# SÉCURITÉ, ici, ce sont : (1) les PORTS 443+80 SEULS (aucun autre port sortant),
+# et (2) le fait que ce SEUL ns `argo` porte cet egress Internet (les autres ns
+# restent default-deny).
 #
 # podSelector {} : le pod builder est éphémère (Workflow instancié par SHA) ;
 # suivre l'idiome des egress du dépôt (tous en podSelector {}), portée = ns argo.
 #
 # ⚠️ IDIOME CILIUM — `ipBlock: 0.0.0.0/0` EXCLUT les IPs des pods du cluster
-# (entités réservées). L'egress Internet (443) ci-dessous NE COUVRE donc PAS le
+# (entités réservées). L'egress Internet (443+80) ci-dessous NE COUVRE donc PAS le
 # registry ni Gitea (pods internes) : ceux-ci sont ouverts SÉPARÉMENT par
 # `namespaceSelector` (calque argocd/allow-reposerver-gitea-egress). Même piège
 # pour l'API server (entité réservée) : ouvert sans `to:` (calque
 # dagster/allow-apiserver-egress) car un `ipBlock` l'exclurait.
 ---
-# (1) EGRESS INTERNET CIBLÉ — build only, port 443 (voir en-tête pour les cibles).
+# (1) EGRESS INTERNET CIBLÉ — build only, ports 443 + 80 (voir en-tête pour les cibles).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -45,7 +52,9 @@ spec:
             cidr: 0.0.0.0/0
       ports:
         - protocol: TCP
-          port: 443 # HTTPS — apt (deb.debian.org), PyPI, DuckDB CDN, HuggingFace
+          port: 443 # HTTPS — PyPI, DuckDB CDN, HuggingFace
+        - protocol: TCP
+          port: 80 # HTTP — apt (deb.debian.org, signé GPG ; transport apt standard)
 ---
 # (2) DNS (CoreDNS / kube-system) — INDISPENSABLE sous default-deny, sinon le
 # builder ne résout ni `registry`, ni `gitea`, ni les hôtes Internet du build.
@@ -70,10 +79,18 @@ spec:
         - protocol: TCP
           port: 53
 ---
-# (3) REGISTRY interne (ns `registry`, port 80) — le PUSH de l'image buildée
+# (3) REGISTRY interne (ns `registry`) — le PUSH de l'image buildée
 # (registry:80/<app>:<sha12>, ADR 0011). Via namespaceSelector car un
 # `ipBlock: 0.0.0.0/0` exclut les pods internes (voir en-tête). Calque
 # dagster/allow-registry-egress.yaml.
+#
+# PORT 5000 = port RÉEL du POD registry après DNAT du Service (le Service mappe
+# 80→5000 ; sous Cilium la NetworkPolicy filtre le port du POD de destination, PAS
+# celui du Service — même piège que gitea:3000 ci-dessous). Le PUSH depuis le pod
+# builder est le PREMIER accès registry DEPUIS un pod du ns argo soumis aux NP (le
+# runtime dagster PULL via le kubelet, hors NP) → sans le 5000 le push timeoute
+# (PROUVÉ AU BANC 2026-07-02 : DNS OK 10.111.32.111, TCP timeout ; dagster:80 seul
+# « marchait » car son pull passe par le nœud). On garde 80 pour robustesse datapath.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -90,7 +107,9 @@ spec:
               kubernetes.io/metadata.name: registry
       ports:
         - protocol: TCP
-          port: 80
+          port: 5000 # port du POD registry (cible réelle après DNAT du Service 80→5000)
+        - protocol: TCP
+          port: 80 # Service registry (robustesse selon le datapath)
 ---
 # (4) GITEA (ns `gitea`) — le CLONE du contexte atlas@SHA (step clone) ET le
 # write-back de `apps/<app>.yaml` par digest (step write-back, Contents API).

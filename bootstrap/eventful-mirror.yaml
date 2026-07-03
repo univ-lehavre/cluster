@@ -27,9 +27,16 @@
   vars:
     # Registry interne cible (parité build_registry_host du rôle platform-build-images).
     eventful_mirror_registry: registry:80
-    # Les 4 images PUBLIQUES du WorkflowTemplate `image-builder` — pull par digest
+    # Les 3 images PUBLIQUES du WorkflowTemplate `image-builder` — pull par digest
     # d'index multi-arch (ADR 0006), tag lisible reposé au registry interne. `public`
     # = référence upstream complète tirée ; `name`/`tag` = destination registry:80.
+    #   - alpine/git    : STEP clone (initContainer du pod build-push) ;
+    #   - moby/buildkit : STEP build-push (BuildKit rootless) ;
+    #   - curlimages/curl : STEPS digest (HEAD /v2/…/manifests → Docker-Content-Digest)
+    #                       ET write-back (Contents API Gitea).
+    # PAS de `crane` : le digest se lit désormais via `curl -I` sur le registry (l'image
+    # crane est DISTROLESS, sans `sh` → inutilisable en step Argo `command:[sh,-c]` ;
+    # PROUVÉ AU BANC 2026-07-03). Une image publique de moins à mirrorer.
     eventful_mirror_images:
       - name: alpine/git
         tag: 2.47.2
@@ -37,9 +44,6 @@
       - name: moby/buildkit
         tag: v0.18.2-rootless
         public: docker.io/moby/buildkit@sha256:95da42806e4e3e3d3cb72f84286446ab5aa60e9c69c521e8b4c72d0c283b4593
-      - name: gcr.io/go-containerregistry/crane
-        tag: v0.20.3
-        public: gcr.io/go-containerregistry/crane@sha256:fc86bcad43a000c2a1ca926a1e167db26c053cebc3fa5d14285c72773fb8c11d
       - name: curlimages/curl
         tag: 8.11.1
         public: docker.io/curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69

@@ -116,6 +116,10 @@ export default defineConfig({
               label: 'Chaîne DataOps (accès & vérifs)',
               link: '/docs/architecture/chaine-dataops/',
             },
+            {
+              label: 'Chaîne build événementiel (git push → pod)',
+              link: '/docs/architecture/chaine-build-evenementiel/',
+            },
             { label: 'Contrat cluster → atlas', link: '/contract/' },
           ],
         },

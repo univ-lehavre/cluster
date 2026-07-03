@@ -58,13 +58,19 @@ Le `WorkflowTemplate` `image-builder`
 ([`workflowtemplate-builder.yaml`](https://github.com/univ-lehavre/cluster/blob/main/platform/argo-workflows/workflowtemplate-builder.yaml))
 est la **traduction in-pod du build node-side** (rôle `platform-build-images`) :
 générique, paramétré
-`{codeLocation, revision, atlasRepoURL, giteaWritebackURL}`, en 4 steps
-séquentiels — **clone** atlas@SHA → **build-push** (BuildKit rootless, contexte
-`dataops/` + `-f <cl>-dagster/Dockerfile`) → **digest** (lecture `crane` avec
-garde `^sha256:[0-9a-f]{64}$`) → **write-back** de `apps/<cl>.yaml` par digest
-dans `cluster/apps` (Contents API, patron `push_contents_file` du seed).
-Décision et frontière :
+`{codeLocation, revision, atlasRepoURL, giteaWritebackURL}`, en **3 steps
+séquentiels** — **build-push** (BuildKit rootless, contexte `dataops/` +
+`-f <cl>-dagster/Dockerfile`, avec le **clone en initContainer** partageant
+l'`emptyDir` du même pod) → **digest** (lecture `curl -I` du
+`Docker-Content-Digest`, garde `^sha256:[0-9a-f]{64}$`) → **write-back** de
+`apps/<cl>.yaml` par digest dans `cluster/apps` (Contents API, patron
+`push_contents_file` du seed). Le nom d'image poussé est **`<cl>-dagster`** (le
+nom que l'overlay kustomize d'atlas attend). Décision et frontière :
 [ADR 0095 §1.b](/cluster/docs/decisions/0095-build-applicatif-evenementiel-in-cluster/).
+
+> **Vue d'ensemble détaillée** (flux complet, chaque maillon, pièges prouvés au
+> banc, exemple de bout en bout) :
+> [Chaîne de build événementiel](/cluster/docs/architecture/chaine-build-evenementiel/).
 
 Dépendances posées avec lui :
 
@@ -126,19 +132,19 @@ builder DOIT rester worker-only, SPOF unique).
 
 ### Mirror des images publiques (banc air-gappé)
 
-Les **4 images publiques** du builder (`alpine/git`, `moby/buildkit`,
-`gcr.io/go-containerregistry/crane`, `curlimages/curl`) sont **épinglées par
-digest d'index multi-arch** (ADR 0006) **et tirées de `registry:80`** dans le
-manifeste (tag conservé pour lisibilité). Au banc air-gappé, un pod ne peut pas
-tirer d'Internet → elles doivent d'abord être **mirrorées au registry interne**
-(ADR 0011). Le play
+Les **3 images publiques** du builder (`alpine/git` pour le clone,
+`moby/buildkit` pour le build, `curlimages/curl` pour digest **et** write-back)
+sont **épinglées par digest d'index multi-arch** (ADR 0006) **et tirées de
+`registry:80`** dans le manifeste (tag conservé pour lisibilité). Au banc
+air-gappé, un pod ne peut pas tirer d'Internet → elles doivent d'abord être
+**mirrorées au registry interne** (ADR 0011). Le play
 [`bootstrap/eventful-mirror.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bootstrap/eventful-mirror.yaml)
 le fait node-side (pull public par digest → tag `registry:80/<img>:<tag>` →
 push), idempotent (skip si déjà présente). Les digests du play et du manifeste
 sont **liés** : un bump change les deux.
 
 ```bash
-# Pré-requis banc air-gappé : mirrorer les 4 images publiques du builder.
+# Pré-requis banc air-gappé : mirrorer les 3 images publiques du builder.
 nestor ansible eventful-mirror.yaml   # inventaire dérivé de la stack active (ADR 0098)
 ```
 

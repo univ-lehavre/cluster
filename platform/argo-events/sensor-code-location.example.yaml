@@ -137,12 +137,25 @@ spec:
             # → <name>. JAMAIS une liste en dur — une code-location NOUVELLE
             # `dataops/newthing-dagster/…` donne `codeLocation=newthing` sans
             # énumération. C'EST le point de la découverte.
-            # (regexFind capture le segment entre `dataops/` et `-dagster` ;
-            #  le format EXACT reste à valider au banc — cf. LIMITE 1/2.)
+            #
+            # ⚠️ PIÈGE Argo Events v1.9.10 (PROUVÉ AU BANC 2026-07-02) — quand
+            # `dataTemplate` est défini, `.Input` N'EST PAS la valeur pointée par
+            # `dataKey` : c'est le PAYLOAD RACINE désérialisé (une map). Un template
+            # `{{ .Input | regexFind … }}` échoue donc « wrong type for value; expected
+            # string; got map[string]interface {} » et Argo RETOMBE sur `dataKey` brut →
+            # le codeLocation valait `dataops/citation-dagster/README.md` (chemin ENTIER,
+            # pas `citation`). Correctif : NAVIGUER explicitement dans `.Input` avec `index`
+            # (`.Input.body.commits[0].modified[0]`) AVANT le regexFind. `dataKey` reste
+            # présent pour le fallback/lisibilité mais le template ne s'en sert pas.
             - src:
                 dependencyName: gitea-push-dep
                 dataKey: body.commits.0.modified.0
-                dataTemplate: '{{ .Input | regexFind "dataops/[^/]+-dagster" | regexFind "[^/]+-dagster" | trimSuffix "-dagster" }}'
+                # `>-` replie les lignes en UN SEUL espace (template Go valide sur une ligne).
+                dataTemplate: >-
+                  {{ (index (index .Input.body.commits 0).modified 0)
+                  | regexFind "dataops/[^/]+-dagster"
+                  | regexFind "[^/]+-dagster"
+                  | trimSuffix "-dagster" }}
               dest: spec.arguments.parameters.0.value
             # revision = body.after — le SHA du push, signal canonique `revision`
             # (ADR 0094 §3) : tag lisible côté image + révision clonée par le

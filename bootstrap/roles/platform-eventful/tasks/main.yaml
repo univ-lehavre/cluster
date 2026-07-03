@@ -82,10 +82,10 @@
     # (00-default-deny) doit précéder les allow, sinon fenêtre de deny / allow ignoré
     # (parité platform-argocd). allow-apiserver-egress est INDISPENSABLE : sans lui le
     # workflow-controller ne joint pas l'API server → CrashLoopBackOff (PROUVÉ AU BANC).
-    # allow-build-egress porte l'egress Internet CIBLÉ (443) du builder + DNS + registry +
-    # gitea (air-gap asymétrique, seul ns argo sort). VÉRIFIÉ : 3 fichiers dans le dossier
-    # (00-default-deny, allow-apiserver-egress, allow-build-egress ; ce dernier porte
-    # DNS/registry/gitea INLINE, pas de sous-fichiers séparés).
+    # allow-build-egress porte l'egress Internet CIBLÉ (443 HTTPS PyPI/HF + 80 HTTP apt)
+    # du builder + DNS + registry (port POD 5000) + gitea (air-gap asymétrique, seul ns argo
+    # sort). VÉRIFIÉ : 3 fichiers dans le dossier (00-default-deny, allow-apiserver-egress,
+    # allow-build-egress ; ce dernier porte DNS/registry/gitea INLINE, pas de sous-fichiers).
     - name: Apply argo-workflows network policies (ordered, default-deny first)
       kubernetes.core.k8s:
         state: present
@@ -101,6 +101,16 @@
         state: present
         namespace: '{{ eventful_workflows_namespace }}'
         src: '{{ platform_repo_dir }}/platform/argo-workflows/configmap-buildkitd-toml.yaml'
+
+    # ── (f bis) RBAC d'EXÉCUTION `builder-sa` (ns argo) — AVANT le WorkflowTemplate. ─
+    # SA + Role : executor (workflowtaskresults) + soumission (workflows). Le WorkflowTemplate
+    # ET le CronWorkflow le référencent (serviceAccountName: builder-sa). Sans lui, le pod de
+    # Workflow tourne avec `default` (sans RBAC) → executor « cannot create workflowtaskresults »
+    # (PROUVÉ AU BANC). Distinct d'operate-workflow-sa (argo-events, côté Sensor-soumission).
+    - name: Apply the builder execution RBAC (builder-sa + Role + Binding)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/argo-workflows/builder-rbac.yaml'
 
     # ── (g) WorkflowTemplate image-builder (ns argo) — la chaîne clone→build→write-back. ─
     # NOTE : réfère le Secret `gitea-writeback-token` (write-back) — GÉNÉRÉ AU SEED,

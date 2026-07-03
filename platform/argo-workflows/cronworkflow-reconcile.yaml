@@ -46,8 +46,11 @@ spec:
   failedJobsHistoryLimit: 3
   workflowSpec:
     entrypoint: reconcile
-    # SA autorisé à `argo submit` (créer des Workflows) — posé à l'intégration.
-    serviceAccountName: operate-workflow-sa
+    # SA du ns argo (create workflows + executor workflowtaskresults) — cf.
+    # builder-rbac.yaml. `operate-workflow-sa` vit dans argo-EVENTS (le Sensor),
+    # PAS dans argo → un CronWorkflow le référençant échouait « serviceaccount
+    # argo/operate-workflow-sa not found » (PROUVÉ AU BANC). On partage `builder-sa`.
+    serviceAccountName: builder-sa
     templates:
       - name: reconcile
         container:
