@@ -14,6 +14,11 @@ metadata:
   name: pg-backup
   namespace: postgres
 spec:
+  # RÉTENTION : ne garder que ~30 jours de backups + WAL (barman purge au-delà). Sans elle,
+  # les backups/WAL s'accumulent SANS FIN dans le bucket S3 (croissance non bornée du datalake).
+  # Format `XXu` (u ∈ d/w/m). 30 j = fenêtre de récupération confortable pour des métadonnées,
+  # tout en bornant le stockage. Ajustable selon le RPO voulu.
+  retentionPolicy: '30d'
   configuration:
     destinationPath: s3://cnpg-backups/
     # PARAMÉTRABLE selon la topologie (cf. en-tête). SeaweedFS/RGW = path-style + http.
