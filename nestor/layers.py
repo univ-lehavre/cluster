@@ -67,6 +67,7 @@ _QUEUE_PHASES = frozenset(
         "gitops-seed-citation",
         "citation",
         "portal",
+        "eventful",
     }
 )
 
