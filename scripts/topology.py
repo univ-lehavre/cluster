@@ -3160,7 +3160,10 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
         #   4. VÉRIFIER `"commit"` dans la réponse — un PUT/POST raté laisse l'ANCIENNE version
         #      dans Gitea → Argo CD déploierait un manifeste périmé (drift). Sans `commit` =
         #      ÉCHEC → return False (fail-fast : run_seed s'arrête net, aucun faux-vert).
-        for fname in ("code-location.yaml", "workspace-patch.yaml", "reload-hook.yaml"):
+        # workspace-fragment.yaml (ConfigMap disjoint `dagster-workspace-toy`, ADR 0103) a
+        # remplacé workspace-patch.yaml (ConfigMap partagé) ; reload-hook.yaml (PostSync) est
+        # retiré — le reconciler socle porte l'agrégation + le rollout (superseded ADR 0086).
+        for fname in ("code-location.yaml", "workspace-fragment.yaml"):
             try:
                 with open(os.path.join(_SEED_SAMPLE_DIR, fname), "rb") as fh:
                     content_b64 = base64.b64encode(fh.read()).decode("ascii")

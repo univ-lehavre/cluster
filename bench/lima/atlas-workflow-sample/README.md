@@ -15,11 +15,10 @@ le banc **autonome** pour exercer la chaîne Dagster (run réel via `launchRun`,
 lineage) **sans dépendre du dépôt atlas**. Réutilise l'image émetteur du banc
 (`registry:80/dagster-openlineage-emit:dev`).
 
-| Fichier                                                                                                                           | Rôle                                                                                                         |
-| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| [`code-location.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bench/lima/atlas-workflow-sample/code-location.yaml)     | La code-location : Deployment gRPC `toy-codeloc` (`dagster api grpc -m toy_assets`) + Service :4000.         |
-| [`workspace-patch.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bench/lima/atlas-workflow-sample/workspace-patch.yaml) | ConfigMap `dagster-workspace` qui branche la location `toy` (remplace `load_from: []`).                      |
-| [`reload-hook.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bench/lima/atlas-workflow-sample/reload-hook.yaml)         | Hook Argo CD PostSync (SA+Role+Job) : `rollout restart` webserver+daemon → ils relisent le workspace patché. |
+| Fichier                                                                                                                                 | Rôle                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| [`code-location.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bench/lima/atlas-workflow-sample/code-location.yaml)           | La code-location : Deployment gRPC `toy-codeloc` (`dagster api grpc -m toy_assets`) + Service :4000.               |
+| [`workspace-fragment.yaml`](https://github.com/univ-lehavre/cluster/blob/main/bench/lima/atlas-workflow-sample/workspace-fragment.yaml) | ConfigMap DISJOINT `dagster-workspace-toy` (labellisé `dagster.io/role: code-location`) portant le fragment `toy`. |
 
 Frontière (ADR 0022/0045) : Argo CD déploie **cette code-location**, jamais
 l'infra DataOps (CNPG/Dagster/Marquez sont montés par Ansible, livrés vides).
