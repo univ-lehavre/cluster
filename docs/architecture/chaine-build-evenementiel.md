@@ -75,8 +75,8 @@ l'app-of-apps (`prune: true`) crée l'Application, sans énumération.
 
 Un développeur pousse sur la branche `main` d'`atlas`, en touchant un fichier
 sous `dataops/<cl>-dagster/` (le code d'une code-location : Dockerfile, `src/`,
-`code-location.manifest.yaml`…). **Rien d'autre à faire.** Gitea émet le webhook
-#2 vers l'EventSource.
+`code-location.manifest.yaml`…). **Rien d'autre à faire.** Gitea émet alors,
+vers l'EventSource, la livraison du webhook n°2.
 
 > Le filtre du Sensor n'accepte que `refs/heads/main` **et** un chemin
 > `dataops/…-dagster/…` : un push sur une autre branche, ou hors code-location,
