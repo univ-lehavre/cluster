@@ -427,14 +427,14 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     #    NodePort). Aucun -e dérivé du profil : les namespaces/retries sont des defaults du
     #    rôle, et le PATCH BANC du nodeSelector est dérivé de EXPECTED_TARGET_KIND (env posé
     #    par le runner), PAS du faisceau derive_run_params. Gate = controllers Ready
-    #    (workflow-controller/argo-server/controller-manager) — cf. le rôle ; ici la table
-    #    n'a pas de signal de graphe (eventful pas encore dans graph.LAYER_SIGNAL, cf. TODO
-    #    d'enregistrement graphe) → gate_kind "none", à enrichir avec le Component graphe. ─
+    #    (workflow-controller/argo-server/controller-manager) — cf. le rôle ; le signal de
+    #    graphe est désormais posé (Component eventful, signal Deployment workflow-controller
+    #    ns argo → graph.LAYER_SIGNAL["eventful"], #564) → gate_kind auto = "ready-replicas". ─
     "eventful": _plan(
         "eventful",
         extravars_keys=(),
         note="chaîne événementielle (Argo Workflows/Events) ; patch banc nodeSelector "
-        "dérivé de EXPECTED_TARGET_KIND (env, pas -e) ; graph.LAYER_SIGNAL à ajouter (TODO)",
+        "dérivé de EXPECTED_TARGET_KIND (env, pas -e) ; signal graphe = workflow-controller",
     ),
 }
 

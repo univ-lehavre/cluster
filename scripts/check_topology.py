@@ -91,17 +91,11 @@ except ModuleNotFoundError:  # pragma: no cover - module du dépôt
 # non `platform-*` (k8s-*, audit-log, …) ne sont PAS des composants de topologie et
 # ne passent pas par la famille 2.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_NON_GRAPH_ROLES: dict[str, str] = {
-    # platform-eventful (ADR 0095 §1.b) : rôle qui monte la chaîne événementielle (Argo
-    # Workflows + Argo Events) via bootstrap/eventful.yaml. Enregistré comme PHASE dans
-    # plan.py/phases.py (montable `nestor ansible bootstrap/eventful.yaml`), mais PAS ENCORE
-    # comme Component(role='platform-eventful') du graphe atomique — son enregistrement
-    # graphe complet (Component + deps argocd/gitea/registry/build-images + LAYER_SIGNAL sur
-    # une feuille + PHASE_COMPONENTS + _QUEUE_PHASES/VALID_LAYERS) est un TODO (montabilité
-    # par le graphe/resolve_layers). Allowlisté ici en attendant, sans bloquer le check.
-    "platform-eventful": "chaîne événementielle ADR 0095 §1.b — phase enregistrée "
-    "(plan.py/phases.py) ; Component graphe à ajouter (TODO montabilité graphe/layers)",
-}
+# Vide aujourd'hui : tous les rôles `platform-*` sont des Components du graphe. (platform-eventful
+# a été enregistré comme Component(role='platform-eventful') — ADR 0095 §1.b / 0103 follow-up #564 —
+# donc retiré de cette allowlist.) Y ajouter une entrée = « rôle platform-* volontairement hors
+# graphe » (socle), à justifier par chemin.
+EXPECTED_NON_GRAPH_ROLES: dict[str, str] = {}
 
 # Mots-clés des tâches qui IMPORTENT un rôle (playbook ou rôle→rôle). On scanne
 # l'arbre YAML : un `import_role`/`include_role` peut être imbriqué (block, when…).
