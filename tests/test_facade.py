@@ -788,10 +788,12 @@ class SeedPhaseWiring(unittest.TestCase):
                 self.assertIn("localhost:3000", url)
 
     # ── push-code-location (step 4/7, Contents API create-or-update) ────────────────
-    # CÂBLÉ (plus de STUB) : pour les 3 manifestes de `bench/lima/atlas-workflow-sample/`,
+    # CÂBLÉ (plus de STUB) : pour les manifestes de `bench/lima/atlas-workflow-sample/`,
     # base64 (Python) → GET du SHA → PUT-avec-sha (existe) vs POST (404) → vérif `"commit"`.
     # On STUBE `_gitea_exec` (curl DANS le pod) avec un faux Gitea : I/O injectée, zéro cluster.
-    _PCL_FILES = ("code-location.yaml", "workspace-patch.yaml", "reload-hook.yaml")
+    # workspace-fragment.yaml (ConfigMap disjoint, ADR 0103) a remplacé workspace-patch.yaml ;
+    # reload-hook.yaml retiré (le reconciler socle porte l'agrégation + le rollout).
+    _PCL_FILES = ("code-location.yaml", "workspace-fragment.yaml")
 
     def _fake_gitea(self, *, existing=False, commit=True):
         """Faux `_gitea_exec` modélisant la Contents API de Gitea pour push-code-location.
@@ -845,7 +847,7 @@ class SeedPhaseWiring(unittest.TestCase):
         return do
 
     def test_push_code_location_new_files_post(self):
-        # Fichiers ABSENTS (GET → 404, sha vide) → POST de création pour les 3, chacun renvoie
+        # Fichiers ABSENTS (GET → 404, sha vide) → POST de création pour chacun, chacun renvoie
         # un `commit` → succès. On vérifie : 1 GET + 1 POST par fichier, dans l'ordre.
         config, calls = self._fake_gitea(existing=False, commit=True)
         do = self._push_only(config)
@@ -853,10 +855,10 @@ class SeedPhaseWiring(unittest.TestCase):
         gets = [c for c in calls if c[0] == "GET"]
         posts = [c for c in calls if c[0] == "POST"]
         puts = [c for c in calls if c[0] == "PUT"]
-        self.assertEqual(len(gets), 3)
-        self.assertEqual(len(posts), 3)  # 404 → création
+        self.assertEqual(len(gets), len(self._PCL_FILES))
+        self.assertEqual(len(posts), len(self._PCL_FILES))  # 404 → création
         self.assertEqual(puts, [])  # aucun PUT (pas de sha)
-        # Les 3 fichiers du sample sont ciblés (path /contents/<fname>) ET le body porte un
+        # Chaque fichier du sample est ciblé (path /contents/<fname>) ET le body porte un
         # `content` base64 + le message « add ... », pas de `sha`.
         for fname in self._PCL_FILES:
             post = next(c for c in posts if c[1].endswith(f"/contents/{fname}"))
@@ -869,13 +871,13 @@ class SeedPhaseWiring(unittest.TestCase):
                 self.assertEqual(base64.b64decode(payload["content"]), fh.read())
 
     def test_push_code_location_existing_files_put_with_sha(self):
-        # Fichiers EXISTANTS (GET → 200 avec sha) → PUT-avec-sha (MAJ idempotente) pour les 3.
+        # Fichiers EXISTANTS (GET → 200 avec sha) → PUT-avec-sha (MAJ idempotente) pour chacun.
         config, calls = self._fake_gitea(existing=True, commit=True)
         do = self._push_only(config)
         self.assertTrue(do("push-code-location"))
         puts = [c for c in calls if c[0] == "PUT"]
         posts = [c for c in calls if c[0] == "POST"]
-        self.assertEqual(len(puts), 3)
+        self.assertEqual(len(puts), len(self._PCL_FILES))
         self.assertEqual(posts, [])  # sha présent → PUT, jamais POST
         for fname in self._PCL_FILES:
             put = next(c for c in puts if c[1].endswith(f"/contents/{fname}"))
