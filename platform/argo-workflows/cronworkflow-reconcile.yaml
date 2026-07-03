@@ -6,28 +6,26 @@
 # un event push perdu pile pendant un redémarrage de NATS n'est JAMAIS construit,
 # car le build n'a PAS de polling natif (contrairement à Argo CD, ~3 min côté
 # déploiement). Ce CronWorkflow est le FILET de rattrapage : périodiquement, pour
-# chaque code-location connue, il compare le HEAD atlas au tag déployé (le sha12
-# lisible dans `apps/<cl>.yaml` de cluster/apps) et, s'ils DIFFÈRENT, SOUMET le
-# builder `image-builder`.
+# chaque code-location connue, il compare le HEAD atlas à la révision DÉPLOYÉE (le
+# `targetRevision` de `apps/<cl>.yaml` dans cluster/apps) et, s'ils DIFFÈRENT,
+# SOUMET le builder `image-builder`.
 #
 # ⚠️ CE N'EST PAS le rejeu `changed=0` d'Ansible (ADR 0052). C'est un rattrapage
 # à latence = la période du Cron (ci-dessous "*/30 * * * *"). Il garantit qu'un
 # push finit par être construit ; il ne prouve PAS l'idempotence. À consigner
 # aussi dans `bench/lima/RESULTS.md` au run banc.
 #
-# ── ÉTAT : SQUELETTE STRUCTURÉ (à compléter au banc) ──────────────────────────
-# Le corps `reconcile` est un SQUELETTE : le shell ci-dessous DÉCRIT la boucle
-# (énumérer les `apps/*.yaml`, lire le tag déployé, `git ls-remote` atlas HEAD,
-# comparer, `argo submit --from wt/image-builder` si écart) mais les commandes
-# concrètes (parsing du sha12 dans le manifeste, appel `argo`/API) restent à
-# CÂBLER ET PROUVER AU BANC (format réel des `apps/<cl>.yaml`, RBAC du SA pour
-# soumettre, image `argocli`/`git` mirrorée). NE PAS prétendre qu'il tourne.
-# RÉSOLU intégration (ADR 0011) : l'image `argocli` (porte `argo submit` + un git/curl
-# utilitaires — un seul conteneur suffit à ce filet) est désormais TIRÉE du registry
-# interne registry:80, épinglée par le MÊME digest que le bundle argo-workflows.yaml
-# (v4.0.6, index multi-arch, ADR 0006). Elle se mirore AVEC le bundle argo-workflows
-# (workflow-controller/argocli, cf. le TODO de mirror du bundle dans README.md), PAS
-# par `bootstrap/eventful-mirror.yaml` (qui ne mirore que les 4 images du builder).
+# ── CÂBLAGE (issue #565) ──────────────────────────────────────────────────────
+# Le corps `reconcile` est CÂBLÉ (plus un squelette) : HEAD atlas via l'API Gitea
+# (`/repos/atlas/atlas/branches/main` → `.commit.id`), énumération des `apps/*.yaml`
+# via la Contents API, lecture du `targetRevision` déployé, comparaison, et
+# resoumission via `kubectl create` d'un Workflow (`workflowTemplateRef: image-builder`)
+# — EXACTEMENT comme le Sensor. AUCUNE image `argocli` requise (on ne fait pas
+# `argo submit`) : on RÉUTILISE `dtzar/helm-kubectl` (kubectl + curl + jq), DÉJÀ
+# mirrorée au registry interne pour le reconciler workspace (ADR 0103, `mirror_only`).
+# RBAC : `builder-sa` (ns argo) porte `create workflows` (builder-rbac.yaml). Reste à
+# PROUVER AU BANC le scénario de rattrapage (event volontairement perdu → build soumis
+# au tick suivant), consigné dans `bench/lima/RESULTS.md`.
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
@@ -54,50 +52,92 @@ spec:
     templates:
       - name: reconcile
         container:
-          # `argocli` porte à la fois `argo` (submit) et un git/curl utilitaires.
-          # Tirée du registry interne (ADR 0011) par TAG : c'est une image DU BUNDLE
-          # argo-workflows.yaml (v4.0.6) — son mirror au registry interne (avec
-          # workflow-controller) est un TODO du montage bundle air-gappé, distinct du
-          # play eventful-mirror (qui ne couvre que les 4 images publiques du builder).
-          image: registry:80/quay.io/argoproj/argocli:v4.0.6
+          # Image `dtzar/helm-kubectl` (kubectl + curl + jq + sh) — DÉJÀ mirrorée au registry
+          # interne pour le reconciler workspace (ADR 0103, mirror_only). On la RÉUTILISE : le
+          # filet n'a besoin que de curl (API Gitea) + kubectl (soumission) — PAS d'`argocli`.
+          # On soumet le build via `kubectl create` d'un Workflow (workflowTemplateRef), EXACTEMENT
+          # comme le Sensor — donc aucune nouvelle image à mirrorer (l'`argocli` du bundle reste un
+          # TODO SÉPARÉ, non requis par ce filet). HEAD atlas via l'API Gitea (pas `git ls-remote`).
+          image: registry:80/dtzar/helm-kubectl:4.2.2
           command: [sh, -c]
+          env:
+            - name: HOME # kubectl écrit un cache sous $HOME ; /tmp est writable (emptyDir).
+              value: /tmp
           args:
             - |
               set -eu
-              # ── SQUELETTE — logique du filet event-loss (à câbler+prouver banc) ──
-              # Base intra-cluster du repo déclaratif cluster/apps (Contents API).
+              # Bases intra-cluster (API Gitea du code atlas + du repo déclaratif cluster/apps).
+              ATLAS_API="http://gitea-http.gitea.svc.cluster.local/api/v1/repos/atlas/atlas"
               APPS_API="http://gitea-http.gitea.svc.cluster.local/api/v1/repos/cluster/apps"
               ATLAS_GIT="http://gitea-http.gitea.svc.cluster.local/atlas/atlas.git"
 
-              # HEAD courant du code atlas (le SHA que la chaîne DEVRAIT avoir bâti).
-              head=$(git ls-remote "$ATLAS_GIT" refs/heads/main | cut -f1)
-              head12=$(printf '%s' "$head" | cut -c1-12)
-              echo "reconcile: atlas HEAD=$head12"
+              # HEAD courant du code atlas (le SHA que la chaîne DEVRAIT avoir bâti), via l'API
+              # Gitea (pas de git : curl + jq suffisent). C'est le signal `revision` (ADR 0094 §3).
+              head=$(curl -fsS "$ATLAS_API/branches/main" | jq -r '.commit.id')
+              printf '%s' "$head" | grep -qE '^[0-9a-f]{40}$' \
+                || { echo "reconcile: HEAD atlas invalide <${head:-∅}>" >&2; exit 1; }
+              echo "reconcile: atlas HEAD=$head"
 
-              # TODO(banc) : énumérer les code-locations connues = les fichiers
-              # `apps/*.yaml` de cluster/apps (GET $APPS_API/contents/apps). Pour
-              # CHACUNE, lire le tag déployé (sha12 lisible dans le manifeste ou
-              # dérivé du digest) et comparer à $head12. Si DIFFÉRENT → un event a
-              # (peut-être) été perdu → resoumettre le builder :
-              #
-              #   for cl in $(list_code_locations); do
-              #     deployed12=$(read_deployed_sha12 "apps/${cl}.yaml")
-              #     if [ "$deployed12" != "$head12" ]; then
-              #       argo submit -n argo --from workflowtemplate/image-builder \
-              #         -p codeLocation="$cl" -p revision="$head" \
-              #         -p atlasRepoURL="$ATLAS_GIT" \
-              #         -p giteaWritebackURL="$APPS_API"
-              #     fi
-              #   done
-              #
-              # Sans le câblage réel (parsing + RBAC), on SORT en no-op explicite :
-              # le filet est STRUCTURÉ mais pas encore prouvé (honnêteté ADR 0034).
-              echo "reconcile: SQUELETTE (câblage list/compare/submit à prouver au banc)"
+              # Énumère les code-locations connues = les fichiers `apps/*.yaml` de cluster/apps
+              # (Contents API). Le nom de code-location = basename sans `.yaml`. JAMAIS une liste
+              # en dur (découverte, comme le Sensor) : une CL neuve `apps/newthing.yaml` est
+              # automatiquement couverte par le filet.
+              files=$(curl -fsS "$APPS_API/contents/apps" \
+                | jq -r '.[] | select(.type=="file") | .name | select(endswith(".yaml"))')
+
+              submitted=0
+              for f in $files; do
+                cl=${f%.yaml}
+                # Révision DÉPLOYÉE = `targetRevision` de l'Application dans apps/<cl>.yaml (le
+                # write-back du builder l'écrit au SHA construit, ADR 0095 §1.a). raw = fichier brut.
+                deployed=$(curl -fsS "$APPS_API/raw/apps/${f}" \
+                  | grep -E '^[[:space:]]*targetRevision:' | head -1 \
+                  | sed -E 's/.*targetRevision:[[:space:]]*"?([0-9a-f]+)"?.*/\1/')
+                if [ "$deployed" = "$head" ]; then
+                  echo "reconcile: $cl à jour ($head) — rien à faire"
+                  continue
+                fi
+                echo "reconcile: $cl DÉRIVE (déployé=<${deployed:-∅}> ≠ HEAD=$head) → resoumission du build"
+                # Soumet le WorkflowTemplate `image-builder` via kubectl (pas `argo submit` → pas
+                # d'argocli). MÊME shape que le Sensor (workflowTemplateRef + params, ns argo) ; le
+                # Workflow hérite du spec du template (dont le nodeSelector, patché au banc).
+                wf=$(printf '%s\n' \
+                  "apiVersion: argoproj.io/v1alpha1" \
+                  "kind: Workflow" \
+                  "metadata:" \
+                  "  generateName: image-builder-reconcile-" \
+                  "  namespace: argo" \
+                  "spec:" \
+                  "  workflowTemplateRef:" \
+                  "    name: image-builder" \
+                  "  arguments:" \
+                  "    parameters:" \
+                  "      - {name: codeLocation, value: \"${cl}\"}" \
+                  "      - {name: revision, value: \"${head}\"}" \
+                  "      - {name: atlasRepoURL, value: \"${ATLAS_GIT}\"}" \
+                  "      - {name: giteaWritebackURL, value: \"${APPS_API}\"}")
+                printf '%s' "$wf" | kubectl create -n argo -f -
+                submitted=$((submitted + 1))
+              done
+
+              # Rattrapage à latence = période du Cron, PAS idempotence changed=0 (ADR 0034) :
+              # `submitted=0` = tout à jour (aucun event perdu à rattraper). Un build en cours au
+              # moment du tick n'a pas encore mis à jour targetRevision → une resoumission RARE
+              # peut survenir (bénigne : même SHA → même digest → write-back idempotent). La
+              # période prudente (*/30) laisse un build finir entre deux ticks.
+              echo "reconcile: terminé — ${submitted} build(s) resoumis"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             runAsNonRoot: true
-            runAsUser: 1000
+            runAsUser: 65532
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
             seccompProfile:
               type: RuntimeDefault
+    volumes:
+      - name: tmp # /tmp writable (kubectl cache, curl/jq) sous readOnlyRootFilesystem.
+        emptyDir: {}
