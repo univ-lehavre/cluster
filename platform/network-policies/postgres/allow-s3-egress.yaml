@@ -1,8 +1,13 @@
 # Egress des instances CNPG vers l'objet S3 des sauvegardes (plugin Barman) :
 #   - Banc léger : SeaweedFS (ns `s3`, port 8333).
-#   - Topologie bare-metal : RGW Ceph (ns rook-ceph, port 80) — surcharger.
+#   - Topologie bare-metal (Ceph) : RGW (ns `rook-ceph`, port 80 Service / 8080 pod).
 # Indispensable sous default-deny pour que le WAL archiving et les sauvegardes
-# atteignent le bucket.
+# atteignent le bucket. On autorise LES DEUX cibles (topology-agnostique, patron
+# dagster/allow-s3-egress) : sur le banc le ns `rook-ceph` est absent → la règle RGW
+# est un no-op ; en prod le ns `s3` est absent → la règle SeaweedFS est un no-op.
+# PAS d'override local (ADR 0023) : sans la règle RGW, le WAL-archive CNPG→RGW est
+# DROPPÉ par le default-deny → WAL non archivé → PVC saturé → primary CrashLoop (INCIDENT
+# PROD dirqual 2026-07-03 : archive KO 21 j, pg 1/3, Marquez DOWN).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -13,6 +18,7 @@ spec:
   policyTypes:
     - Egress
   egress:
+    # Banc léger : SeaweedFS.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -20,3 +26,13 @@ spec:
       ports:
         - protocol: TCP
           port: 8333
+    # Topologie Ceph : RGW (Service rook-ceph-rgw-datalake:80, pod 8080).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rook-ceph
+      ports:
+        - protocol: TCP
+          port: 80 # Service RGW
+        - protocol: TCP
+          port: 8080 # port du POD rgw (cible réelle après DNAT — piège Cilium)
