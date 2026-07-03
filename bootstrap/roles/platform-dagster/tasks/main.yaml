@@ -116,6 +116,34 @@
             password: '{{ pgvector_role_secret.resources[0].data.password }}'
       tags: pgvector-secret
 
+    # SEED du workspace (ADR 0103) — le ConfigMap `dagster-workspace` n'est PLUS dans le
+    # bundle dagster.yaml (retiré : un `load_from: []` réappliqué à chaque run ÉCRASERAIT
+    # le workspace densifié par le reconciler). On le pose ICI en `load_from: []` UNE SEULE
+    # FOIS, `when` absent, pour que le webserver/daemon démarrent (sinon « No arguments
+    # given »). Le reconciler (CronJob, appliqué plus bas) en devient propriétaire et
+    # l'agrège ensuite depuis les fragments per-code-location. Rejeu idempotent : si le
+    # ConfigMap existe déjà (seedé OU densifié), on NE le touche PAS (pas d'écrasement).
+    - name: Check whether the dagster-workspace ConfigMap already exists
+      kubernetes.core.k8s_info:
+        kind: ConfigMap
+        name: dagster-workspace
+        namespace: '{{ dagster_namespace }}'
+      register: dagster_workspace_cm
+
+    - name: Seed the empty dagster-workspace ConfigMap (only if absent — reconciler owns it)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: dagster-workspace
+            namespace: '{{ dagster_namespace }}'
+          data:
+            workspace.yaml: |
+              load_from: []
+      when: dagster_workspace_cm.resources | default([]) | length == 0
+
     - name: Apply Dagster manifest
       kubernetes.core.k8s:
         state: present
@@ -145,6 +173,20 @@
         state: present
         namespace: '{{ dagster_namespace }}'
         src: '{{ platform_repo_dir }}/platform/dagster/nodeport.yaml'
+
+    # Reconciler du workspace multi-code-location (ADR 0103) — SA + RBAC + CronJob qui
+    # AGRÈGE les fragments per-code-location (`dagster-workspace-<nom>`, labellisés
+    # `dagster.io/role: code-location`, posés par les Applications atlas) dans le
+    # `load_from:` du ConfigMap central, puis rollout-restart webserver+daemon SI changé.
+    # C'est l'agrégateur du workspace de l'orchestrateur socle (INFRA, pas applicatif —
+    # ADR 0022/0033) ; il SUPERSEDE le patch per-CL + le hook PostSync reload d'ADR 0086.
+    # PRÉREQUIS banc air-gappé : l'image kubectl+jq (registry:80/dtzar/helm-kubectl) doit
+    # être mirrorée AVANT (ADR 0011, node-side) — sinon le pod du CronJob fait ImagePullBackOff.
+    - name: Apply the Dagster workspace reconciler (SA + RBAC + CronJob)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ dagster_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/dagster/reconciler.yaml'
 
   # Rescue DIAGNOSTIQUE (ADR 0050, #236) — calqué sur argocd/cnpg. Aucun delete.
   rescue:

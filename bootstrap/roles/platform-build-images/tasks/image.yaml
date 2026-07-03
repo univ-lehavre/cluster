@@ -22,8 +22,35 @@
 # image périmée quand le code source change (vécu : toy_assets sans toy_job — la
 # code-location jouet exposait un module ancien). Les images à tag FIGÉ (ADR 0006)
 # gardent force_rebuild=false : leur tag identifie le contenu, inutile de rebuilder.
+# PASSTHROUGH mirror (`img.mirror_only`) — image PUBLIQUE multi-arch (ex.
+# `dtzar/helm-kubectl` du reconciler workspace Dagster, ADR 0103) : ni build ni
+# retag-officiel. Pull par digest d'index (`img.public`, ADR 0006) pour l'arch courante
+# (le registry sert cette arch au nœud) → tag lisible → push. Comme eventful-mirror, mais
+# intégré à ce rôle node-side (dataops) : la couche dagster n'a pas à dépendre d'un autre play.
+- name: 'Mirror public passthrough image — {{ img.name }}'
+  when:
+    - img.mirror_only | default(false) | bool
+    - img_present.rc != 0
+  block:
+    - name: 'Pull public image (current arch) — {{ img.name }}'
+      ansible.builtin.command: >-
+        nerdctl pull --platform
+        {{ 'linux/arm64' if ansible_facts.architecture == 'aarch64' else 'linux/amd64' }}
+        {{ img.public }}
+      changed_when: true
+    - name: 'Tag public image to the internal registry — {{ img.name }}'
+      ansible.builtin.command: >-
+        nerdctl tag {{ img.public }} {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
+      changed_when: true
+    - name: 'Push the mirrored image — {{ img.name }}'
+      ansible.builtin.command: >-
+        nerdctl push {{ build_registry_host }}/{{ img.name }}:{{ img.tag }}
+      changed_when: true
+
 - name: 'Build (arm64) or retag (x86) image — {{ img.name }}'
-  when: img_present.rc != 0 or (img.force_rebuild | default(false) | bool)
+  when:
+    - not (img.mirror_only | default(false) | bool)
+    - img_present.rc != 0 or (img.force_rebuild | default(false) | bool)
   block:
     # BUILD interne via nerdctl/buildkit, depuis les sources sur le nœud, pour l'arch
     # courante. arm64 TOUJOURS ; x86 seulement si `build_all_arch` (image dérivée à

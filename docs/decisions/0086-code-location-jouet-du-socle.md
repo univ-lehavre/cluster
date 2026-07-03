@@ -6,6 +6,17 @@ Accepted (2026-06-19) — livraison INCRÉMENTALE. Le code est livré
 (`platform/dagster/image-openlineage/toy_assets.py`, code-location jouet) ;
 promu depuis `Proposed (2026-06-18)`.
 
+> **Partiellement superseded par
+> [0103](0103-workspace-dagster-multi-code-location-reconciler.md)**
+> (2026-07-03) : le mécanisme de **workspace** décrit ici (patch du ConfigMap
+> **partagé** `dagster-workspace` par code-location + hook PostSync
+> `rollout restart`) ne passe pas à l'échelle multi-code-location (deux
+> Applications Argo CD ne peuvent pas co-éditer une clé de ConfigMap →
+> écrasement). Il est remplacé par un **reconciler socle** qui agrège des
+> **fragments disjoints** `dagster-workspace-<nom>`. Le reste d'ADR 0086 (la
+> code-location jouet, le workspace non vide, la contrainte host court #458)
+> reste valable.
+
 ## Contexte
 
 L'orchestrateur Dagster du socle est livré **vide** : son `workspace.yaml` porte
