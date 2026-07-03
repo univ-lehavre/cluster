@@ -1,0 +1,37 @@
+# Fragment de workspace Dagster de la code-location JOUET `toy` (ADR 0086 + 0103).
+#
+# ── POURQUOI un ConfigMap DISJOINT (et non plus un patch du ConfigMap partagé) ──
+# Le socle livre `dagster-workspace` avec `load_from: []` (orchestrateur vide). Auparavant
+# (ADR 0086) ce jouet REMPLAÇAIT ce ConfigMap partagé — mais deux code-locations (jouet +
+# atlas citation/mediawatch) ne peuvent pas co-éditer une même clé de ConfigMap : elles
+# s'écrasent (la dernière synchronisée gagne, les autres deviennent invisibles). C'est le
+# bug corrigé par ADR 0103 : chaque code-location pose SON PROPRE ConfigMap disjoint
+# `dagster-workspace-<nom>` labellisé `dagster.io/role: code-location`, et un RECONCILER
+# socle (CronJob ns dagster, platform/dagster/reconciler.yaml) DÉCOUVRE ces fragments par
+# label, les AGRÈGE dans le `load_from:` central, et redémarre webserver+daemon si changé.
+# Le hook PostSync `reload-hook.yaml` disparaît donc (le reconciler porte le rollout).
+#
+# host: nom COURT `toy-codeloc` (PAS le FQDN `…svc.cluster.local`). Le résolveur gRPC/c-ares
+# du webserver suit `resolv.conf` (ndots:5) ; en prod, un search domain externe fait
+# TIMEOUTER la résolution du FQDN complet → « DagsterUserCodeUnreachableError: gRPC
+# UNAVAILABLE » alors que le pod gRPC est sain (constaté dirqual 2026-06-22). Le nom court
+# résout via le 1er search domain (`dagster.svc.cluster.local`). Frontière ADR 0022/0045 :
+# ce fragment est du contenu applicatif (réconcilié par Argo CD), pas de l'infra.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-workspace-toy
+  namespace: dagster
+  labels:
+    # Le reconciler socle découvre les fragments par CE label (ADR 0103).
+    dagster.io/role: code-location
+    app.kubernetes.io/part-of: dataops
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/name: toy-codeloc
+    atlas.workflow/sample: 'true'
+data:
+  fragment.yaml: |
+    - grpc_server:
+        host: toy-codeloc
+        port: 4000
+        location_name: toy
