@@ -9,20 +9,16 @@
 # postgres (init wait-for-db) épinglé par digest d'index multi-arch (ADR 0006).
 # Régénérer : voir README + values.bench.yaml.
 #
-# RETOUCHE LOCALE (workspace orchestrateur vide) : un orchestrateur SANS
-# code-location doit quand même recevoir un workspace, sinon `dagster-webserver`
-# et `dagster-daemon` échouent (« No arguments given and no [tool.dagster] block »).
-# On monte un ConfigMap `dagster-workspace` (load_from: [] = zéro location) et on
-# passe `-w /workspace/workspace.yaml` aux deux commandes (validé sur banc, #167).
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: dagster-workspace
-  namespace: dagster
-data:
-  workspace.yaml: |
-    load_from: []
+# WORKSPACE (orchestrateur multi-code-location) : un orchestrateur SANS code-location
+# doit quand même recevoir un workspace, sinon `dagster-webserver`/`dagster-daemon`
+# échouent (« No arguments given and no [tool.dagster] block »). Le ConfigMap
+# `dagster-workspace` (monté à `-w /workspace/workspace.yaml`, validé banc #167) est
+# désormais possédé par le RECONCILER (platform/dagster/reconciler.yaml, ADR 0103) :
+# il l'AGRÈGE depuis les fragments per-code-location (`dagster-workspace-<nom>`). On ne
+# le pose donc PLUS ici (un `load_from: []` réappliqué à chaque run du rôle ÉCRASERAIT le
+# workspace densifié — bug de propriété concurrente). Le rôle platform-dagster le SEED une
+# seule fois (`load_from: []`, `when: absent`) pour le 1er démarrage ; le reconciler le
+# densifie ensuite. Ce retrait supersede la « RETOUCHE LOCALE » + le patch per-CL d'ADR 0086.
 ---
 # Source: dagster/templates/serviceaccount.yaml
 apiVersion: v1

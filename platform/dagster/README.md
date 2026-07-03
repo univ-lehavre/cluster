@@ -21,6 +21,31 @@ IO managers DuckDB↔S3) vit dans le dépôt `atlas` (Phase 2+). Géré par
 | `namespace.yaml`         | Namespace `dagster`                                            | linté |
 | `pg-secret.example.yaml` | patron Secret de connexion Postgres (`.example`)               | linté |
 | `gateway.yaml`           | exposition webserver (Gateway Cilium + TLS interne)            | linté |
+| `reconciler.yaml`        | reconciler du workspace multi-code-location (ADR 0103)         | linté |
+
+## Workspace multi-code-location (reconciler — ADR 0103)
+
+Le webserver et le daemon chargent **toutes** les code-locations depuis **un
+seul** `-w /workspace/workspace.yaml` (ConfigMap `dagster-workspace`). Chaque
+code-location étant déployée par une Application Argo CD **distincte** (chaîne
+de build événementiel, ADR 0095), elles ne peuvent pas co-éditer ce ConfigMap
+partagé (la dernière synchronisée écrase les autres → code-location invisible).
+
+**`reconciler.yaml`** (CronJob ns `dagster`) résout ça : chaque code-location
+atlas pose un ConfigMap **disjoint** `dagster-workspace-<nom>` labellisé
+`dagster.io/role: code-location` (son fragment `grpc_server`, host **court**) ;
+le reconciler les DÉCOUVRE par label, les AGRÈGE dans le `load_from:` central,
+et `rollout restart`e webserver+daemon **si** le workspace a changé (idempotent
+: rejeu sans changement = `changed=0`, aucun redémarrage).
+
+Le ConfigMap `dagster-workspace` n'est **plus** dans `dagster.yaml` (un
+`load_from: []` réappliqué l'écraserait) : le rôle `platform-dagster` le
+**seed** vide une fois (`when` absent), le reconciler en est ensuite
+propriétaire. Ceci **supersede** le patch per-CL + le hook PostSync reload
+d'ADR 0086. Image du reconciler : `dtzar/helm-kubectl` (kubectl + jq + sh),
+mirrorée au registry interne par `platform-build-images` (`mirror_only`, ADR
+0011/0006). Détail complet :
+[ADR 0103](/cluster/docs/decisions/0103-workspace-dagster-multi-code-location-reconciler/).
 
 ## Image arm64 construite en interne
 

@@ -1,0 +1,201 @@
+# Reconciler du workspace Dagster multi-code-location (ADR 0103).
+#
+# ── LE PROBLÈME ────────────────────────────────────────────────────────────────
+# Le webserver ET le daemon Dagster chargent TOUTES les code-locations depuis UN seul
+# fichier `-w /workspace/workspace.yaml` (ConfigMap `dagster-workspace`, clé
+# `workspace.yaml`, `load_from: [...]`). Chaque code-location est déployée par une
+# Application Argo CD DISTINCTE. Deux Applications NE PEUVENT PAS co-éditer une clé de
+# ConfigMap : chacune applique le manifeste COMPLET → écrasement (la dernière synchronisée
+# gagne, les autres deviennent INVISIBLES dans le webserver). Bug constaté au banc :
+# mediawatch tournait (pod gRPC Running) mais absente de l'UI, citation « possédait » le
+# ConfigMap partagé.
+#
+# ── LA SOLUTION (ADR 0103) ─────────────────────────────────────────────────────
+# Chaque code-location pose SON PROPRE ConfigMap DISJOINT `dagster-workspace-<nom>`
+# (zéro collision), labellisé `dagster.io/role: code-location`, portant SON fragment
+# `grpc_server` (host court, port, location_name — cf. atlas
+# dataops/<cl>-dagster/deploy/base/workspace-fragment.yaml). CE reconciler (CronJob ns
+# dagster) DÉCOUVRE ces ConfigMaps PAR LABEL, AGRÈGE leurs fragments dans le `load_from:`
+# du ConfigMap central `dagster-workspace`, et — SI le workspace a CHANGÉ — redémarre le
+# webserver + daemon (ils relisent `-w` seulement au démarrage). ZÉRO énumération centrale :
+# une code-location NEUVE = juste son Application (son fragment), le reconciler l'ajoute au
+# tick suivant. C'est le pendant « visibilité workspace » de la découverte zéro-geste du
+# build événementiel (ADR 0095) — le reconciler agrège, il ne déploie rien.
+#
+# ── FRONTIÈRE (ADR 0022/0033/0094) ─────────────────────────────────────────────
+# INFRA, pas applicatif : le reconciler est l'AGRÉGATEUR du workspace de l'orchestrateur
+# socle (il appartient au cluster, PAS à une code-location) → posé par Ansible
+# (rôle platform-dagster, comme nodeport.yaml), existe AVANT toute code-location, survit
+# au re-apply du rôle. Il SUPERSEDE le patch per-CL + le hook PostSync reload d'ADR 0086.
+#
+# ── HONNÊTETÉ (ADR 0034/0052) ──────────────────────────────────────────────────
+# Latence de réconciliation = période du Cron (comme le filet builder-reconcile, ADR 0095).
+# Ce N'EST PAS un contrôleur temps réel (pas de watch) : un CronJob périodique, idempotent
+# (rejeu sans changement = `changed=0`, AUCUN redémarrage inutile — cf. le diff du script).
+---
+# Le SCRIPT de réconciliation, monté dans le CronJob (séparé pour la lisibilité + shellcheck).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-workspace-reconciler-script
+  namespace: dagster
+data:
+  reconcile.sh: |
+    #!/bin/sh
+    # Agrège les fragments grpc_server des code-locations en un workspace Dagster,
+    # puis redémarre webserver+daemon SI (et seulement si) le workspace a changé.
+    set -eu
+
+    ns=dagster
+    central=dagster-workspace                 # ConfigMap central lu par -w /workspace/workspace.yaml
+    label=dagster.io/role=code-location       # les fragments des code-locations
+
+    tmp=$(mktemp)
+    trap 'rm -f "$tmp"' EXIT
+
+    # Découverte PAR LABEL, ordre DÉTERMINISTE (tri par nom) → workspace byte-stable
+    # → le diff ci-dessous est fiable (pas de faux « changé » dû à l'ordre d'énumération).
+    names=$(kubectl -n "$ns" get configmap -l "$label" \
+              -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)
+
+    if [ -z "$names" ]; then
+      # Aucune code-location → orchestrateur vide (Dagster exige un workspace valide).
+      printf 'load_from: []\n' > "$tmp"
+    else
+      printf 'load_from:\n' > "$tmp"
+      for n in $names; do
+        # Chaque fragment est un item de liste `- grpc_server:` à la colonne 0 ; on
+        # l'indente de 2 espaces pour le nicher sous `load_from:`. La code-location reste
+        # PROPRIÉTAIRE de son host/port/location_name (host COURT, cf. cluster#458).
+        kubectl -n "$ns" get configmap "$n" -o jsonpath='{.data.fragment\.yaml}' \
+          | sed 's/^/  /' >> "$tmp"
+      done
+    fi
+
+    # IDEMPOTENCE (ADR 0052) : compare au workspace central courant. Identique → RIEN à
+    # faire, on NE redémarre PAS le webserver/daemon inutilement (pas de churn Dagster).
+    cur=$(kubectl -n "$ns" get configmap "$central" \
+            -o jsonpath='{.data.workspace\.yaml}' 2>/dev/null || true)
+    new=$(cat "$tmp")
+    if [ "$cur" = "$new" ]; then
+      echo "reconcile: workspace inchangé (changed=0) — aucun redémarrage"
+      exit 0
+    fi
+
+    echo "reconcile: workspace CHANGÉ — apply + rollout restart"
+    echo "--- nouveau workspace.yaml ---"
+    cat "$tmp"
+
+    # Écrit le ConfigMap central (create-or-replace idempotent via apply).
+    kubectl -n "$ns" create configmap "$central" \
+      --from-file=workspace.yaml="$tmp" --dry-run=client -o yaml \
+      | kubectl -n "$ns" apply -f -
+
+    # Le webserver/daemon relisent `-w /workspace/workspace.yaml` seulement au DÉMARRAGE
+    # → rollout restart pour qu'ils voient le workspace densifié (patron reload-hook ADR 0086).
+    kubectl -n "$ns" rollout restart deploy/dagster-dagster-webserver deploy/dagster-daemon
+    echo "reconcile: terminé"
+---
+# SA dédié — le SA `dagster` du chart ne porte PAS `patch deployments` ni l'écriture de
+# ConfigMaps. On ne l'élargit PAS (patron reload-hook ADR 0086) : SA + Role minimal.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dagster-workspace-reconciler
+  namespace: dagster
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dagster-workspace-reconciler
+  namespace: dagster
+rules:
+  # Découvrir les fragments + lire/écrire le ConfigMap central du workspace.
+  - apiGroups: ['']
+    resources: ['configmaps']
+    verbs: ['get', 'list', 'watch', 'create', 'update', 'patch']
+  # rollout restart = patch de l'annotation du template + lecture du statut (patron reload-hook).
+  - apiGroups: ['apps']
+    resources: ['deployments']
+    verbs: ['get', 'list', 'patch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dagster-workspace-reconciler
+  namespace: dagster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dagster-workspace-reconciler
+subjects:
+  - kind: ServiceAccount
+    name: dagster-workspace-reconciler
+    namespace: dagster
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dagster-workspace-reconciler
+  namespace: dagster
+spec:
+  # Période PRUDENTE — filet, pas temps réel (honnêteté ADR 0034). La latence d'apparition
+  # d'une code-location neuve dans l'UI ≤ cette période. Un tick sans changement est un
+  # no-op (changed=0). Ajustable ; on peut aussi déclencher à la demande
+  # (`kubectl create job --from=cronjob/dagster-workspace-reconciler`).
+  schedule: '*/5 * * * *'
+  concurrencyPolicy: Forbid # jamais deux réconciliations concurrentes.
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 300
+      template:
+        spec:
+          serviceAccountName: dagster-workspace-reconciler
+          restartPolicy: OnFailure
+          # Durci (KSV-0118) : kubectl n'a besoin d'aucun privilège ni écriture rootfs.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: reconcile
+              # kubectl + jq + sh — image PUBLIQUE `dtzar/helm-kubectl` (alpine ; kubectl
+              # v1.36, jq, busybox sh/sed/sort/cmp), épinglée par DIGEST d'index multi-arch
+              # (arm64+amd64 vérifiés crane, ADR 0006). MIRRORÉE au registry interne
+              # (registry:80, ADR 0011) — au banc air-gappé, un pod ne tire pas d'Internet.
+              # (L'image kubectl officielle registry.k8s.io est DISTROLESS, sans shell/jq →
+              #  inutilisable pour le diff idempotent ; d'où ce choix.)
+              image: registry:80/dtzar/helm-kubectl:4.2.2
+              command: [sh, /scripts/reconcile.sh]
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                # /tmp writable (emptyDir) — `mktemp` du script écrit ici ; le rootfs reste RO.
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ['ALL']
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+          volumes:
+            - name: script
+              configMap:
+                name: dagster-workspace-reconciler-script
+                defaultMode: 0555
+            - name: tmp
+              emptyDir: {}

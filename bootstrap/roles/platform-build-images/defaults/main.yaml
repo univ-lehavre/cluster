@@ -94,6 +94,15 @@ build_images:
     src_dockerfile: '{{ platform_repo_dir }}/platform/marquez/image-web/Dockerfile'
     build_context: '{{ marquez_src_dir }}/web'
     dockerfile: '{{ build_workdir }}/marquez-web/Dockerfile'
+  # PASSTHROUGH (mirror_only) — image kubectl+jq du reconciler workspace Dagster (ADR 0103,
+  # platform/dagster/reconciler.yaml). Publique multi-arch (kubectl v1.36 + jq + busybox sh),
+  # épinglée par DIGEST d'index (arm64+amd64 vérifiés crane, ADR 0006). Ni build ni retag :
+  # pull → tag → push (cf. mirror_only dans image.yaml). Sans elle, le CronJob du reconciler
+  # fait ImagePullBackOff au banc air-gappé (ADR 0011).
+  - name: dtzar/helm-kubectl
+    tag: 4.2.2
+    mirror_only: true
+    public: docker.io/dtzar/helm-kubectl@sha256:d815939dfc36d06dde3baaa3d122dc017753006e712c111a72d7f3e1e1744807
 
 # Image maison MLflow (ADR 0082 amendé) : officielle + psycopg2. Liste SÉPARÉE de
 # build_images — consommée UNIQUEMENT par la layer autonome bootstrap/mlflow.yaml
