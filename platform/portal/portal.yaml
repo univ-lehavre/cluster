@@ -77,6 +77,20 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          env:
+            # HOST par lequel les NAVIGATEURS joignent les NodePort des nœuds (config
+            # d'instance, ADR 0023). En prod l'InternalIP d'un nœud peut être INJOIGNABLE de
+            # l'extérieur (accès par hostname Tailscale, ex. `dirqual1`) → sans cette valeur les
+            # liens du portail pointent une IP morte (constaté dirqual, 10.67.2.11). Fourni par
+            # le ConfigMap `portal-access` (posé au déploiement, NON versionné). OPTIONNEL → au
+            # banc (ConfigMap absent) le portail retombe sur l'InternalIP (VM Lima joignable).
+            # Cf. nestor/portal_server.py:_ready_node_host (env > InternalIP).
+            - name: PORTAL_ACCESS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: portal-access
+                  key: host
+                  optional: true
           readinessProbe:
             httpGet:
               path: /healthz

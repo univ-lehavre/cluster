@@ -357,6 +357,27 @@ class ObserveCluster(unittest.TestCase):
         self.assertEqual(o.node_port, 30808)
         self.assertEqual(o.node_ip, "10.0.2.11")
 
+    def test_access_host_env_overrides_internal_ip(self):
+        # PORTAL_ACCESS_HOST (config d'instance, ADR 0023) PRIME sur l'InternalIP dérivée : en
+        # prod l'IP interne est injoignable de l'extérieur (accès Tailscale par hostname), on
+        # force le host des liens sans toucher aux nœuds. Sans l'env → InternalIP (rétrocompat).
+        import os
+        from unittest import mock
+
+        eps = [
+            {"id": "x", "service": "argocd-server", "namespace": "argocd",
+             "layer": "gitops", "auth": "none", "exposed": True}
+        ]  # fmt: skip
+        apis = self._fake_apis(
+            present={("argocd", "argocd-server")},
+            ready={("argocd", "argocd-server")},
+            node_ports={("argocd", "argocd-server"): 30808},
+            node_ip="10.0.2.11",
+        )
+        with mock.patch.dict(os.environ, {"PORTAL_ACCESS_HOST": "dirqual1"}):
+            obs = portal_server.observe_cluster(eps, apis=apis)
+        self.assertEqual(obs[("argocd", "argocd-server")].node_ip, "dirqual1")
+
     def test_nodeport_on_separate_service(self):
         # ADR 0092 : pour une UI vendored, le ClusterIP du contrat (argocd-server) n'a
         # PAS de nodePort — il vit sur un Service SÉPARÉ `<svc>-nodeport`. Le portail

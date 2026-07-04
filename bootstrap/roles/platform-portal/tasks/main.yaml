@@ -16,9 +16,38 @@
 - name: Deploy the access portal
   run_once: true
   block:
-    # portal.yaml (ns + SA + ClusterRole + binding + Deployment + Service NodePort) en
-    # PREMIER : il crée le ns `portal`, requis par les NetworkPolicies namespacées
-    # appliquées juste après. k8s garantit l'ordre intra-fichier (le ns avant le reste).
+    # HOST navigateur (config d'instance, ADR 0023) : quand `portal_access_host` est fourni
+    # (ex. `dirqual1` en prod — l'InternalIP y est injoignable de l'extérieur, accès Tailscale),
+    # on pose le ConfigMap `portal-access` AVANT le Deployment pour qu'il capte l'env
+    # `PORTAL_ACCESS_HOST` (valueFrom optional) au démarrage du pod. Le ns portal est aussi créé
+    # par portal.yaml (idempotent) ; on le pose ici en premier pour héberger le ConfigMap. Au
+    # banc (var vide) : rien posé → le portail retombe sur l'InternalIP (VM Lima joignable).
+    - name: Ensure the portal namespace exists (host le ConfigMap portal-access)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: '{{ portal_namespace }}'
+      when: portal_access_host | length > 0
+
+    - name: Set the browser-facing access host (ConfigMap portal-access, ADR 0023)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: portal-access
+            namespace: '{{ portal_namespace }}'
+          data:
+            host: '{{ portal_access_host }}'
+      when: portal_access_host | length > 0
+
+    # portal.yaml (ns + SA + ClusterRole + binding + Deployment + Service NodePort) : il crée
+    # le ns `portal`, requis par les NetworkPolicies namespacées appliquées juste après. k8s
+    # garantit l'ordre intra-fichier (le ns avant le reste).
     - name: Apply the portal manifests (ns + RBAC + Deployment + Service)
       kubernetes.core.k8s:
         state: present
