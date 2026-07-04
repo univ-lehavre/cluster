@@ -3395,11 +3395,14 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
         if not (cloned and cloned.returncode == 0):
             print("  ✗ clone du dépôt atlas échoué")
             return False
-        branched = _git("-C", clone, "branch", "-f", "main", revision)
+        # `checkout -B` (reset main SUR la révision + checkout) plutôt que `branch -f` :
+        # le clone a `main` checked-out, et git récent REFUSE `branch -f` sur la branche
+        # courante (« cannot force update the branch 'main' used by worktree »), MÊME si main
+        # est déjà à la révision. `checkout -B` déplace la branche courante sans refus.
+        branched = _git("-C", clone, "checkout", "--quiet", "-B", "main", revision)
         if not (branched and branched.returncode == 0):
             print(f"  ✗ impossible de placer main sur {revision}")
             return False
-        _git("-C", clone, "checkout", "--quiet", "main")
 
         # Substitution du digest dans l'overlay prod DU CLONE, POUR CHAQUE code-location
         # (ADR 0095 §2 / frontière 0094). Best-effort par CL : un CL sans digest est WARN +
