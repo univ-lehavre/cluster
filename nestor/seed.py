@@ -248,9 +248,15 @@ _BANC_STEPS = (
 )
 _PROD_STEPS = (
     "admin-token",  # admin + token API (idempotent)
+    # token Gitea D'ÉCRITURE dédié (scope write:repository) + Secret gitea-writeback-token
+    # (ns argo, clé `token`) monté par le step write-back du WorkflowTemplate image-builder.
+    # POINT DUR 3 (ADR 0095 §Coût) : SANS lui, un build événementiel échoue au push du digest
+    # (401). Créé par AUCUN geste avant ce câblage (le .example est factice) → seed prod.
+    "writeback-token",
     "org-repo-apps",  # org/repo déclaratif cluster/apps
     "org-repo-atlas",  # org/repo de code atlas/atlas
-    "push-atlas-tree",  # push GIT de l'arbre atlas figé (révision + digest injecté)
+    "push-atlas-tree",  # push GIT de l'arbre atlas figé (révision + digest injecté, overlay prod)
+    "webhook-build",  # WEBHOOK #2 (BUILD, ADR 0095 §1.b) → EventSource — APRÈS repo atlas
     # push-citation : nom HISTORIQUE d'une étape désormais MULTI-code-location — son handler
     # façade BOUCLE sur `config.code_locations` (rend/pousse apps/<name>.yaml pour chacun).
     # Une seule étape (la boucle est dans le handler, pas dans les steps → ordre stable).
@@ -262,30 +268,26 @@ _PROD_STEPS = (
 #    C'est l'étape 1 « premier pas » de l'ADR 0095 (§1.a) prouvée au banc mono-nœud
 #    local-path (ADR 0085) AVANT la prod, comme l'exige ADR 0034. Elle REPREND la SÉQUENCE
 #    `_PROD_STEPS` (le flux citation EST le flux App-of-Apps : org/repo atlas, push de
-#    l'arbre atlas figé, apps/citation.yaml par digest, AppProject + racine) MAIS y AJOUTE
-#    une étape `webhook-build` — le WEBHOOK #2 (BUILD) de la chaîne événementielle
-#    (ADR 0095 §1.b) qui, au banc, arme le déclencheur « git push atlas → build in-pod ».
+#    l'arbre atlas figé, webhook #2, apps/<cl>.yaml par digest, AppProject + racine).
 #
-#    POURQUOI banc-citation DIVERGE de prod ici : le webhook #2 est un geste BANC de la
-#    preuve événementielle (Argo Events/Workflows montés au banc, ADR 0095 §1.b). En PROD
-#    le webhook #2 se posera lors du rebuild dirqual dans un flux dédié (garde
-#    `assert_prod_target`) — on NE le grave donc PAS dans `_PROD_STEPS`. La séquence
-#    banc-citation n'est plus un alias de `_PROD_STEPS` : c'est un tuple propre.
-#
+#    DEPUIS le câblage du seed PROD (déploiement dirqual, ADR 0095 §1.b) : `webhook-build`
+#    est DÉSORMAIS gravé dans `_PROD_STEPS` — le seed prod EST le « flux dédié » sous garde
+#    `assert_prod_target` évoqué naguère. banc-citation et prod PARTAGENT donc le cœur ET
+#    le webhook #2 ; les SEULES divergences (INJECTÉES par la façade topology.py, jamais
+#    gravées dans les steps) sont :
+#      • la GARDE — `_assert_bench_target` (cible = banc Lima) au banc, OPPOSÉE à
+#        `assert_prod_target` (cible = cluster-prod) en prod. On ne rend JAMAIS la garde
+#        prod franchissable par paramètre (ADR 0053/0084) : deux façades distinctes.
+#      • la CIBLE de déploiement — l'overlay kustomize `overlays/bench` (SeaweedFS, pas
+#        d'OBC Ceph) au banc vs `overlays/prod` (OBC Ceph rook-ceph-datalake) en prod. Au
+#        banc local-path la StorageClass `rook-ceph-datalake` n'existe pas ; atlas fournit
+#        DÉJÀ les deux overlays (frontière ADR 0094 : cluster CHOISIT, atlas FOURNIT).
+#      • le TOKEN write-back — `_PROD_STEPS` ajoute `writeback-token` (Secret
+#        gitea-writeback-token ns argo). Au banc la preuve événementielle l'a posé à la main
+#        (dette de reproductibilité banc résiduelle, hors périmètre du câblage prod).
+#    Partager le cœur de séquence garantit qu'une preuve banc VALIDE le chemin prod.
 #    L'ORDRE : `webhook-build` vient APRÈS `push-atlas-tree` (le repo de CODE atlas doit
-#    EXISTER avant d'y poser le hook) et avant `push-citation` (peu importe vis-à-vis de
-#    citation ; ce qui compte est la dépendance repo-atlas). Ce qui DIFFÈRE encore de la
-#    prod est INJECTÉ par la façade (topology.py), jamais gravé ici :
-#      • la GARDE — `_assert_bench_target` (cible = banc Lima), OPPOSÉE à `assert_prod_target`
-#        de la prod. On ne rend JAMAIS la garde prod franchissable par paramètre (ADR
-#        0053/0084) : c'est une 3e variante à part entière, garde banc en propre.
-#      • la CIBLE de déploiement — l'overlay kustomize `overlays/bench` (Secret SeaweedFS,
-#        pas d'OBC Ceph) au lieu d'`overlays/prod` : au banc local-path la StorageClass
-#        `rook-ceph-datalake` n'existe pas ; atlas fournit DÉJÀ cet overlay bench (frontière
-#        ADR 0094 : cluster CHOISIT l'overlay, atlas FOURNIT les deux).
-#    Partager le CŒUR de séquence (mêmes étapes App-of-Apps, même ordre, mêmes gardes de
-#    digest) garantit qu'une preuve banc VALIDE le chemin prod — le seul ajout est le
-#    webhook événementiel banc, absent de la prod.
+#    EXISTER avant d'y poser le hook) et avant `push-citation`.
 _BANC_CITATION_STEPS = (
     "admin-token",  # admin + token API (idempotent)
     "org-repo-apps",  # org/repo déclaratif cluster/apps
