@@ -412,9 +412,10 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     ),
     # ── mlflow : suivi de modèles (backend CNPG + artefacts S3). ──────────────
     "mlflow": _plan("mlflow", extravars_keys=("mlflow_s3_backing", "mlflow_s3_endpoint")),
-    # ── portal : portail d'accès aux UI (NodePort L4, lecture seule). NI stockage
-    #    NI S3 → aucun -e dérivé (run-phases.sh:1184 ne passe que dataops_k8s_host). ─
-    "portal": _plan("portal", extravars_keys=()),
+    # ── portal : portail d'accès aux UI (NodePort L4, lecture seule). `portal_access_host`
+    #    dérivé du bloc `portal.access_host` de la topo (ex. `dirqual1` en prod, où l'InternalIP
+    #    est injoignable de l'extérieur — accès Tailscale) → repro `nestor up` sans env manuel. ─
+    "portal": _plan("portal", extravars_keys=("portal_access_host",)),
     # ── citation : BUILD de l'image applicative de la code-location atlas `citation`
     #    (ADR 0094/0095 §1.a). Layer node-side pure (build+push+lit digest) — le
     #    DÉPLOIEMENT est GitOps (Argo CD tire par digest), pas un signal de couche ici.
