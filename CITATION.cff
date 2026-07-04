@@ -11,8 +11,7 @@ authors:
     family-names: Chasset
     email: pierre-olivier.chasset@univ-lehavre.fr
     affiliation: Université Le Havre Normandie
-    # Renseigner l'ORCID quand disponible (https://orcid.org/) :
-    # orcid: 'https://orcid.org/0000-0000-0000-0000'
+    orcid: 'https://orcid.org/0000-0002-0177-0387'
 repository-code: 'https://github.com/univ-lehavre/cluster'
 abstract: >-
   Infrastructure-as-Code d'une plateforme Kubernetes hyperconvergée de

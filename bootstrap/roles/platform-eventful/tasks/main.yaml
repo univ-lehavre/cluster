@@ -140,6 +140,22 @@
                         | items2dict}) }}
       when: eventful_patch_worker_selector | bool
 
+    # Le write-back CIBLE `overlays/<eventful_build_overlay>` (bench SeaweedFS / prod OBC
+    # Ceph). On remplace la valeur du paramètre `overlay` (défaut YAML `bench`) par la
+    # valeur dérivée du target_kind — MÊME logique que le nodeSelector ci-dessus. On
+    # retire le param `overlay` de la liste et le ré-ajoute avec la bonne valeur (combine
+    # recursive remplace la liste `parameters`, préserve les autres clés de spec). L'état
+    # appliqué EST l'état final → idempotent (changed=0 au rejeu, pattern apply-vs-patch).
+    - name: Set the write-back overlay from the target kind (bench/prod)
+      ansible.builtin.set_fact:
+        eventful_builder_def: >-
+          {{ eventful_builder_def | combine(
+               {'spec': {'arguments': {'parameters':
+                 (eventful_builder_def.spec.arguments.parameters
+                  | rejectattr('name', 'equalto', 'overlay') | list)
+                 + [{'name': 'overlay', 'value': eventful_build_overlay}]}}},
+               recursive=true) }}
+
     - name: Apply the image-builder WorkflowTemplate (nodeSelector already resolved)
       kubernetes.core.k8s:
         state: present

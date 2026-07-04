@@ -31,3 +31,11 @@ eventful_ready_delay: 5
 # retire, prod GARDE. La façade/runner pose EXPECTED_TARGET_KIND dans l'environnement
 # (nestor/runner.py, run-phases.sh) — on le lit comme la garde audit-log (lookup env).
 eventful_patch_worker_selector: "{{ (lookup('env', 'EXPECTED_TARGET_KIND') | default('prod', true)) == 'bench' }}"
+
+# Overlay kustomize CIBLE du write-back du WorkflowTemplate image-builder
+# (`dataops/<cl>-dagster/deploy/overlays/<overlay>`). Même dérivation que ci-dessus :
+# `bench` (SeaweedFS) au banc, `prod` (OBC Ceph rook-ceph-datalake) en prod. Le rôle
+# PATCHE le paramètre `overlay` du WorkflowTemplate avec cette valeur — sinon le
+# write-back figeait `overlays/bench` → déploiement prod sur le mauvais stockage
+# (BLOCKER #2, découverte dirqual 2026-07-04).
+eventful_build_overlay: "{{ 'bench' if (lookup('env', 'EXPECTED_TARGET_KIND') | default('prod', true)) == 'bench' else 'prod' }}"
