@@ -146,9 +146,14 @@ spec:
                 secretKeyRef:
                   name: mlflow-s3-creds
                   key: ACCESS_SECRET_KEY
+          # 768Mi étaient trop serrés : le serveur seul tient, mais toute opération
+          # de maintenance (mlflow gc/experiments delete = un 2ᵉ process mlflow qui
+          # importe pandas/sqlalchemy/boto3 en plus du serveur) OOM-killait le pod
+          # (exitCode 137). Marge portée à 1.5Gi pour ces opérations ET la charge à
+          # venir (logging de modèles, artefacts + spooling S3 des rapports Evidently).
           resources:
             limits:
-              memory: 768Mi
+              memory: 1536Mi
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi

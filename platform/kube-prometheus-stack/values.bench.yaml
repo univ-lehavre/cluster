@@ -46,7 +46,9 @@ prometheus:
         cpu: 100m
         memory: 512Mi
       limits:
-        memory: 1Gi
+        # Relevé de 1Gi : usage à 97 % de la limite (audit 2026-07-04) → OOM
+        # imminent dès que la chaîne applicative ajoute des cibles de scrape.
+        memory: 3Gi
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -105,7 +107,9 @@ grafana:
       cpu: 50m
       memory: 128Mi
     limits:
-      memory: 256Mi
+      # Relevé de 256Mi : conteneur à ~130 % de la limite (audit 2026-07-04) →
+      # redémarrages récurrents sous charge (dashboards + sidecars).
+      memory: 512Mi
   # Sidecars dashboards/datasources : restreints aux CONFIGMAPS seules. Par défaut
   # le chart met resource=both (ConfigMaps + Secrets) → ClusterRole avec get/watch/
   # list sur secrets cluster-wide (lecture des creds pg/argocd/ceph/S3 — audit
@@ -117,6 +121,12 @@ grafana:
       resource: configmap
     datasources:
       resource: configmap
+  # PVC RWO (single-attach) → Recreate OBLIGATOIRE : en RollingUpdate (défaut du
+  # chart) une MAJ surgit un 2ᵉ pod qui ne peut pas monter le même PVC
+  # (Multi-Attach) → deadlock à chaque mise à jour (constaté 2026-07-04 en
+  # relevant les limites mémoire).
+  deploymentStrategy:
+    type: Recreate
   persistence:
     enabled: true
     storageClassName: rook-ceph-block-replicated

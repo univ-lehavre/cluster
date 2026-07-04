@@ -203,7 +203,9 @@ spec:
               value: "true"
           resources:
             limits:
-              memory: 768Mi
+              # Relevé de 768Mi (préventif, audit 2026-07-04) : serré pour une JVM
+              # Dropwizard ; marge posée avant l'afflux de lineage (0 run à ce jour).
+              memory: 1536Mi
             requests:
               cpu: 100m
               memory: 256Mi
