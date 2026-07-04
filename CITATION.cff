@@ -25,7 +25,10 @@ keywords:
   - ansible
   - hyperconvergence
 license: MIT
-version: 2.33.0
+# `version` synchronisée AUTOMATIQUEMENT par release-please à chaque release (marqueur
+# `x-release-please-version` ci-dessous + entrée `extra-files` de release-please-config.json).
+# NE PAS éditer à la main — elle suit `package.json` / `.release-please-manifest.json`.
+version: 2.50.0 # x-release-please-version
 date-released: '2026-06-01'
 # DOI Zenodo pour une citation pérenne (concept DOI, toutes versions) :
 doi: '10.5281/zenodo.20287209'
