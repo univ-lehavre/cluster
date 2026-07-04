@@ -3395,11 +3395,14 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
         if not (cloned and cloned.returncode == 0):
             print("  ✗ clone du dépôt atlas échoué")
             return False
-        branched = _git("-C", clone, "branch", "-f", "main", revision)
+        # `checkout -B` (reset main SUR la révision + checkout) plutôt que `branch -f` :
+        # le clone a `main` checked-out, et git récent REFUSE `branch -f` sur la branche
+        # courante (« cannot force update the branch 'main' used by worktree »), MÊME si main
+        # est déjà à la révision. `checkout -B` déplace la branche courante sans refus.
+        branched = _git("-C", clone, "checkout", "--quiet", "-B", "main", revision)
         if not (branched and branched.returncode == 0):
             print(f"  ✗ impossible de placer main sur {revision}")
             return False
-        _git("-C", clone, "checkout", "--quiet", "main")
 
         # Substitution du digest dans l'overlay prod DU CLONE, POUR CHAQUE code-location
         # (ADR 0095 §2 / frontière 0094). Best-effort par CL : un CL sans digest est WARN +
@@ -3418,6 +3421,22 @@ def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
                 print(f"  ✗ overlay prod introuvable dans le clone : {overlay}")
                 return False
             if not _substitute_digest_in_tree(overlay, cl.name, cl.image_name, cl.image_digest):
+                return False
+
+        # COMMIT de la substitution AVANT le push. Sans lui, `git push main:main` pousse l'arbre
+        # BRUT (placeholders __<NAME>_IMAGE(_DIGEST)__ NON substitués → image du Deployment ET
+        # DAGSTER_CURRENT_IMAGE des pods de RUN invalides → InvalidImageName). Conditionnel : au
+        # banc l'overlay `bench` n'a pas de placeholder → rien à committer → on pousse tel quel.
+        status = _git("-C", clone, "status", "--porcelain")
+        if status and status.stdout.strip():
+            _git("-C", clone, "add", "-A")
+            committed = _git(
+                "-C", clone, "-c", "user.email=nestor-seed@example-org.lan",
+                "-c", "user.name=nestor-seed", "commit", "--quiet", "-m",
+                "seed: injecte les digests d'image dans l'overlay prod",
+            )  # fmt: skip
+            if not (committed and committed.returncode == 0):
+                print("  ✗ commit de la substitution digest échoué")
                 return False
 
         # Port-forward vers gitea-http (tunnel k8s, contourne le piège DNS FQDN). Le PORT du
@@ -3691,7 +3710,15 @@ def _seed_do_app_of_apps(topo: Topology, config, *, overlay: str | None) -> Call
                 # patron conservé, OBC Ceph rook-ceph-datalake). Le patron citation.example.yaml
                 # pointe overlays/prod ; None = no-op (path prod), "bench" réécrit vers bench.
                 rendered = _seed.render_code_location_declaration(
-                    example, cl.name, config.atlas_repo_url(), cl.revision or "", overlay=overlay
+                    # targetRevision = `main` (et NON `cl.revision`) : le seed force-push l'arbre
+                    # atlas SUBSTITUÉ+committé comme `main` ; épingler le SHA BRUT `cl.revision`
+                    # ferait suivre à Argo un ancêtre AVANT substitution (placeholders → images
+                    # invalides). Argo suit la tête `main` (l'état force-push, reproductible).
+                    example,
+                    cl.name,
+                    config.atlas_repo_url(),
+                    "main",
+                    overlay=overlay,
                 )
             except _seed.SeedError as exc:
                 print(f"  ✗ {exc}")
