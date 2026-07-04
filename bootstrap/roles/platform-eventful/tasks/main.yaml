@@ -131,12 +131,12 @@
              platform_repo_dir ~ '/platform/argo-workflows/workflowtemplate-builder.yaml')
              | from_yaml }}
 
-    - name: Drop the worker nodeSelector at the banc (CP is the builder)
+    - name: Drop the worker nodeAffinity at the banc (CP is the builder)
       ansible.builtin.set_fact:
         eventful_builder_def: >-
           {{ eventful_builder_def
              | combine({'spec': eventful_builder_def.spec
-                        | dict2items | rejectattr('key', 'equalto', 'nodeSelector')
+                        | dict2items | rejectattr('key', 'equalto', 'affinity')
                         | items2dict}) }}
       when: eventful_patch_worker_selector | bool
 

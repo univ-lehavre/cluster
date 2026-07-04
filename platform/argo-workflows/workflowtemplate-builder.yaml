@@ -68,13 +68,24 @@ spec:
   # unique, invariant 5 ADR 0095). L'audit prouve qu'un worker l'absorbe (~90 %
   # RAM libre).
   #
-  # ⚠️ ÉCART BANC — au banc Lima MONO-NŒUD, le control-plane EST le seul nœud :
-  # ce nodeSelector `DoesNotExist` NE MATCHE AUCUN NŒUD → le pod resterait
-  # Pending. Un overlay/patch banc l'ASSOUPLIT (retire le nodeSelector), tout
-  # comme le scénario 34 documente « au banc, le CP est aussi le builder ». On
-  # GARDE le nodeSelector ici (posture prod correcte) ; le banc le patche.
-  nodeSelector:
-    node-role.kubernetes.io/control-plane: DoesNotExist
+  # nodeAffinity `operator: DoesNotExist` : planifie sur les nœuds SANS le label
+  # node-role.kubernetes.io/control-plane (= les workers). ⚠️ PAS un
+  # `nodeSelector: {control-plane: DoesNotExist}` — un nodeSelector fait un EXACT-MATCH sur la
+  # VALEUR (la string littérale « DoesNotExist »), qui ne matche AUCUN nœud → build
+  # Unschedulable (constaté prod dirqual : « 0/4 nodes match » ; JAMAIS exercé au banc
+  # mono-nœud, où le patch banc RETIRE l'affinity). `DoesNotExist` n'est un opérateur que
+  # dans une matchExpression de nodeAffinity, pas dans un nodeSelector.
+  #
+  # ⚠️ ÉCART BANC — au banc Lima MONO-NŒUD, le control-plane EST le seul nœud : cette
+  # affinity l'EXCLUT → le pod resterait Pending. Le patch banc RETIRE l'affinity (le CP est
+  # aussi le builder, scénario 34). On GARDE l'affinity ici (posture prod) ; le banc la patche.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
 
   # Volume partagé clone → build (le contexte atlas cloné, lu par buildctl).
   volumes:
