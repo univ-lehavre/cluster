@@ -67,6 +67,18 @@
       ansible.builtin.meta: flush_handlers
       tags: registry-node
 
+    # rsync est REQUIS par `ansible.posix.synchronize` (copie du projet dbt ci-dessous) ET
+    # doit exister SUR LE NŒUD (le module lance `sudo -u root rsync` côté distant). Il est
+    # ABSENT des nœuds Debian par défaut (constaté prod dirqual : `sudo: rsync: command not
+    # found`) → on l'installe avant la synchro (idempotent ; cache apt 1 h).
+    - name: Ensure rsync is present on the build node (required by synchronize)
+      ansible.builtin.apt:
+        name: rsync
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      become: true
+
     # ── Contexte de build préparé node-side (cas multi-dossier, cf. en-tête) ──────
     # On reconstruit, à la racine du build_context citation, l'arborescence que le
     # Dockerfile attend (chemins relatifs `citation-dagster/…` et `citation-dbt/`).
