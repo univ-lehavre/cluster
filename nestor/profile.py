@@ -214,6 +214,14 @@ def derive_run_params(topo: Topology) -> dict:
     atlas_block = getattr(topo, "atlas", {}) or {}
     if atlas_block.get("repo_dir"):
         out["citation_repo_dir"] = atlas_block["repo_dir"]
+    # Bloc `portal` (ADR 0023, config locale) → extravar du déploiement portail. `access_host`
+    # = le HOST par lequel les navigateurs joignent les NodePort (ex. `dirqual1` en prod, où
+    # l'InternalIP est injoignable de l'extérieur — accès Tailscale). Sa dérivation depuis
+    # `portal.access_host` évite de passer `PORTAL_ACCESS_HOST` en env à la main (repro `nestor
+    # up`). Absent → on ne pose pas la clé (le rôle retombe sur l'InternalIP, banc Lima).
+    portal_block = getattr(topo, "portal", {}) or {}
+    if portal_block.get("access_host"):
+        out["portal_access_host"] = portal_block["access_host"]
     return out
 
 
