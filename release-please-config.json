@@ -16,7 +16,8 @@
   ],
   "packages": {
     ".": {
-      "package-name": "cluster"
+      "package-name": "cluster",
+      "extra-files": [{ "type": "generic", "path": "CITATION.cff" }]
     }
   }
 }
