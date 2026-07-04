@@ -167,10 +167,14 @@ def phase_playbook(phase: str) -> str | None:
 _SOCLE_CEPH = ["up", "bootstrap", "ceph", "sc"]
 _SOCLE_LIGHT = ["up", "bootstrap"]
 
-# ha-3cp : chemin HA à séquence PROPRE (amorçage VIP + joins etcd), NON réductible à
-# des layers. Son refactor (HA = propriété de la topologie) est DIFFÉRÉ à une PR dédiée
-# (ADR 0083 §À revoir) — ici on le conserve tel quel pour ne pas casser le HA existant.
-_HA_3CP_SEQUENCE = ["up", "bootstrap-ha", "join-cp", "storage-simple"]
+# HA (ADR 0097, voie 2) : le TARGET nommé `ha-3cp` est SUPPRIMÉ — son chemin
+# d'exécution (run_ha_3cp / callback `ha`) a été retiré (commit fd04ee0), plus aucune
+# séquence ne le produit ni ne le route. Le MODELAGE HA GÉNÉRIQUE survit intact et
+# resservira au rebuild dirqual HA (prod 3 control-planes, #486) : `model.is_ha_control_plane`
+# (dérivé du nombre de control-planes) + sa validation VIP, et les phases génériques
+# `bootstrap-ha` / `join-cp` de PHASE_PLAYBOOK. Le chemin d'exécution HA sera recâblé
+# dans path.py sous sa propre PR (ADR 0083 §2 : « la HA est une propriété de la topologie,
+# pas un chemin nommé »).
 
 # Alias de chemins nommés → ENSEMBLE de layers (ADR 0083). PLUS de séquence figée
 # (`_PATH_TAIL` supprimé) : l'ORDRE vient TOUJOURS de resolve_layers (graphe atomique).
@@ -194,8 +198,9 @@ _PRESET_EPREUVES: dict[str, list[str]] = {
 _CEPH_PRESETS = {"storage-real", "cluster-dataops", "atlas-ceph"}
 
 # Cibles connues acceptées par `--target` : les alias de chemin + l'épreuve storage-real
-# + le générique `layers` + `ha-3cp` (chemin HA conservé, refactor différé, ADR 0083).
-KNOWN_TARGETS = frozenset(_PRESET_LAYERS) | set(_PRESET_EPREUVES) | {"layers", "ha-3cp"}
+# + le générique `layers`. Le target `ha-3cp` a été RETIRÉ (ADR 0097, voie 2 : chemin
+# d'exécution HA supprimé ; le modelage HA générique reste, cf. note plus haut).
+KNOWN_TARGETS = frozenset(_PRESET_LAYERS) | set(_PRESET_EPREUVES) | {"layers"}
 
 
 class PlanError(ValueError):
@@ -219,16 +224,17 @@ def _hardening_requested(topo: Topology) -> bool:
 def default_target(topo: Topology) -> str:
     """Chemin DÉDUIT de la topologie déclarée (ADR 0083).
 
-    HA D'ABORD : > 1 control-plane → `ha-3cp` (chemin d'amorçage VIP/etcd à séquence
-    propre, NON réductible à des layers ; son refactor est différé à une PR dédiée).
-    Sinon : TOUJOURS `layers` — la séquence vient EXCLUSIVEMENT du graphe atomique
+    TOUJOURS `layers` — la séquence vient EXCLUSIVEMENT du graphe atomique
     (`resolve_layers`) + le socle dérivé. Plus de mapping vers des presets applicatifs
     (`atlas`/`socle`/`metrics`/`atlas-ceph`), seconde source de vérité de l'ordre
     supprimée. Les noms de preset restent acceptés via `--target <nom>` (KNOWN_TARGETS,
     rétrocompat) mais ne sont plus DÉRIVÉS. `atlas` est désormais un alias de LAYERS
-    (`layers: [atlas]`), pas un chemin."""
-    if topo.is_ha_control_plane:
-        return "ha-3cp"
+    (`layers: [atlas]`), pas un chemin.
+
+    HA (ADR 0097, voie 2) : plus de dérivation vers un target `ha-3cp` (supprimé — son
+    chemin d'exécution n'existe plus). Le modelage HA générique (`is_ha_control_plane`,
+    phases `bootstrap-ha`/`join-cp`) est préservé pour le rebuild dirqual HA (#486) ; son
+    câblage dans le moteur reviendra sous sa PR dédiée."""
     return "layers"
 
 
@@ -249,18 +255,6 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     if target not in KNOWN_TARGETS:
         raise PlanError(f"chemin `{target}` inconnu (connus : {sorted(KNOWN_TARGETS)})")
     backend = _backend_of(topo)
-
-    # ha-3cp : chemin HA à séquence propre (amorçage VIP + joins), conservé tel quel
-    # (refactor différé, ADR 0083). Backend local-path imposé (HA ⊥ stockage, #250).
-    if target == "ha-3cp":
-        if backend == "ceph":
-            raise PlanError(
-                "chemin `ha-3cp` = local-path (HA ⊥ stockage, #250) ; pas de backend ceph"
-            )
-        seq = list(_HA_3CP_SEQUENCE)
-        if _hardening_requested(topo):
-            seq.insert(2, "hardening")  # après bootstrap-ha, avant les joins
-        return seq
 
     if target in _CEPH_PRESETS and backend != "ceph":
         raise PlanError(f"chemin `{target}` exige le backend ceph (déclaré : `{backend}`)")

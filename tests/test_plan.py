@@ -218,11 +218,14 @@ class TargetValidation(unittest.TestCase):
         self.assertEqual(seq, ["up", "bootstrap", "metrics-server"])
 
     def _ha_topo(self):
-        # Topologie HA déclarée : 3 control-planes hyperconvergés + VIP (la
-        # déclaration de #333). Le modèle exige control_plane_lb dès > 1 CP.
+        # Topologie HA déclarée : 3 control-planes hyperconvergés + VIP (la déclaration
+        # de #333). Le MODÈLE accepte toujours cette topologie (is_ha_control_plane +
+        # validation VIP restent — modelage HA générique préservé pour le rebuild dirqual
+        # HA #486) ; c'est le TARGET nommé `ha-3cp` du planner qui a été retiré (ADR 0097,
+        # voie 2 : chemin d'exécution HA supprimé, commit fd04ee0).
         return topology_from_dict(
             {
-                "catalog": {"topology": "ha-3cp", "profile": "base"},
+                "catalog": {"topology": "ha", "profile": "base"},
                 "nodes": [
                     {"name": "cp1", "roles": ["control", "worker"]},
                     {"name": "cp2", "roles": ["control", "worker"]},
@@ -234,33 +237,17 @@ class TargetValidation(unittest.TestCase):
             }
         )
 
-    def test_ha_topology_derives_ha_3cp(self):
-        # > 1 CP DÉCLARÉ → default_target dérive ha-3cp (HA prime). ADR 0083 conserve
-        # le chemin HA tel quel (son refactor en layers est différé à une PR dédiée).
-        self.assertEqual(default_target(self._ha_topo()), "ha-3cp")
+    def test_ha_topology_derives_layers_not_ha_3cp(self):
+        # ADR 0097 voie 2 : plus de dérivation vers le target `ha-3cp` (supprimé) — une
+        # topologie HA rend désormais `layers` comme toute autre. Le câblage d'exécution
+        # HA reviendra sous sa PR dédiée (rebuild dirqual, #486).
+        self.assertEqual(default_target(self._ha_topo()), "layers")
 
-    def test_ha_3cp_sequence(self):
-        # Séquence HA propre (amorçage VIP + joins), inchangée par l'ADR 0083.
-        seq = expected_phase_sequence(self._ha_topo())
-        self.assertEqual(seq, ["up", "bootstrap-ha", "join-cp", "storage-simple"])
-
-    def test_ha_3cp_rejects_ceph_backend(self):
-        # ha-3cp = local-path (HA ⊥ stockage). Un backend ceph déclaré est refusé.
-        ceph_ha = topology_from_dict(
-            {
-                "catalog": {"topology": "ha-3cp", "profile": "base"},
-                "nodes": [
-                    {"name": "cp1", "roles": ["control"]},
-                    {"name": "cp2", "roles": ["control"]},
-                    {"name": "cp3", "roles": ["control"]},
-                ],
-                "network": {"control_plane_lb": {"mode": "kube-vip-arp"}},
-                "storage": {"backend": "ceph"},
-                "target_kind": "bench",
-            }
-        )
+    def test_ha_3cp_target_is_unknown(self):
+        # Le target nommé `ha-3cp` n'est plus une cible connue : le demander explicitement
+        # via --target est refusé (KNOWN_TARGETS ne le contient plus).
         with self.assertRaises(PlanError):
-            expected_phase_sequence(ceph_ha, "ha-3cp")
+            expected_phase_sequence(self._ha_topo(), "ha-3cp")
 
 
 class DiffPhases(unittest.TestCase):
