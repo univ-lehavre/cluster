@@ -33,7 +33,15 @@ spec:
         image:
           reference: ghcr.io/cloudnative-pg/pgvector:0.8.2-18-trixie@sha256:16410c599bd2bfea40653c05c67d98ab4c04befc53eaa3445a5f4cf898b1e98e
   storage:
-    size: 5Gi
+    # 500Gi (headroom généreux) : PAS 5Gi — sous 5Gi, un WAL non archivé (ex. bucket de
+    # backup absent/injoignable) SATURE le volume en heures → « Detected low-disk space »
+    # → le primary crashe → cluster dégradé (vécu en prod dirqual : archive S3 KO, bucket
+    # disparu → pg-2 CrashLoop, 1/3 sain). Les métadonnées (dagster/marquez/mlflow) tiennent
+    # en quelques Go ; 500Gi n'est PAS pour les données mais pour ABSORBER un backlog WAL le
+    # temps de réparer l'archive (le pool RBD répliqué a des dizaines de To dispo). L'archive
+    # WAL + la rétention (objectstore.yaml) bornent la croissance en régime normal ; RBD est
+    # ALLOWVOLUMEEXPANSION → une hausse ultérieure s'applique en ligne.
+    size: 500Gi
     # Défaut versionné = PROD (ADR 0033) : RBD répliqué ×3 (ADR 0001 — JAMAIS
     # EC 2+1 pour ce stateful). Le rôle Ansible platform-cnpg surcharge ce champ
     # par topologie (cnpg_storage_class) ; une autre topologie peut pointer une
