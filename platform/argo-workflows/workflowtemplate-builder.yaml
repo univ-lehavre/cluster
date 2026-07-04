@@ -55,6 +55,14 @@ spec:
       - name: revision # SHA git — tag lisible + révision clonée
       - name: atlasRepoURL # ex. http://gitea-http.gitea.svc.cluster.local/atlas/atlas.git
       - name: giteaWritebackURL # base Contents API cluster/apps, ex. http://gitea-http.gitea.svc.cluster.local/api/v1/repos/cluster/apps
+      # Overlay kustomize CIBLE du write-back (`overlays/<overlay>`). Défaut `bench`
+      # (SeaweedFS) pour un apply autonome ; le rôle platform-eventful PATCHE cette
+      # valeur en `prod` (OBC Ceph rook-ceph-datalake) quand EXPECTED_TARGET_KIND=prod
+      # — MÊME mécanisme que le patch du nodeSelector worker. Sans ce paramètre, le
+      # write-back figeait `overlays/bench` → en prod la code-location déployait sur
+      # SeaweedFS au lieu du datalake Ceph (BLOCKER #2, découverte dirqual 2026-07-04).
+      - name: overlay
+        value: bench
 
   # POINT DUR 4 — le builder tourne sur un WORKER, JAMAIS le control-plane (SPOF
   # unique, invariant 5 ADR 0095). L'audit prouve qu'un worker l'absorbe (~90 %
@@ -322,7 +330,7 @@ spec:
               source:
                 repoURL: http://gitea-http.gitea.svc.cluster.local/atlas/atlas.git
                 targetRevision: "{{workflow.parameters.revision}}"
-                path: dataops/${cl}-dagster/deploy/overlays/bench
+                path: dataops/${cl}-dagster/deploy/overlays/{{workflow.parameters.overlay}}
                 kustomize:
                   images:
                     - ${image_ref}

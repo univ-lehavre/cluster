@@ -138,6 +138,23 @@ _LIMA_CP_SECOND = (
 )
 
 
+# Topo PROD (target_kind: prod) avec bloc atlas multi-code-location — prouve que
+# gitops-seed-citation route vers `_seed_do_prod` (garde `assert_prod_target`), pas le banc.
+_PROD_CITATION = (
+    "catalog: {topology: multi-node-4}\n"
+    "nodes:\n"
+    "  - {name: dirqual1, roles: [control, worker]}\n"
+    "  - {name: dirqual2, roles: [worker]}\n"
+    "storage: {backend: ceph}\ntarget_kind: prod\n"
+    "atlas:\n"
+    "  org_atlas: atlas\n"
+    "  repo_atlas: atlas\n"
+    "  code_locations:\n"
+    "    - {name: citation, revision: abc1234, image_digest: sha256:dead}\n"
+    "    - {name: mediawatch, revision: abc1234, image_digest: sha256:beef}\n"
+)
+
+
 def _topo(yaml_text: str):
     import yaml
 
@@ -666,6 +683,45 @@ class SeedPhaseWiring(unittest.TestCase):
         except TypeError as exc:  # pragma: no cover — le bug d'origine
             self.fail(f"playbook=None a crashé (os.path.join(_ROOT, None)) : {exc}")
         self.assertEqual(code, 0)
+
+    def _stub_do_prod(self):
+        """Stub `_seed_do_prod` → un do(step) enregistreur (zéro kubectl/Gitea réel)."""
+        seen = []
+
+        def _fake(topo, config):
+            def do(step):
+                seen.append(step)
+                return True
+
+            return do
+
+        self._patch(cli, "_seed_do_prod", _fake)
+        return seen
+
+    def test_gitops_seed_citation_prod_routes_to_seed_do_prod(self):
+        # ROUTING target_kind-aware (ADR 0095 §1.b) : en target_kind=prod, gitops-seed-citation
+        # route vers `_seed_do_prod` (app-of-apps multi-code-location dirqual) sous garde
+        # `assert_prod_target` — JAMAIS `_seed_do_banc_citation` / `_assert_bench_target`. Prouvé
+        # sans toucher au cluster (stubs), les 8 étapes prod jouées dans l'ordre.
+        prod_calls = []
+        self._patch(cli, "assert_prod_target", lambda action, *a, **k: prod_calls.append(action))
+
+        def _bench_boom(*_a, **_k):
+            raise AssertionError("garde BANC appelée pour un seed PROD (routing cassé)")
+
+        def _bc_boom(*_a, **_k):
+            raise AssertionError("_seed_do_banc_citation construit en prod (routing cassé)")
+
+        self._patch(cli, "_assert_bench_target", _bench_boom)
+        self._patch(cli, "_seed_do_banc_citation", _bc_boom)
+        seen = self._stub_do_prod()
+        code = _engine(_topo(_PROD_CITATION), "layers", ["gitops-seed-citation"], "dirqual")
+        self.assertEqual(code, 0)
+        from nestor import seed as _seed
+
+        self.assertEqual(seen, list(_seed.seed_steps("prod")))  # 8 étapes prod, dans l'ordre
+        self.assertTrue(prod_calls)  # garde PROD branchée (assert_target dans run_seed)
+        self.assertTrue(all("gitops-seed-citation" in a for a in prod_calls))
 
     def test_banc_guard_is_wired(self):
         # La garde BANC est BRANCHÉE : `_assert_bench_target` est appelée pour gitops-seed
