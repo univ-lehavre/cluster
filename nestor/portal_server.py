@@ -70,7 +70,7 @@ def observe_cluster(endpoints: list[dict], apis=None) -> dict[tuple[str, str], p
     """
     core_v1, discovery = apis if apis is not None else _apis()
     observed: dict[tuple[str, str], portal.Observed] = {}
-    node_ip = _ready_node_ip(core_v1)  # une fois pour tous : IP d'un nœud Ready
+    node_ip = _ready_node_host(core_v1)  # une fois pour tous : host d'un nœud Ready (env > IP)
     for ep in endpoints:
         ns, svc = ep.get("namespace", ""), ep.get("service", "")
         if not ns or not svc:
@@ -113,8 +113,18 @@ def _service_state(core_v1, ns: str, svc: str) -> tuple[bool, int | None]:
     return True, node_port
 
 
-def _ready_node_ip(core_v1) -> str | None:
-    """IP interne d'un nœud Ready (cible des NodePort, ADR 0092). None si inconnue."""
+def _ready_node_host(core_v1) -> str | None:
+    """Host d'un nœud Ready où joindre les NodePort (ADR 0092). None si inconnu.
+
+    Priorité à la variable d'environnement `PORTAL_ACCESS_HOST` (config d'instance, ADR 0023) :
+    le HOST par lequel les navigateurs joignent les nœuds. En prod dirqual, l'`InternalIP`
+    (10.67.2.11) est INJOIGNABLE de l'extérieur (accès par hostname Tailscale `dirqual1`) → sans
+    surcharge, tous les liens du portail sont cassés. On pose donc `PORTAL_ACCESS_HOST=dirqual1`
+    au déploiement. À défaut de surcharge, on retombe sur l'`InternalIP` d'un nœud Ready (banc
+    Lima : l'IP de la VM reste joignable depuis l'hôte)."""
+    override = os.environ.get("PORTAL_ACCESS_HOST")
+    if override:
+        return override
     from kubernetes.client.exceptions import ApiException
 
     try:

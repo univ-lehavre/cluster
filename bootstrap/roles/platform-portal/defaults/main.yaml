@@ -9,6 +9,13 @@
 platform_repo_dir: '{{ playbook_dir }}/..'
 portal_namespace: portal
 
+# HOST navigateur des liens du portail (config d'INSTANCE, ADR 0023) : le host par lequel les
+# navigateurs joignent les NodePort des nœuds. VIDE par défaut → le portail dérive l'InternalIP
+# d'un nœud Ready (banc Lima : VM joignable). À RENSEIGNER en prod quand l'InternalIP est
+# injoignable de l'extérieur : ex. `dirqual1` (hostname Tailscale ; l'IP 10.67.2.11 est morte).
+# Lu depuis l'env `PORTAL_ACCESS_HOST` (façade/opérateur) ; posé en ConfigMap `portal-access`.
+portal_access_host: "{{ lookup('env', 'PORTAL_ACCESS_HOST') | default('', true) }}"
+
 # Gate Ready du Deployment portal (= `kubectl -n portal rollout status deploy/portal`).
 # Calqué sur mlflow_ready_retries/delay : ~5 min au pire (pull de l'image registry:80).
 portal_ready_retries: 30
