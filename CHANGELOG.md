@@ -11,6 +11,30 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.50.0](https://github.com/univ-lehavre/cluster/compare/v2.49.0...v2.50.0) (2026-07-04)
+
+
+### Features
+
+* **dagster:** reconciler du workspace multi-code-location (ADR 0103) ([38d49e8](https://github.com/univ-lehavre/cluster/commit/38d49e8b255a6777e843e4e6cdaeeef2d40fbe64))
+* **dagster:** reconciler du workspace multi-code-location (ADR 0103) ([7d7fde7](https://github.com/univ-lehavre/cluster/commit/7d7fde74b833a8a367ccca92e18109f352b3f002))
+* **eventful:** câble le filet event-loss builder-reconcile ([#565](https://github.com/univ-lehavre/cluster/issues/565), ADR 0095) ([b536726](https://github.com/univ-lehavre/cluster/commit/b53672623075e0d8ec88e8b55f6aabec8f3b870b))
+* **eventful:** câble le filet event-loss builder-reconcile ([#565](https://github.com/univ-lehavre/cluster/issues/565)) ([b78d544](https://github.com/univ-lehavre/cluster/commit/b78d544d97352be4725145682bdac246e4aa5fb2))
+* **nestor:** enregistre platform-eventful comme Component du graphe ([#564](https://github.com/univ-lehavre/cluster/issues/564)) ([fdebb0a](https://github.com/univ-lehavre/cluster/commit/fdebb0a9e4aaa6e83e1da790820eca0578e51dfb))
+* **nestor:** enregistre platform-eventful comme Component du graphe atomique ([#564](https://github.com/univ-lehavre/cluster/issues/564), ADR 0096) ([0703bcc](https://github.com/univ-lehavre/cluster/commit/0703bccc28ba3f50e09ee9764a2b8fcf6d3be627))
+
+
+### Bug Fixes
+
+* **dagster:** migre la code-location jouet aux fragments de workspace (ADR 0103) ([ee85c62](https://github.com/univ-lehavre/cluster/commit/ee85c626f282f692bb8855d809dd21b82998abc4))
+* **dagster:** migre la code-location jouet aux fragments de workspace (ADR 0103) ([c5cee6a](https://github.com/univ-lehavre/cluster/commit/c5cee6ac1ace821cd6e3881039cca02c9cdbde0c))
+* **eventful:** chaîne de build événementiel verte e2e au banc (zéro-geste prouvé) ([a0f58e2](https://github.com/univ-lehavre/cluster/commit/a0f58e28b6ba788dcf6c1f571d41aa8b83cec5f4))
+
+
+### Documentation
+
+* **eventful:** reformule pour éviter [#2](https://github.com/univ-lehavre/cluster/issues/2) en début de ligne (markdownlint MD018 CI) ([fdcccf3](https://github.com/univ-lehavre/cluster/commit/fdcccf3b1aba1c4fd06020636cd94ae96c5a8c0a))
+
 ## [2.49.0](https://github.com/univ-lehavre/cluster/compare/v2.48.0...v2.49.0) (2026-07-03)
 
 
