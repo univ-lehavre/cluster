@@ -7,10 +7,10 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **73 drifts** indexés — statut : 3 caduc, 67 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 20 harnais, 4 livrable.
+- **74 drifts** indexés — statut : 3 caduc, 68 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 39 code, 10 env, 20 harnais, 5 livrable.
 
-## Livrable (bug — vaut pour tous les bancs ET la prod) (4)
+## Livrable (bug — vaut pour tous les bancs ET la prod) (5)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -18,6 +18,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L51` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | L'Application Argo CD `atlas-workflows` reste InvalidSpecError : « application repo `http://gitea-http…/atlas/workflows.git` is not permitted in project 'atlas' », alors que le sourceRepos autorise `http://gitea-http…/*`. → sourceRepos `…/**` (double étoile, récursif) dans appproject-atlas.yaml. Validé banc : Application acceptée (passe à ComparisonError puis Synced). |
 | `L52` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | Application bloquée ComparisonError « dial tcp …:8081 i/o timeout » : l'application-controller ne joint pas le repo-server (génération de manifeste impossible). → NetworkPolicy `allow-argocd-internal-egress` (podSelector {} → podSelector {} intra-ns, ports 8081/8084/6379/8080/5556/5557) dans allow-egress.yaml. |
 | `L53` | ✅ corrige | scénario 27 GitOps → workflows atlas (#231) | repo-server : « failed to list refs: Get `http://gitea-http…/atlas/` workflows.git/info/refs : context deadline exceeded » — clone du dépôt Gitea impossible. → NetworkPolicy `allow-reposerver-gitea-egress` ciblant le namespace gitea par namespaceSelector, ports 3000 (cible réelle du pod après DNAT) ET 80 (robustesse). Validé banc : repo-server clone, Application Synced/Healthy, scénario 27 PASS + 9 scénarios pertinents PASS (10/10). |
+| `L73` | ✅ corrige | incident prod dirqual1 — gel du control-plane (inotify, 2026-07-05) | dirqual1 (control-plane UNIQUE) devient non-réactif : l'apiserver et sshd stallent, le nœud répond au ping mais gèle tout le userspace → le cluster entier est figé jusqu'au reboot manuel. Le lint ne voyait rien ; seul le fonctionnement réel a révélé l'écart (198 erreurs « too many open files » accumulées depuis le 22 juin). Mes deux premières hypothèses (I/O du bootstrap, OOM mlflow) étaient FAUSSES — réfutées par les logs kernel (audit docs/audit/2026-07-05-incident-inotify-et-risques-ha-a-chaud.md §1). → Relever `fs.inotify.max_user_instances` 128 → 8192 (+ `max_user_watches` figé à 1048576 pour la reproductibilité, ADR 0052) en sysctl node-level dans `bootstrap/roles/k8s-CRI-install/tasks/main.yaml` (à côté du tuning ip_forward), persistant aux reboots, sur les 4 nœuds ; + une assertion de vérif (`sysctl --values fs.inotify.max_user_instances >= 8192`) calquée sur celle d'ip_forward — un run échoue bruyamment si la valeur retombe. Audit #586, fix #587. PROUVÉ sur prod (2026-07-05) : `nestor ansible cri.yaml` failed=0 sur les 4 nœuds, `max_user_instances=8192` vérifié runtime + persisté dans /etc/sysctl.d/k8s.conf, cluster resté sain (Ceph HEALTH_OK, 4 nœuds Ready) après le restart containerd induit. |
 
 ## Code (défaut du livrable révélé au run) (39)
 
