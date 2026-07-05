@@ -9,9 +9,14 @@
 > [2026-06-24 (prod dirqual)](../audit/2026-06-24-audit-prod-dirqual.md) l'a
 > listée,
 > [2026-07-04 (requests/limits)](../audit/2026-07-04-audit-ressources-requests-limits.md)
-> l'a **chiffrée** (usage réel vs limite). **Pas de nouvel ADR** : ce n'est pas
-> une décision structurante, c'est du réglage — chaque changement repart dans le
-> manifeste / values **versionné** puis se **re-vérifie** par un `kubectl top`.
+> l'a **chiffrée** (usage réel vs limite), et
+> [2026-07-05 (code-first)](../audit/2026-07-05-requests-limits-code-first.md) a
+> cartographié **où le dépôt déclare ou omet** chaque resource (fichier:ligne,
+> corrigeable) — révélant des trous que le runtime ne voit pas encore (charges
+> pas actives : `pg-1/2/3`, cert-manager, RGW, NATS, Kong…). **Pas de nouvel
+> ADR** : ce n'est pas une décision structurante, c'est du réglage — chaque
+> changement repart dans le manifeste / values **versionné** puis se
+> **re-vérifie** par un `kubectl top`.
 
 Périmètre : les **limites mémoire sous-dimensionnées** du socle (monitoring +
 dataops) et une hygiène de limites. **Hors périmètre** : Ceph (élastique par
@@ -53,6 +58,41 @@ preuve `kubectl top pod` après application. Issues à créer/rattacher au fil.
       `platform/argocd/argocd.yaml` (édition proscrite, exclu du lint) ;
       priorité _info_, faible enjeu (rayon de souffle contenu par ~251
       GiB/nœud).
+
+### Paliers issus du volet code-first (2026-07-05) — charges pas encore vues par `top`
+
+Le passage code-first a trouvé des workloads **sans resources codées** que le
+runtime n'a pas listés (pas encore actifs). Ordre par gravité réelle sur
+`dirqual` ; chaque item repart dans un fichier versionné + preuve `kubectl top`.
+
+- [ ] **`pg-1/2/3` (CNPG) — aucun `spec.resources`**
+      (`platform/cloudnative-pg/cluster.yaml`). **Priorité #1** : stateful
+      applicatif le plus lourd, HA 3 instances, sans plafond mémoire, sur un
+      cluster déjà dégradé une fois par un incident WAL/disque (PR #568). Poser
+      `requests` + `limits.memory` **dérivés par topologie** (bench vs prod),
+      comme `storageClass` l'est déjà.
+- [ ] **cert-manager (cainjector/controller)** — socle TLS (prérequis
+      Barman/CNPG). Bundle vendored `platform/cert-manager/cert-manager.yaml` →
+      **patch hors-bundle** (overlay/kustomize), pas édition du fichier figé.
+- [ ] **RGW Ceph** (`gateway.resources`,
+      `storage/ceph/storageClass/datalake/datalake-ec.yaml`) + **EventBus NATS**
+      (`containerTemplate.resources`, `platform/argo-events/eventbus-nats.yaml`
+      ; JetStream `max_memory_store: -1` non borné) — chemins
+      données/événements.
+- [ ] **Kong** (`kong.resources` dans `platform/k8s-dashboard/values.yaml`,
+      paramétrage chart légitime — chemin critique NodePort→UI) +
+      **`redcap-mariadb`** (`apps/redcap/mariadb.yaml`, base stateful de
+      REDCap).
+- [ ] **Régénérer** `kube-prometheus-stack.yaml` depuis `values.bench.yaml` :
+      les plafonds Prometheus 3Gi / Grafana 512Mi sont **décidés dans les
+      values** mais le manifeste rendu appliqué porte encore les anciens
+      (Ansible charge le manifeste tel quel, sans re-render Helm). Fix
+      mécanique.
+
+> **À laisser** (choix documentés, pas des trous) : toutes les `limits.cpu`
+> absentes (CPU compressible → throttling, jamais OOM) ; `metrics-server`
+> (system-critical) ; jobs de run Dagster (frontière atlas, ADR 0022) ; exemples
+> wordpress ; local-path banc.
 
 ### Ne PAS faire — Ceph (rappel de la loi d'élasticité)
 
