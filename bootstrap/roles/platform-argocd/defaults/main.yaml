@@ -17,3 +17,76 @@ argocd_namespace: argocd
 # Timeouts du gate Ready (alignés sur les autres rôles plateforme).
 argocd_ready_retries: 60
 argocd_ready_delay: 5
+
+# requests/limits des workloads Argo CD (audit code-first 2026-07-05). Le bundle
+# vendored (argocd.yaml) ne pose aucune resource → 7/7 BestEffort ; on les injecte
+# par PATCH strategic APRÈS l'apply (jamais en éditant le fichier figé, ADR 0006).
+# Dimensionné sur le repos observé en prod : application-controller ~690 MiB (garde
+# l'état de TOUTES les Applications — le seul gros, StatefulSet) ; repo-server pique
+# à chaque helm template ; les autres < 70 MiB. PAS de limits.cpu (CPU compressible).
+# Une entrée par workload : {kind, container, resources} (le container diffère du
+# workload pour dex/redis). Surchargeable par topologie via group_vars (ADR 0023).
+argocd_resources:
+  argocd-application-controller:
+    kind: StatefulSet
+    container: argocd-application-controller
+    resources:
+      requests:
+        cpu: 100m
+        memory: 768Mi
+      limits:
+        memory: 1536Mi
+  argocd-repo-server:
+    kind: Deployment
+    container: argocd-repo-server
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  argocd-server:
+    kind: Deployment
+    container: argocd-server
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+  argocd-applicationset-controller:
+    kind: Deployment
+    container: argocd-applicationset-controller
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+  argocd-notifications-controller:
+    kind: Deployment
+    container: argocd-notifications-controller
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+  argocd-dex-server:
+    kind: Deployment
+    container: dex
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+  argocd-redis:
+    kind: Deployment
+    container: redis
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 128Mi

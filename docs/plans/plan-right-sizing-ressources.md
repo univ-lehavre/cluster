@@ -53,11 +53,11 @@ preuve `kubectl top pod` après application. Issues à créer/rattacher au fil.
 - [x] **Marquez 768Mi → 1,5 GiB** (préventif) — `platform/marquez/marquez.yaml`
       (rôle `platform-marquez`). JVM Dropwizard serrée ; 0 lineage reçu encore.
       **Appliqué + vérifié** (1536Mi).
-- [ ] **Hygiène — `argocd-application-controller`** (668Mi non borné) —
-      **différé** : la ressource vit dans le **bundle vendored**
-      `platform/argocd/argocd.yaml` (édition proscrite, exclu du lint) ;
-      priorité _info_, faible enjeu (rayon de souffle contenu par ~251
-      GiB/nœud).
+- [x] **Argo CD (7 workloads dont `application-controller`)** — posé par PATCH
+      hors-bundle dans le rôle `platform-argocd` (`argocd_resources`, patché
+      après l'apply), SANS éditer le bundle vendored (ADR 0006).
+      application-controller (StatefulSet, ~690 MiB observé) → lim mem 1536Mi ;
+      repo-server 512Mi ; server/autres 128-256Mi. À prouver par `kubectl top`.
 
 ### Paliers issus du volet code-first (2026-07-05) — charges pas encore vues par `top`
 
@@ -70,9 +70,11 @@ runtime n'a pas listés (pas encore actifs). Ordre par gravité réelle sur
       via `cnpg_resources` (defaults + `combine` du rôle `platform-cnpg`, comme
       `storageClass`). Repos observé ~280 MiB → marge pour les pics pgvector. À
       **prouver par `kubectl top`** après re-apply du rôle sur prod.
-- [ ] **cert-manager (cainjector/controller)** — socle TLS (prérequis
-      Barman/CNPG). Bundle vendored `platform/cert-manager/cert-manager.yaml` →
-      **patch hors-bundle** (overlay/kustomize), pas édition du fichier figé.
+- [x] **cert-manager (controller/cainjector/webhook)** — posé par PATCH
+      hors-bundle dans le rôle `platform-cert-manager`
+      (`cert_manager_resources`, `state: patched` après l'apply), sans éditer le
+      bundle figé. cainjector 512Mi (cache cluster-wide) / controller 256Mi /
+      webhook 128Mi. À prouver par `kubectl top`.
 - [x] **RGW Ceph** (`gateway.resources` req 250m/512Mi lim mem 2Gi,
       `storage/ceph/storageClass/datalake/datalake-ec.yaml`) + **EventBus NATS**
       (`containerTemplate.resources` req 100m/256Mi lim mem 1Gi,
@@ -82,11 +84,12 @@ runtime n'a pas listés (pas encore actifs). Ordre par gravité réelle sur
       `platform/k8s-dashboard/values.yaml`, paramétrage chart légitime — chemin
       critique NodePort→UI) + **`redcap-mariadb`** (`apps/redcap/mariadb.yaml`
       req 100m/256Mi lim mem 1Gi, base stateful de REDCap).
-- [ ] **Régénérer** `kube-prometheus-stack.yaml` depuis `values.bench.yaml` :
-      les plafonds Prometheus 3Gi / Grafana 512Mi sont **décidés dans les
-      values** mais le manifeste rendu appliqué porte encore les anciens
-      (Ansible charge le manifeste tel quel, sans re-render Helm). Fix
-      mécanique.
+- [x] **Prometheus 3Gi / Grafana 512Mi matérialisés** dans
+      `kube-prometheus-stack.yaml` : les plafonds étaient **décidés dans les
+      values** mais le manifeste rendu (seul appliqué par Ansible, sans
+      re-render Helm) portait encore les anciens. **Patch chirurgical** des 2
+      valeurs (aligné sur les values) plutôt qu'une régénération du bundle de 92
+      Ko + 9 digests d'index ré-injectés à la main (risque disproportionné).
 
 > **À laisser** (choix documentés, pas des trous) : toutes les `limits.cpu`
 > absentes (CPU compressible → throttling, jamais OOM) ; `metrics-server`
