@@ -46,7 +46,13 @@ Concrètement :
 
 ## Statut
 
-Accepted.
+Accepted. **Révisé par
+[0104](0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md)**
+(sans abrogation) : le run e2e from-scratch au banc reste la preuve du
+**socle**, mais 0104 précise que le **flux applicatif** dont une dépendance est
+substituée au banc (source externe réelle, Ceph RGW/OBC, seed prod I/O) se
+prouve **sur prod** — le banc est une gate de logique, pas d'intégration
+externe.
 
 ## Conséquences
 
