@@ -123,3 +123,4 @@ Format léger inspiré de Michael Nygard :
 | 0101 | [Migration de la zone grise bash → Python (`bench/lima/` confort)](0101-migration-zone-grise-bash-python.md)                                       | Proposed           |
 | 0102 | [Catalogue de topologies v2 : la topologie, source unique (nommage, kubeconfig, provisioning)](0102-catalogue-topologies-v2-topo-source-unique.md) | Proposed           |
 | 0103 | [Workspace Dagster multi-code-location : un reconciler par découverte de labels](0103-workspace-dagster-multi-code-location-reconciler.md)         | Accepted           |
+| 0104 | [Doctrine de preuve à deux étages : banc-logique / prod-intégration](0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md)            | Accepted           |
