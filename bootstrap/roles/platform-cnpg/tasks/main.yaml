@@ -100,7 +100,8 @@
         state: present
         definition: >-
           {{ item
-             | combine({'spec': {'storage': {'storageClass': cnpg_storage_class}}}, recursive=True)
+             | combine({'spec': {'storage': {'storageClass': cnpg_storage_class},
+                                 'resources': cnpg_resources}}, recursive=True)
              if (item.kind | default('')) == 'Cluster' else item }}
       loop: '{{ cnpg_cluster_defs | select | list }}'
       loop_control:

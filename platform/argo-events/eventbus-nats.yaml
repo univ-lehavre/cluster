@@ -43,3 +43,14 @@ spec:
       metricsExporterImage: natsio/prometheus-nats-exporter:0.14.0@sha256:839c59f6a23473a657f6560c2a14dca9b9ce722a017933a41d071a3c9dd3a7d7
       # natsio/nats-server-config-reloader:0.14.0 (recharge la conf sans restart)
       configReloaderImage: natsio/nats-server-config-reloader:0.14.0@sha256:8c28b75bc416bb068761b19edf9a471bf8e35062bf619ea49c8e22af517e383e
+      # Ressources du conteneur NATS (audit code-first 2026-07-05). Bus AVEC ÉTAT
+      # (JetStream) et SPOF `replicas: 1` : sans plafond, un pic mémoire JetStream peut
+      # OOM le pod → event push perdu (cf. POINT DUR 4). requests = plancher de
+      # scheduling ; limits.memory = marge bornée. PAS de limits.cpu (CPU compressible).
+      containerTemplate:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi

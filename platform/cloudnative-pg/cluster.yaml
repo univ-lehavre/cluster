@@ -24,6 +24,19 @@ metadata:
   namespace: postgres
 spec:
   instances: 3 # HA : 1 primary + 2 replicas (réplication streaming)
+  # requests/limits par instance (audit code-first 2026-07-05, plan right-sizing) :
+  # pg-1/2/3 était le SEUL stateful applicatif lourd sans plafond mémoire (BestEffort).
+  # requests = plancher de scheduling sain (repos observé ~280 MiB / <65m CPU en prod) ;
+  # limits.memory = marge pour les pics pgvector (embeddings vector(384) + fts chargés par
+  # atlas), backlog WAL et réplication. PAS de limits.cpu (CPU compressible → throttling,
+  # jamais OOM : convention du dépôt). Défaut versionné = PROD (ADR 0033) ; le rôle Ansible
+  # platform-cnpg surcharge par topologie via `cnpg_resources` (le banc léger allège).
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
   # Operand PostgreSQL 18 (requis par les Image Volume Extensions).
   imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:e14f3ed42b14f3abeefc56468af42deb2abc3d9eddf2c465b875b2f0ec3ce3f6
   postgresql:

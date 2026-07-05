@@ -70,6 +70,15 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ['ALL']
+          # Base stateful de REDCap (audit code-first 2026-07-05) : sans plafond, un OOM
+          # de MariaDB = perte de REDCap alors que le frontend est borné. PAS de limits.cpu
+          # (CPU compressible, convention du dépôt).
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
           env:
             - name: MARIADB_ROOT_PASSWORD
               valueFrom:

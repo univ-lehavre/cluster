@@ -41,3 +41,26 @@ metricsScraper:
       limits:
         cpu: 250m
         memory: 400Mi
+
+# Conteneur d'auth du chart (login/token). Non borné par défaut → BestEffort.
+auth:
+  containers:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 100Mi
+      limits:
+        cpu: 250m
+        memory: 200Mi
+
+# Kong (subchart) : proxy du CHEMIN CRITIQUE — le NodePort route toute l'UI vers lui
+# et il termine le TLS (audit code-first 2026-07-05). Non borné par défaut → un OOM
+# de Kong ferait tomber l'UI entière alors qu'api/web/scraper (bornés) survivraient.
+# Paramétrage légitime du subchart (PAS une édition de bundle vendored).
+kong:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
