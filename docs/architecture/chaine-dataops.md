@@ -41,6 +41,13 @@ Dagster orchestre les runs ; leur état/event log est persisté dans **CNPG**
 que **Marquez** ingère (store dans la base `marquez` du même CNPG) et expose
 dans son UI. L'observabilité (Prometheus/Loki/Mailpit) est transverse.
 
+Ce document décrit **deux niveaux** : le **socle** DataOps (infra + briques
+plateforme, ci-dessous — la carte d'accès) et la **chaîne applicative réelle**
+qui tourne dessus (section
+[« Chaîne applicative (citation) »](#chaine-applicative-citation-progression-reelle)).
+La « source de données » abstraite du schéma est, en pratique, le snapshot
+public **OpenAlex** ingéré par la code-location `citation`.
+
 ## Briques d'infrastructure
 
 | Brique                                 | Rôle (ADR)                                                                                                                                         | Accès — navigateur / console                                                        | Actions vérifiables                                                                                           |
@@ -93,6 +100,78 @@ Le maillon qui prouve que tout est câblé est **Dagster → Marquez** : un run 
 > branchement) et le **29** exécute (run e2e → lineage + MLflow). ⚠️ Les env
 > (`MLFLOW_TRACKING_URI`, `OPENLINEAGE_*`) doivent être injectées dans les
 > **pods de run** via un tag `dagster-k8s/config` — voir la note du contrat.
+
+## Chaîne applicative (citation) — progression réelle {#chaine-applicative-citation-progression-reelle}
+
+Le socle ci-dessus est la **plomberie** ; la première chaîne _applicative_ qui
+la traverse réellement est **citation** (code-location atlas déployée par
+App-of-Apps, [ADR 0094/0095](../decisions/)). Cette section décrit la
+**progression réelle des données** — telle que **prouvée** sur prod dirqual le
+**2026-07-05**
+([passage d'audit](../audit/2026-07-05-transform-e2e-prouve-prod.md)) — et non
+un flux idéalisé. Elle distingue explicitement ce qui est **prouvé** de ce qui
+reste une **frontière** (doctrine à deux étages,
+[ADR 0104](../decisions/0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md)).
+
+### Le flux, étage par étage
+
+```text
+OpenAlex S3 (snapshot public, 482 partitions updated_date)
+   │  ingestion_job  ──  raw_snapshot (rclone, borné au banc / COMPLET en prod)
+   ▼
+raw/{works,authors,merged_ids}/           (Ceph RGW, bucket OBC citation-datalake-…)
+   │  transform_job (dbt-duckdb)
+   ▼
+staging (views) → curated_* (parquet external)   ← « mart 1 : tout OpenAlex »
+   │                    └─ curated_eunicoast_works ← « mart 2 : ≥1 auteur EUNICoast ∩ <N ans »
+   ▼                                    └─ curated_pair_uplift_labels (paires ≥2 co-pubs + baseline solo)
+marts_* (researchers, researchers_fts, author_profiles, collab_pairs)
+   │
+   ├─▶ researcher_embeddings  → marts/researcher_vectors (ONNX all-MiniLM-L6-v2, 384d)
+   ├─▶ pair_uplift_model      → prédictions/recos     ─┐  runs MLflow (experiments)
+   ├─▶ evidently_*_drift      → verdict S3 + MLflow    ─┤  + rapports Evidently
+   ├─▶ great_expectations     → checks + MLflow        ─┘
+   └─▶ index_load             → Postgres pgvector (table researchers : embedding+fts)
+```
+
+### Ce qui est PROUVÉ (run 6e9a3c32, `RUN_SUCCESS`, 2026-07-05)
+
+- **Ingestion** OpenAlex → `raw/` (Ceph RGW), watermark avancé,
+  `ge_raw_contract` PASS.
+- **dbt** (staging → curated → marts) sur le **vrai bucket OBC**
+  (`s3://citation-datalake-…/{raw,curated,marts}`), 0 test en échec.
+- **Embeddings** (`researcher_vectors_manifest`, `work_vectors_manifest`),
+  **uplift** (`pair_uplift_model` + run MLflow), **Evidently** drift (check
+  passé), **Great Expectations** (3 checks loggés MLflow).
+- **`index_load` → pgvector** : table `public.researchers` peuplée (**1152
+  lignes**, `embedding vector(384)` + `fts tsvector`), `ge_index_load` PASS.
+- **Lineage** Marquez + **runs MLflow** (egress `marquez.marquez:5000` /
+  `mlflow.mlflow:5000` opérationnels).
+
+### Frontières (à prouver / conditionnées aux données)
+
+- **Modèle uplift prédictif** : au 1er run, `served_mode=descriptive`
+  (`n_pairs_labeled=0`) — pas assez de **paires de collaboration** (≥2 co-pubs
+  EUNICoast + baseline solo antérieure des deux côtés) dans une tranche ingérée
+  petite. C'est une **condition de données**, pas un bug : le modèle bascule en
+  prédictif dès que le volume le permet (bootstrap OpenAlex complet en prod, la
+  polarité d'échantillonnage étant désormais **prod-complète par défaut**, le
+  banc bornant — cf. la révision d'ingestion et
+  [ADR 0104 §5](../decisions/0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md)).
+- **Drift Evidently réel** : exige **2 runs** au même `dt` (le 1er n'a pas de
+  baseline N-1). `passed=True, baseline absente` au 1er run est normal.
+
+### Le fil rouge — 5 bugs de config prod, tous dans l'écart banc/prod
+
+Cette chaîne **n'avait jamais tourné E2E** avant le 2026-07-05. Elle a été
+débloquée couche par couche par une série de bugs qui **passaient tous le lint
+ET le run banc au vert** mais ne se révélaient que sur prod (seed prod I/O ·
+chemin OpenAlex `data/jsonl` · quota OBC Ceph · bucket dbt non dérivé de
+`BUCKET_NAME` · orphelins `author_id` d'entité OpenAlex). C'est l'illustration
+fondatrice de la **doctrine à deux étages** : le banc prouve la **logique**, la
+prod prouve l'**intégration externe**
+([ADR 0104](../decisions/0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md),
+[passage doctrine](../audit/2026-07-05-banc-lima-vaut-il-le-coup.md)).
 
 ## Voir aussi
 
