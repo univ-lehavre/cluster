@@ -43,10 +43,9 @@ dans son UI. L'observabilité (Prometheus/Loki/Mailpit) est transverse.
 
 Ce document décrit **deux niveaux** : le **socle** DataOps (infra + briques
 plateforme, ci-dessous — la carte d'accès) et la **chaîne applicative réelle**
-qui tourne dessus (section
-[« Chaîne applicative (citation) »](#chaine-applicative-citation-progression-reelle)).
-La « source de données » abstraite du schéma est, en pratique, le snapshot
-public **OpenAlex** ingéré par la code-location `citation`.
+qui tourne dessus (section « Chaîne applicative (citation) » plus bas). La «
+source de données » abstraite du schéma est, en pratique, le snapshot public
+**OpenAlex** ingéré par la code-location `citation`.
 
 ## Briques d'infrastructure
 
@@ -101,7 +100,7 @@ Le maillon qui prouve que tout est câblé est **Dagster → Marquez** : un run 
 > (`MLFLOW_TRACKING_URI`, `OPENLINEAGE_*`) doivent être injectées dans les
 > **pods de run** via un tag `dagster-k8s/config` — voir la note du contrat.
 
-## Chaîne applicative (citation) — progression réelle {#chaine-applicative-citation-progression-reelle}
+## Chaîne applicative (citation) — progression réelle
 
 Le socle ci-dessus est la **plomberie** ; la première chaîne _applicative_ qui
 la traverse réellement est **citation** (code-location atlas déployée par
