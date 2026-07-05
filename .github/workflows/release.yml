@@ -2,10 +2,15 @@ name: Release
 
 # Cadence : UNE release par jour, la nuit — au lieu d'une release par merge sur
 # main (qui produisait plusieurs versions/jour, bruyantes). release-please ne
-# tourne donc plus sur `push` mais sur un cron : il crée SA PR de release
-# (cumulant tous les commits de la journée) ET l'auto-merge dans le même run →
-# une seule version/jour. `workflow_dispatch` garde la possibilité de forcer une
-# release à la demande.
+# tourne donc plus sur `push` mais sur un cron.
+#
+# CYCLE COMPLET EN UN SEUL RUN (ADR 0093, parité atlas) : release-please est
+# idempotent → PASSE 1 ouvre la PR de version (CHANGELOG.md + package.json +
+# CITATION.cff), on l'auto-merge et on ATTEND son merge, PASSE 2 rejoue
+# release-please qui TAGUE `vX.Y.Z` + crée la GitHub Release. Tag, CHANGELOG et
+# publication sortent donc la NUIT MÊME (avant : le tag attendait le cron du
+# lendemain). La Release publiée déclenche ensuite `sign-release` (signature des
+# assets). `workflow_dispatch` force une release à la demande.
 #
 # Cron en UTC (Actions n'a pas de fuseau) : 01:00 UTC = 03:00 Europe/Paris en
 # heure d'été (CEST), 02:00 en heure d'hiver (CET). L'écart d'1 h l'hiver est
@@ -113,14 +118,44 @@ jobs:
             git push --quiet origin "HEAD:${BRANCH}"
           fi
 
-      - name: Enable auto-merge on the release PR
+      # CYCLE COMPLET EN UN SEUL RUN (ADR 0093, parité atlas). release-please est
+      # idempotent : la PASSE 1 (ci-dessus) ouvre la PR de version ; ici on l'auto-merge
+      # PUIS on ATTEND son merge effectif (l'auto-merge est asynchrone : il patiente le
+      # vert des checks requis, ~3-5 min) ; enfin la PASSE 2 rejoue release-please — le
+      # commit de version étant désormais sur `main` — qui TAGUE `vX.Y.Z` + crée la GitHub
+      # Release. Sans l'attente, la passe 2 tournerait avant le merge et ne taguerait rien
+      # (ancien comportement : le tag sortait au cron du LENDEMAIN — le décalage supprimé).
+      # La publication de la Release déclenche ensuite `sign-release` (on: release published).
+      - name: Auto-merge et attente du merge de la PR de release
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
+          set -euo pipefail
           PR_NUMBER=$(echo "$RELEASE_PR" | jq -r '.number')
+          echo "PR de release : #${PR_NUMBER}"
           gh pr merge "$PR_NUMBER" --auto --merge --repo "$GITHUB_REPOSITORY"
+          # Poll jusqu'au MERGED (timeout ~20 min : marge au-dessus de la CI requise).
+          for i in $(seq 1 80); do
+            state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
+            echo "  [$i/80] PR #${PR_NUMBER} → ${state}"
+            if [ "$state" = "MERGED" ]; then echo "✅ PR de release mergée." && break; fi
+            if [ "$state" = "CLOSED" ]; then echo "::error::PR #${PR_NUMBER} fermée sans merge." && exit 1; fi
+            if [ "$i" = "80" ]; then echo "::error::Timeout : PR #${PR_NUMBER} non mergée à temps." && exit 1; fi
+            sleep 15
+          done
+
+      # --- Passe 2 : le commit de version est sur `main` ; release-please pose le tag
+      # `vX.Y.Z` et crée la GitHub Release DANS CE MÊME RUN. No-op si la passe 1 n'avait
+      # rien à releaser (garde sur `prs_created`).
+      - name: Release Please — tag + GitHub Release (passe 2)
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   # Signe les assets de release (ADR 0088, scorecard Signed-Releases). Déclenché
   # à la PUBLICATION de la release : crée une archive source `.tar.gz`, la signe
