@@ -1151,3 +1151,39 @@ drifts:
       `vm_memory_default` porté à 12 GiO (run-phases.sh), indépendant de
       WITH_CEPH (les deux backends en ont besoin). Commit ad08529.
     statut: corrige
+
+  - id: L73
+    campagne: 'incident prod dirqual1 — gel du control-plane (inotify, 2026-07-05)'
+    portee: livrable
+    symptome: >-
+      dirqual1 (control-plane UNIQUE) devient non-réactif : l'apiserver et sshd
+      stallent, le nœud répond au ping mais gèle tout le userspace → le cluster
+      entier est figé jusqu'au reboot manuel. Le lint ne voyait rien ; seul le
+      fonctionnement réel a révélé l'écart (198 erreurs « too many open files »
+      accumulées depuis le 22 juin). Mes deux premières hypothèses (I/O du
+      bootstrap, OOM mlflow) étaient FAUSSES — réfutées par les logs kernel
+      (audit docs/audit/2026-07-05-incident-inotify-et-risques-ha-a-chaud.md §1).
+    cause: >-
+      `fs.inotify.max_user_instances = 128` — le DÉFAUT Linux, jamais relevé
+      (aucun tuning inotify dans bootstrap/). containerd, buildkitd, kubelet et
+      l'apiserver ouvrent chacun des instances inotify ; sous saturation ils
+      échouent en `failed to create inotify fd: too many open files`. À l'épuisement,
+      containerd ne crée plus d'inotify fd → `context deadline exceeded`,
+      `ttrpc inactive stream` → il ne gère plus les conteneurs → apiserver et sshd
+      (sous ce containerd) deviennent injoignables. Défaut UNIVERSEL : tout nœud
+      k8s monté par ce code en héritait (d'où la portée livrable). La HA du
+      control-plane n'aurait PAS empêché l'incident (bug node), seulement masqué
+      le symptôme en important un risque pire (audit §3, verdict « attendre le
+      rebuild »).
+    correctif: >-
+      Relever `fs.inotify.max_user_instances` 128 → 8192 (+ `max_user_watches`
+      figé à 1048576 pour la reproductibilité, ADR 0052) en sysctl node-level
+      dans `bootstrap/roles/k8s-CRI-install/tasks/main.yaml` (à côté du tuning
+      ip_forward), persistant aux reboots, sur les 4 nœuds ; + une assertion de
+      vérif (`sysctl --values fs.inotify.max_user_instances >= 8192`) calquée sur
+      celle d'ip_forward — un run échoue bruyamment si la valeur retombe. Audit
+      #586, fix #587. PROUVÉ sur prod (2026-07-05) : `nestor ansible cri.yaml`
+      failed=0 sur les 4 nœuds, `max_user_instances=8192` vérifié runtime + persisté
+      dans /etc/sysctl.d/k8s.conf, cluster resté sain (Ceph HEALTH_OK, 4 nœuds
+      Ready) après le restart containerd induit.
+    statut: corrige
