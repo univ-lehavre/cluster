@@ -11,6 +11,40 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.51.0](https://github.com/univ-lehavre/cluster/compare/v2.50.0...v2.51.0) (2026-07-05)
+
+
+### Features
+
+* **eventful:** rend la chaîne événementielle déployable sur dirqual (overlay prod + seed prod multi-CL) ([9309ff9](https://github.com/univ-lehavre/cluster/commit/9309ff9046629a8a43462e417c9b59c34d74f04b))
+* **nestor:** câble le seed prod app-of-apps multi-code-location (ADR 0095 §1.b) ([bea1d8e](https://github.com/univ-lehavre/cluster/commit/bea1d8e35988db78f4a019398b74ddcda89f001b))
+* **portal:** dérive PORTAL_ACCESS_HOST du bloc portal.access_host de la topo ([e687c9c](https://github.com/univ-lehavre/cluster/commit/e687c9c24b22914e64232aa79e1b95436ba5617e))
+* **portal:** dérive PORTAL_ACCESS_HOST du bloc portal.access_host de la topo ([7636351](https://github.com/univ-lehavre/cluster/commit/763635119cdb8cab1cb5638f6e3ebf0832e6944d))
+
+
+### Bug Fixes
+
+* **citation:** installe rsync node-side avant le synchronize du projet dbt ([cf23701](https://github.com/univ-lehavre/cluster/commit/cf237014c3944db0f0ea90e316337a44198172d7))
+* **cnpg:** egress RGW manquant (cause racine) + headroom WAL 500Gi + rétention 30d ([9a96b85](https://github.com/univ-lehavre/cluster/commit/9a96b8565bab7c31560c55a979d64266478b86f2))
+* **eventful:** 2 blocages du déploiement prod dirqual (rsync build + nodeAffinity builder) ([45f84de](https://github.com/univ-lehavre/cluster/commit/45f84de20d5b8c38079992c27f2e1ef005f09473))
+* **eventful:** builder sur worker via nodeAffinity DoesNotExist (pas nodeSelector) ([972c54e](https://github.com/univ-lehavre/cluster/commit/972c54e3f0e30d0dd1fbf109444643e57bf5a155))
+* **eventful:** dérive l'overlay du write-back selon le target_kind (bench/prod) ([0cd490a](https://github.com/univ-lehavre/cluster/commit/0cd490a0539fc2b1f2427d300f38675c2d8c7d8d))
+* **nestor:** seed push-atlas-tree — `checkout -B` au lieu de `branch -f` ([ab15767](https://github.com/univ-lehavre/cluster/commit/ab157673b19e0f3a48d9e0cf6b0bccbbda2657b6))
+* **nestor:** seed push-atlas-tree — checkout -B au lieu de branch -f ([60cf7d9](https://github.com/univ-lehavre/cluster/commit/60cf7d967b37cce96384e383536b2d4a33483f81))
+* **nestor:** seed push-atlas-tree — commite la substitution + targetRevision suit main ([5c1d112](https://github.com/univ-lehavre/cluster/commit/5c1d112114fd76a93bbf9d85a2685aeb8821ac09))
+* **platform:** relève les limites mémoire OOM du socle ([0befd75](https://github.com/univ-lehavre/cluster/commit/0befd7510c0b145f0dd2f56f2a3bbe68fdbcc2b3))
+* **platform:** relève les limites mémoire OOM du socle ([0b2da66](https://github.com/univ-lehavre/cluster/commit/0b2da66474ab14676a942b14ad41e0d73bce38b8))
+* **portal:** host des liens configurable via PORTAL_ACCESS_HOST ([1e23083](https://github.com/univ-lehavre/cluster/commit/1e23083d4b56130632dfff273791e619d538cd11))
+* **portal:** host des liens configurable via PORTAL_ACCESS_HOST ([dde263b](https://github.com/univ-lehavre/cluster/commit/dde263ba0d877c7d9a4fe11503e353ce00b75b8b))
+
+
+### Documentation
+
+* **citation:** renseigne l'ORCID de l'auteur ([e985089](https://github.com/univ-lehavre/cluster/commit/e985089e7f811ac549d0edc4b06b761f5d64a7cb))
+* **citation:** renseigne l'ORCID de l'auteur ([58f6a6b](https://github.com/univ-lehavre/cluster/commit/58f6a6bde7bd32789394361841a3f9ac88c54d22))
+* **citation:** synchronise la version de CITATION.cff via release-please ([cd192c4](https://github.com/univ-lehavre/cluster/commit/cd192c4eb760850bc47aa275355d816c5a816abd))
+* **citation:** synchronise version CITATION.cff via release-please ([39d3c8a](https://github.com/univ-lehavre/cluster/commit/39d3c8a0a9499278311de673712934d4e90a7d5c))
+
 ## [2.50.0](https://github.com/univ-lehavre/cluster/compare/v2.49.0...v2.50.0) (2026-07-04)
 
 
