@@ -1180,6 +1180,42 @@ def _discover_gateways_present() -> bool:
     return out is not None and out.returncode == 0 and bool(out.stdout.strip())
 
 
+def _discover_deployed_cl_digests() -> dict[str, str]:
+    """Digest de l'image RÉELLEMENT déployée par code-location (ns dagster) → {name: sha256:…}.
+
+    Sonde les Deployments applicatifs atlas (label `app.kubernetes.io/part-of=atlas`, posé par
+    l'overlay ADR 0095) : chacun se nomme `<code-location>-dagster` (ex. `citation-dagster`).
+    On dérive le nom de code-location en retirant le suffixe `-dagster` (pour matcher les
+    `atlas.code_locations[].name` de la topo) et on extrait le digest (`@sha256:…`) de l'image
+    du 1er conteneur. Sert au garde-fou de DRIFT DE DIGEST de `preview` (ADR 0046/0095 : un
+    build manuel node-side peut laisser le manifeste sur un ancien digest, silencieusement).
+    Read-only ; `{}` si le cluster ne répond pas ou aucune code-location déployée (pas de bruit)."""
+    out = _kubectl(
+        "get",
+        "deploy",
+        "-n",
+        "dagster",
+        "-l",
+        "app.kubernetes.io/part-of=atlas",
+        "-o",
+        'jsonpath={range .items[*]}{.metadata.labels.app\\.kubernetes\\.io/name}{" "}'
+        '{.spec.template.spec.containers[0].image}{"\\n"}{end}',
+    )
+    if out is None or out.returncode != 0:
+        return {}
+    digests: dict[str, str] = {}
+    for line in out.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        deploy_name, image = parts
+        name = deploy_name.removesuffix("-dagster")
+        _, sep, digest = image.partition("@")
+        if sep and digest.startswith("sha256:"):
+            digests[name] = digest
+    return digests
+
+
 def _confirm_destroy(vms: list[str], *, assume_yes: bool) -> bool:
     """Confirme la DESTRUCTION des VMs `vms`. --yes saute ; hors TTY sans --yes : refus.
 
@@ -2682,6 +2718,25 @@ def cmd_preview(args: argparse.Namespace) -> int:
                 f"backend RÉEL `{backend_reel}` ≠ déclaré "
                 f"`{topo.storage.get('backend', 'local-path')}` — résidu d'un backend non "
                 "défait (ADR 0046 : corriger en code/détruire l'ancien, pas entériner)."
+            )
+
+        # Drift de DIGEST (ADR 0046/0095) : le digest DÉCLARÉ (topo `atlas.code_locations`)
+        # peut CONTREDIRE le digest RÉELLEMENT déployé — cas d'un build manuel node-side qui
+        # écrit le nouveau digest dans la topo sans re-seeder (le signal de couche
+        # `gitops-seed-citation` = présence d'Application, aveugle au digest, tient le
+        # déploiement « à-jour »). Le manifeste reste alors sur l'ancien digest en silence.
+        # On rend la divergence VISIBLE (le flux garanti reste git-push→eventful→write-back).
+        declared_digests = {
+            (cl or {}).get("name", ""): (cl or {}).get("image_digest", "")
+            for cl in topo.atlas.get("code_locations", []) or []
+        }
+        for name, declared, deployed in _discover.classify_digest_drift(
+            declared_digests, _discover_deployed_cl_digests()
+        ):
+            _warn(
+                f"code-location `{name}` : digest DÉPLOYÉ `{deployed}` ≠ déclaré "
+                f"`{declared}` — build manuel non propagé au manifeste (re-seed requis : le "
+                "seed prod substitue le digest de la topo dans cluster/apps ; ADR 0046/0095)."
             )
 
     # ── PLAN : la séquence de couches à monter ───────────────────────────────────
