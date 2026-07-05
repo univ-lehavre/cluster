@@ -189,6 +189,35 @@ def classify_backend_drift(
     return None
 
 
+def classify_digest_drift(
+    declared_digests: dict[str, str], deployed_digests: dict[str, str]
+) -> list[tuple[str, str, str]]:
+    """Code-locations dont le digest DÉPLOYÉ contredit le digest DÉCLARÉ (PUR, ADR 0046/0095).
+
+    Le seed (`_seed_do_prod`) substitue le digest de la topo dans l'overlay poussé vers
+    Gitea `cluster/apps` → Argo déploie. Mais un BUILD MANUEL node-side (`nestor next` sur
+    la couche image) écrit le nouveau digest dans la TOPO sans re-seeder — et le signal de
+    couche `gitops-seed-citation` (présence de l'Application, pas le digest) tient le
+    déploiement « à-jour ». Le manifeste garde alors l'ANCIEN digest silencieusement.
+    Ce comparateur rend la divergence VISIBLE (la façade `preview` AVERTIT).
+
+    `declared_digests` : {code-location: digest} de la topo (`atlas.code_locations[].image_digest`),
+    filtré aux entrées qui EN portent un (None/absent = rien à comparer, ex. mediawatch overlay).
+    `deployed_digests` : {code-location: digest} lu du cluster (image du Deployment).
+
+    Renvoie la liste `(name, declared, deployed)` des divergences — vide si tout concorde
+    (ou si un côté manque : on ne signale QUE deux digests présents qui DIFFÈRENT, pas une
+    absence). Read-only ; PUR (aucune I/O) → testable sans cluster."""
+    drifts: list[tuple[str, str, str]] = []
+    for name, declared in declared_digests.items():
+        if not declared:
+            continue
+        deployed = deployed_digests.get(name)
+        if deployed and deployed != declared:
+            drifts.append((name, declared, deployed))
+    return drifts
+
+
 def detect_exposition(*, gateways_present: bool, crd_groups: list[str]) -> str:
     """Mode d'exposition constaté (PUR, ADR 0074 §1, aligné ADR 0020 « gateway unique »).
 

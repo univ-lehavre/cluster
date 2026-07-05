@@ -20,6 +20,7 @@ from nestor.discover import (  # noqa: E402
     assemble,
     build_topology,
     classify_backend_drift,
+    classify_digest_drift,
     classify_health,
     classify_namespaces,
     detect_backend,
@@ -133,6 +134,46 @@ class ClassifyBackendDrift(unittest.TestCase):
                 "local-path", ["rancher.io/local-path", "rook-ceph.rbd.csi.ceph.com"]
             ),
             "ceph",
+        )
+
+
+class ClassifyDigestDrift(unittest.TestCase):
+    """ADR 0046/0095 : signaler un digest DÉPLOYÉ qui contredit le digest DÉCLARÉ (topo).
+
+    Cas vécu : build manuel node-side → nouveau digest dans la topo, mais le seed n'est pas
+    rejoué (signal de couche aveugle au digest) → le manifeste garde l'ancien silencieusement.
+    """
+
+    _NEW = "sha256:6d66d38a"
+    _OLD = "sha256:d952ba2d"
+
+    def test_declared_differs_from_deployed_is_drift(self):
+        # Le cas vécu : topo bumpée par un build manuel, manifeste resté sur l'ancien.
+        self.assertEqual(
+            classify_digest_drift({"citation": self._NEW}, {"citation": self._OLD}),
+            [("citation", self._NEW, self._OLD)],
+        )
+
+    def test_declared_matches_deployed_no_drift(self):
+        self.assertEqual(
+            classify_digest_drift({"citation": self._NEW}, {"citation": self._NEW}), []
+        )
+
+    def test_declared_without_digest_is_skipped(self):
+        # mediawatch en overlay (tag mutable) : image_digest vide/None → rien à comparer.
+        self.assertEqual(classify_digest_drift({"mediawatch": ""}, {"mediawatch": self._OLD}), [])
+        self.assertEqual(classify_digest_drift({"mediawatch": None}, {}), [])  # type: ignore[dict-item]
+
+    def test_deployed_absent_no_drift(self):
+        # Cluster injoignable / code-location pas encore déployée → pas de drift affirmable.
+        self.assertEqual(classify_digest_drift({"citation": self._NEW}, {}), [])
+
+    def test_multiple_code_locations_reports_only_diverging(self):
+        declared = {"citation": self._NEW, "mediawatch": "sha256:aaaa"}
+        deployed = {"citation": self._OLD, "mediawatch": "sha256:aaaa"}
+        self.assertEqual(
+            classify_digest_drift(declared, deployed),
+            [("citation", self._NEW, self._OLD)],
         )
 
 
