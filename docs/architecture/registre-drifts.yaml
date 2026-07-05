@@ -1187,3 +1187,69 @@ drifts:
       dans /etc/sysctl.d/k8s.conf, cluster resté sain (Ceph HEALTH_OK, 4 nœuds
       Ready) après le restart containerd induit.
     statut: corrige
+
+  - id: L74
+    campagne: 'aval citation — 1er ge_raw_contract sur datalake COMPLET (prod, 2026-07-05)'
+    portee: livrable
+    symptome: >-
+      Après une ingestion COMPLÈTE réussie (raw_snapshot STEP_SUCCESS en 3h34m,
+      691 GiB / 261k objets vérifiés dans le pool datalake), le contrat qualité
+      ge_raw_contract échoue en DuckDB « Could not resolve hostname » sur un HTTP HEAD
+      vers l'endpoint RGW rook-ceph-rgw-datalake.rook-ceph:80 (fichier part_0949.gz) —
+      alors que rclone venait de résoudre LE MÊME endpoint 3h34m sans erreur. Invisible
+      au lint et au banc (SeaweedFS host seaweedfs, sans domaine → pas de search-list).
+      Ne se déclenche qu'au VOLUME (datalake complet), pas sur l'échantillon →
+      raffinement de L58 (qui couvrait « ne résout pas du tout » ; ici « résout, mais
+      sature sous charge »).
+    cause: >-
+      Amplification `ndots:5` × HEAD-par-fichier. Le fix #550 (L58) a raccourci
+      l'endpoint DuckDB au nom court ns-qualifié `rook-ceph-rgw-datalake.rook-ceph`
+      (1 point < ndots:5) → glibc `getaddrinfo` le traite comme RELATIF et parcourt
+      TOUTE la search-list (dont les domaines EXTERNES du resolv.conf,
+      `tahr-boga.ts.net`/`dix.univ-lehavre.fr`) AVANT la forme absolue = 5-6 lookups
+      par résolution. Or `ge_raw_contract` (DuckDB httpfs = cpp-httplib →
+      `getaddrinfo` glibc, PAS c-ares — vérifié à la source) fait un HTTP HEAD PAR
+      FICHIER sur des milliers de `part_*.gz`, chacun ouvrant un client neuf → un
+      `getaddrinfo` neuf. L'ampli ×5-6 sature le DNS → `EAI_AGAIN` transitoires
+      (« Could not resolve hostname »), intermittents (l'erreur tombe sur part_0949,
+      loin dans le glob). rclone RÉUTILISE ses connexions (keep-alive) → peu de
+      lookups → n'était pas touché (d'où le succès de l'ingestion sur le même nom).
+      Diagnostic : workflow adversarial (4 hypothèses + synthèse, source primaire
+      cpp-httplib). Mes tests DuckDB glob sur le pod de prod l'ont OOM-killé 2× —
+      arrêtés ; le comptage réel via `ceph df` (261k objets) a démenti le
+      `list_objects_v2` boto (2446, tronqué par l'index RGW — cf. L75).
+    correctif: >-
+      Poser `dnsConfig ndots:1` sur les pods de RUN Dagster (ingestion ET transform), via
+      `pod_spec_config` du tag `dagster-k8s/config` (constante `_DNS_NDOTS_1`
+      partagée, `definitions.py`) — le K8sRunLauncher ne porte pas le pod-spec des
+      runs, il vient de là. Tout nom ≥ 1 point est tenté en ABSOLU d'abord → 1 seul
+      lookup, aucune search-list ; bénéficie à TOUS les accès DNS du pod (DuckDB, S3,
+      Postgres). Préféré au FQDN-absolu trailing-dot (pas de risque signature S3 v4,
+      couverture plus large). atlas#551 (3 tests, 42 verts). À RE-PROUVER par un run
+      ge_raw_contract VERT en prod après rebuild + re-seed (ADR 0052).
+    statut: en-cours
+
+  - id: L75
+    campagne: 'aval citation — diagnostic ge_raw_contract (prod, 2026-07-05)'
+    portee: harnais
+    symptome: >-
+      Pendant le diagnostic de L74, `boto3 list_objects_v2` sur le bucket datalake
+      renvoyait ~2446 objets pour `raw/works/` (identique à l'échantillon d'avant) —
+      laissant croire que l'ingestion complète de 3h34m N'AVAIT RIEN produit. Piège
+      de diagnostic : le sous-comptage aurait pu faire conclure à tort « ingestion
+      ratée » et relancer inutilement (ou chercher un faux bug), alors que les
+      données étaient bien là.
+    cause: >-
+      Index bucket RGW incohérent après une écriture massive (261k objets) : le
+      listing S3 (`list_objects_v2`, qui lit l'index) SOUS-COMPTE, tandis que les
+      données réelles sont intactes dans le pool. Même famille que l'artefact
+      d'index déjà vu (radosgw-admin bucket stats renvoyant vide/2002). Le lint ne
+      voit rien ; seul le croisement de deux sondes au run révèle l'écart.
+    correctif: >-
+      Ne PAS faire confiance au `list_objects_v2` / `radosgw-admin bucket stats`
+      pour juger le volume réel après une grosse ingestion : croiser avec
+      `ceph df` (pool `datalake.rgw.buckets.data` : STORED + OBJECTS) qui, lui, ne
+      ment pas (691 GiB / 261k objets confirmés). Règle de méthode consignée (le
+      réel = le pool, pas l'index). Pas de fix CODE : c'est une garde de diagnostic
+      (le harnais de sonde doit préférer ceph df au list pour le volume).
+    statut: corrige
