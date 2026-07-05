@@ -82,6 +82,37 @@ jobs:
       # `if:` ne joue (erreur « The template is not valid … Error reading JToken »
       # observée sur le run du 2026-05-31). On lit donc le numéro de PR dans le
       # `run:` via `outputs.pr` passé en variable (vide = inoffensif là).
+      # release-please (extra-files générique) ne synchronise que le `version:` de
+      # CITATION.cff (marqueur x-release-please-version), PAS `date-released` — qui
+      # restait donc figé. On l'estampille ICI, dans la PR de release elle-même
+      # (avant l'auto-merge), à la date du jour : le champ suit la date de release
+      # (≈ date de fusion de la PR) et voyage dans le MÊME commit série que le bump
+      # de version, sans push séparé sur `main`. `docs:`/`chore:` ne rebumpent pas.
+      # Checkout de la BRANCHE de la PR de release (le PAT autorise le push retour).
+      # release-please-action ne clone rien ; il faut ce checkout pour estampiller.
+      - name: Checkout de la branche de release
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      - name: Estampiller date-released dans la PR de release (CITATION.cff)
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          BRANCH=$(echo "$RELEASE_PR" | jq -r '.headBranchName')
+          TODAY=$(date -u +%Y-%m-%d)
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Remplace la valeur de `date-released:` (quel que soit son format actuel).
+          sed -i -E "s/^date-released:.*/date-released: '${TODAY}'/" CITATION.cff
+          if ! git diff --quiet CITATION.cff; then
+            git add CITATION.cff
+            git commit --quiet -m "chore: estampille date-released ${TODAY} (release-please)"
+            git push --quiet origin "HEAD:${BRANCH}"
+          fi
+
       - name: Enable auto-merge on the release PR
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
@@ -129,8 +160,14 @@ jobs:
           # Le générateur SLSA attend les hashes en base64 (sortie de sha256sum).
           echo "hashes=$(sha256sum "$ARCHIVE" | base64 -w0)" >>"$GITHUB_OUTPUT"
 
+      # Les drapeaux `--output-signature` / `--output-certificate` (couple .sig/.pem,
+      # contrat de vérification) sont RETIRÉS en cosign v4 au profit d'un bundle
+      # `.sigstore.json` unique → un `cosign-installer@v4` fait échouer `sign-blob`
+      # (« create bundle file: open : no such file or directory ») et le job release
+      # tombait à CHAQUE release. On épingle v3.x tant que la vérification reste sur
+      # le couple .sig/.pem (même pin qu'atlas #547 / ADR 0093).
       - name: Installer cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
       - name: Signer l'archive (cosign keyless)
         env:
