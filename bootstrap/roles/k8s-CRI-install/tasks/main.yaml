@@ -19,12 +19,21 @@
         - br_netfilter
       changed_when: false
 
+    # fs.inotify.max_user_instances relève le défaut Linux (128), trop bas pour un
+    # nœud k8s : containerd/buildkitd/kubelet/apiserver ouvrent chacun des instances
+    # inotify ; sous saturation ils échouent en `too many open files` → containerd
+    # ne crée plus d'inotify fd, l'apiserver et sshd (sous ce containerd) stallent,
+    # le nœud répond au ping mais gèle userspace (incident dirqual1 2026-07-05,
+    # docs/audit/2026-07-05-incident-inotify-et-risques-ha-a-chaud.md). max_user_watches
+    # est déjà à 1048576 par défaut mais on le fige pour la reproductibilité (ADR 0052).
     - name: Persist kernel parameters required by Kubernetes
       ansible.builtin.copy:
         content: |
           net.ipv4.ip_forward = 1
           net.bridge.bridge-nf-call-iptables = 1
           net.bridge.bridge-nf-call-ip6tables = 1
+          fs.inotify.max_user_instances = 8192
+          fs.inotify.max_user_watches = 1048576
         dest: /etc/sysctl.d/k8s.conf
         mode: '0644'
 
@@ -41,6 +50,19 @@
       ansible.builtin.assert:
         that: output_ipv4_forward.stdout == '1'
         fail_msg: IPv4 forwarding is not enabled on {{ ansible_facts.hostname }}.
+
+    - name: Gather the inotify user-instance limit
+      ansible.builtin.command: sysctl --values fs.inotify.max_user_instances
+      register: output_inotify_instances
+      changed_when: false
+
+    - name: The inotify user-instance limit is raised above the Linux default
+      ansible.builtin.assert:
+        that: output_inotify_instances.stdout | int >= 8192
+        fail_msg: >-
+          fs.inotify.max_user_instances is {{ output_inotify_instances.stdout }}
+          on {{ ansible_facts.hostname }} (expected >= 8192) — the 128 default
+          starves containerd/apiserver and freezes the node (incident 2026-07-05).
 
     - name: Install APT dependencies
       ansible.builtin.apt:
