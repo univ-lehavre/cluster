@@ -2078,7 +2078,10 @@ spec:
               port: grafana
           resources:
             limits:
-              memory: 256Mi
+              # 256Mi → 512Mi : aligne le manifeste sur values.bench.yaml (conteneur à
+              # ~130 % de 256Mi → OOM, audit 2026-07-04 / plan right-sizing). Cf. la note
+              # du CR Prometheus ci-dessous : patch chirurgical, pas re-render du bundle.
+              memory: 512Mi
             requests:
               cpu: 50m
               memory: 128Mi
@@ -2582,7 +2585,13 @@ spec:
   enableAdminAPI: false
   resources:
     limits:
-      memory: 1Gi
+      # 1Gi → 3Gi : aligne le manifeste rendu sur la décision des values.bench.yaml
+      # (Prometheus était à 97 % de 1Gi → OOM imminent, plan right-sizing / audit
+      # 2026-07-04). Ansible applique CE manifeste tel quel (pas de re-render Helm),
+      # donc la valeur DÉCIDÉE dans les values doit y être matérialisée. Patch
+      # chirurgical (2 valeurs) plutôt qu'une régénération du bundle de 92 Ko + 9
+      # digests d'index ré-injectés à la main (risque disproportionné).
+      memory: 3Gi
     requests:
       cpu: 100m
       memory: 512Mi
