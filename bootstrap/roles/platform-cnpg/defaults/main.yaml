@@ -14,6 +14,17 @@ cnpg_operator_namespace: cnpg-system
 # JAMAIS EC 2+1 pour ce stateful) ; banc léger surcharge en local-path.
 cnpg_storage_class: rook-ceph-block-replicated
 
+# requests/limits par instance pg (audit code-first 2026-07-05, plan right-sizing).
+# Défaut = valeurs PROD (identiques à cluster.yaml, ADR 0033). Le banc léger mono-nœud
+# (~12 GiB) peut alléger via group_vars (ADR 0023) — 3 instances × limits.memory doit
+# rester une fraction raisonnable du nœud. PAS de limits.cpu (CPU compressible, convention).
+cnpg_resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
 # Backing S3 des sauvegardes Barman : 'rgw' (prod) ou 'seaweedfs' (banc léger).
 cnpg_s3_backing: rgw
 

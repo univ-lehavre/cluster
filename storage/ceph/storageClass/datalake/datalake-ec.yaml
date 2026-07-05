@@ -22,3 +22,13 @@ spec:
   gateway:
     port: 80
     instances: 3
+    # RGW = chemin S3 des backups Barman/CNPG et de Loki (audit code-first 2026-07-05).
+    # Non borné, Rook n'applique aucun défaut → sous charge multipart/gros objets un RGW
+    # gonfle et se fait OOM-kill. requests = plancher de scheduling ; limits.memory = marge.
+    # PAS de limits.cpu (CPU compressible, convention du dépôt).
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 2Gi

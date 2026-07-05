@@ -65,24 +65,23 @@ Le passage code-first a trouvé des workloads **sans resources codées** que le
 runtime n'a pas listés (pas encore actifs). Ordre par gravité réelle sur
 `dirqual` ; chaque item repart dans un fichier versionné + preuve `kubectl top`.
 
-- [ ] **`pg-1/2/3` (CNPG) — aucun `spec.resources`**
-      (`platform/cloudnative-pg/cluster.yaml`). **Priorité #1** : stateful
-      applicatif le plus lourd, HA 3 instances, sans plafond mémoire, sur un
-      cluster déjà dégradé une fois par un incident WAL/disque (PR #568). Poser
-      `requests` + `limits.memory` **dérivés par topologie** (bench vs prod),
-      comme `storageClass` l'est déjà.
+- [x] **`pg-1/2/3` (CNPG)** — posé `spec.resources` (req 250m/512Mi, lim mem
+      2Gi) dans `platform/cloudnative-pg/cluster.yaml`, **dérivé par topologie**
+      via `cnpg_resources` (defaults + `combine` du rôle `platform-cnpg`, comme
+      `storageClass`). Repos observé ~280 MiB → marge pour les pics pgvector. À
+      **prouver par `kubectl top`** après re-apply du rôle sur prod.
 - [ ] **cert-manager (cainjector/controller)** — socle TLS (prérequis
       Barman/CNPG). Bundle vendored `platform/cert-manager/cert-manager.yaml` →
       **patch hors-bundle** (overlay/kustomize), pas édition du fichier figé.
-- [ ] **RGW Ceph** (`gateway.resources`,
+- [x] **RGW Ceph** (`gateway.resources` req 250m/512Mi lim mem 2Gi,
       `storage/ceph/storageClass/datalake/datalake-ec.yaml`) + **EventBus NATS**
-      (`containerTemplate.resources`, `platform/argo-events/eventbus-nats.yaml`
-      ; JetStream `max_memory_store: -1` non borné) — chemins
-      données/événements.
-- [ ] **Kong** (`kong.resources` dans `platform/k8s-dashboard/values.yaml`,
-      paramétrage chart légitime — chemin critique NodePort→UI) +
-      **`redcap-mariadb`** (`apps/redcap/mariadb.yaml`, base stateful de
-      REDCap).
+      (`containerTemplate.resources` req 100m/256Mi lim mem 1Gi,
+      `platform/argo-events/eventbus-nats.yaml`) — chemins données/événements.
+      La limite pod NATS borne de fait JetStream (`max_memory_store: -1`).
+- [x] **Kong + auth** (`kong.resources` / `auth` dans
+      `platform/k8s-dashboard/values.yaml`, paramétrage chart légitime — chemin
+      critique NodePort→UI) + **`redcap-mariadb`** (`apps/redcap/mariadb.yaml`
+      req 100m/256Mi lim mem 1Gi, base stateful de REDCap).
 - [ ] **Régénérer** `kube-prometheus-stack.yaml` depuis `values.bench.yaml` :
       les plafonds Prometheus 3Gi / Grafana 512Mi sont **décidés dans les
       values** mais le manifeste rendu appliqué porte encore les anciens
