@@ -18,7 +18,12 @@
 - name: Récupérer les snapshots etcd hors-nœud
   hosts: control
   become: true
-  gather_facts: false
+  # gather_facts requis : l'audit-log (pre_tasks) journalise `ansible_facts.user_id`
+  # → sans facts, il échoue « object of type 'dict' has no attribute 'user_id' » et le
+  # play meurt AVANT le fetch (bug qui rendait etcd-fetch injouable — le hors-nœud
+  # n'avait donc JAMAIS tourné, le SPOF etcd restait entier). Parité etcd-backup.yaml
+  # (qui garde le défaut true et fonctionne).
+  gather_facts: true
   vars:
     # Destination locale (sur le poste de contrôle), relative au dépôt.
     etcd_fetch_dest: '{{ playbook_dir }}/../etcd-snapshots'
