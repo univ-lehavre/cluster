@@ -46,6 +46,35 @@
         server_side_apply:
           field_manager: ansible-platform-cert-manager
 
+    # requests/limits par PATCH hors-bundle (audit code-first 2026-07-05) : le bundle
+    # vendored ne pose aucune resource → BestEffort. On les injecte SANS éditer le fichier
+    # figé (ADR 0006). Strategic merge sur le conteneur : son nom diffère du Deployment pour
+    # le controller (`cert-manager` → conteneur `cert-manager-controller`), d'où la map.
+    # Idempotent (re-jeu = no-op si déjà en place). resource_definition car le patch cible
+    # une clé (containers[name]) que `patch` par nom ne sait pas fusionner seul.
+    - name: Set cert-manager resources (patch hors-bundle)
+      kubernetes.core.k8s:
+        state: patched
+        kind: Deployment
+        namespace: '{{ cert_manager_namespace }}'
+        name: '{{ item.deploy }}'
+        definition:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: '{{ item.container }}'
+                    resources: '{{ cert_manager_resources[item.deploy] }}'
+      loop:
+        - deploy: cert-manager
+          container: cert-manager-controller
+        - deploy: cert-manager-cainjector
+          container: cert-manager-cainjector
+        - deploy: cert-manager-webhook
+          container: cert-manager-webhook
+      loop_control:
+        label: '{{ item.deploy }}'
+
     # Le webhook d'admission doit être Ready avant d'appliquer des ressources
     # cert-manager (Issuers) — sinon « failed calling webhook ».
     - name: Wait for cert-manager webhook to be Ready

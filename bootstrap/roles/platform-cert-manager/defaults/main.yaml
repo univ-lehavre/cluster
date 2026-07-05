@@ -20,3 +20,30 @@ gateway_api_crd_tmp: /tmp/gateway-api-crds
 # Issuers (un apply trop tôt échoue sur le webhook d'admission).
 cert_manager_ready_retries: 30
 cert_manager_ready_delay: 5
+
+# requests/limits des 3 Deployments cert-manager (audit code-first 2026-07-05).
+# Le bundle vendored (cert-manager.yaml) ne pose AUCUNE resource → BestEffort ; on
+# les injecte par PATCH strategic APRÈS l'apply (jamais en éditant le fichier figé,
+# ADR 0006/0023). Dimensionné sur le repos observé en prod (cainjector ~136 MiB —
+# cache cluster-wide croissant, le plus gourmand ; controller ~57 MiB ; webhook
+# ~30 MiB). PAS de limits.cpu (CPU compressible, convention du dépôt). Par composant
+# (clé = nom du Deployment) → une topo peut surcharger via group_vars (ADR 0023).
+cert_manager_resources:
+  cert-manager:
+    requests:
+      cpu: 20m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  cert-manager-cainjector:
+    requests:
+      cpu: 20m
+      memory: 192Mi
+    limits:
+      memory: 512Mi
+  cert-manager-webhook:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

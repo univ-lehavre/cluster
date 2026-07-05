@@ -35,6 +35,28 @@
           field_manager: ansible-platform-argocd
           force_conflicts: true
 
+    # requests/limits par PATCH hors-bundle (audit code-first 2026-07-05) : le bundle
+    # vendored ne pose aucune resource → 7/7 BestEffort (perte de réconciliation GitOps si
+    # évincés sous pression). On les injecte SANS éditer le fichier figé (ADR 0006). Strategic
+    # merge sur le conteneur ; `item.value.kind` distingue le StatefulSet (application-
+    # controller) des Deployments. Idempotent (re-jeu = no-op si déjà en place).
+    - name: Set Argo CD resources (patch hors-bundle)
+      kubernetes.core.k8s:
+        state: patched
+        kind: '{{ item.value.kind }}'
+        namespace: '{{ argocd_namespace }}'
+        name: '{{ item.key }}'
+        definition:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: '{{ item.value.container }}'
+                    resources: '{{ item.value.resources }}'
+      loop: '{{ argocd_resources | dict2items }}'
+      loop_control:
+        label: '{{ item.key }}'
+
     # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
     # allow ignoré). Ordre explicite via loop, pas un apply de dossier.
     - name: Apply argocd network policies (ordered)
