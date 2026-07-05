@@ -1,0 +1,78 @@
+name: Resign Releases
+
+# Utilitaire PONCTUEL (workflow_dispatch uniquement) : re-signe et attache les assets
+# cosign (archive source .tar.gz + .sig + .pem) à des GitHub Releases DÉJÀ publiées
+# mais dont l'étape de signature du workflow Release avait échoué (incident cosign v4 :
+# les drapeaux --output-signature/--output-certificate retirés en v4 → sign-blob KO ;
+# cf. le fix de release.yml et atlas #547/#548, ADR 0093). Ne publie RIEN de neuf :
+# les Releases existent déjà, on n'ajoute que les artefacts de vérification (ADR 0087/0088).
+#
+# La signature keyless s'appuie sur l'identité OIDC du runner GitHub Actions (certificat
+# identity = https://github.com/univ-lehavre/cluster/...), reproduisant à l'identique le
+# contrat de vérification du workflow Release — ce qu'un run local ne pourrait pas faire
+# (il porterait l'identité personnelle du mainteneur).
+#
+# L'archive est reconstruite À L'IDENTIQUE (git archive au tag, même prefix) — le contenu
+# est déterministe donc le .tar.gz re-signé correspond bit-à-bit à celui qu'aurait produit
+# le job sign-release au moment de la release.
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: >-
+          Liste d'étiquettes de Release à re-signer, séparées par des espaces
+          (ex. « v2.46.0 v2.47.0 v2.48.0 v2.49.0 v2.50.0 »).
+        required: true
+        type: string
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  resign:
+    name: Resign and attach assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # upload d'assets sur les Releases
+      id-token: write # OIDC keyless cosign (mêmes scopes que le job sign-release)
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0 # tous les tags pour pouvoir archiver n'importe quelle version
+          persist-credentials: false
+
+      # cosign v3.x : contrat de vérification sur le couple .sig/.pem (ADR 0087) —
+      # PAS le bundle .sigstore.json de cosign v4 (cf. ADR 0093).
+      - name: Installer cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      # Pour chaque tag : on reconstruit l'archive source À L'IDENTIQUE (git archive au tag,
+      # même NAME/prefix que sign-release), on signe, on attache. `--clobber` rend l'opération
+      # réentrante (re-jouable sans erreur si un asset existe déjà).
+      - name: Resign and attach assets
+        env:
+          COSIGN_YES: 'true'
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          TAGS: ${{ inputs.tags }}
+        run: |
+          set -euo pipefail
+          for tag in $TAGS; do
+            echo "::group::Resigning ${tag}"
+            NAME="cluster-${tag}.tar.gz"
+            # Archive du code AU TAG (déterministe, sans .git) — même NAME/prefix que
+            # sign-release, donc les 3 assets attachés sont ceux qu'aurait produits la
+            # release (archive + .sig + .pem ; pas de .sha256, parité sign-release).
+            git archive --format=tar.gz --prefix="cluster-${tag}/" -o "$NAME" "$tag"
+            cosign sign-blob \
+              --output-signature "${NAME}.sig" \
+              --output-certificate "${NAME}.pem" \
+              "$NAME"
+            gh release upload "$tag" "$NAME" "${NAME}.sig" "${NAME}.pem" --clobber
+            rm -f "$NAME" "${NAME}.sig" "${NAME}.pem"
+            echo "::endgroup::"
+          done
+          echo "✅ Re-signature terminée."
