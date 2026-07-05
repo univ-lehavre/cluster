@@ -29,6 +29,8 @@ license: MIT
 # `x-release-please-version` ci-dessous + entrée `extra-files` de release-please-config.json).
 # NE PAS éditer à la main — elle suit `package.json` / `.release-please-manifest.json`.
 version: 2.51.0 # x-release-please-version
-date-released: '2026-06-01'
+# `date-released` estampillée automatiquement à la date de release par le workflow
+# release.yml (release-please ne synchronise que `version:`) — ne pas éditer à la main.
+date-released: '2026-07-05'
 # DOI Zenodo pour une citation pérenne (concept DOI, toutes versions) :
 doi: '10.5281/zenodo.20287209'
