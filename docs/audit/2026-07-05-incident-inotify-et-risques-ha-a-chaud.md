@@ -60,9 +60,22 @@ surveillance**.
   poser dans `bootstrap/roles/k8s-CRI-install/tasks/main.yaml` (à côté du tuning
   `ip_forward` existant), avec l'**assertion de vérification** analogue
   (`sysctl --values fs.inotify.max_user_instances`).
-- **Instrumenter** (P1) : scrape/alerte Prometheus sur la saturation inotify
-  pour **trancher fuite vs pic** et **nommer** le process coupable si ça
-  remonte.
+- **Instrumenter** (P1) — **NON fait, et pourquoi** (honnêteté ADR 0052) : une
+  alerte Prometheus runtime sur la saturation inotify a été **écartée**, faute
+  de signal fiable déjà scrapé. `node-exporter` **n'expose aucune métrique
+  inotify native** (`node_inotify_*` n'existe pas) ; le seul proxy,
+  `node_filefd_*`, est à **~0 %** en prod (le `file-max` système se compte en
+  millions) → il n'atteindrait jamais son seuil avant l'épuisement des 8192
+  instances inotify : alerter dessus donnerait une **couverture fictive**. Une
+  vraie métrique exigerait un exporter dédié (textfile collector node-side
+  comptant les instances par uid) — chantier d'instrumentation à part, hors de
+  ce correctif. **Couverture retenue** : l'assertion de bootstrap (ci-dessus)
+  garantit la valeur `8192` et échoue bruyamment si elle retombe ; elle couvre
+  le **sous-dimensionnement** (la cause réelle du 05-07), PAS une fuite runtime.
+  Or `8192` = **64×** l'ancienne limite `128` : une fuite au rythme observé (≈2
+  semaines pour épuiser 128) mettrait des **mois** à saturer 8192 — risque
+  résiduel jugé acceptable. À rouvrir (exporter dédié) si une saturation remonte
+  malgré tout.
 - **Réduire le churn** (P2) : espacer le CronJob reconciler `*/5` → `*/15`
   (`platform/dagster/reconciler.yaml:146`).
 
