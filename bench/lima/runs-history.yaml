@@ -260,3 +260,15 @@ runs:
       gitops-seed: 2
       mlflow: 154
       portal: 161
+  - id: 2026-07-06T21-base-5b93c6a
+    date: '2026-07-06T21:37:20Z'
+    branche: docs/drifts-preuve-prod-citation-parquet
+    commit: 5b93c6a
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 77
+    phases:
+      gitops-seed-citation: 77

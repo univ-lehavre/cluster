@@ -7,10 +7,10 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **86 drifts** indexés — statut : 3 caduc, 80 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 22 harnais, 15 livrable.
+- **87 drifts** indexés — statut : 3 caduc, 81 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 39 code, 10 env, 22 harnais, 16 livrable.
 
-## Livrable (bug — vaut pour tous les bancs ET la prod) (15)
+## Livrable (bug — vaut pour tous les bancs ET la prod) (16)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -29,6 +29,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L82` | ✅ corrige | preuve prod citation Parquet — déploiement GitOps (2026-07-06) | Après un seed manuel poussant une image saine, le pod citation RE-CRASHE : Argo redéploie un digest CASSÉ (protobuf) à chaque push. Impossible de stabiliser le déploiement. → Pointer la topo sur le SHA main À JOUR (7dbe0bfb, fixes mergés). Le build étant désormais REPRODUCTIBLE (L81), l'eventful rebuild le MÊME code sain → récidive structurellement impossible. Déploiement stable (pod Ready, Argo Synced/Healthy). Enseignement : ne jamais épingler un SHA périmé ; le digest et la revision doivent être cohérents avec main. |
 | `L83` | ✅ corrige | preuve prod citation Parquet — run ingestion (2026-07-06) | Le run ingestion_job OOMKill le pod SUR l'étape ge_raw_contract (pas sur le mart). Le contrat GE consommait 12,9 GiB puis dépassait 28Gi sur un échantillon de 4 fichiers. → Découpler : EXISTENCE des colonnes via le SCHÉMA (`DESCRIBE`, aucune donnée) + VALEURS (not_null/regex/row_count) sur la SEULE colonne id (VARCHAR léger). raw_works_expectations ne porte plus que id. atlas#560. Prouvé prod : ge_raw_contract PASS en 7s sur le lac COMPLET (2446 fichiers, 510M works), 1,1 GiB. |
 | `L85` | ✅ corrige | preuve prod citation Parquet — run transform (2026-07-06) | Après une ingestion COMPLÈTE réussie (mart EUNICoast = 98 645 works filtrés de 510M), le transform_job échouait dès les modèles staging (stg_citation_works / authorships / topics) : « HTTP 404 reading s3://citation/mart_eunicoast/run= ». → Dériver mart_root du bucket comme les autres racines (`s3://{bucket}/mart_eunicoast`) + 2 assertions (dict exact + dérivation depuis BUCKET_NAME). atlas#563. Débloque le transform aval (co-autorat + uplift) à l'échelle réelle. |
+| `L86` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-06) | Le fix mart_root (L85) passé, le transform_job matérialise marts_collab_pairs (co-autorat, 98 645 works), puis TOUT l'aval échoue (18×) : « Not implemented Error: Cannot switch temporary directory after the current one has been used » — marts_researchers, uplift, embeddings, index pgvector en ERROR/SKIP. → Déplacer temp_directory de `settings` vers `config_options` (config de CONNEXION posée UNE fois via duckdb.connect(config=…), jamais re-SET) ; memory_limit/threads restent en settings (re-SET idempotent). Le spilling vers l'emptyDir survit à N modèles lourds (dbt-duckdb #600). atlas fix/citation-duckdb-tempdir-config. Smoke dbt hermétique vert (7 tests). |
 
 ## Code (défaut du livrable révélé au run) (39)
 
