@@ -1326,3 +1326,132 @@ drifts:
       cause 2). ADR atlas 0094. Résout L76/L77 à la RACINE (plus de parse JSON). Prouvé banc :
       uplift non vide sur fixtures ; prod-intégration à venir (ADR 0104).
     statut: corrige
+
+  - id: L79
+    campagne: 'preuve prod citation Parquet — build node-side (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Au 1er build node-side du refactoring (ADR atlas 0094) sur prod, `dbt parse` échoue :
+      « Model stg_citation_authors depends on a source citation_raw.authors which was not
+      found ». Or ce modèle a bien été SUPPRIMÉ par la refonte co-autorat — il n'existe plus
+      dans le dépôt. Le banc ne le voyait pas (manifest dbt en cache ; build from-scratch seul
+      révèle le full parse).
+    cause: >-
+      Le play de build (bootstrap/citation.yaml puis code-location-build.yaml) réplique le
+      projet dbt node-side via `rsync` SANS `--delete`. Le workdir `/tmp/dataops-build/…`
+      PERSISTE entre builds de révisions différentes → un modèle retiré dans la nouvelle
+      révision (stg_citation_authors) subsiste en ORPHELIN dans le workdir et est vu par dbt parse.
+    correctif: >-
+      `delete: true` sur `ansible.posix.synchronize` (le workdir reflète EXACTEMENT la source ;
+      exclusions logs/target/pycache protégées, `--delete-excluded` non posé). Appliqué à
+      citation.yaml PUIS au play générique code-location-build.yaml (cluster#600). Build prod
+      VERT ensuite.
+    statut: corrige
+
+  - id: L80
+    campagne: 'preuve prod citation Parquet — build node-side (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Le build mediawatch via le play GÉNÉRIQUE code-location-build.yaml échoue : « Could not
+      find or access .../mediawatch-dagster/scripts/ ». Le play copiait `src` ET `scripts` en
+      dur, mais `scripts/` est propre à citation (fetch_model.py/ONNX) ; mediawatch v1 n'en a pas.
+    cause: >-
+      Le play « générique » (paramétré par code_location) copiait une liste de dossiers FIXE
+      (src + scripts) sans vérifier leur existence — hérité du cas citation, donc pas vraiment
+      générique pour une code-location au périmètre différent.
+    correctif: >-
+      `ansible.builtin.stat` sur les dossiers candidats + boucle filtrée `selectattr("stat.exists")`
+      → on ne copie que les dossiers PRÉSENTS. Le play devient vraiment générique (cluster#600).
+      Dette : citation.yaml duplique le play générique — à fusionner.
+    statut: corrige
+
+  - id: L81
+    campagne: 'preuve prod citation Parquet — build node-side (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Le pod gRPC citation CRASHE au démarrage (CrashLoopBackOff) : « Detected incompatible
+      Protobuf Gencode/Runtime versions … gencode 7.35.0 runtime 6.33.6 ». L'ancienne image
+      (même lock, même protobuf 6.33.6) démarrait pourtant. Idem mediawatch (bug jumeau).
+    cause: >-
+      Le Dockerfile faisait `uv pip install .` qui RÉSOUT À NEUF depuis pyproject et IGNORE
+      uv.lock (le commentaire prétendait « reproductible via uv.lock » — faux). Une transitive
+      non épinglée (grpcio-health-checking) a floté 1.81→1.82, dont le gencode protobuf 7.35.0
+      exige un runtime ≥7.x, incompatible avec le 6.33.6 du lock.
+    correctif: >-
+      Installer les deps EXACTES du lock (`uv export --frozen --no-dev` → requirements) PUIS le
+      paquet `--no-deps`. Le build reflète uv.lock, pas la résolution du jour ; build REPRODUCTIBLE
+      (même SHA source → même digest). atlas#560-suite (citation) + atlas#562 (mediawatch).
+    statut: corrige
+
+  - id: L82
+    campagne: 'preuve prod citation Parquet — déploiement GitOps (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Après un seed manuel poussant une image saine, le pod citation RE-CRASHE : Argo redéploie
+      un digest CASSÉ (protobuf) à chaque push. Impossible de stabiliser le déploiement.
+    cause: >-
+      DEUX causes conjuguées. (1) La topo pointait un SHA atlas (e3a84575) ANTÉRIEUR au merge du
+      fix Dockerfile → toute image buildée de ce SHA est cassée. (2) La chaîne eventful
+      (eventsource gitea-push + sensor code-location-build) rebuild à chaque push et re-pousse
+      le digest cassé, écrasant le seed manuel (App-of-Apps + selfHeal Argo propagent).
+    correctif: >-
+      Pointer la topo sur le SHA main À JOUR (7dbe0bfb, fixes mergés). Le build étant désormais
+      REPRODUCTIBLE (L81), l'eventful rebuild le MÊME code sain → récidive structurellement
+      impossible. Déploiement stable (pod Ready, Argo Synced/Healthy). Enseignement : ne jamais
+      épingler un SHA périmé ; le digest et la revision doivent être cohérents avec main.
+    statut: corrige
+
+  - id: L83
+    campagne: 'preuve prod citation Parquet — run ingestion (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Le run ingestion_job OOMKill le pod SUR l'étape ge_raw_contract (pas sur le mart). Le
+      contrat GE consommait 12,9 GiB puis dépassait 28Gi sur un échantillon de 4 fichiers.
+    cause: >-
+      check_raw faisait `SELECT id, publication_year, title, authorships, topics … .df()` :
+      matérialiser authorships/topics (structs lourds : dizaines d'auteurs × institutions,
+      hiérarchie topics) en pandas explose la RAM sur des fichiers récents (~360k works). MÊME
+      piège que L77 (colonnes imbriquées lourdes) mais côté contrôle qualité, pas le mart.
+    correctif: >-
+      Découpler : EXISTENCE des colonnes via le SCHÉMA (`DESCRIBE`, aucune donnée) + VALEURS
+      (not_null/regex/row_count) sur la SEULE colonne id (VARCHAR léger). raw_works_expectations
+      ne porte plus que id. atlas#560. Prouvé prod : ge_raw_contract PASS en 7s sur le lac COMPLET
+      (2446 fichiers, 510M works), 1,1 GiB.
+    statut: corrige
+
+  - id: L84
+    campagne: 'preuve prod citation Parquet — bootstrap complet (2026-07-06)'
+    portee: harnais
+    symptome: >-
+      Après le pré-vol (1 partition), l'ingestion COMPLÈTE non bornée ne rapatriait quasi rien :
+      elle repartait du watermark (2026-06-26 posé par le pré-vol) au lieu de tout OpenAlex.
+    cause: >-
+      raw_snapshot est incrémental par watermark (max_partitions=0 = « toutes postérieures au
+      watermark », pas « toutes »). Aucun flag de bootstrap/reset dans RawSnapshotConfig → un
+      pré-vol qui avance le watermark bloque un bootstrap complet ultérieur.
+    correctif: >-
+      Réinitialiser la clé `works` du raw/_watermark.json (backup fait) → raw_snapshot repart de
+      None = bootstrap complet (usage normal du watermark, réversible : le run le réécrit). Prouvé :
+      2446 fichiers / 510M works ingérés. Amélioration possible (suivi) : un champ reset_watermark
+      explicite plutôt qu'une édition du fichier de contrôle.
+    statut: corrige
+
+  - id: L85
+    campagne: 'preuve prod citation Parquet — run transform (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Après une ingestion COMPLÈTE réussie (mart EUNICoast = 98 645 works filtrés de 510M),
+      le transform_job échouait dès les modèles staging (stg_citation_works / authorships /
+      topics) : « HTTP 404 reading s3://citation/mart_eunicoast/run= ».
+    cause: >-
+      build_dbt_vars dérive raw_root / curated_root / marts_root du BUCKET_NAME réel de l'OBC
+      (citation-datalake-<uuid>, jamais `citation` en prod), mais OUBLIAIT mart_root — pourtant
+      la SOURCE de toute la chaîne dbt depuis le refactoring co-autorat (ADR atlas 0094, le mart
+      EUNICoast Parquet). dbt retombait donc sur le défaut banc `s3://citation/mart_eunicoast`,
+      inexistant en prod. Écart banc/prod invisible au banc : les tests d'intégration passent
+      mart_root explicitement.
+    correctif: >-
+      Dériver mart_root du bucket comme les autres racines (`s3://{bucket}/mart_eunicoast`) +
+      2 assertions (dict exact + dérivation depuis BUCKET_NAME). atlas#563. Débloque le transform
+      aval (co-autorat + uplift) à l'échelle réelle.
+    statut: corrige
