@@ -11,6 +11,51 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.52.0](https://github.com/univ-lehavre/cluster/compare/v2.51.0...v2.52.0) (2026-07-06)
+
+
+### Features
+
+* **preview:** détecte le drift de digest topo vs manifeste déployé ([35c6d8f](https://github.com/univ-lehavre/cluster/commit/35c6d8ff877c17e0afae0fdf7ba8e2ae57973135))
+* **preview:** détecte le drift de digest topo vs manifeste déployé ([4990813](https://github.com/univ-lehavre/cluster/commit/4990813f5bfed0432f0681c92c023efd9cb6ca1f))
+* **resources:** borne cert-manager et argo cd par patch hors-bundle ([619c6bd](https://github.com/univ-lehavre/cluster/commit/619c6bd1a921fd0813d5734879115f640dfe4a54))
+* **resources:** borne cert-manager et argo cd par patch hors-bundle ([d5c1232](https://github.com/univ-lehavre/cluster/commit/d5c1232d80f8f13bc7f794e6b0f08e5348050123))
+* **resources:** pose les requests/limits manquants (pg, rgw, nats, kong, mariadb) ([6b289ba](https://github.com/univ-lehavre/cluster/commit/6b289bab243900bd89aac1a9e918f3533cb06449))
+* **resources:** pose les requests/limits manquants (pg, rgw, nats, kong, mariadb) ([f9edf8f](https://github.com/univ-lehavre/cluster/commit/f9edf8f75aa74848b964bd8df1951042ed4b596c))
+
+
+### Bug Fixes
+
+* **bootstrap:** relève fs.inotify.max_user_instances (128 → 8192) ([862d139](https://github.com/univ-lehavre/cluster/commit/862d139999c906e61b2bac67f37f4b47ce25cde2))
+* **bootstrap:** relève fs.inotify.max_user_instances (128 → 8192) ([fc44f4e](https://github.com/univ-lehavre/cluster/commit/fc44f4e441dae552aae35954683007e121b5507e))
+* **docs:** retire l'ancre custom non supportée par starlight (build CI) ([6f5c721](https://github.com/univ-lehavre/cluster/commit/6f5c721bbb68fbb3dd1357ed5d02d112bb4a39cf))
+* **etcd:** rend etcd-fetch jouable (gather_facts requis par l'audit-log) ([4848ac4](https://github.com/univ-lehavre/cluster/commit/4848ac413b514245e66465b9cabb4ec91ece7fff))
+* **etcd:** rend etcd-fetch jouable (gather_facts requis par l'audit-log) ([d98cb66](https://github.com/univ-lehavre/cluster/commit/d98cb666f6b24d0723e18adb36e95d94e82aa9c9))
+* **monitoring:** matérialise les plafonds prometheus 3gi / grafana 512mi ([0d3da94](https://github.com/univ-lehavre/cluster/commit/0d3da949379711a2bcc60ac9719b9b63667e868c))
+* **monitoring:** matérialise les plafonds prometheus 3gi / grafana 512mi ([669ac52](https://github.com/univ-lehavre/cluster/commit/669ac524ca4ef2a9031479cd636d4e83a4632f02))
+
+
+### Documentation
+
+* **adr:** doctrine de preuve à deux étages (banc-logique / prod-intégration, 0104) ([239dd3b](https://github.com/univ-lehavre/cluster/commit/239dd3b20b80ec27895570e8ec748b04a8be7a41))
+* **adr:** doctrine de preuve à deux étages (banc-logique / prod-intégration, 0104) ([3ce26e2](https://github.com/univ-lehavre/cluster/commit/3ce26e2d787670ff22e75eeb4ee94cb4b7e180bc))
+* **architecture:** décrit la progression réelle des données (chaîne applicative citation) ([2ad5af3](https://github.com/univ-lehavre/cluster/commit/2ad5af3ea8f56dfbccd873a326c1c21a27daafd0))
+* **architecture:** progression réelle des données (chaîne applicative citation) ([ab25497](https://github.com/univ-lehavre/cluster/commit/ab25497befd24de8cf4d1f0b62c158918ac6afae))
+* **audit:** consigne pourquoi l'alerte inotify runtime n'est pas faite ([3eca046](https://github.com/univ-lehavre/cluster/commit/3eca046835b1af8316c0fd26ddcafb3f1ddaa7be))
+* **audit:** consigne pourquoi l'alerte inotify runtime n'est pas faite ([2aebaf7](https://github.com/univ-lehavre/cluster/commit/2aebaf75391031dfc28f8df667a74ce20921a4fc))
+* **audit:** incident dirqual1 (inotify) & risques d'un passage HA à chaud ([1fbdba6](https://github.com/univ-lehavre/cluster/commit/1fbdba6620705402ab2eae44208de690bf9b1780))
+* **audit:** incident dirqual1 (inotify) & risques d'un passage HA à chaud ([1172f6c](https://github.com/univ-lehavre/cluster/commit/1172f6c2ac6e0b9ceb87a49fc15c9060ef1809ba))
+* **audit:** passages datés de la mise en route citation E2E sur prod (2026-07-05) ([84983ce](https://github.com/univ-lehavre/cluster/commit/84983ce2e91128f5d4c8e6d967ae2fd39f7cf885))
+* **audit:** passages datés de la mise en route citation E2E sur prod (2026-07-05) ([9826ff3](https://github.com/univ-lehavre/cluster/commit/9826ff3e8db0a67b730115c5e66e192ddda0c7a6))
+* **audit:** requests/limits, volet code-first ([21a5dfd](https://github.com/univ-lehavre/cluster/commit/21a5dfd985793b0fab7fcb12ba2f0432508c1a57))
+* **audit:** requests/limits, volet code-first (ce que le dépôt déclare) ([683cace](https://github.com/univ-lehavre/cluster/commit/683cace1b3764797c4f273add6245782f6417492))
+* **drift:** consigne L73 — gel prod dirqual1 par épuisement inotify ([6842b09](https://github.com/univ-lehavre/cluster/commit/6842b09e0572739715147f5baed5945cb4eea06d))
+* **drift:** consigne L73 — gel prod dirqual1 par épuisement inotify ([fc9fb81](https://github.com/univ-lehavre/cluster/commit/fc9fb810fe6499757b534db1a6a4ddba33a62a37))
+* **drift:** consigne L74/L75 + audit ge_raw_contract (amplification ndots) ([48d5490](https://github.com/univ-lehavre/cluster/commit/48d54905a4d93971034be66959a01631f2c3b354))
+* **drift:** consigne L74/L75 + audit ge_raw_contract (amplification ndots) ([54769f7](https://github.com/univ-lehavre/cluster/commit/54769f7e3473ff83ae0c11a4716867b7b5cbbc88))
+* **plan:** coche cert-manager/argocd + prometheus dans le plan right-sizing ([0e68abe](https://github.com/univ-lehavre/cluster/commit/0e68abea9e362535b0ef095d9abf262f7d55d29b))
+* **readme:** régénère le bloc STATS après L73 (73 → 74 drifts) ([892f9d2](https://github.com/univ-lehavre/cluster/commit/892f9d29cbcb7283e5e7ed7f4848b122f95c5ff8))
+
 ## [2.51.0](https://github.com/univ-lehavre/cluster/compare/v2.50.0...v2.51.0) (2026-07-05)
 
 
