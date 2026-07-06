@@ -160,6 +160,39 @@ marts_* (researchers, researchers_fts, author_profiles, collab_pairs)
 - **Drift Evidently réel** : exige **2 runs** au même `dt` (le 1er n'a pas de
   baseline N-1). `passed=True, baseline absente` au 1er run est normal.
 
+### Refonte scalabilité (ADR atlas 0094, 2026-07-06) — prouvée banc, prod à venir
+
+Le run du 2026-07-05 ci-dessus a établi que la chaîne **tourne** de bout en
+bout, mais a exposé son mur : matérialiser tout OpenAlex (250 M+ works) avant de
+filtrer EUNICoast fait OOM (drifts [L76/L77](registre-drifts.md)). La chaîne a
+donc été **refondue** — le flux ci-dessus décrit l'état 2026-07-05 (JSONL.gz, «
+mart 1 tout OpenAlex », volet citations), désormais remplacé :
+
+```text
+OpenAlex S3 (data/PARQUET/works, colonnaire)
+   │  ingestion_job — raw_snapshot (rclone → raw/works Parquet) + manifest (num_rows footers)
+   ▼
+raw/works/*.parquet  +  raw/manifest_works.parquet
+   │  mart_eunicoast (asset DuckDB, PAR LOTS homogènes en nb de works)
+   ▼  filtre : ≥1 auteur affilié EUNICoast (ror DANS le work) ∩ publication_year ≥ 2016
+mart_eunicoast/run=<id>/*.parquet   (~10⁴–10⁵ works, colonnes d'intérêt only)
+   │  transform_job (dbt-duckdb) — lit LE MART (déjà filtré, petit)
+   ▼
+staging → curated → marts_collab_pairs (CO-AUTORAT : co_publications par paire)
+                  → curated_pair_uplift_labels → pair_uplift_model (prédictif)
+```
+
+Changements structurants : **Parquet colonnaire** (fin du parse JSON qui
+OOM-ait) · **filtre EUNICoast dans l'asset par lots** (mémoire bornée par lot,
+plus par le lac) · **affiliation lue dans le work**
+(`authorships[].institutions[].ror`, works auto-suffisants) · **métadonnées
+only** (année, authorships, topics, keywords — plus de `referenced_works`) ·
+**collaboration = co-autorat** (le volet citations `curated_edges` et l'entité
+`authors` sont retirés) · **DuckDB, pas Dask** (drift
+[L78](registre-drifts.md)). **Prouvé au banc** (fixtures hermétiques, uplift non
+vide) ; **prod-intégration à venir** (doctrine à deux étages,
+[ADR 0104](../decisions/0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md)).
+
 ### Le fil rouge — 5 bugs de config prod, tous dans l'écart banc/prod
 
 Cette chaîne **n'avait jamais tourné E2E** avant le 2026-07-05. Elle a été
