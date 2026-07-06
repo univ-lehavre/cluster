@@ -131,10 +131,20 @@
     # `target/` (artefacts régénérés par `dbt parse` AU BUILD) — inutiles au build et
     # transférés fichier-par-fichier par `copy` (module lent → play bloqué ~minutes, vécu
     # au banc). rsync avec `--exclude` ne transfère que le nécessaire (delta + exclusions).
+    #
+    # `--delete` (CRITIQUE) : le workdir node-side PERSISTE entre deux builds de révisions
+    # DIFFÉRENTES. Sans `--delete`, rsync copie les fichiers présents mais NE SUPPRIME PAS les
+    # orphelins d'un build antérieur — un modèle dbt retiré dans la nouvelle révision (ex.
+    # `stg_citation_authors.sql`, supprimé par le refonte co-autorat ADR atlas 0094) subsiste
+    # dans le workdir et fait ÉCHOUER `dbt parse` au build (« source citation_raw.authors not
+    # found »). `--delete` fait refléter EXACTEMENT la source → le workdir n'a jamais de
+    # modèle fantôme. Les exclusions restent protégées de la suppression (`--delete-excluded`
+    # NON posé) : logs/target/pycache locaux du nœud ne sont pas purgés.
     - name: Copy the citation-dbt project into the build context (sans logs/target)
       ansible.posix.synchronize:
         src: '{{ citation_repo_dir }}/dataops/citation-dbt/'
         dest: '{{ citation_build_workdir }}/citation-dbt/'
+        delete: true
         rsync_opts:
           - '--exclude=logs/'
           - '--exclude=target/'
