@@ -1302,3 +1302,27 @@ drifts:
       parser le reste. Levier DÉCISIF du fix L76 (sans lui, même 4 fichiers OOM). Mesuré :
       works 725k lignes/41s + authors 751k/19s sans OOM. atlas#552.
     statut: corrige
+
+  - id: L78
+    campagne: 'refonte scalable citation — bascule Parquet + Dask écarté (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Les fixes L76/L77 (échantillonnage + columns= explicites) rendaient le CONTRAT GE
+      scalable, mais le TRANSFORM au datalake complet OOM-ait toujours : matérialiser tout
+      OpenAlex (250M+ works) avant de filtrer EUNICoast dépasse la RAM. Piste envisagée :
+      passer le filtre à Dask (out-of-core distribué) plutôt qu'à DuckDB.
+    cause: >-
+      Deux causes-racines. (1) Le JSON de forme (.gz) impose read_json_auto qui parse le work
+      entier (drift L77) ; le columns= n'était qu'un pansement. (2) Dask, étudié comme moteur
+      alternatif, ne sait PAS lire un seul sous-champ imbriqué (authorships[].institutions[].ror)
+      — il charge la colonne authorships ENTIÈRE puis l'aplatit en objets Python (10-30× la
+      taille disque), et son filtre par métadonnées est bogué sur les colonnes imbriquées OpenAlex.
+    correctif: >-
+      Abandon du JSON de forme au profit du PARQUET colonnaire OpenAlex (data/parquet/works) :
+      lecture par colonne, projection stricte (jamais abstract_inverted_index/referenced_works).
+      Filtre EUNICoast déplacé dans un asset Python `mart_eunicoast` qui traite le lac PAR LOTS
+      homogènes (cumul num_rows du footer Parquet) → mémoire bornée par lot, plus par les 250M
+      works. Moteur = DuckDB (unnest de structs, list_has_any sur les 14 ROR) — Dask écarté (cf.
+      cause 2). ADR atlas 0094. Résout L76/L77 à la RACINE (plus de parse JSON). Prouvé banc :
+      uplift non vide sur fixtures ; prod-intégration à venir (ADR 0104).
+    statut: corrige
