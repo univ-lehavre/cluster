@@ -1518,3 +1518,24 @@ drifts:
       assets ; coût = run un peu plus long (acceptable pour un pod à mémoire bornée). atlas
       fix/citation-transform-max-concurrent. Tests definitions verts (9), ruff clean.
     statut: corrige
+
+  - id: L89
+    campagne: 'preuve prod citation Parquet — run transform aval (2026-07-07)'
+    portee: livrable
+    symptome: >-
+      max_concurrent (L88) posé, researcher_embeddings MATÉRIALISE enfin (28m47s, 0 OOM) — puis
+      le pod de run OOMKill (28Gi) sur pair_uplift_model, alors qu'il tournait SEUL (concurrence
+      déjà bornée). L'uplift + l'index pgvector restent bloqués.
+    cause: >-
+      FONDAMENTALE : _predict_all_pairs énumérait TOUTES les paires d'auteurs profilés (double
+      boucle a<b) pour les scorer. À l'échelle réelle (~90k auteurs) ce sont ~4 milliards de
+      paires, chacune générant un vecteur de features + une prédiction accumulés en RAM :
+      intractable en mémoire ET en temps, quel que soit le dimensionnement du pod. Le banc ne le
+      voyait pas (trop peu d'auteurs pour que O(N²) fasse mal).
+    correctif: >-
+      Candidate generation par kNN (pratique standard des systèmes de reco) : ne scorer que les
+      k plus proches voisins de chaque auteur (voisinage sur le vecteur THÉMATIQUE = couverture
+      universelle), l'union symétrisée → ~N·k paires au lieu de N²/2. Features/modèle/sorties
+      identiques ; petit N dégénère en toutes-les-paires (compat). ADR atlas 0097 (décision
+      structurante) + atlas fix/citation-uplift-knn-candidates. 3 tests kNN + 38 tests uplift verts.
+    statut: corrige
