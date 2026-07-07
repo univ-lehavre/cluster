@@ -1498,3 +1498,23 @@ drifts:
       (fwci = métrique cible du modèle uplift). Le test unique redevient un invariant vrai ; l'aval
       ne double-compte plus. atlas fix/citation-dedup-work-id. Smoke dbt hermétique vert.
     statut: corrige
+
+  - id: L88
+    campagne: 'preuve prod citation Parquet — run transform aval (2026-07-07)'
+    portee: livrable
+    symptome: >-
+      Les 3 fixes dbt (L85-L87) passés, le dbt build est INTÉGRALEMENT vert (Done. PASS=64 ERROR=0
+      SKIP=0) — puis le pod de run est OOMKilled (limite 28Gi) dès le STEP_START de
+      researcher_embeddings. L'aval (embeddings, pair_uplift_model, index pgvector) ne s'exécute pas.
+    cause: >-
+      Le K8sRunLauncher lance 1 pod par run ; l'executor multiprocess y parallélise les steps. SANS
+      cap de concurrence, researcher_embeddings (charge les vecteurs en RAM) démarre PENDANT que
+      plusieurs GE checks tournent — chacun matérialisant un Parquet en pandas `.df()`. Les mémoires
+      se cumulent et dépassent 28Gi. Invisible au banc : échantillon trop petit pour saturer, même
+      en parallèle.
+    correctif: >-
+      Config executor `multiprocess.max_concurrent=1` sur transform_job → les steps lourds
+      s'exécutent séquentiellement, chacun dispose seul de la mémoire du pod. Aucun refactor des
+      assets ; coût = run un peu plus long (acceptable pour un pod à mémoire bornée). atlas
+      fix/citation-transform-max-concurrent. Tests definitions verts (9), ruff clean.
+    statut: corrige

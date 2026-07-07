@@ -284,3 +284,15 @@ runs:
     total_s: 102
     phases:
       gitops-seed-citation: 102
+  - id: 2026-07-07T09-base-1e01120
+    date: '2026-07-07T09:55:24Z'
+    branche: docs/drift-l87-dedup-work-id
+    commit: 1e01120
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 105
+    phases:
+      gitops-seed-citation: 105
