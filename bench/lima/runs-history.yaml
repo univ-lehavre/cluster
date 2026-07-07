@@ -308,3 +308,15 @@ runs:
     total_s: 113
     phases:
       gitops-seed-citation: 113
+  - id: 2026-07-07T13-base-c4a4e55
+    date: '2026-07-07T13:39:00Z'
+    branche: docs/drift-l89-uplift-oom-knn
+    commit: c4a4e55
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 113
+    phases:
+      gitops-seed-citation: 113

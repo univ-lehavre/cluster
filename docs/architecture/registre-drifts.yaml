@@ -1539,3 +1539,22 @@ drifts:
       identiques ; petit N dégénère en toutes-les-paires (compat). ADR atlas 0097 (décision
       structurante) + atlas fix/citation-uplift-knn-candidates. 3 tests kNN + 38 tests uplift verts.
     statut: corrige
+
+  - id: L90
+    campagne: 'preuve prod citation Parquet — run transform aval (2026-07-07)'
+    portee: livrable
+    symptome: >-
+      Le kNN (L89) déployé, researcher_embeddings matérialise (0 OOM) — puis pair_uplift_model
+      OOMKill ENCORE (28Gi, ~3 min après le start), après l'entraînement du modèle, pendant le
+      scoring des paires candidates.
+    cause: >-
+      Le kNN a borné le NOMBRE de paires (~N·k) mais _predict_knn_pairs matérialisait ENCORE
+      TOUTES leurs features en un seul np.stack avant model.predict. À l'échelle réelle (~plusieurs
+      millions de paires × ~1,3k floats de features) cette matrice pèse des dizaines de Go → OOM.
+      Le kNN (L89) était NÉCESSAIRE mais PAS SUFFISANT. Invisible au banc (trop peu de paires).
+    correctif: >-
+      Scorer les paires candidates PAR LOTS (_PREDICT_BATCH=200k) : les features ne sont
+      construites que pour le lot courant, jamais toutes d'un coup. Résultat numérique identique
+      (predict sans état) ; petit N = un seul lot (inchangé). Test multi-lots (lot=2 → 780 paires
+      stables). atlas fix/citation-uplift-predict-batched. 20 tests uplift verts.
+    statut: corrige
