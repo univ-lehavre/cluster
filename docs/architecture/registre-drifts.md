@@ -7,10 +7,10 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **89 drifts** indexés — statut : 3 caduc, 83 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 22 harnais, 18 livrable.
+- **90 drifts** indexés — statut : 3 caduc, 84 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 39 code, 10 env, 22 harnais, 19 livrable.
 
-## Livrable (bug — vaut pour tous les bancs ET la prod) (18)
+## Livrable (bug — vaut pour tous les bancs ET la prod) (19)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -32,6 +32,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L86` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-06) | Le fix mart_root (L85) passé, le transform_job matérialise marts_collab_pairs (co-autorat, 98 645 works), puis TOUT l'aval échoue (18×) : « Not implemented Error: Cannot switch temporary directory after the current one has been used » — marts_researchers, uplift, embeddings, index pgvector en ERROR/SKIP. → Déplacer temp_directory de `settings` vers `config_options` (config de CONNEXION posée UNE fois via duckdb.connect(config=…), jamais re-SET) ; memory_limit/threads restent en settings (re-SET idempotent). Le spilling vers l'emptyDir survit à N modèles lourds (dbt-duckdb #600). atlas fix/citation-duckdb-tempdir-config. Smoke dbt hermétique vert (7 tests). |
 | `L87` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-06) | Les fixes mart_root (L85) + temp_directory (L86) passés, le transform_job matérialise les 43 modèles dbt (staging, curated, co-autorat, marts_researchers, uplift) — puis échoue sur UN test : « FAIL 8786 unique_stg_citation_works_work_id ». dbt build sort en exit 2 → step Dagster en échec → aval Python (embeddings, pair_uplift_model, index pgvector) SKIP. → Dédupliquer par work_id dans stg_citation_works via `qualify row_number() over (partition by work_id order by fwci desc, cited_by_count desc) = 1` — une ligne par work, la plus riche (fwci = métrique cible du modèle uplift). Le test unique redevient un invariant vrai ; l'aval ne double-compte plus. atlas fix/citation-dedup-work-id. Smoke dbt hermétique vert. |
 | `L88` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | Les 3 fixes dbt (L85-L87) passés, le dbt build est INTÉGRALEMENT vert (Done. PASS=64 ERROR=0 SKIP=0) — puis le pod de run est OOMKilled (limite 28Gi) dès le STEP_START de researcher_embeddings. L'aval (embeddings, pair_uplift_model, index pgvector) ne s'exécute pas. → Config executor `multiprocess.max_concurrent=1` sur transform_job → les steps lourds s'exécutent séquentiellement, chacun dispose seul de la mémoire du pod. Aucun refactor des assets ; coût = run un peu plus long (acceptable pour un pod à mémoire bornée). atlas fix/citation-transform-max-concurrent. Tests definitions verts (9), ruff clean. |
+| `L89` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | max_concurrent (L88) posé, researcher_embeddings MATÉRIALISE enfin (28m47s, 0 OOM) — puis le pod de run OOMKill (28Gi) sur pair_uplift_model, alors qu'il tournait SEUL (concurrence déjà bornée). L'uplift + l'index pgvector restent bloqués. → Candidate generation par kNN (pratique standard des systèmes de reco) : ne scorer que les k plus proches voisins de chaque auteur (voisinage sur le vecteur THÉMATIQUE = couverture universelle), l'union symétrisée → ~N·k paires au lieu de N²/2. Features/modèle/sorties identiques ; petit N dégénère en toutes-les-paires (compat). ADR atlas 0097 (décision structurante) + atlas fix/citation-uplift-knn-candidates. 3 tests kNN + 38 tests uplift verts. |
 
 ## Code (défaut du livrable révélé au run) (39)
 

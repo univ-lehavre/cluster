@@ -296,3 +296,15 @@ runs:
     total_s: 105
     phases:
       gitops-seed-citation: 105
+  - id: 2026-07-07T10-base-2d1e946
+    date: '2026-07-07T10:26:18Z'
+    branche: docs/drift-l88-oom-embeddings-concurrency
+    commit: 2d1e946
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 113
+    phases:
+      gitops-seed-citation: 113
