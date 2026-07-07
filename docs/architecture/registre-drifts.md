@@ -7,10 +7,10 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **92 drifts** indexés — statut : 3 caduc, 86 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 22 harnais, 21 livrable.
+- **93 drifts** indexés — statut : 3 caduc, 87 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 39 code, 10 env, 22 harnais, 22 livrable.
 
-## Livrable (bug — vaut pour tous les bancs ET la prod) (21)
+## Livrable (bug — vaut pour tous les bancs ET la prod) (22)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -35,6 +35,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L89` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | max_concurrent (L88) posé, researcher_embeddings MATÉRIALISE enfin (28m47s, 0 OOM) — puis le pod de run OOMKill (28Gi) sur pair_uplift_model, alors qu'il tournait SEUL (concurrence déjà bornée). L'uplift + l'index pgvector restent bloqués. → Candidate generation par kNN (pratique standard des systèmes de reco) : ne scorer que les k plus proches voisins de chaque auteur (voisinage sur le vecteur THÉMATIQUE = couverture universelle), l'union symétrisée → ~N·k paires au lieu de N²/2. Features/modèle/sorties identiques ; petit N dégénère en toutes-les-paires (compat). ADR atlas 0097 (décision structurante) + atlas fix/citation-uplift-knn-candidates. 3 tests kNN + 38 tests uplift verts. |
 | `L90` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | Le kNN (L89) déployé, researcher_embeddings matérialise (0 OOM) — puis pair_uplift_model OOMKill ENCORE (28Gi, ~3 min après le start), après l'entraînement du modèle, pendant le scoring des paires candidates. → Scorer les paires candidates PAR LOTS (_PREDICT_BATCH=200k) : les features ne sont construites que pour le lot courant, jamais toutes d'un coup. Résultat numérique identique (predict sans état) ; petit N = un seul lot (inchangé). Test multi-lots (lot=2 → 780 paires stables). atlas fix/citation-uplift-predict-batched. 20 tests uplift verts. |
 | `L91` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | Malgré L88+L89+L90 (3 hotspots mémoire levés), pair_uplift_model OOMKill ENCORE (~15s après STEP_START, avant tout scoring). L'aval (uplift + index pgvector) reste bloqué. → Porter la limite mémoire du pod de run de 28Gi à 56Gi (_RUN_RESOURCES, tags dagster-k8s/config) → ~30Gi hors-DuckDB, très au-dessus du pic (~10Gi), DuckDB restant sous la limite (spill préservé). Nœuds dirqual = 256Gi (large marge). Aucune logique modèle touchée. atlas fix/citation-transform-pod-memory. Tests definitions verts (9). |
+| `L92` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | pair_uplift_model OOMKill MÊME à 56Gi (L91) — a tenu ~1-2 min. Preuve que relever la mémoire du pod ne suffit PAS : le pic réel dépasse 56Gi. La voie « plus de RAM » (28→56) est épuisée ; il fallait borner la mémoire DANS LE CODE. → Refactor streaming (ne jamais matérialiser toutes les paires) : knn_candidate_pairs devient un GÉNÉRATEUR (yield par bloc, block dérivé de N, top-k vectorisé) ; prédictions STREAMÉES dans une table DuckDB `preds` (executemany par bloc) ; predictions + recommandations écrites via COPY + fenêtre SQL (row_number top-N), plus de VALUES géant ni dict Python. Pic RAM = un bloc kNN. Sémantique préservée. atlas fix/citation-uplift-streaming. 87 tests verts (_FakeCon adossé à une vraie base DuckDB). LEÇON : analyser (workflow mémoire) plutôt que colmater — L88/89/90 puis 2 raises pod (L91/92) avant le vrai fix structurel. |
 
 ## Code (défaut du livrable révélé au run) (39)
 

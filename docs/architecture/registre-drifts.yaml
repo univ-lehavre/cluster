@@ -1578,3 +1578,25 @@ drifts:
       la limite (spill préservé). Nœuds dirqual = 256Gi (large marge). Aucune logique modèle
       touchée. atlas fix/citation-transform-pod-memory. Tests definitions verts (9).
     statut: corrige
+
+  - id: L92
+    campagne: 'preuve prod citation Parquet — run transform aval (2026-07-07)'
+    portee: livrable
+    symptome: >-
+      pair_uplift_model OOMKill MÊME à 56Gi (L91) — a tenu ~1-2 min. Preuve que relever la
+      mémoire du pod ne suffit PAS : le pic réel dépasse 56Gi. La voie « plus de RAM » (28→56)
+      est épuisée ; il fallait borner la mémoire DANS LE CODE.
+    cause: >-
+      À l'échelle réelle (242 291 auteurs → ~12M paires), l'asset matérialisait TOUT en RAM : la
+      liste des prédictions (~12M), la liste de dicts candidats (~12M), surtout un littéral SQL
+      VALUES de 12M lignes dans _write_predictions (que le parser DuckDB fait exploser en dizaines
+      de Go), et le dict by_author des recommandations (~24M). Estimation initiale (~10Gi) fausse.
+    correctif: >-
+      Refactor streaming (ne jamais matérialiser toutes les paires) : knn_candidate_pairs devient
+      un GÉNÉRATEUR (yield par bloc, block dérivé de N, top-k vectorisé) ; prédictions STREAMÉES
+      dans une table DuckDB `preds` (executemany par bloc) ; predictions + recommandations écrites
+      via COPY + fenêtre SQL (row_number top-N), plus de VALUES géant ni dict Python. Pic RAM = un
+      bloc kNN. Sémantique préservée. atlas fix/citation-uplift-streaming. 87 tests verts
+      (_FakeCon adossé à une vraie base DuckDB). LEÇON : analyser (workflow mémoire) plutôt que
+      colmater — L88/89/90 puis 2 raises pod (L91/92) avant le vrai fix structurel.
+    statut: corrige
