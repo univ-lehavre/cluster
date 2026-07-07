@@ -320,3 +320,15 @@ runs:
     total_s: 113
     phases:
       gitops-seed-citation: 113
+  - id: 2026-07-07T15-base-cef3800
+    date: '2026-07-07T15:02:35Z'
+    branche: docs/drift-l90-uplift-feature-batch
+    commit: cef3800
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 124
+    phases:
+      gitops-seed-citation: 124

@@ -1558,3 +1558,23 @@ drifts:
       (predict sans état) ; petit N = un seul lot (inchangé). Test multi-lots (lot=2 → 780 paires
       stables). atlas fix/citation-uplift-predict-batched. 20 tests uplift verts.
     statut: corrige
+
+  - id: L91
+    campagne: 'preuve prod citation Parquet — run transform aval (2026-07-07)'
+    portee: livrable
+    symptome: >-
+      Malgré L88+L89+L90 (3 hotspots mémoire levés), pair_uplift_model OOMKill ENCORE (~15s après
+      STEP_START, avant tout scoring). L'aval (uplift + index pgvector) reste bloqué.
+    cause: >-
+      CAUSE RACINE (analyse mémoire complète) : le pod de run fait 28Gi mais chaque connexion
+      DuckDB (lakehouse.connect) réserve memory_limit=24GB → il ne reste que ~4Gi hors-DuckDB.
+      Or pair_uplift_model est du NUMPY PUR (matrice cosinus kNN, vecteurs, features) dont le pic à
+      l'échelle réelle (242 291 auteurs profilés — pas 90k —, ~12M paires candidates) est ~10Gi,
+      qui coexiste avec la réservation DuckDB → OOM. L88/89/90 colmataient des hotspots ; le vrai
+      plafond était le budget hors-DuckDB de 4Gi. Invisible au banc (échantillon trop petit).
+    correctif: >-
+      Porter la limite mémoire du pod de run de 28Gi à 56Gi (_RUN_RESOURCES, tags
+      dagster-k8s/config) → ~30Gi hors-DuckDB, très au-dessus du pic (~10Gi), DuckDB restant sous
+      la limite (spill préservé). Nœuds dirqual = 256Gi (large marge). Aucune logique modèle
+      touchée. atlas fix/citation-transform-pod-memory. Tests definitions verts (9).
+    statut: corrige
