@@ -11,6 +11,26 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.52.1](https://github.com/univ-lehavre/cluster/compare/v2.52.0...v2.52.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **citation:** rsync --delete aussi dans le play générique de build ([1865a93](https://github.com/univ-lehavre/cluster/commit/1865a935cf9ce25cd1d9e12b86a7d7f395af0435))
+* **citation:** rsync --delete du workdir dbt (build node-side) ([923aae4](https://github.com/univ-lehavre/cluster/commit/923aae461aa7ae87e19c855b84b12bc8962f08f9))
+* **citation:** rsync --delete du workdir dbt (purge les modèles retirés) ([68e76c4](https://github.com/univ-lehavre/cluster/commit/68e76c48fe70bb54fe46aebd78ec7adef9325b3a))
+
+
+### Documentation
+
+* **drift:** consigne l78 — bascule parquet + dask écarté ([5be7363](https://github.com/univ-lehavre/cluster/commit/5be736300fefc57321c9596b2d5654f50f05c49e))
+* **drift:** consigne L79-L85 — 7 écarts banc/prod de la preuve citation Parquet ([3b5e5e5](https://github.com/univ-lehavre/cluster/commit/3b5e5e562ecd69d175a54cf9743f82bc75d35064))
+* **drift:** consigne L79-L85 — 7 écarts banc/prod de la preuve citation Parquet ([5b93c6a](https://github.com/univ-lehavre/cluster/commit/5b93c6a5074d0ab09188e39bf6e3aea71f54fc1e))
+* **drift:** consigne L86 — spill DuckDB temp_directory (transform aval prod) ([cfda397](https://github.com/univ-lehavre/cluster/commit/cfda3975e11f84c86be2d75c7749cd324b3f4256))
+* **drift:** consigne L86 — spill DuckDB temp_directory (transform aval prod) ([1614381](https://github.com/univ-lehavre/cluster/commit/16143819beacae51342b779f214ee5d861494a61))
+* **drift:** l78 — bascule parquet + mart eunicoast (co-autorat) ([90d8db0](https://github.com/univ-lehavre/cluster/commit/90d8db04dd67cf3580657d314e5df589141c7823))
+* **drift:** vrai diagnostic ge_raw_contract (contrat non-scalable) + L74 requalifié ([cf38ebf](https://github.com/univ-lehavre/cluster/commit/cf38ebf0bb517ac271e9913b74d62965f2783f8a))
+
 ## [2.52.0](https://github.com/univ-lehavre/cluster/compare/v2.51.0...v2.52.0) (2026-07-06)
 
 
