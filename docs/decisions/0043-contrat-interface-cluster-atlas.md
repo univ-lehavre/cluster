@@ -79,3 +79,27 @@ Accepted.
   ou quelle SC viser selon le profil
   ([ADR 0035](0035-strategie-bancs-fidelite-vitesse.md),
   [ADR 0036](0036-backing-s3-unique-rgw.md)).
+
+## Mises à jour
+
+- **2026-07-07 — 3ᵉ consommateur du datalake objet : `pageviews`.** La
+  code-location dataops `pageviews` (dépôt `atlas`, package `pageviews-dagster`,
+  ADR atlas 0098 — prévision des vues Wikipédia des universités) instancie son
+  **point de contact S3** sur le même mécanisme générique que
+  `citation`/`mediawatch` : un `ObjectBucketClaim` `pageviews-datalake`
+  (storageClass `rook-ceph-datalake`, ns `dagster`) → Rook génère un **Secret**
+  (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) et un **ConfigMap**
+  (`BUCKET_HOST`/`BUCKET_PORT`/`BUCKET_NAME`, nom réel
+  `pageviews-datalake-<uuid>`), consommés par `envFrom`, endpoint RGW
+  path-style. Le contrat n'énumère **pas** un OBC par consommateur (il documente
+  le _mécanisme_, ADR 0023) : aucun changement structurel de
+  `contract/*.example.yaml` n'est requis, le bloc `object_bucket_claim` existant
+  couvre ce cas. **Écart clé vs `citation` : aucune base Postgres/pgvector**
+  (pas de Secret PG, pas de migration SQL, pas d'index vectoriel) — le contrat
+  côté base n'est pas sollicité.
+- **Garde-fou « même vague » (miroir atlas ADR 0033).** L'instanciation de ce
+  point de contact déclenche la synchronisation de son miroir applicatif :
+  l'**ADR atlas 0033** doit être mis à jour **dans la même vague de PR**
+  (convention de bucket `pageviews`, mécanisme OBC, namespaces `pageviews`) —
+  les deux faces du même contrat nomment le même bucket et les mêmes namespaces
+  (c'est la divergence que le contrat bilatéral existe pour prévenir).
