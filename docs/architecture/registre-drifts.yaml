@@ -1477,3 +1477,24 @@ drifts:
       (re-SET idempotent). Le spilling vers l'emptyDir survit à N modèles lourds (dbt-duckdb #600).
       atlas fix/citation-duckdb-tempdir-config. Smoke dbt hermétique vert (7 tests).
     statut: corrige
+
+  - id: L87
+    campagne: 'preuve prod citation Parquet — run transform aval (2026-07-06)'
+    portee: livrable
+    symptome: >-
+      Les fixes mart_root (L85) + temp_directory (L86) passés, le transform_job matérialise les 43
+      modèles dbt (staging, curated, co-autorat, marts_researchers, uplift) — puis échoue sur UN
+      test : « FAIL 8786 unique_stg_citation_works_work_id ». dbt build sort en exit 2 → step
+      Dagster en échec → aval Python (embeddings, pair_uplift_model, index pgvector) SKIP.
+    cause: >-
+      OpenAlex publie la MÊME œuvre dans plusieurs snapshots Parquet (records fusionnés/mis à
+      jour) → à l'échelle réelle ~8786 work_id apparaissent en double dans le mart EUNICoast.
+      stg_citation_works lit la source SANS déduplication, donc le test `unique(work_id)` (sévérité
+      error) échoue légitimement et casse toute la chaîne. Invisible au banc : l'échantillon n'a
+      pas de doublon multi-snapshot.
+    correctif: >-
+      Dédupliquer par work_id dans stg_citation_works via `qualify row_number() over (partition by
+      work_id order by fwci desc, cited_by_count desc) = 1` — une ligne par work, la plus riche
+      (fwci = métrique cible du modèle uplift). Le test unique redevient un invariant vrai ; l'aval
+      ne double-compte plus. atlas fix/citation-dedup-work-id. Smoke dbt hermétique vert.
+    statut: corrige

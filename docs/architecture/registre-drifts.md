@@ -7,10 +7,10 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **87 drifts** indexés — statut : 3 caduc, 81 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 22 harnais, 16 livrable.
+- **88 drifts** indexés — statut : 3 caduc, 82 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 39 code, 10 env, 22 harnais, 17 livrable.
 
-## Livrable (bug — vaut pour tous les bancs ET la prod) (16)
+## Livrable (bug — vaut pour tous les bancs ET la prod) (17)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -30,6 +30,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L83` | ✅ corrige | preuve prod citation Parquet — run ingestion (2026-07-06) | Le run ingestion_job OOMKill le pod SUR l'étape ge_raw_contract (pas sur le mart). Le contrat GE consommait 12,9 GiB puis dépassait 28Gi sur un échantillon de 4 fichiers. → Découpler : EXISTENCE des colonnes via le SCHÉMA (`DESCRIBE`, aucune donnée) + VALEURS (not_null/regex/row_count) sur la SEULE colonne id (VARCHAR léger). raw_works_expectations ne porte plus que id. atlas#560. Prouvé prod : ge_raw_contract PASS en 7s sur le lac COMPLET (2446 fichiers, 510M works), 1,1 GiB. |
 | `L85` | ✅ corrige | preuve prod citation Parquet — run transform (2026-07-06) | Après une ingestion COMPLÈTE réussie (mart EUNICoast = 98 645 works filtrés de 510M), le transform_job échouait dès les modèles staging (stg_citation_works / authorships / topics) : « HTTP 404 reading s3://citation/mart_eunicoast/run= ». → Dériver mart_root du bucket comme les autres racines (`s3://{bucket}/mart_eunicoast`) + 2 assertions (dict exact + dérivation depuis BUCKET_NAME). atlas#563. Débloque le transform aval (co-autorat + uplift) à l'échelle réelle. |
 | `L86` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-06) | Le fix mart_root (L85) passé, le transform_job matérialise marts_collab_pairs (co-autorat, 98 645 works), puis TOUT l'aval échoue (18×) : « Not implemented Error: Cannot switch temporary directory after the current one has been used » — marts_researchers, uplift, embeddings, index pgvector en ERROR/SKIP. → Déplacer temp_directory de `settings` vers `config_options` (config de CONNEXION posée UNE fois via duckdb.connect(config=…), jamais re-SET) ; memory_limit/threads restent en settings (re-SET idempotent). Le spilling vers l'emptyDir survit à N modèles lourds (dbt-duckdb #600). atlas fix/citation-duckdb-tempdir-config. Smoke dbt hermétique vert (7 tests). |
+| `L87` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-06) | Les fixes mart_root (L85) + temp_directory (L86) passés, le transform_job matérialise les 43 modèles dbt (staging, curated, co-autorat, marts_researchers, uplift) — puis échoue sur UN test : « FAIL 8786 unique_stg_citation_works_work_id ». dbt build sort en exit 2 → step Dagster en échec → aval Python (embeddings, pair_uplift_model, index pgvector) SKIP. → Dédupliquer par work_id dans stg_citation_works via `qualify row_number() over (partition by work_id order by fwci desc, cited_by_count desc) = 1` — une ligne par work, la plus riche (fwci = métrique cible du modèle uplift). Le test unique redevient un invariant vrai ; l'aval ne double-compte plus. atlas fix/citation-dedup-work-id. Smoke dbt hermétique vert. |
 
 ## Code (défaut du livrable révélé au run) (39)
 

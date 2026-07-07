@@ -272,3 +272,15 @@ runs:
     total_s: 77
     phases:
       gitops-seed-citation: 77
+  - id: 2026-07-06T22-base-cfda397
+    date: '2026-07-06T22:31:47Z'
+    branche: main
+    commit: cfda397
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 102
+    phases:
+      gitops-seed-citation: 102
