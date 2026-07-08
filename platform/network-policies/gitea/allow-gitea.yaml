@@ -31,6 +31,8 @@ spec:
   egress:
     # Webhook #1 Gitea → argocd-server (port du POD, 8080 ; le Service mappe
     # 80→8080). Déclenche la réconciliation Argo CD au push cluster/apps (ADR 0044).
+    # (L'egress webhook #2 → EventSource Argo Events, jadis ici, a été RETIRÉ avec la
+    # chaîne événementielle §1.b — ADR 0105.)
     - to:
         - namespaceSelector:
             matchLabels:
@@ -41,18 +43,3 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
-    # Webhook #2 Gitea → EventSource Argo Events (:12000). Déclenche le BUILD
-    # événementiel sur push du CODE atlas (ADR 0095 §1.b). Sans cette règle, le POST
-    # du webhook #2 timeoute (default-deny egress du ns gitea) → la chaîne ne se
-    # déclenche jamais (PROUVÉ AU BANC 2026-07-02 : connect timeout, HTTP 000). Le
-    # podSelector cible le pod EventSource (Service `<eventsource>-eventsource-svc`).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: argo-events
-          podSelector:
-            matchLabels:
-              eventsource-name: gitea-push
-      ports:
-        - protocol: TCP
-          port: 12000

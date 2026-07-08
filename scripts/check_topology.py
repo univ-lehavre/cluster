@@ -91,10 +91,10 @@ except ModuleNotFoundError:  # pragma: no cover - module du dépôt
 # non `platform-*` (k8s-*, audit-log, …) ne sont PAS des composants de topologie et
 # ne passent pas par la famille 2.
 # ─────────────────────────────────────────────────────────────────────────────
-# Vide aujourd'hui : tous les rôles `platform-*` sont des Components du graphe. (platform-eventful
-# a été enregistré comme Component(role='platform-eventful') — ADR 0095 §1.b / 0103 follow-up #564 —
-# donc retiré de cette allowlist.) Y ajouter une entrée = « rôle platform-* volontairement hors
-# graphe » (socle), à justifier par chemin.
+# Vide aujourd'hui : tous les rôles `platform-*` sont des Components du graphe. (Le rôle
+# `platform-eventful` — chaîne événementielle ADR 0095 §1.b — a été RETIRÉ, ADR 0105.) Y
+# ajouter une entrée = « rôle platform-* volontairement hors graphe » (socle), à justifier
+# par chemin.
 EXPECTED_NON_GRAPH_ROLES: dict[str, str] = {}
 
 # Mots-clés des tâches qui IMPORTENT un rôle (playbook ou rôle→rôle). On scanne

@@ -29,8 +29,6 @@ ignore: |
   storage/ceph/toolbox.yaml
   platform/cert-manager/cert-manager.yaml
   platform/argocd/argocd.yaml
-  platform/argo-workflows/argo-workflows.yaml
-  platform/argo-events/argo-events.yaml
   platform/kube-prometheus-stack/crds.yaml
   platform/kube-prometheus-stack/kube-prometheus-stack.yaml
   platform/loki/loki.yaml
