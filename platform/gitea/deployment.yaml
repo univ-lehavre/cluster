@@ -85,19 +85,36 @@ spec:
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10
+            # /api/healthz sert derrière le même mutex que git-upload-pack /
+            # pre-receive ; sous charge de push il a été mesuré à ~4,7 s (défaut
+            # timeoutSeconds=1 → readiness FAIL parasite). Tolérer la lenteur.
+            timeoutSeconds: 10
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /api/healthz
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 30
+            # Idem : sans marge, un push lent (pre-receive hook mesuré à 36 s)
+            # faisait échouer la liveness (timeout défaut 1 s) → K8s tuait Gitea
+            # EN PLEIN PUSH → le seed `push-citation` échouait (crash-loop 12
+            # redémarrages observés). failureThreshold×periodSeconds ≈ 3 min de
+            # grâce avant redémarrage.
+            timeoutSeconds: 15
+            failureThreshold: 6
           resources:
+            # Au repos Gitea tient en ~200Mi/8m ; mais un `git push` du monorepo
+            # atlas + le hook pre-receive saturaient les DEUX plafonds (mesuré
+            # 509Mi/512 et 501m/500 = CPU throttlé 100 %), rendant les opérations
+            # git si lentes que les sondes timeoutaient. Enveloppe dimensionnée
+            # pour les pics de push (nœuds à 256 Gio, marge sans risque).
             requests:
-              memory: '256Mi'
-              cpu: '100m'
-            limits:
               memory: '512Mi'
-              cpu: '500m'
+              cpu: '250m'
+            limits:
+              memory: '2Gi'
+              cpu: '2'
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
