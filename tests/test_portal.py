@@ -123,7 +123,8 @@ class LoginFor(unittest.TestCase):
     def test_known_logins(self):
         self.assertEqual(login_for({"id": "argocd-ui", "auth": "secret-admin"}), "admin")
         self.assertEqual(login_for({"id": "grafana-ui", "auth": "secret-admin"}), "admin")
-        self.assertEqual(login_for({"id": "gitea-ui", "auth": "secret-admin"}), "gitea_admin")
+        # Gitea : compte admin `atlas-admin` (défaut du seed), pas `gitea_admin`.
+        self.assertEqual(login_for({"id": "gitea-ui", "auth": "secret-admin"}), "atlas-admin")
 
     def test_contract_login_overrides(self):
         # le champ `login` du contrat prime sur la convention.

@@ -127,10 +127,13 @@ def _secret_ref(endpoint: dict, secrets: dict | None) -> tuple[str, str]:
 
 # Logins connus par convention (l'identifiant à saisir à côté du mot de passe).
 # Le contrat peut surcharger via le champ `login`; sinon on dérive par id/auth.
+# gitea-ui : le compte admin est `atlas-admin` (défaut du seed, cf.
+# bootstrap/seed-app-of-apps.sh `GITEA_ADMIN_USER:-atlas-admin`), PAS `gitea_admin` — un
+# login erroné faisait échouer la connexion (l'UI paraissait « ne pas fonctionner »).
 _KNOWN_LOGIN = {
     "argocd-ui": "admin",
     "grafana-ui": "admin",
-    "gitea-ui": "gitea_admin",
+    "gitea-ui": "atlas-admin",
     "ceph-dashboard-ui": "admin",
 }
 
