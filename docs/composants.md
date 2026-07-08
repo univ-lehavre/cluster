@@ -262,30 +262,23 @@ en local (tutoriel [Monter le banc local](banc-local.md#3-pousser-sur-gitea)) et
 qu'invoque le
 [mode d'emploi de branchement](se-brancher.md#déployer--la-boucle-gitops).
 
-### Argo Workflows + Argo Events (build événementiel)
+### Build applicatif : node-side, puis seed → Argo CD
 
-La boucle ci-dessus garde une **étape manuelle** : le _build + push_ de l'image
-(1.). La **cible événementielle**
-([ADR 0095](decisions/0095-build-applicatif-evenementiel-in-cluster.md) §1.b)
-l'automatise — un `git push` de **code** applicatif suffit, sans geste :
+Le _build + push_ de l'image applicative reste un **geste opérateur unique
+assumé** : `nestor ansible code-location-build.yaml`
+([`platform-build-images`](/cluster/bootstrap/roles/platform-build-images/))
+build + push `registry:80/<cl>-dagster`, **lit le digest réel**
+(`nerdctl image inspect`), puis le **seed l'injecte** dans l'overlay Kustomize
+(`images: digest:`) poussé dans le dépôt de code que réconcilie **Argo CD** —
+déploiement **par digest figé** (immuabilité totale, ADR 0006).
 
-- [**Argo Events**](/cluster/platform/argo-events/) capte un **2ᵉ webhook**
-  Gitea (distinct du webhook #1 déploiement) via un `EventSource`, le route par
-  un **`EventBus` NATS**, et le matérialise en `Sensor` qui **dérive la
-  code-location du chemin** (`dataops/<X>-dagster/`, jamais énuméré) et **soumet
-  un `Workflow`**.
-- [**Argo Workflows**](/cluster/platform/argo-workflows/) exécute ce `Workflow`
-  **in-pod** (BuildKit rootless, sur un worker) : clone `@SHA` → build → push
-  `registry:80` → lit le **digest** → write-back `apps/<app>.yaml` **par
-  `@sha256`** dans le dépôt `cluster/apps` — que le webhook #1 → **Argo CD**
-  réconcilie.
-
-Ces deux opérateurs sont de l'**INFRA** (posés par
-Ansible/`kubectl apply --server-side`, **pas** réconciliés par Argo CD — même
-frontière anti-bootstrap qu'Argo CD lui-même). Le **build reste
-containerd-natif** (BuildKit/nerdctl, **pas** Kaniko). Détail et mise en œuvre
-incrémentale :
-[plan build événementiel](/cluster/docs/plans/plan-build-evenementiel-gitops/).
+> **La chaîne de build ÉVÉNEMENTIEL in-cluster (Argo Events + Argo Workflows +
+> NATS, ancienne cible d'ADR 0095 §1.b) a été RETIRÉE**
+> ([ADR 0105](decisions/0105-retrait-build-evenementiel-node-side-terminal.md))
+> : instable en prod (un `git push` full-tree amplifiait le webhook en dizaines
+> de builds redondants, ~52 % d'échec) et **redondante** avec le chemin
+> node-side ci-dessus (prouvé suffisant seul). Le build node-side devient le
+> mécanisme **terminal** ; −3 opérateurs.
 
 ## Chaîne DataOps
 

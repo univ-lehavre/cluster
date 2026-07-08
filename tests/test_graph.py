@@ -91,11 +91,10 @@ class Invariant3Determinism(unittest.TestCase):
 class Acyclicite(unittest.TestCase):
     """topo_sort sur tout le catalogue réussit ; un cycle est détecté."""
 
-    def test_all_components_sortable_30(self):
+    def test_all_components_sortable_29(self):
         order = graph.topo_sort(list(graph.COMPONENT_ALL))
-        # 30 composants (27 + citation + gitops-seed-citation + eventful, ADR 0094/0095/0103),
-        # tous émis.
-        self.assertEqual(len(order), 30)
+        # 29 composants (27 + citation + gitops-seed-citation ; eventful RETIRÉ, ADR 0105).
+        self.assertEqual(len(order), 29)
         self.assertEqual(set(order), set(graph.COMPONENT_ALL))
 
     def test_injected_cycle_detected(self):
@@ -195,7 +194,6 @@ class PhaseClosureCeph(unittest.TestCase):
                 "mlflow",
                 "portal",
                 "gitops-seed-citation",
-                "eventful",  # dépend d'argocd/gitea/registry/build-images → terminale (ADR 0103)
             ],
         )
 
@@ -213,7 +211,6 @@ class PhaseClosureCeph(unittest.TestCase):
                 "mlflow",
                 "portal",
                 "gitops-seed-citation",
-                "eventful",  # consommateur de gitops (argocd/gitea) + registry → tiré aussi
             ],
         )
         self.assertIn("gitops", cl)
@@ -226,10 +223,9 @@ class PhaseClosureCeph(unittest.TestCase):
 
     def test_gitops_pulls_seed(self):
         # gitops-seed-citation dépend d'argocd/gitea (chaîne gitops) → tiré aussi (ADR 0095).
-        # eventful dépend AUSSI d'argocd/gitea (write-back → App-of-Apps) → tiré (ADR 0103).
         self.assertEqual(
             graph.phase_closure("gitops"),
-            ["gitops", "gitops-seed", "gitops-seed-citation", "eventful"],
+            ["gitops", "gitops-seed", "gitops-seed-citation"],
         )
 
     def test_leaves_pull_only_themselves(self):
@@ -240,10 +236,9 @@ class PhaseClosureCeph(unittest.TestCase):
 
     def test_dataops_pulls_mlflow_portal(self):
         # gitops-seed-citation dépend de citation → registry (∈ dataops) → tiré aussi.
-        # eventful dépend AUSSI de registry (∈ dataops) + build-images → tiré (parité portal, 0103).
         self.assertEqual(
             graph.phase_closure("dataops"),
-            ["dataops", "mlflow", "portal", "gitops-seed-citation", "eventful"],
+            ["dataops", "mlflow", "portal", "gitops-seed-citation"],
         )
 
     def test_mount_order_ceph_first(self):
@@ -325,7 +320,6 @@ class SignalIsAGraphProperty(unittest.TestCase):
         "gitops-seed": ("application", "atlas-workflows", "argocd", False),
         "gitops-seed-citation": ("application", "citation-dagster", "argocd", False),
         "portal": ("deployment", "portal", "portal", True),
-        "eventful": ("deployment", "workflow-controller", "argo", True),
     }
 
     def test_layer_signal_matches_frozen_oracle(self):

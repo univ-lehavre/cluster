@@ -124,3 +124,4 @@ Format léger inspiré de Michael Nygard :
 | 0102 | [Catalogue de topologies v2 : la topologie, source unique (nommage, kubeconfig, provisioning)](0102-catalogue-topologies-v2-topo-source-unique.md) | Proposed           |
 | 0103 | [Workspace Dagster multi-code-location : un reconciler par découverte de labels](0103-workspace-dagster-multi-code-location-reconciler.md)         | Accepted           |
 | 0104 | [Doctrine de preuve à deux étages : banc-logique / prod-intégration](0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md)            | Accepted           |
+| 0105 | [Retrait du build événementiel : le build node-side devient terminal](0105-retrait-build-evenementiel-node-side-terminal.md)                       | Accepted           |

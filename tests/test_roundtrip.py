@@ -32,18 +32,16 @@ class Closure(unittest.TestCase):
         # → défaire dataops oblige à défaire mlflow ET portail d'abord (ordre inverse,
         # ADR 0054). portail en QUEUE (poids 9, après mlflow poids 8).
         # gitops-seed-citation dépend de citation → registry (∈ dataops) → tiré aussi (ADR 0095).
-        # eventful dépend AUSSI de registry (∈ dataops) + build-images → tiré (parité portal, 0103).
         self.assertEqual(
             roundtrip.closure("dataops"),
-            ["dataops", "mlflow", "portal", "gitops-seed-citation", "eventful"],
+            ["dataops", "mlflow", "portal", "gitops-seed-citation"],
         )
 
     def test_gitops_pulls_seed(self):
         # gitops-seed-citation dépend d'argocd/gitea (chaîne gitops) → tiré aussi (ADR 0095).
-        # eventful dépend AUSSI d'argocd/gitea (write-back → App-of-Apps) → tiré (ADR 0103).
         self.assertEqual(
             roundtrip.closure("gitops"),
-            ["gitops", "gitops-seed", "gitops-seed-citation", "eventful"],
+            ["gitops", "gitops-seed", "gitops-seed-citation"],
         )
 
     def test_metrics_server_independent(self):
@@ -90,7 +88,6 @@ class Closure(unittest.TestCase):
                 "mlflow",
                 "portal",
                 "gitops-seed-citation",
-                "eventful",  # couche terminale (argocd/gitea/registry/build-images), ADR 0103
             ],
         )
         self.assertEqual(
@@ -105,7 +102,6 @@ class Closure(unittest.TestCase):
                 "mlflow",
                 "portal",
                 "gitops-seed-citation",
-                "eventful",  # couche terminale (argocd/gitea/registry/build-images), ADR 0103
             ],
         )
 
@@ -202,7 +198,6 @@ class RoundtripNominal(unittest.TestCase):
                 roundtrip.phase_signal("gitops")
                 + roundtrip.phase_signal("gitops-seed")
                 + roundtrip.phase_signal("gitops-seed-citation")
-                + roundtrip.phase_signal("eventful")  # eventful ∈ clôture gitops (ADR 0103)
             )
         )
         res = roundtrip.run_roundtrip(
@@ -214,11 +209,11 @@ class RoundtripNominal(unittest.TestCase):
         )
         self.assertTrue(res.reversible)
         # La destruction est UN geste (découverte) ; les appels run_phase sont les RECONSTRUCTIONS,
-        # dans l'ordre de montage (gitops → gitops-seed → gitops-seed-citation → eventful,
-        # ADR 0095/0103). Plus aucun `rollback` bash.
+        # dans l'ordre de montage (gitops → gitops-seed → gitops-seed-citation, ADR 0095).
+        # Plus aucun `rollback` bash.
         self.assertEqual(
             fb.calls,
-            [("gitops",), ("gitops-seed",), ("gitops-seed-citation",), ("eventful",)],
+            [("gitops",), ("gitops-seed",), ("gitops-seed-citation",)],
         )
 
     def test_destroy_layer_discovery_destroys_whole_closure_in_one_call(self):

@@ -2,7 +2,14 @@
 
 ## Statut
 
-Accepted (2026-06-25 ; proposé le 2026-06-24)
+Accepted (2026-06-25 ; proposé le 2026-06-24).
+
+**Partiellement superseded par
+[0105](0105-retrait-build-evenementiel-node-side-terminal.md) (2026-07-08)** :
+le §1.b (build ÉVÉNEMENTIEL in-cluster) est ABROGÉ — instable en prod
+(amplification webhook ×45, 52 % d'échec). Le §1.a (build Ansible node-side)
+devient le mécanisme TERMINAL. Les §2 (digest figé), §3 (miroir) et §4 restent
+valides.
 
 Précise et complète les ADR [0022](0022-argocd-gitops-applicatif.md) (Argo CD
 déploie l'applicatif), [0033](0033-orchestration-ansible-platform-dataops.md)
