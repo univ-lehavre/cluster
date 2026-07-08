@@ -1714,3 +1714,38 @@ drifts:
       n'expose TOUJOURS aucun Secret (invariant ADR 0091/0014 tenu). PR cluster #614, 34 tests
       portail verts. (Provisioning admin non codé = dette séparée, issue #616.)
     statut: corrige
+  - id: L98
+    campagne: 'preuve prod — mismatch digest après retrait eventful (2026-07-08)'
+    portee: infra
+    symptome: >-
+      Après le retrait du build événementiel (ADR 0105, PR #621 mergée), les 3 code-locations
+      (citation, pageviews, mediawatch) tournaient sur des images DIVERGENTES de la topologie :
+      pageviews déployé sur `sha256:5ae96bc8` (code PRÉ-fix D26, sans keep-alive HTTP) alors que
+      la topo déclare `sha256:8fbed0ee` (AVEC le fix). Argo CD reportait pourtant « Synced » : le
+      hard-refresh, le restart du repo-server et une opération de sync ne changeaient rien.
+    cause: >-
+      La chaîne événementielle (encore VIVANTE en prod malgré le code retiré : les objets appliqués
+      par l'ex-rôle `platform-eventful` ne sont réconciliés par personne) tournait toujours — le
+      Sensor était suspendu (replicas 0) MAIS le CronWorkflow `builder-reconcile` (filet event-loss)
+      s'exécutait toutes les 30 min, rebuildait chaque code-location depuis un arbre atlas périmé et
+      écrivait son digest. Or son write-back visait `spec.source.kustomize.images` de l'Application
+      Argo (et le fichier `cluster/apps/apps/<cl>.yaml`), PAS l'overlay `atlas/atlas`. Ce
+      `kustomize.images` OVERRIDE l'overlay : les overlays pinnaient tous le BON digest (= topo),
+      mais l'override applicatif imposait le digest reconcile. Le patron seed `citation.example.yaml`
+      ET `render_code_location_declaration` n'écrivent JAMAIS `kustomize.images` (le digest vient de
+      l'overlay via `substitute_image_digest`) → aucun code cluster ne produit cet override : c'est
+      un artefact du write-back eventful, désormais supprimé (ADR 0105).
+    correctif: >-
+      Démontage du live eventful sur dirqual (conforme ADR 0105, code déjà retiré) : suppression des
+      namespaces `argo` + `argo-events`, du CronWorkflow `builder-reconcile`, du WorkflowTemplate
+      `image-builder`, des ~1230 Workflows, du RBAC cluster (argo-cluster-role/argo-events-role/…) et
+      des 11 CRDs Workflows/Events (les 3 CRDs Argo CD `applications`/`appprojects`/`applicationsets`
+      PRÉSERVÉS). Finalizers orphelins (Sensor/EventSource/EventBus) strippés pour débloquer la
+      terminaison des namespaces. Preserve-set vérifié INTACT (Argo CD 6/6, 4 Applications Healthy,
+      dagster + 3 code-locations Running, reconciler workspace ADR 0103 vivant). Puis nettoyage de
+      l'ÉTAT Git résiduel : les 3 `apps/<cl>.yaml` restaurés au patron versionné (targetRevision
+      figé + overlay, SANS `kustomize.images`) → Argo rend l'overlay = digest topo pour les 3.
+      LEÇON : un objet appliqué par un rôle Ansible retiré n'est PAS pruné par Argo CD — le retrait
+      du CODE doit s'accompagner d'un teardown de l'ÉTAT vivant (ADR 0046 : le code est la vérité,
+      mais l'état déjà divergent se corrige explicitement).
+    statut: corrige

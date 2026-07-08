@@ -7,8 +7,8 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **98 drifts** indexés — statut : 3 caduc, 92 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 22 harnais, 3 infra, 24 livrable.
+- **99 drifts** indexés — statut : 3 caduc, 93 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 39 code, 10 env, 22 harnais, 4 infra, 24 livrable.
 
 ## Livrable (bug — vaut pour tous les bancs ET la prod) (24)
 
