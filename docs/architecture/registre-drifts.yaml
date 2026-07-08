@@ -1667,3 +1667,50 @@ drifts:
       071ae6c8 poussé au registry interne. Généralise le play à toute code-location (scripts/
       optionnel), aligné sur l'invariant « ce que le Dockerfile référence ».
     statut: corrige
+  - id: L96
+    campagne: 'preuve prod citation+pageviews — observabilité et débit des runs longs (2026-07-08)'
+    portee: livrable
+    symptome: >-
+      Deux assets à boucle longue tournaient DES HEURES sans le moindre log de progression après
+      STEP_START — indiscernables d'un run bloqué (il fallait lire /proc/<pid>/stat dans le pod
+      pour savoir s'ils avançaient). citation `pair_uplift_model` : 3h+ (scoring ~12M paires).
+      pageviews `ref_universities` : 61 min (résolution des redirections). Mauvaise pratique
+      signalée par l'utilisateur ; les deux runs arrêtés proprement (terminateRun) pour reprendre.
+    cause: >-
+      (1) DÉBIT : citation construisait les features par une boucle Python appelant
+      pair_features_combined PAR PAIRE (millions d'appels) ; pageviews résolvait les milliers de
+      titres UN PAR UN en HTTP séquentiel. (2) OBSERVABILITÉ : aucun log périodique — le scoring
+      streame dans DuckDB in-memory et ne COPY qu'à la fin (zéro signal intermédiaire), la
+      résolution ne loggait rien.
+    correctif: >-
+      DÉBIT sans multiprocessing (rouvrirait l'OOM L90/L92 ou casse le déterminisme) : citation
+      VECTORISE la construction des features (pair_features_block ; mêmes résultats — vectoriel
+      bit-à-bit, cos/dist ≤1 ULP ; BLAS/sklearn parallélisent alors en interne) ; pageviews
+      PARALLÉLISE la résolution en ThreadPool 16 (I/O-bound, dict ordre-indépendant → référentiel
+      inchangé). OBSERVABILITÉ (décision : logs + métadonnées Dagster/MLflow, PAS Prometheus — pod
+      éphémère, Pushgateway absent, Loki/MLflow déjà là) : log de progression ≥1×/min via
+      context.log (bloc/total ou titres/total, débit, ETA) + métadonnées MaterializeResult
+      historisées (scoring_duration_s/pairs_per_s ; n_titres_resolus/resolution_duration_s). atlas
+      PR #585 (citation, 25 tests) + #586 (pageviews, 61 tests), mergées. Rebuild + re-seed +
+      relance des 2 runs. LEÇON : un run long DOIT logger périodiquement dès la conception.
+    statut: corrige
+  - id: L97
+    campagne: 'preuve prod — accès Gitea via le portail (2026-07-08)'
+    portee: infra
+    symptome: >-
+      L'accès Gitea indiqué par le portail « ne fonctionnait pas » : aucune URL cliquable affichée,
+      et le login proposé échouait à la connexion.
+    cause: >-
+      DEUX bugs. (1) L'endpoint `gitea-ui` du contrat pointait `gitea-http` — le ClusterIP (port
+      80, SANS NodePort) — au lieu de `gitea-http-nodeport` (porteur du NodePort 30336, ADR 0092).
+      Le portail observait un Service sans `node_port` → `_ui_url` = None → aucune URL. (2) Le login
+      affiché était `gitea_admin`, or le compte admin créé par le seed est `atlas-admin`
+      (`GITEA_ADMIN_USER` par défaut, bootstrap/seed-app-of-apps.sh).
+    correctif: >-
+      Contrat : `gitea-ui` pointe `gitea-http-nodeport:3000` (source platform/gitea/nodeport.yaml)
+      → l'URL `http://<nœud>:30336` s'affiche. portal.py : `_KNOWN_LOGIN[gitea-ui]` = `atlas-admin`.
+      La commande de récupération du mot de passe (kubectl … gitea-admin … password | base64 -d)
+      était déjà correcte (clés réelles du Secret vérifiées = username/password) ; le portail
+      n'expose TOUJOURS aucun Secret (invariant ADR 0091/0014 tenu). PR cluster #614, 34 tests
+      portail verts. (Provisioning admin non codé = dette séparée, issue #616.)
+    statut: corrige

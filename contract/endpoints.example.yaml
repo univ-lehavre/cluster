@@ -322,15 +322,18 @@ endpoints:
       bout (run from-scratch) en cours.
 
   - id: gitea-ui
-    service: gitea-http
+    # Le portail observe le Service porteur du NodePort (`gitea-http-nodeport`, ADR 0092),
+    # PAS le ClusterIP `gitea-http` (port 80, sans NodePort) : sinon `node_port` reste None
+    # → aucune URL cliquable affichée pour Gitea (l'UI paraissait « ne pas fonctionner »).
+    service: gitea-http-nodeport
     namespace: gitea
-    fqdn: gitea-http.gitea.svc.cluster.local
-    port: 80
+    fqdn: gitea-http-nodeport.gitea.svc.cluster.local
+    port: 3000
     protocol: http
     auth: secret-admin # Secret gitea-admin (créé à l'init du dépôt, clé password)
     layer: gitops
     exposed: true # exposé en NodePort L4 (ADR 0092 ; port auto, observé par le portail)
-    source: platform/gitea/service.yaml
+    source: platform/gitea/nodeport.yaml
     note: Forge git intra-banc (air-gapped) — source des workflows atlas (ADR 0044).
 
   - id: k8s-dashboard-ui

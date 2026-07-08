@@ -368,3 +368,15 @@ runs:
     total_s: 24
     phases:
       gitops-seed-citation: 24
+  - id: 2026-07-08T15-base-52ef11c
+    date: '2026-07-08T15:55:46Z'
+    branche: fix/portal-gitea-nodeport-service
+    commit: 52ef11c
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 51
+    phases:
+      gitops-seed-citation: 51
