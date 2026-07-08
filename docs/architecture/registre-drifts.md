@@ -7,10 +7,10 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **93 drifts** indexés — statut : 3 caduc, 87 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 22 harnais, 22 livrable.
+- **94 drifts** indexés — statut : 3 caduc, 88 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 39 code, 10 env, 22 harnais, 23 livrable.
 
-## Livrable (bug — vaut pour tous les bancs ET la prod) (22)
+## Livrable (bug — vaut pour tous les bancs ET la prod) (23)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -36,6 +36,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L90` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | Le kNN (L89) déployé, researcher_embeddings matérialise (0 OOM) — puis pair_uplift_model OOMKill ENCORE (28Gi, ~3 min après le start), après l'entraînement du modèle, pendant le scoring des paires candidates. → Scorer les paires candidates PAR LOTS (_PREDICT_BATCH=200k) : les features ne sont construites que pour le lot courant, jamais toutes d'un coup. Résultat numérique identique (predict sans état) ; petit N = un seul lot (inchangé). Test multi-lots (lot=2 → 780 paires stables). atlas fix/citation-uplift-predict-batched. 20 tests uplift verts. |
 | `L91` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | Malgré L88+L89+L90 (3 hotspots mémoire levés), pair_uplift_model OOMKill ENCORE (~15s après STEP_START, avant tout scoring). L'aval (uplift + index pgvector) reste bloqué. → Porter la limite mémoire du pod de run de 28Gi à 56Gi (_RUN_RESOURCES, tags dagster-k8s/config) → ~30Gi hors-DuckDB, très au-dessus du pic (~10Gi), DuckDB restant sous la limite (spill préservé). Nœuds dirqual = 256Gi (large marge). Aucune logique modèle touchée. atlas fix/citation-transform-pod-memory. Tests definitions verts (9). |
 | `L92` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-07) | pair_uplift_model OOMKill MÊME à 56Gi (L91) — a tenu ~1-2 min. Preuve que relever la mémoire du pod ne suffit PAS : le pic réel dépasse 56Gi. La voie « plus de RAM » (28→56) est épuisée ; il fallait borner la mémoire DANS LE CODE. → Refactor streaming (ne jamais matérialiser toutes les paires) : knn_candidate_pairs devient un GÉNÉRATEUR (yield par bloc, block dérivé de N, top-k vectorisé) ; prédictions STREAMÉES dans une table DuckDB `preds` (executemany par bloc) ; predictions + recommandations écrites via COPY + fenêtre SQL (row_number top-N), plus de VALUES géant ni dict Python. Pic RAM = un bloc kNN. Sémantique préservée. atlas fix/citation-uplift-streaming. 87 tests verts (_FakeCon adossé à une vraie base DuckDB). LEÇON : analyser (workflow mémoire) plutôt que colmater — L88/89/90 puis 2 raises pod (L91/92) avant le vrai fix structurel. |
+| `L93` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-08) | pair_uplift_model OOMKill pour la 5ᵉ fois, MÊME après le streaming (L92). L'aval (uplift + index pgvector) reste bloqué. → Échantillon DÉTERMINISTE des labels d'entraînement au-delà de _MAX_TRAIN_LABELS (défaut 800k, dérivable via CITATION_UPLIFT_MAX_TRAIN_LABELS) AVANT la densification de X → X : 48 Go → ~8 Go. Un GradientBoosting n'a pas besoin de 4,7M lignes ; la validation groupée-par-auteur reste honnête sur l'échantillon (graine figée, ADR 0057). atlas fix/citation-uplift-train-sample. 45 tests verts. LEÇON : MESURER (count des inputs) dès le 1er OOM plutôt qu'estimer — 5 cycles perdus à colmater le scoring alors que le volume était côté labels d'entraînement. |
 
 ## Code (défaut du livrable révélé au run) (39)
 

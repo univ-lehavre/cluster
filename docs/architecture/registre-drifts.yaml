@@ -1600,3 +1600,25 @@ drifts:
       (_FakeCon adossé à une vraie base DuckDB). LEÇON : analyser (workflow mémoire) plutôt que
       colmater — L88/89/90 puis 2 raises pod (L91/92) avant le vrai fix structurel.
     statut: corrige
+
+  - id: L93
+    campagne: 'preuve prod citation Parquet — run transform aval (2026-07-08)'
+    portee: livrable
+    symptome: >-
+      pair_uplift_model OOMKill pour la 5ᵉ fois, MÊME après le streaming (L92). L'aval (uplift +
+      index pgvector) reste bloqué.
+    cause: >-
+      CAUSE RÉELLE enfin MESURÉE (kubectl exec + count sur les inputs) : l'OOM n'a JAMAIS été le
+      scoring des candidats (kNN/batch/streaming, L89-L92 visaient la mauvaise phase) ni le pod
+      (L91). C'est l'ENTRAÎNEMENT : curated_pair_uplift_labels = 4 694 399 paires labellisées →
+      build_dataset densifie X = (4,7M × ~1,3k features × 8o) ≈ 48 Go, + la copie de sklearn.fit
+      (~×1,7) ≈ 82 Go ≫ pod. L'OOM précoce (~15s, avant tout log de prédiction) le signalait à
+      chaque fois. Invisible au banc.
+    correctif: >-
+      Échantillon DÉTERMINISTE des labels d'entraînement au-delà de _MAX_TRAIN_LABELS (défaut 800k,
+      dérivable via CITATION_UPLIFT_MAX_TRAIN_LABELS) AVANT la densification de X → X : 48 Go → ~8
+      Go. Un GradientBoosting n'a pas besoin de 4,7M lignes ; la validation groupée-par-auteur reste
+      honnête sur l'échantillon (graine figée, ADR 0057). atlas fix/citation-uplift-train-sample.
+      45 tests verts. LEÇON : MESURER (count des inputs) dès le 1er OOM plutôt qu'estimer — 5
+      cycles perdus à colmater le scoring alors que le volume était côté labels d'entraînement.
+    statut: corrige
