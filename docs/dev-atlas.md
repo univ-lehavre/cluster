@@ -21,10 +21,14 @@ bench/lima/run-phases.sh atlas
 bench/lima/access.sh
 ```
 
-Puis travaillez dans `atlas` et `git push` : **zéro geste**, l'image se
-construit et se déploie toute seule. Vous ne buildez **plus** l'image à la main.
-Détail pas à pas : [guide du développeur data](guide-dev-data.md) ; mécanique
-complète ci-dessous.
+Puis travaillez dans `atlas` et `git push`. La **fabrique** de l'image est un
+geste opérateur assumé (`nestor ansible code-location-build.yaml`, cf.
+ci-dessous et
+[ADR 0105](decisions/0105-retrait-build-evenementiel-node-side-terminal.md)) ;
+une fois l'image poussée, le **déploiement** reste **zéro geste** (seed du
+digest → Argo CD). Vous ne faites **jamais** de `kubectl apply` de vos
+workflows. Détail pas à pas : [guide du développeur data](guide-dev-data.md) ;
+mécanique complète ci-dessous.
 
 ## Ce qui se passe quand une nouvelle image est publiée
 
