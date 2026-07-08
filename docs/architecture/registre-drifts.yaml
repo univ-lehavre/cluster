@@ -1647,3 +1647,23 @@ drifts:
       résolue jusqu'aux run pods pageviews (image = digest réel). LEÇON : ne pas masquer un échec
       récurrent par des retries — mesurer l'usage vs les limites du composant socle sollicité.
     statut: corrige
+  - id: L95
+    campagne: "preuve prod pageviews — build node-side d'une code-location sans scripts/ (2026-07-08)"
+    portee: infra
+    symptome: >-
+      Le build node-side de la code-location pageviews (`code-location-build.yaml`) ÉCHOUAIT à
+      l'étape « Copy the code-location source directories » : « Could not find or access
+      …/pageviews-dagster/scripts/ ». Impossible de fabriquer l'image pageviews (ni aucune
+      code-location dépourvue de `scripts/`).
+    cause: >-
+      Le play générique copiait `src` ET `scripts` dans une SEULE boucle inconditionnelle. Or
+      `scripts/` n'existe QUE sur citation (2 fichiers) ; mediawatch et pageviews n'en ont pas
+      (leur Dockerfile ne le référence pas). `ansible.builtin.copy` d'un répertoire source absent
+      échoue durement → build cassé pour toute code-location sans `scripts/`.
+    correctif: >-
+      Séparer la copie : `src` (toujours) en tâche dédiée ; `scripts/` conditionnel — un `stat`
+      délégué au contrôleur (le dépôt atlas est sur l'hôte) teste sa présence, la copie est gardée
+      par `when: … stat.exists and … isdir`. Le build pageviews passe (RC=0, 4 nœuds), digest
+      071ae6c8 poussé au registry interne. Généralise le play à toute code-location (scripts/
+      optionnel), aligné sur l'invariant « ce que le Dockerfile référence ».
+    statut: corrige

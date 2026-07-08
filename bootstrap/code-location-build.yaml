@@ -89,16 +89,35 @@
         - README.md
       become: true
 
-    - name: Copy the code-location source directories into the build context
+    - name: Copy the code-location src directory into the build context
       ansible.builtin.copy:
-        src: '{{ cl_src_dir }}/{{ item }}/'
-        dest: '{{ cl_build_workdir }}/{{ code_location }}-dagster/{{ item }}/'
+        src: '{{ cl_src_dir }}/src/'
+        dest: '{{ cl_build_workdir }}/{{ code_location }}-dagster/src/'
         mode: '0644'
         directory_mode: '0755'
-      loop:
-        - src
-        - scripts
       become: true
+
+    # `scripts/` est OPTIONNEL : présent sur citation (2 fichiers), ABSENT sur mediawatch et
+    # pageviews. Le copier inconditionnellement fait ÉCHOUER le build d'une code-location qui
+    # n'en a pas (« Could not find or access … /scripts/ »). On teste donc sa présence côté
+    # contrôleur (le dépôt atlas est sur l'HÔTE) et on ne copie que s'il existe. Le Dockerfile
+    # de chaque code-location ne référence `scripts/` que s'il en a un.
+    - name: Détecter un scripts/ optionnel dans la code-location
+      ansible.builtin.stat:
+        path: '{{ cl_src_dir }}/scripts'
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: cl_scripts_dir
+
+    - name: Copy the code-location scripts directory into the build context (si présent)
+      ansible.builtin.copy:
+        src: '{{ cl_src_dir }}/scripts/'
+        dest: '{{ cl_build_workdir }}/{{ code_location }}-dagster/scripts/'
+        mode: '0644'
+        directory_mode: '0755'
+      become: true
+      when: cl_scripts_dir.stat.exists and cl_scripts_dir.stat.isdir
 
     # Projet dbt frère — rsync (sans logs/target lourds, régénérés au build). Cf. citation.
     # `--delete` (CRITIQUE) : le workdir node-side PERSISTE entre deux builds de révisions
