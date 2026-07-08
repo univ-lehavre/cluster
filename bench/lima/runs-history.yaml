@@ -332,3 +332,39 @@ runs:
     total_s: 124
     phases:
       gitops-seed-citation: 124
+  - id: 2026-07-08T12-base-8570796-dirty
+    date: '2026-07-08T12:54:31Z'
+    branche: docs/drift-l93-uplift-train-sample
+    commit: 8570796-dirty
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 45
+    phases:
+      gitops-seed-citation: 45
+  - id: 2026-07-08T13-base-922dbde-dirty
+    date: '2026-07-08T13:31:01Z'
+    branche: fix/gitea-resources-push
+    commit: 922dbde-dirty
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 50
+    phases:
+      gitops-seed-citation: 50
+  - id: 2026-07-08T13-base-922dbde-dirty
+    date: '2026-07-08T13:31:37Z'
+    branche: fix/gitea-resources-push
+    commit: 922dbde-dirty
+    profil: base
+    topologie: dirqual
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 24
+    phases:
+      gitops-seed-citation: 24
