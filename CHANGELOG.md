@@ -11,6 +11,28 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.53.0](https://github.com/univ-lehavre/cluster/compare/v2.52.1...v2.53.0) (2026-07-08)
+
+
+### Features
+
+* **pageviews:** accueil de la 3ᵉ code-location dataops (bucket S3, ADR 0043) ([876f07e](https://github.com/univ-lehavre/cluster/commit/876f07e1eca9761efb43a5d9e7baacde30a6df2e))
+
+
+### Documentation
+
+* **adr:** 0043 — 3ᵉ consommateur datalake pageviews + signal sync atlas 0033 ([777e587](https://github.com/univ-lehavre/cluster/commit/777e587bf66cc7abd9a6d5c3b5805b2b9d40b8ed))
+* **drift:** consigne L87 — doublons work_id OpenAlex (transform aval prod) ([70ba11e](https://github.com/univ-lehavre/cluster/commit/70ba11e530a28aa0e07f821dc5ba3da36d14ef95))
+* **drift:** consigne L87 — doublons work_id OpenAlex (transform aval prod) ([1e01120](https://github.com/univ-lehavre/cluster/commit/1e011201db710df0faaa98653b5034172c08a462))
+* **drift:** consigne L88 — OOM embeddings par concurrence executor (aval prod) ([fd1eb9b](https://github.com/univ-lehavre/cluster/commit/fd1eb9bb39a512b7d8696977b5ab559d93013544))
+* **drift:** consigne L88 — OOM embeddings par concurrence executor (aval prod) ([2d1e946](https://github.com/univ-lehavre/cluster/commit/2d1e946888e694fef56d13796f0740199dcae1a9))
+* **drift:** consigne L89 — OOM uplift O(N²) → candidats kNN (aval prod) ([bd41e82](https://github.com/univ-lehavre/cluster/commit/bd41e82d02bc2dec304989bc9118edc51497ab84))
+* **drift:** consigne L89 — OOM uplift O(N²) → candidats kNN (aval prod) ([c4a4e55](https://github.com/univ-lehavre/cluster/commit/c4a4e551871a134755fe44150ce51010039885fa))
+* **drift:** consigne L90 — OOM features uplift (batch du scoring, aval prod) ([23870a2](https://github.com/univ-lehavre/cluster/commit/23870a26b6aa092caf0a1a9c868b655477c773cd))
+* **drift:** consigne L90 — OOM features uplift (batch du scoring, aval prod) ([cef3800](https://github.com/univ-lehavre/cluster/commit/cef380020b25cd7e19953cc5a56a612370a8ff5a))
+* **drift:** consigne L91 — cause racine OOM uplift (budget hors-DuckDB, pod 56Gi) ([e6cb38b](https://github.com/univ-lehavre/cluster/commit/e6cb38b4a9197f22fa3acf9fab8c622161ba19fa))
+* **drift:** consigne L91 — cause racine OOM uplift (budget hors-DuckDB, pod 56Gi) ([ea9bfc9](https://github.com/univ-lehavre/cluster/commit/ea9bfc99dbe2443378e2a0333adeae22f7b5a283))
+
 ## [2.52.1](https://github.com/univ-lehavre/cluster/compare/v2.52.0...v2.52.1) (2026-07-07)
 
 
