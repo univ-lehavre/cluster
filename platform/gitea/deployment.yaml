@@ -59,15 +59,14 @@ spec:
               value: 'true'
             - name: GITEA__security__INSTALL_LOCK
               value: 'true'
-            # Pas de webhook sortant arbitraire : on n'autorise QUE les hôtes internes
-            # des DEUX webhooks (ADR 0044/0095 §1.b) — évite qu'un dépôt configure un
-            # webhook vers l'extérieur (cohérent air-gapped). #1 Argo CD (déploiement) ;
-            # #2 EventSource Argo Events (build événementiel sur push atlas). Sans le 2e
-            # hôte, Gitea refuse la livraison (« webhook can only call allowed HTTP
-            # servers ») → la chaîne événementielle ne se déclenche jamais (PROUVÉ AU
-            # BANC 2026-07-02). Liste séparée par virgule.
+            # Pas de webhook sortant arbitraire : on n'autorise QUE l'hôte interne du
+            # webhook #1 Argo CD (déploiement, ADR 0044) — évite qu'un dépôt configure
+            # un webhook vers l'extérieur (cohérent air-gapped). Sans cet hôte, Gitea
+            # refuse la livraison (« webhook can only call allowed HTTP servers »).
+            # (Le webhook #2 EventSource — chaîne événementielle §1.b — a été RETIRÉ,
+            # ADR 0105 ; son hôte a donc disparu de l'allowlist.)
             - name: GITEA__webhook__ALLOWED_HOST_LIST
-              value: argocd-server.argocd.svc.cluster.local,gitea-push-eventsource-svc.argo-events.svc.cluster.local
+              value: argocd-server.argocd.svc.cluster.local
           volumeMounts:
             # Données persistantes (dépôts git + base SQLite) — PVC.
             - name: gitea-data

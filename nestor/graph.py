@@ -403,24 +403,10 @@ _CATALOGUE: tuple[Component, ...] = (
         signal=("application", "citation-dagster", "argocd", False),
         weight=7,
     ),
-    Component(
-        name="eventful",
-        role="platform-eventful",  # chaîne événementielle Argo Workflows + Events (ADR 0095 §1.b)
-        # Couche TERMINALE : consomme le registry + build-images (comme portal/citation) ET
-        # dépend du chemin de déploiement gitops (argocd/gitea : write-back → App-of-Apps).
-        deps=("argocd", "gitea", "registry", "build-images"),
-        # Possesseur de ns `argo` (le rôle pose AUSSI ns `argo-events` — 2ᵉ ns non modélisable
-        # dans un Component ≤1 ns ; on déclare `argo` où vit le signal, pour la résolution
-        # signal→feuille de check_topology famille-3).
-        namespace="argo",
-        # DERNIER maillon de la chaîne : Deployment `workflow-controller` (ns argo) Ready →
-        # le moteur de build in-pod est monté (readyReplicas≥1). L'EventBus NATS est gaté sur
-        # une CONDITION `Deployed` (pas status.phase) → mauvais fit pour SignalTarget ; le
-        # controller est la feuille canonique (parité argocd-server pour gitops).
-        signal=("deployment", "workflow-controller", "argo", True),
-        weight=9,  # couche applicative terminale (parité portal/citation) ; append = rang max.
-    ),
 )
+# NB (ADR 0105) : la couche `eventful` (build applicatif événementiel in-cluster, Argo Events +
+# Argo Workflows + NATS, ADR 0095 §1.b) a été RETIRÉE — le build node-side (platform-build-images,
+# §1.a) est le mécanisme terminal ; le seed injecte le digest, Argo CD déploie. Plus de couche ici.
 
 # Index nom → Component, ET ordre stable du catalogue (= component_all).
 COMPONENTS: dict[str, Component] = {c.name: c for c in _CATALOGUE}
@@ -514,7 +500,6 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     "gitops": ("gitea", "argocd"),
     "gitops-seed": ("gitops-seed",),
     "gitops-seed-citation": ("gitops-seed-citation",),
-    "eventful": ("eventful",),
     # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
     # seulement) ; l'ordre vient de topo_sort, pas de cette énumération.
     "atlas-ceph": (
@@ -640,7 +625,6 @@ ROUNDTRIP_PHASES: tuple[str, ...] = (
     "gitops-seed",
     "gitops-seed-citation",
     "portal",
-    "eventful",
 )
 
 
@@ -771,7 +755,6 @@ _PHASE_SIGNAL_COMPONENT: dict[str, str] = {
     "gitops-seed": "gitops-seed",
     "gitops-seed-citation": "gitops-seed-citation",
     "portal": "portal",
-    "eventful": "eventful",  # signal = Deployment workflow-controller (porté par eventful)
 }
 
 

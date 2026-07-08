@@ -2,19 +2,21 @@
 
 ## État
 
-> **État : Actif** (2026-06-25, revu 2026-07-02) · **Fonde :**
-> [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md)
-> (Accepted) +
-> [ADR 0094](../decisions/0094-frontiere-deploiement-applicatif.md). · **Issues
-> :** atlas #499/#501 (déblocage citation). · **Preuve :** bench/lima + scénario
-> 34 (chaîne prouvée avec image JOUET busybox ; `MODE=citation` reste en SKIP —
-> bascule sur l'image RÉELLE = ce que cette révision livre).
+> **État : Achevé** (2026-06-25, revu 2026-07-02, clos 2026-07-08 —
+> partiellement superseded). Le **premier pas** (§1.a d'
+> [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md),
+> build node-side, étapes 1-4) est LIVRÉ et devient le mécanisme **terminal**.
+> La **cible événementielle** (§1.b, étapes 5-8 : Argo Events + Argo Workflows +
+> NATS) a été **abrogée et retirée** par
+> [ADR 0105](../decisions/0105-retrait-build-evenementiel-node-side-terminal.md)
+> — instable en prod (amplification du webhook, images divergentes, 52 %
+> d'échec). Les étapes 5-8 ci-dessous sont conservées comme **archive de
+> conception** (ce qui a été monté puis retiré), non comme travail à faire.
 >
-> ADR `Accepted` ⇒ implémentation mergeable
-> ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6).
-> Ce plan **livre le premier pas** (§1.a de l'ADR, étapes 1-4) ; la **cible
-> événementielle** (§1.b, étapes 5-8) est **cadrée mais différée** à des
-> itérations ultérieures.
+> **Fonde :**
+> [ADR 0095](../decisions/0095-build-applicatif-evenementiel-in-cluster.md) +
+> [ADR 0094](../decisions/0094-frontiere-deploiement-applicatif.md). · **Issues
+> :** atlas #499/#501 (déblocage citation).
 >
 > **Révision 2026-07-02 — bascule sur l'image citation RÉELLE au banc.** Une
 > cartographie des deux dépôts (côté atlas : `dataops/citation-dagster/deploy/`

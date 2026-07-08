@@ -146,43 +146,41 @@ class Steps(unittest.TestCase):
         self.assertEqual(len(steps), 7)
 
     def test_prod_steps(self):
-        # Le seed PROD app-of-apps multi-code-location (dirqual) : 8 étapes ordonnées, dont
-        # writeback-token (Secret gitea-writeback-token) et webhook-build (webhook #2 événementiel).
+        # Le seed PROD app-of-apps multi-code-location (dirqual) : 6 étapes ordonnées.
+        # ADR 0105 : `writeback-token` et `webhook-build` (chaîne événementielle §1.b) RETIRÉS
+        # — le build node-side lit lui-même le digest, plus d'EventSource à câbler.
         steps = seed.seed_steps("prod")
         self.assertEqual(
             steps,
             (
                 "admin-token",
-                "writeback-token",
                 "org-repo-apps",
                 "org-repo-atlas",
                 "push-atlas-tree",
-                "webhook-build",
                 "push-citation",
                 "appproject-root",
             ),
         )
-        # webhook-build APRÈS push-atlas-tree (le repo de code atlas doit exister avant le hook).
-        self.assertGreater(steps.index("webhook-build"), steps.index("push-atlas-tree"))
-        # writeback-token APRÈS admin-token (a besoin du pod/admin Gitea) et AVANT push-citation.
-        self.assertGreater(steps.index("writeback-token"), steps.index("admin-token"))
+        # push-citation APRÈS push-atlas-tree (le repo de code atlas doit exister d'abord).
+        self.assertGreater(steps.index("push-citation"), steps.index("push-atlas-tree"))
+        # Plus aucun vestige de la chaîne événementielle dans la séquence (ADR 0105).
+        self.assertNotIn("webhook-build", steps)
+        self.assertNotIn("writeback-token", steps)
 
     def test_banc_citation_and_prod_share_the_app_of_apps_core(self):
-        # banc-citation et prod PARTAGENT le flux App-of-Apps + le webhook #2 (gravé dans les DEUX
-        # depuis le câblage du seed prod dirqual, ADR 0095 §1.b). La SEULE divergence de séquence
-        # est `writeback-token` (prod uniquement — au banc la preuve événementielle l'a posé à la
-        # main). L'overlay (bench/prod) et la garde sont injectés par la façade, pas dans les steps.
+        # banc-citation et prod PARTAGENT INTÉGRALEMENT le flux App-of-Apps : ADR 0105 a retiré
+        # `writeback-token` (l'unique divergence historique). L'overlay (bench/prod) et la garde
+        # sont injectés par la façade, pas dans les steps → séquences identiques.
         bc = seed.seed_steps("banc-citation")
         prod = seed.seed_steps("prod")
         self.assertIn("push-citation", bc)
-        self.assertIn("webhook-build", bc)
-        self.assertIn("webhook-build", prod)  # webhook #2 gravé dans les DEUX
-        self.assertIn("writeback-token", prod)
-        self.assertNotIn("writeback-token", bc)  # prod uniquement
-        # webhook-build vient APRÈS push-atlas-tree dans les deux séquences.
-        self.assertGreater(bc.index("webhook-build"), bc.index("push-atlas-tree"))
-        # La seule différence de STEPS entre prod et banc-citation = {writeback-token}.
-        self.assertEqual(set(prod) - set(bc), {"writeback-token"})
+        self.assertNotIn("webhook-build", bc)  # chaîne événementielle retirée (ADR 0105)
+        self.assertNotIn("webhook-build", prod)
+        self.assertNotIn("writeback-token", prod)
+        # push-citation vient APRÈS push-atlas-tree dans les deux séquences.
+        self.assertGreater(bc.index("push-citation"), bc.index("push-atlas-tree"))
+        # Aucune divergence de STEPS entre prod et banc-citation (ADR 0105).
+        self.assertEqual(set(prod) - set(bc), set())
         self.assertEqual(set(bc) - set(prod), set())
 
     def test_unknown_kind_rejected(self):
@@ -243,8 +241,8 @@ class GuardsOpposed(unittest.TestCase):
 
     def test_banc_citation_runs_its_sequence_under_banc_guard(self):
         # Le POINT de la décision A (ADR 0095 §1.a) : banc-citation joue le flux App-of-Apps
-        # (séquence prod) + le webhook #2 (build) SOUS garde banc. La garde passe (cible =
-        # banc) → les 7 étapes de banc-citation, dans l'ordre.
+        # SOUS garde banc. La garde passe (cible = banc) → les étapes de banc-citation, dans
+        # l'ordre (chaîne événementielle retirée, ADR 0105).
         order = []
         result = seed.run_seed(
             "banc-citation",
@@ -255,7 +253,7 @@ class GuardsOpposed(unittest.TestCase):
         self.assertTrue(result.done)
         self.assertEqual(order[0], "guard")
         self.assertEqual(order[1:], list(seed.seed_steps("banc-citation")))
-        self.assertIn("webhook-build", order)
+        self.assertIn("push-citation", order)
 
     def test_banc_citation_guard_refusing_prod_target_stops_before_steps(self):
         # SÉCURITÉ (ADR 0053/0084) : la garde banc de banc-citation DÉTECTE une cible prod

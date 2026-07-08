@@ -248,15 +248,13 @@ _BANC_STEPS = (
 )
 _PROD_STEPS = (
     "admin-token",  # admin + token API (idempotent)
-    # token Gitea D'ÉCRITURE dédié (scope write:repository) + Secret gitea-writeback-token
-    # (ns argo, clé `token`) monté par le step write-back du WorkflowTemplate image-builder.
-    # POINT DUR 3 (ADR 0095 §Coût) : SANS lui, un build événementiel échoue au push du digest
-    # (401). Créé par AUCUN geste avant ce câblage (le .example est factice) → seed prod.
-    "writeback-token",
+    # NB (ADR 0105) : les étapes `writeback-token` (Secret gitea-writeback-token, ns argo)
+    # et `webhook-build` (webhook Gitea #2 → EventSource) — qui câblaient la chaîne
+    # ÉVÉNEMENTIELLE (ADR 0095 §1.b) — sont RETIRÉES : le build node-side lit lui-même le
+    # digest de ce qu'il pousse (aucun token de write-back), et il n'y a plus d'EventSource.
     "org-repo-apps",  # org/repo déclaratif cluster/apps
     "org-repo-atlas",  # org/repo de code atlas/atlas
     "push-atlas-tree",  # push GIT de l'arbre atlas figé (révision + digest injecté, overlay prod)
-    "webhook-build",  # WEBHOOK #2 (BUILD, ADR 0095 §1.b) → EventSource — APRÈS repo atlas
     # push-citation : nom HISTORIQUE d'une étape désormais MULTI-code-location — son handler
     # façade BOUCLE sur `config.code_locations` (rend/pousse apps/<name>.yaml pour chacun).
     # Une seule étape (la boucle est dans le handler, pas dans les steps → ordre stable).
@@ -268,13 +266,10 @@ _PROD_STEPS = (
 #    C'est l'étape 1 « premier pas » de l'ADR 0095 (§1.a) prouvée au banc mono-nœud
 #    local-path (ADR 0085) AVANT la prod, comme l'exige ADR 0034. Elle REPREND la SÉQUENCE
 #    `_PROD_STEPS` (le flux citation EST le flux App-of-Apps : org/repo atlas, push de
-#    l'arbre atlas figé, webhook #2, apps/<cl>.yaml par digest, AppProject + racine).
+#    l'arbre atlas figé, apps/<cl>.yaml par digest, AppProject + racine).
 #
-#    DEPUIS le câblage du seed PROD (déploiement dirqual, ADR 0095 §1.b) : `webhook-build`
-#    est DÉSORMAIS gravé dans `_PROD_STEPS` — le seed prod EST le « flux dédié » sous garde
-#    `assert_prod_target` évoqué naguère. banc-citation et prod PARTAGENT donc le cœur ET
-#    le webhook #2 ; les SEULES divergences (INJECTÉES par la façade topology.py, jamais
-#    gravées dans les steps) sont :
+#    banc-citation et prod PARTAGENT le cœur de séquence ; les SEULES divergences
+#    (INJECTÉES par la façade topology.py, jamais gravées dans les steps) sont :
 #      • la GARDE — `_assert_bench_target` (cible = banc Lima) au banc, OPPOSÉE à
 #        `assert_prod_target` (cible = cluster-prod) en prod. On ne rend JAMAIS la garde
 #        prod franchissable par paramètre (ADR 0053/0084) : deux façades distinctes.
@@ -282,18 +277,17 @@ _PROD_STEPS = (
 #        d'OBC Ceph) au banc vs `overlays/prod` (OBC Ceph rook-ceph-datalake) en prod. Au
 #        banc local-path la StorageClass `rook-ceph-datalake` n'existe pas ; atlas fournit
 #        DÉJÀ les deux overlays (frontière ADR 0094 : cluster CHOISIT, atlas FOURNIT).
-#      • le TOKEN write-back — `_PROD_STEPS` ajoute `writeback-token` (Secret
-#        gitea-writeback-token ns argo). Au banc la preuve événementielle l'a posé à la main
-#        (dette de reproductibilité banc résiduelle, hors périmètre du câblage prod).
 #    Partager le cœur de séquence garantit qu'une preuve banc VALIDE le chemin prod.
-#    L'ORDRE : `webhook-build` vient APRÈS `push-atlas-tree` (le repo de CODE atlas doit
-#    EXISTER avant d'y poser le hook) et avant `push-citation`.
+#    NB (ADR 0105) : le webhook #2 (build) et le token de write-back ont DISPARU du seed —
+#    le build node-side (platform-build-images) lit lui-même le digest de ce qu'il pousse et
+#    le seed l'injecte dans l'overlay ; plus aucune chaîne événementielle à amorcer.
 _BANC_CITATION_STEPS = (
     "admin-token",  # admin + token API (idempotent)
     "org-repo-apps",  # org/repo déclaratif cluster/apps
     "org-repo-atlas",  # org/repo de code atlas/atlas
     "push-atlas-tree",  # push GIT de l'arbre atlas figé (révision + digest injecté)
-    "webhook-build",  # WEBHOOK #2 (BUILD, ADR 0095 §1.b) → EventSource — APRÈS repo atlas
+    # NB (ADR 0105) : `webhook-build` (webhook #2 → EventSource) RETIRÉ — plus de chaîne
+    # événementielle ; le build node-side + seed suffisent au déploiement par digest.
     "push-citation",  # rendu + push apps/<name>.yaml pour CHAQUE code-location (handler boucle)
     "appproject-root",  # AppProject cluster-apps + Application racine
 )
@@ -470,8 +464,6 @@ _BANC_TODO = (
     "— à prouver sur dirqual",
     "câblage do(step) banc-citation en façade : do() du flux App-of-Apps ciblant l'overlay "
     "bench + injection digest, garde _assert_bench_target — à prouver au banc (ADR 0095 §1.a)",
-    "run banc de l'étape `webhook-build` (webhook #2 → EventSource Argo Events) : nom réel du "
-    "Service EventSource, format du payload push, dédup /hooks — à PROUVER au banc (ADR 0095 §1.b)",
     "brancher _assert_bench_target (banc/banc-citation) / assert_prod_target (prod) en façade "
     "(topology.py)",
     "run banc gitea-init + run banc-citation (citation réel) + run prod app-of-apps consignés "

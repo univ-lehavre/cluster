@@ -76,10 +76,9 @@ runtime n'a pas listés (pas encore actifs). Ordre par gravité réelle sur
       bundle figé. cainjector 512Mi (cache cluster-wide) / controller 256Mi /
       webhook 128Mi. À prouver par `kubectl top`.
 - [x] **RGW Ceph** (`gateway.resources` req 250m/512Mi lim mem 2Gi,
-      `storage/ceph/storageClass/datalake/datalake-ec.yaml`) + **EventBus NATS**
-      (`containerTemplate.resources` req 100m/256Mi lim mem 1Gi,
-      `platform/argo-events/eventbus-nats.yaml`) — chemins données/événements.
-      La limite pod NATS borne de fait JetStream (`max_memory_store: -1`).
+      `storage/ceph/storageClass/datalake/datalake-ec.yaml`) — chemin données.
+      (L'**EventBus NATS** de la chaîne événementielle, jadis borné ici, a été
+      **retiré** avec cette chaîne — ADR 0105.)
 - [x] **Kong + auth** (`kong.resources` / `auth` dans
       `platform/k8s-dashboard/values.yaml`, paramétrage chart légitime — chemin
       critique NodePort→UI) + **`redcap-mariadb`** (`apps/redcap/mariadb.yaml`

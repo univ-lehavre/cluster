@@ -105,38 +105,6 @@ misconfigurations:
     paths:
       - 'platform/argocd/argocd.yaml'
 
-  # ── Argo Workflows vendored (bundle officiel v4.0.6) — RBAC inhérent ──────
-  # Manifeste amont appliqué tel quel (épinglé par digest, ADR 0006/0095 §1.b). Le
-  # RBAC large EST la fonction d'Argo Workflows : orchestrer des Workflows in-pod.
-  - id: KSV-0041 # « manage secrets » : le workflow-controller et l'argo-server
-    # créent/lisent les Secrets des Workflows (artifacts creds, tokens, outputs).
-    paths:
-      - 'platform/argo-workflows/argo-workflows.yaml'
-  - id: KSV-0053 # « exec into pods » : le controller streame les logs et exécute
-    # dans les pods de step (émulation de PNS/executor) — cœur de l'orchestrateur.
-    paths:
-      - 'platform/argo-workflows/argo-workflows.yaml'
-
-  # ── Argo Events vendored (bundle officiel v1.9.10) — RBAC inhérent ────────
-  # Manifeste amont appliqué tel quel (épinglé par digest, ADR 0006/0095 §1.b). Le
-  # RBAC large EST la fonction du controller : gérer EventSource/Sensor/EventBus.
-  - id: KSV-0041 # « manage secrets » : le controller crée/lit les Secrets des
-    # EventSource/Sensor (tokens webhook, creds de triggers).
-    paths:
-      - 'platform/argo-events/argo-events.yaml'
-  - id: KSV-0053 # « exec into pods » : le controller gère les pods eventsource/
-    # sensor (pods/exec) qu'il spawne — cœur du contrôleur.
-    paths:
-      - 'platform/argo-events/argo-events.yaml'
-  - id: KSV-0056 # RBAC networking : le controller gère services/endpoints pour
-    # exposer les eventsource (webhook Gitea) et router les événements.
-    paths:
-      - 'platform/argo-events/argo-events.yaml'
-  - id: KSV-0014 # rootfs non read-only : le controller-manager du bundle amont
-    # n'a pas readOnlyRootFilesystem posé en amont (non durci upstream).
-    paths:
-      - 'platform/argo-events/argo-events.yaml'
-
   # ── kube-prometheus-stack vendored (chart 86.1.0) — posture inhérente ─────
   # Helm template figé (épinglé par digest, ADR 0006/0016 palier 2). Ces findings
   # sont la FONCTION même des composants de monitoring système, pas un oubli.

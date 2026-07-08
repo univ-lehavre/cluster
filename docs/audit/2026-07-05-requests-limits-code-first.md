@@ -99,17 +99,17 @@ Légende : ✅ posé · ⚠️ via défaut chart (non versionné) · ❌ absent 
    backups Barman/CNPG et de Loki** ; sous charge multipart/gros objets un RGW
    gonfle → OOM-kill.
 
-5. **EventBus NATS (argo-events)** —
-   [`platform/argo-events/eventbus-nats.yaml`](../../platform/argo-events/eventbus-nats.yaml),
-   sans `containerTemplate.resources`, JetStream `max_memory_store: -1` (jusqu'à
-   ~75 % RAM nœud). Bus avec état, `replicas: 1` (SPOF), mémoire non bornée →
-   OOM = event push perdu.
+5. **EventBus NATS (argo-events)** — `platform/argo-events/eventbus-nats.yaml`
+   (retiré depuis, ADR 0105), sans `containerTemplate.resources`, JetStream
+   `max_memory_store: -1` (jusqu'à ~75 % RAM nœud). Bus avec état, `replicas: 1`
+   (SPOF), mémoire non bornée → OOM = event push perdu.
 
 6. **BuildKit rootless (image-builder)** —
-   [`platform/argo-workflows/workflowtemplate-builder.yaml`](../../platform/argo-workflows/workflowtemplate-builder.yaml).
-   Workload le plus gourmand (build image in-pod), empreinte RAM imprévisible
-   selon le Dockerfile atlas, sur un worker sans plafond. Le template invoque un
-   « audit ~90 % RAM libre » mais **aucune limite n'est codée**.
+   `platform/argo-workflows/workflowtemplate-builder.yaml` (retiré depuis, ADR
+   0105). Workload le plus gourmand (build image in-pod), empreinte RAM
+   imprévisible selon le Dockerfile atlas, sur un worker sans plafond. Le
+   template invoque un « audit ~90 % RAM libre » mais **aucune limite n'est
+   codée**.
 
 7. **Kong (k8s-dashboard)** — subchart Kong 2.38.0, `resources: {}` non overridé
    dans
