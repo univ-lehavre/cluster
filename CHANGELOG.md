@@ -11,6 +11,35 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.53.1](https://github.com/univ-lehavre/cluster/compare/v2.53.0...v2.53.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **build:** rend scripts/ optionnel dans le build d'une code-location ([7bce332](https://github.com/univ-lehavre/cluster/commit/7bce3324125ee65185764dcacadd71d8520ea60d))
+* **gitea/build:** débloque le seed GitOps et le build des code-locations (pageviews) ([fa4802a](https://github.com/univ-lehavre/cluster/commit/fa4802a79cd1073793af45f96bf74df510be89be))
+* **gitea:** dimensionne gitea pour les pics de push (débloque le seed) ([922dbde](https://github.com/univ-lehavre/cluster/commit/922dbdec855c5c07252959c42cac1f261fdd8118))
+* **portal:** corrige l'accès gitea (service nodeport + login atlas-admin) ([52ef11c](https://github.com/univ-lehavre/cluster/commit/52ef11c3ef7b968b72a5e126d7679a700d4a90a7))
+* **portal:** corrige l'accès Gitea (service NodePort + login atlas-admin) ([446c668](https://github.com/univ-lehavre/cluster/commit/446c668b1cfad31b03c875cd0bee74d35aa17059))
+
+
+### Refactor
+
+* **build:** purge les références résiduelles à la chaîne événementielle (adr 0105) ([0688707](https://github.com/univ-lehavre/cluster/commit/0688707b6bb2ff9b1257cb155e4f4a33de06d3c4))
+* **build:** retire la chaîne événementielle, build node-side terminal (adr 0105) ([30308e4](https://github.com/univ-lehavre/cluster/commit/30308e492ceb3128d9b72b046bd75d8b1dcca03c))
+* **build:** retire la chaîne événementielle, build node-side terminal (ADR 0105) ([9a0c332](https://github.com/univ-lehavre/cluster/commit/9a0c3326a0f9da461fc9130ad73dc051f157d1c1))
+
+
+### Documentation
+
+* **dev-atlas:** l'intro décrit le build node-side (geste opérateur), pas 'zéro geste' (adr 0105) ([f395c8d](https://github.com/univ-lehavre/cluster/commit/f395c8de7e70810eeb0dd1d742ad8123e995e5bd))
+* **drift:** consigne L92 — refactor streaming uplift (OOM même à 56Gi) ([f9de49c](https://github.com/univ-lehavre/cluster/commit/f9de49c443137244f51e75e31505f0cfc5385427))
+* **drift:** consigne L93 — cause réelle OOM uplift (échantillon entraînement) ([f67d9ed](https://github.com/univ-lehavre/cluster/commit/f67d9edaa82127c4eca962b96e41282fba7489d0))
+* **drift:** consigne L93 — cause réelle OOM uplift (échantillon entraînement) ([8570796](https://github.com/univ-lehavre/cluster/commit/8570796d88e8c476faec3ea687c228a87dd9a956))
+* **drift:** consigne L96 (observabilité/débit runs) et L97 (accès gitea portail) ([d53a8ef](https://github.com/univ-lehavre/cluster/commit/d53a8ef54870b7707449925457c33e20c225d6b1))
+* **drift:** consigne L98 — mismatch digest après retrait eventful ([c3682dd](https://github.com/univ-lehavre/cluster/commit/c3682dde9be6650e87d6858e339e9f59c64b4a9d))
+* **drift:** consigne L98 — mismatch digest après retrait eventful (override kustomize.images) ([6d0b184](https://github.com/univ-lehavre/cluster/commit/6d0b184f3749d181a83b58f9fc5e695ebbf00cfe))
+
 ## [2.53.0](https://github.com/univ-lehavre/cluster/compare/v2.52.1...v2.53.0) (2026-07-08)
 
 
