@@ -226,6 +226,18 @@ contribuer (branche, commits, revue, merge) et outiller sa machine :
 
 ## Culture d'ingénierie
 
+> **Prémisse — adaptativité matérielle.** La mise à disposition d'une
+> infrastructure DataOps+MLOps s'**adapte à la classe de matériel** : une seule
+> classe déclarée (portable, bare-metal HDD, bare-metal massif…) fait dériver,
+> de façon cohérente, l'infrastructure (distribution `k8s`/`k3s`, stockage
+> bloc/objet), le cache des données et le comportement du code applicatif. Il
+> n'y a plus de « prod » ni de « banc » — seulement des **instances** sur des
+> **classes**, isolées par leur **identité**. Les cultures nommées ci-dessous
+> s'exercent **sous** cette prémisse : la classe est l'entrée, la culture est la
+> manière
+> ([ADR 0107](docs/decisions/0107-adaptativite-materielle-premisse-cultures.md),
+> _en construction_).
+
 Au-delà des garde-fous transverses, le dépôt **nomme** les cultures d'ingénierie
 qu'il incarne — chacune ancrée dans des décisions d'architecture (_ADR_,
 _Architecture Decision Record_, dans [`docs/decisions/`](docs/decisions/)), pas
@@ -537,7 +549,7 @@ juger en 5 min : [docs/preuves.md](docs/preuves.md).
 
 <!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
 
-- **105 ADR** (91 Accepted, 10 Proposed, 4 Superseded)
+- **106 ADR** (91 Accepted, 11 Proposed, 4 Superseded)
 - **17 plans** vivants (1 Abandonné, 7 Achevé, 8 Actif, 1 Brouillon)
 - **99 drifts** indexés (3 caduc, 93 corrige, 1 en-cours, 2 ouvert)
 - **34 scénarios** E2E reproductibles
