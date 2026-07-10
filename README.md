@@ -226,6 +226,18 @@ contribuer (branche, commits, revue, merge) et outiller sa machine :
 
 ## Culture d'ingénierie
 
+> **Prémisse — adaptativité matérielle.** La mise à disposition d'une
+> infrastructure DataOps+MLOps s'**adapte à la classe de matériel** : une seule
+> classe déclarée (portable, bare-metal HDD, bare-metal massif…) fait dériver,
+> de façon cohérente, l'infrastructure (distribution `k8s`/`k3s`, stockage
+> bloc/objet), le cache des données et le comportement du code applicatif. Il
+> n'y a plus de « prod » ni de « banc » — seulement des **instances** sur des
+> **classes**, isolées par leur **identité**. Les cultures nommées ci-dessous
+> s'exercent **sous** cette prémisse : la classe est l'entrée, la culture est la
+> manière
+> ([ADR 0107](docs/decisions/0107-adaptativite-materielle-premisse-cultures.md),
+> _en construction_).
+
 Au-delà des garde-fous transverses, le dépôt **nomme** les cultures d'ingénierie
 qu'il incarne — chacune ancrée dans des décisions d'architecture (_ADR_,
 _Architecture Decision Record_, dans [`docs/decisions/`](docs/decisions/)), pas
