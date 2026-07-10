@@ -175,6 +175,7 @@ OpenAlex S3 (data/PARQUET/works, colonnaire)
 raw/works/*.parquet  +  raw/manifest_works.parquet
    │  mart_eunicoast (asset DuckDB, PAR LOTS homogènes en nb de works)
    ▼  filtre : ≥1 auteur affilié EUNICoast (ror DANS le work) ∩ publication_year ≥ 2016
+   ▼  puis dédup par récence (updated_date desc, une version par work_id — ADR atlas 0099)
 mart_eunicoast/run=<id>/*.parquet   (~10⁴–10⁵ works, colonnes d'intérêt only)
    │  transform_job (dbt-duckdb) — lit LE MART (déjà filtré, petit)
    ▼

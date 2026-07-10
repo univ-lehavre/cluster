@@ -1497,6 +1497,10 @@ drifts:
       work_id order by fwci desc, cited_by_count desc) = 1` — une ligne par work, la plus riche
       (fwci = métrique cible du modèle uplift). Le test unique redevient un invariant vrai ; l'aval
       ne double-compte plus. atlas fix/citation-dedup-work-id. Smoke dbt hermétique vert.
+      SUIVI (ADR atlas 0099) : cette déduplication a depuis été remontée du staging dbt vers
+      l'asset mart_eunicoast et son critère changé de `fwci desc` (qui pouvait figer une version
+      périmée) vers `updated_date desc` — les doublons viennent des rééditions OpenAlex d'un même
+      work_id (filigrane d'ingestion additif), dont seule la version la plus récente fait autorité.
     statut: corrige
 
   - id: L88
