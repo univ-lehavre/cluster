@@ -2,11 +2,11 @@
 
 ## Statut
 
-**Amendé (2026-07-11) — le volet BUILD IN-POD est ABANDONNÉ ; le split pré-image
-reste.** Le run banc a RÉFUTÉ l'hypothèse centrale « buildkit rootless in-pod
-tolérable sous PodSecurity » : sur k8s ≥ 1.34, PodSecurity `baseline`
-**interdit** `seccompProfile: Unconfined` ET `AppArmor: unconfined` (message
-d'admission
+Accepted (2026-07-11), **amendé le 2026-07-11 — le volet BUILD IN-POD est
+ABANDONNÉ ; le split pré-image reste.** Le run banc a RÉFUTÉ l'hypothèse
+centrale « buildkit rootless in-pod tolérable sous PodSecurity » : sur k8s ≥
+1.34, PodSecurity `baseline` **interdit** `seccompProfile: Unconfined` ET
+`AppArmor: unconfined` (message d'admission
 `violates PodSecurity "baseline:latest": forbidden AppArmor profiles … seccompProfile … Unconfined`),
 et tout moteur de build rootless (buildkit, kaniko, buildah…) exige ces
 dérogations pour ses `unshare`/`mount`. Le pod buildkitd n'a jamais pu être créé

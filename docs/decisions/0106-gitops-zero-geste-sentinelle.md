@@ -16,7 +16,7 @@ Superseded by 0110 (2026-07-11). Proposé le 2026-07-10.
 > rebuild+push ») ; l'**acheminement `main → Gitea`** (§6) ; la **frontière**
 > nestor/atlas/auto (§5). Seul le _support_ du build change (hors cluster au
 > lieu d'in-pod).
-
+>
 > ⚠️ **Superseded PARTIEL par
 > [ADR 0110](0110-preimage-de-build-et-build-in-pod.md).** La pré-image (0110)
 > supprime l'egress du build de code → ce build passe **in-pod** (buildkit
