@@ -25,13 +25,16 @@ localAPIEndpoint:
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
-# Nom du cluster (ADR 0053 (b)) : kubeadm dérive le contexte kubeconfig
-# `kubernetes-admin@{{ cluster_name | default('cluster-prod') }}` au lieu de
+# Nom du cluster (ADR 0053 (b) / 0108) : kubeadm dérive le contexte kubeconfig
+# `<user>@{{ cluster_name | default(stack_id | default('cluster-prod')) }}`, au lieu de
 # l'homonyme `kubernetes-admin@kubernetes`. Évite qu'un kubeconfig prod écrase un
-# kubeconfig banc dans une fusion `KUBECONFIG=banc:prod`. Défaut générique
-# surchargeable (ADR 0023) ; le banc Lima renomme déjà son contexte au fetch
-# (cluster-banc), il n'a donc pas besoin de surcharger cette valeur.
-clusterName: {{ cluster_name | default('cluster-prod') }}
+# kubeconfig banc dans une fusion `KUBECONFIG=banc:prod`.
+# On le cale sur le `stack_id` (identité de l'instance, ADR 0108) : le garde d'identité
+# du chemin kubectl exige `current-context == stack_id`, et le rewrite du fetch ne renomme
+# QUE le défaut kubeadm `kubernetes` — un `clusterName` figé (ex. `cluster-prod`) survivait
+# donc au rapatriement et produisait un contexte `…@cluster-prod` ≠ stack → refus du garde.
+# `cluster_name` explicite prime (override rare) ; sinon `stack_id` ; sinon fail-safe legacy.
+clusterName: {{ cluster_name | default(stack_id | default('cluster-prod')) }}
 controlPlaneEndpoint: {{ control_plane_endpoint }}:{{ control_plane_port }}
 # Version d'API du control-plane FIGÉE au patch (ADR 0006/0052, #295). Sans
 # cette clé, kubeadm résout lui-même la version à l'init → deux installs à deux

@@ -162,7 +162,16 @@ class SeedConfig:
             repo_apps=g("repo_apps"),
             org_atlas=g("org_atlas"),
             repo_atlas=g("repo_atlas"),
-            expected_cluster=atlas.get("expected_cluster", _DEFAULTS["expected_cluster"]),
+            # Cible prouvée de la garde prod (assert_prod_target). DÉRIVÉE du `stack_id`
+            # (identité de l'instance, ADR 0108) quand `atlas.expected_cluster` n'est pas
+            # déclaré : le `clusterName` kubeadm vaut désormais le stack_id (kubeadm-config.j2),
+            # donc la garde prod (cluster == expected_cluster) et la garde d'identité
+            # (contexte == stack_id) partagent UNE SEULE source de vérité. Explicite prime ;
+            # sinon stack_id ; sinon fail-safe legacy `cluster-prod` (stack_id absent).
+            expected_cluster=atlas.get(
+                "expected_cluster",
+                getattr(topo, "stack_id", "") or _DEFAULTS["expected_cluster"],
+            ),
             atlas_repo_dir=atlas.get("repo_dir"),
             code_locations=_code_locations_from_atlas(atlas),
         )
