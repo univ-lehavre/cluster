@@ -2,7 +2,31 @@
 
 ## Statut
 
-Accepted (2026-07-11 ; proposé le 2026-07-11). Supersede **partiellement**
+Accepted (2026-07-11), **amendé le 2026-07-11 — le volet BUILD IN-POD est
+ABANDONNÉ ; le split pré-image reste.** Le run banc a RÉFUTÉ l'hypothèse
+centrale « buildkit rootless in-pod tolérable sous PodSecurity » : sur k8s ≥
+1.34, PodSecurity `baseline` **interdit** `seccompProfile: Unconfined` ET
+`AppArmor: unconfined` (message d'admission
+`violates PodSecurity "baseline:latest": forbidden AppArmor profiles … seccompProfile … Unconfined`),
+et tout moteur de build rootless (buildkit, kaniko, buildah…) exige ces
+dérogations pour ses `unshare`/`mount`. Le pod buildkitd n'a jamais pu être créé
+(0 pod, rejets d'admission répétés). Combiné au fait que l'automatisme « build à
+chaque merge » n'existe plus (Argo Events abrogé,
+[ADR 0105](0105-retrait-build-evenementiel-node-side-terminal.md)/[ADR 0106](0106-gitops-zero-geste-sentinelle.md)
+→ le build est **déjà manuel**), le seul bénéfice de l'in-pod (autonomie « à
+chaque merge » du cluster) tombe. **DÉCISION amendée : l'image de code se build
+HORS cluster** (sur le poste de contrôle, `atlas`
+`deploy/build-code.sh --target code`, comme la pré-image deps-base), avec un
+garde-fou de fraîcheur symétrique (`check_code_freshness.py` : « le code a
+changé → rebuild+push »). Le split pré-image (base lourde à egress figée / image
+de code sans egress `FROM` la base) est **CONSERVÉ** — c'est lui qui rend le
+build de code trivial et reproductible. Le flux GitOps (digest injecté dans
+l'overlay prod → Argo CD déploie par digest) est **INCHANGÉ**. Le chantier
+buildkit-in-pod (`platform/buildkit/`, rôle `platform-buildkit`, mirror
+`moby/buildkit`) est retiré.
+
+_Historique (statut initial, avant réfutation au banc) :_ Accepted (2026-07-11 ;
+proposé le 2026-07-11). Supersede **partiellement**
 [ADR 0106](0106-gitops-zero-geste-sentinelle.md) : l'**exécution node-side du
 build de l'image de code** (0106 §1, le _timer systemd_ posé par
 `platform-build-images`) devient **caduque** — la pré-image supprimant l'egress

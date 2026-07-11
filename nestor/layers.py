@@ -65,7 +65,6 @@ _QUEUE_PHASES = frozenset(
         "mlflow",
         "gitops-seed",
         "gitops-seed-citation",
-        "citation",
         "portal",
     }
 )

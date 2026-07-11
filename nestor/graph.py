@@ -351,17 +351,11 @@ _CATALOGUE: tuple[Component, ...] = (
         signal=("deployment", "portal", "portal", True),
         weight=9,
     ),
-    Component(
-        name="citation",
-        role=None,  # BUILD node-side (bootstrap/citation.yaml importe platform-build-images,
-        # PAS de rôle dédié) : l'image citation est FABRIQUÉE, pas déployée ici — le
-        # déploiement est GitOps (Argo CD tire par digest, ADR 0094/0095). Comme portal,
-        # elle consomme le registry + le rôle générique de build (build-images), mais son
-        # « succès » est l'image présente au registry, pas un Deployment k8s → signal=None
-        # (pur BUILD, aucun workload à gater ; hors ROUNDTRIP_PHASES, comme storage-simple).
-        deps=("registry", "build-images"),
-        weight=9,
-    ),
+    # NB (ADR 0110 amendé) : le composant/phase `citation` (BUILD node-side de l'image de
+    # code) a été RETIRÉ — l'image de code se build hors cluster (poste, atlas build-code.sh).
+    # Le DÉPLOIEMENT survit via `gitops-seed-citation` (Argo CD tire par digest) : ce dernier
+    # ne dépend PLUS de `citation` (le digest vient désormais du build hors cluster, injecté
+    # dans la topo/seed), seulement d'argocd/gitea.
     Component(
         name="gitea",
         role="platform-gitea",
@@ -394,32 +388,19 @@ _CATALOGUE: tuple[Component, ...] = (
         name="gitops-seed-citation",
         role=None,  # données : le VRAI flux App-of-Apps citation (git push arbre atlas +
         # apps/citation.yaml par digest + Applications) — pas de rôle Ansible dédié (comme
-        # gitops-seed). Dépend d'argocd/gitea (org/repo poussé) ET de citation (l'image
-        # buildée dont le digest est publié dans apps/citation.yaml, ADR 0095 §2).
-        deps=("argocd", "gitea", "citation"),
+        # gitops-seed). Dépend d'argocd/gitea (org/repo poussé). Le digest de l'image publié
+        # dans apps/citation.yaml vient désormais du build HORS cluster (ADR 0110 amendé),
+        # injecté dans la topo/seed — plus de dépendance à une phase `citation` de build.
+        deps=("argocd", "gitea"),
         # Application `citation-dagster` (déployée dans dagster, projet argocd `atlas`).
         targeted=("-n argocd applications.argoproj.io citation-dagster",),
         # Application Argo CD `citation-dagster` (CRD sans replicas) → présence seule.
         signal=("application", "citation-dagster", "argocd", False),
         weight=7,
     ),
-    # AJOUT en QUEUE (ADR 0110) — ne réordonne AUCUN composant existant (leur `rank` =
-    # index dans COMPONENT_ALL est préservé ; la byte-identité tient, cf. commentaire
-    # en tête de _CATALOGUE). buildkitd rootless IN-POD : build l'image de CODE des
-    # code-locations (`FROM deps-base`, zéro egress), remplace le build node-side pour
-    # le code courant. Dépend de `registry` (pull la pré-image + push le résultat) et
-    # de `build-images` (même famille build node-side, dont il est le pendant in-pod).
-    Component(
-        name="buildkit",
-        role="platform-buildkit",
-        deps=("registry", "build-images"),
-        namespace="buildkit",
-        # PAS de `signal` : comme `registry`/`build-images` (même famille outillage
-        # build), buildkit n'est pas le dernier maillon d'une PHASE roundtrip — il
-        # n'atteste aucune couche applicative, il outille le build. Un signal serait
-        # orphelin (test `only_signal_components_carry_a_signal`).
-        weight=8,
-    ),
+    # NB (ADR 0110 amendé) : le composant `buildkit` (moteur de build IN-POD) a été RETIRÉ —
+    # PodSecurity baseline (k8s ≥ 1.34) refuse le seccomp Unconfined du rootless, et le build
+    # de code est déplacé HORS cluster (poste, atlas build-code.sh). Plus de rôle platform-buildkit.
 )
 # NB (ADR 0105) : la couche `eventful` (build applicatif événementiel in-cluster, Argo Events +
 # Argo Workflows + NATS, ADR 0095 §1.b) a été RETIRÉE — le build node-side (platform-build-images,
@@ -513,7 +494,6 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     ),
     "mlflow": ("mlflow", "s3-backing-mlflow"),
     "portal": ("portal",),
-    "citation": ("citation",),
     "gitops": ("gitea", "argocd"),
     "gitops-seed": ("gitops-seed",),
     "gitops-seed-citation": ("gitops-seed-citation",),

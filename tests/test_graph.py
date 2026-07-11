@@ -91,11 +91,11 @@ class Invariant3Determinism(unittest.TestCase):
 class Acyclicite(unittest.TestCase):
     """topo_sort sur tout le catalogue réussit ; un cycle est détecté."""
 
-    def test_all_components_sortable_30(self):
+    def test_all_components_sortable_28(self):
         order = graph.topo_sort(list(graph.COMPONENT_ALL))
-        # 30 composants (29 + buildkit, moteur de build in-pod ADR 0110 ; eventful
-        # RETIRÉ ADR 0105).
-        self.assertEqual(len(order), 30)
+        # 28 composants : buildkit (build in-pod) et citation (build node-side) RETIRÉS
+        # (ADR 0110 amendé — build de code hors cluster) ; eventful RETIRÉ (ADR 0105).
+        self.assertEqual(len(order), 28)
         self.assertEqual(set(order), set(graph.COMPONENT_ALL))
 
     def test_injected_cycle_detected(self):
@@ -192,9 +192,9 @@ class PhaseClosureCeph(unittest.TestCase):
                 "gitops",
                 "dataops",
                 "gitops-seed",
+                "gitops-seed-citation",
                 "mlflow",
                 "portal",
-                "gitops-seed-citation",
             ],
         )
 
@@ -209,9 +209,9 @@ class PhaseClosureCeph(unittest.TestCase):
                 "gitops",
                 "dataops",
                 "gitops-seed",
+                "gitops-seed-citation",
                 "mlflow",
                 "portal",
-                "gitops-seed-citation",
             ],
         )
         self.assertIn("gitops", cl)
@@ -236,10 +236,12 @@ class PhaseClosureCeph(unittest.TestCase):
         self.assertEqual(graph.phase_closure("metrics-server"), ["metrics-server"])
 
     def test_dataops_pulls_mlflow_portal(self):
-        # gitops-seed-citation dépend de citation → registry (∈ dataops) → tiré aussi.
+        # ADR 0110 amendé : la phase `citation` (build) a été retirée → gitops-seed-citation
+        # ne dépend plus de dataops (via citation→registry), seulement d'argocd/gitea. Il
+        # sort donc de la clôture de `dataops`.
         self.assertEqual(
             graph.phase_closure("dataops"),
-            ["dataops", "mlflow", "portal", "gitops-seed-citation"],
+            ["dataops", "mlflow", "portal"],
         )
 
     def test_mount_order_ceph_first(self):

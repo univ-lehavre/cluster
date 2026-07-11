@@ -58,14 +58,6 @@ misconfigurations:
   - id: KSV-0014 # rootfs read-only impossible (rstudio-server root + écritures)
     paths:
       - 'apps/rstudio/deployment.yaml'
-  # buildkitd rootless (ADR 0110) : le moteur écrit son état de build (couches,
-  # cache, montages du snapshotter) dans le rootfs → rootfs read-only le casse.
-  # Le reste est durci (non-root uid 1000, drop ALL caps) ; seccomp Unconfined +
-  # AppArmor unconfined sont les dérogations MINIMALES du rootless, tolérées par
-  # PodSecurity baseline du ns (jamais privileged/hostPath). Cf. ADR 0110 §2.
-  - id: KSV-0014 # rootfs read-only impossible (buildkit rootless écrit son état)
-    paths:
-      - 'platform/buildkit/deployment.yaml'
 
   # ── mailpit SMTP : hostPort 1025 assumé (banc-only, ADR 0071) ─────────────
   # Le relais postfix HÔTE (#131) tourne SUR le nœud, hors réseau pods — il joint

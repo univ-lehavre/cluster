@@ -31,10 +31,11 @@ class Closure(unittest.TestCase):
         # le portail (ADR 0091) dépend du registry/build-images de dataops (image maison)
         # → défaire dataops oblige à défaire mlflow ET portail d'abord (ordre inverse,
         # ADR 0054). portail en QUEUE (poids 9, après mlflow poids 8).
-        # gitops-seed-citation dépend de citation → registry (∈ dataops) → tiré aussi (ADR 0095).
+        # ADR 0110 amendé : la phase `citation` (build) retirée → gitops-seed-citation ne
+        # dépend plus de dataops (via citation→registry) → sort de la clôture de `dataops`.
         self.assertEqual(
             roundtrip.closure("dataops"),
-            ["dataops", "mlflow", "portal", "gitops-seed-citation"],
+            ["dataops", "mlflow", "portal"],
         )
 
     def test_gitops_pulls_seed(self):
@@ -85,9 +86,9 @@ class Closure(unittest.TestCase):
                 "gitops",
                 "dataops",
                 "gitops-seed",
+                "gitops-seed-citation",
                 "mlflow",
                 "portal",
-                "gitops-seed-citation",
             ],
         )
         self.assertEqual(
@@ -99,9 +100,9 @@ class Closure(unittest.TestCase):
                 "gitops",
                 "dataops",
                 "gitops-seed",
+                "gitops-seed-citation",
                 "mlflow",
                 "portal",
-                "gitops-seed-citation",
             ],
         )
 

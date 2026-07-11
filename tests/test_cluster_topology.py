@@ -516,15 +516,12 @@ class OsdDerivation(unittest.TestCase):
         topo = topology_from_dict(_base(storage={"backend": "local-path"}))
         self.assertIsNone(derive_metadata_device(topo))
 
-    def test_citation_repo_dir_derived_from_atlas_block(self):
-        # Le bloc `atlas.repo_dir` (config locale, ADR 0023) → extravar citation_repo_dir
-        # du build citation (bootstrap/citation.yaml, ADR 0095 §1.a) — évite le -e manuel.
+    def test_citation_repo_dir_no_longer_derived(self):
+        # ADR 0110 amendé : le build node-side citation a été retiré → `citation_repo_dir`
+        # n'est PLUS dérivé du bloc `atlas.repo_dir` (plus aucun consommateur). Le bloc
+        # `atlas` reste lu pour le seed (code_locations/digest), pas pour un build.
         topo = topology_from_dict(_base(atlas={"repo_dir": "/x/atlas"}))
-        self.assertEqual(derive_run_params(topo).get("citation_repo_dir"), "/x/atlas")
-
-    def test_citation_repo_dir_absent_without_atlas_block(self):
-        # Pas de bloc atlas → clé absente (la garde du play lève, message explicite).
-        self.assertNotIn("citation_repo_dir", derive_run_params(topology_from_dict(_base())))
+        self.assertNotIn("citation_repo_dir", derive_run_params(topo))
 
 
 class DiskParsing(unittest.TestCase):

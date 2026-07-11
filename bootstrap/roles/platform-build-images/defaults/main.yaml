@@ -103,16 +103,10 @@ build_images:
     tag: 4.2.2
     mirror_only: true
     public: docker.io/dtzar/helm-kubectl@sha256:d815939dfc36d06dde3baaa3d122dc017753006e712c111a72d7f3e1e1744807
-  # PASSTHROUGH (mirror_only) — buildkit rootless, moteur de build IN-POD (ADR 0110).
-  # Publique multi-arch (arm64+amd64 vérifiés `docker buildx imagetools`), épinglée par
-  # DIGEST d'index (ADR 0006). Ni build ni retag : pull → tag → push. Sans elle, le
-  # Deployment buildkitd fait ImagePullBackOff au banc air-gappé (ADR 0011). La ref
-  # interne `registry:80/moby/buildkit:v0.19.0-rootless` est consommée par
-  # platform/buildkit/deployment.yaml (épinglée par digest).
-  - name: moby/buildkit
-    tag: v0.19.0-rootless
-    mirror_only: true
-    public: docker.io/moby/buildkit@sha256:e901cffdad753892a7c3afb8b9972549fca02c73888cf340c91ed801fdd96d71
+
+# NB (ADR 0110 amendé) : le mirror `moby/buildkit` (moteur de build IN-POD) a été RETIRÉ —
+# le build in-pod est abandonné (baseline refuse seccomp Unconfined ; build de code déplacé
+# hors cluster). Plus aucune image buildkit à mirrorer.
 
 # Image maison MLflow (ADR 0082 amendé) : officielle + psycopg2. Liste SÉPARÉE de
 # build_images — consommée UNIQUEMENT par la layer autonome bootstrap/mlflow.yaml
@@ -175,31 +169,10 @@ portal_build_images:
     build_all_arch: true
     force_rebuild: true
 
-# Image APPLICATIVE de la code-location atlas `citation` (exemple générique ADR 0023 ;
-# ADR 0094/0095 §1.a « premier pas »). Liste SÉPARÉE de build_images : consommée
-# UNIQUEMENT par la layer autonome bootstrap/citation.yaml (override `build_images` au
-# niveau import_role), JAMAIS par dataops/mlflow/portal.
-#
-# CAS CONTEXTE MULTI-DOSSIER (comme portal) : le Dockerfile citation (dépôt atlas,
-# dataops/citation-dagster/Dockerfile) a pour contexte de build `dataops/` — il embarque
-# la code-location `citation-dagster/` ET le projet dbt frère `citation-dbt/` (`COPY
-# citation-dagster/… ` et `COPY citation-dbt …`). Le `src_context` générique mono-dossier
-# ne couvre pas ce cas → PAS de `src_context` ici : le play bootstrap/citation.yaml
-# RÉPLIQUE node-side l'arborescence minimale attendue (citation-dagster/{pyproject,uv.lock,
-# README,src,scripts} + citation-dbt/ + le Dockerfile à la racine du contexte) sous
-# `build_workdir/citation/` AVANT d'importer ce rôle. Le rôle build ce contexte préparé.
-#
-# PAS d'`official_image` : image 100 % maison (FROM python:3.10-slim + le paquet atlas).
-# `build_all_arch: true` : aucune officielle amd64 à retaguer → BUILD sur TOUTE arche (x86
-# prod inclus). `force_rebuild: true` : tag `:dev` MUTABLE — le code atlas évolue à chaque
-# révision (raisonnement émetteur/portail, defaults L51-53). `gitops_writeback: true` : le
-# DÉPLOIEMENT est GitOps par DIGEST (ADR 0095 §2), pas par tag ; le rôle lit `RepoDigests`
-# après push et expose `build_image_digests` que le SEED publie dans cluster/apps.
-citation_build_images:
-  - name: citation-dagster
-    tag: dev
-    build_context: '{{ build_workdir }}/citation'
-    dockerfile: '{{ build_workdir }}/citation/Dockerfile'
-    build_all_arch: true
-    force_rebuild: true
-    gitops_writeback: true
+# NB (ADR 0110 amendé) : `citation_build_images` (build node-side de l'image de code
+# citation) a été RETIRÉ. L'image de code des code-locations se build désormais HORS cluster
+# (sur le poste, `atlas` deploy/build-code.sh) — le build node-side (plays citation.yaml /
+# code-location-build.yaml) est abandonné. Le rôle platform-build-images ne sert plus qu'aux
+# images de base dataops (dagster/marquez), via la liste `build_images` par défaut ci-dessus.
+# Le DÉPLOIEMENT reste GitOps par DIGEST (ADR 0095 §2) : le digest produit hors cluster est
+# injecté dans l'overlay prod et publié dans cluster/apps par le seed.
