@@ -1,0 +1,33 @@
+# Configuration de `buildkitd` in-pod (ADR 0110).
+#
+# Le pod buildkitd n'hérite PAS de la config containerd du nœud (le `hosts.toml`
+# de `certs.d` + `use_local_image_pull` posés par `platform-registry` volet node) :
+# c'est un moteur rootless isolé. Il faut donc lui redire ICI que le registre
+# interne `registry:80` est en **HTTP** (ADR 0011, registre HTTP sans auth) et
+# `insecure` (pas de TLS à vérifier) — sinon « HTTP response to HTTPS client » au
+# push (même symptôme que le fix node-side `use_local_image_pull`).
+#
+# La résolution de nom `registry:80` passe par le **DNS cluster** : le pod cible le
+# Service `registry.registry.svc.cluster.local:80` (pas `/etc/hosts` du nœud). Le
+# tag reste le nom logique `registry:80/…` ; buildkit résout via le DNS.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: buildkitd-config
+  namespace: buildkit
+data:
+  buildkitd.toml: |
+    debug = false
+
+    # Registre interne HTTP sans TLS (ADR 0011). Requis pour pull la pré-image
+    # `citation-deps-base` ET push l'image de code produite.
+    [registry."registry:80"]
+      http = true
+      insecure = true
+
+    [worker.oci]
+      enabled = true
+      # snapshotter : départagé au banc (lot 2 du plan, ADR 0110). Défaut buildkit
+      # rootless = `auto` (fuse-overlayfs si /dev/fuse dispo, sinon native). On
+      # laisse `auto` pour l'instant ; la preuve du lot 2 fige le choix ici.
+      snapshotter = "auto"

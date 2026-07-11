@@ -1,0 +1,16 @@
+# Service TCP interne : le Job de build (lot 3) joint `buildkitd` par
+# `tcp://buildkitd.buildkit.svc:1234` pour lui soumettre le build de l'image de
+# code. Pas d'exposition hors cluster (ClusterIP).
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd
+  namespace: buildkit
+spec:
+  selector:
+    app: buildkitd
+  ports:
+    - name: buildkit
+      protocol: TCP
+      port: 1234
+      targetPort: 1234

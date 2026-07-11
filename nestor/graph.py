@@ -403,6 +403,23 @@ _CATALOGUE: tuple[Component, ...] = (
         signal=("application", "citation-dagster", "argocd", False),
         weight=7,
     ),
+    # AJOUT en QUEUE (ADR 0110) — ne réordonne AUCUN composant existant (leur `rank` =
+    # index dans COMPONENT_ALL est préservé ; la byte-identité tient, cf. commentaire
+    # en tête de _CATALOGUE). buildkitd rootless IN-POD : build l'image de CODE des
+    # code-locations (`FROM deps-base`, zéro egress), remplace le build node-side pour
+    # le code courant. Dépend de `registry` (pull la pré-image + push le résultat) et
+    # de `build-images` (même famille build node-side, dont il est le pendant in-pod).
+    Component(
+        name="buildkit",
+        role="platform-buildkit",
+        deps=("registry", "build-images"),
+        namespace="buildkit",
+        # PAS de `signal` : comme `registry`/`build-images` (même famille outillage
+        # build), buildkit n'est pas le dernier maillon d'une PHASE roundtrip — il
+        # n'atteste aucune couche applicative, il outille le build. Un signal serait
+        # orphelin (test `only_signal_components_carry_a_signal`).
+        weight=8,
+    ),
 )
 # NB (ADR 0105) : la couche `eventful` (build applicatif événementiel in-cluster, Argo Events +
 # Argo Workflows + NATS, ADR 0095 §1.b) a été RETIRÉE — le build node-side (platform-build-images,

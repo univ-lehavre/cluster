@@ -91,10 +91,11 @@ class Invariant3Determinism(unittest.TestCase):
 class Acyclicite(unittest.TestCase):
     """topo_sort sur tout le catalogue réussit ; un cycle est détecté."""
 
-    def test_all_components_sortable_29(self):
+    def test_all_components_sortable_30(self):
         order = graph.topo_sort(list(graph.COMPONENT_ALL))
-        # 29 composants (27 + citation + gitops-seed-citation ; eventful RETIRÉ, ADR 0105).
-        self.assertEqual(len(order), 29)
+        # 30 composants (29 + buildkit, moteur de build in-pod ADR 0110 ; eventful
+        # RETIRÉ ADR 0105).
+        self.assertEqual(len(order), 30)
         self.assertEqual(set(order), set(graph.COMPONENT_ALL))
 
     def test_injected_cycle_detected(self):
