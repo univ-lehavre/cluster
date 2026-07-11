@@ -2,7 +2,7 @@
 
 ## Statut
 
-Proposed (2026-07-11). Supersede **partiellement**
+Accepted (2026-07-11 ; proposé le 2026-07-11). Supersede **partiellement**
 [ADR 0106](0106-gitops-zero-geste-sentinelle.md) : l'**exécution node-side du
 build de l'image de code** (0106 §1, le _timer systemd_ posé par
 `platform-build-images`) devient **caduque** — la pré-image supprimant l'egress
