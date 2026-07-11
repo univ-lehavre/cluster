@@ -99,7 +99,7 @@ _REAL_WAIT_HEALTHY = cli._wait_layer_healthy  # gate de santé réelle (#355)
 
 def setUpModule():
     cli.subprocess.run = _deny_run
-    # Garde d'isolation neutralisée PAR DÉFAUT : les tests métier (up/next/destroy/…)
+    # Garde d'isolation neutralisée PAR DÉFAUT : les tests métier (install/next/destroy/…)
     # n'ont pas de contexte kubectl estampillé et ne doivent pas être bloqués par elle.
     # La classe `TargetIdentityGuard` la RÉACTIVE explicitement pour la tester
     # (cf. _REAL_ASSERT_IDENTITY).
@@ -2481,17 +2481,25 @@ class Stack(unittest.TestCase):
         self.assertRegex(out, r"★ socle\.example\s+→ layers")
 
 
-class UpCommand(unittest.TestCase):
-    """`up` : dérive le chemin → affiche le plan → confirme → MONTE via le moteur Python
-    `_run_path_engine` (SEUL moteur depuis le retrait du filet bash run-phases.sh)."""
+class InstallCommand(unittest.TestCase):
+    """`install` (ex-`up`, ADR 0108 §4) : dérive le chemin → affiche le plan → confirme →
+    MONTE via le moteur Python `_run_path_engine` (SEUL moteur). INVARIANT CARDINAL :
+    `install` EXCLUT TOUJOURS le substrat (phase amont `up`), même en terrain local."""
 
     def _stub_engine(self, rc=0):
         # Espionne `_run_path_engine` (le SEUL moteur) : capture (target, seq, stack_name).
         # Le montage (le moteur) est stubé ; on LAISSE PASSER les appels subprocess au GRAPHE
-        # (rollback-lib.sh) pour que `expected_phase_sequence` dérive la séquence (les sondes
-        # réelles _ready_nodes/_real_vms tapent limactl/kubectl → déniées en CompletedProcess
-        # vide, qu'elles tolèrent : plan annoté « tout à installer », neutre en test).
+        # (rollback-lib.sh) pour que `expected_phase_sequence` dérive la séquence. Les sondes
+        # réelles _real_vms/_ready_nodes sont neutralisées à ∅ : sur une topo LOCALE elles
+        # shelleraient limactl/kubectl (déniés bruyamment par le blindage) — ∅ = plan annoté
+        # « tout à installer », neutre en test.
         _install_graph_passthrough(self)
+        orig_vms = cli._real_vms
+        cli._real_vms = lambda *_a, **_k: []
+        self.addCleanup(setattr, cli, "_real_vms", orig_vms)
+        orig_ready = cli._ready_nodes
+        cli._ready_nodes = lambda *_a, **_k: []
+        self.addCleanup(setattr, cli, "_ready_nodes", orig_ready)
         calls = []
 
         def _spy(topo, target, seq, stack_name, a_appliquer=None):
@@ -2504,10 +2512,10 @@ class UpCommand(unittest.TestCase):
         return calls
 
     def test_yes_derives_path_and_mounts_via_engine(self):
-        # `nestor up` dérive le chemin, affiche le plan, puis MONTE via `_run_path_engine`
+        # `nestor install` dérive le chemin, affiche le plan, puis MONTE via `_run_path_engine`
         # (un seul moteur). La séquence vient du graphe atomique (ADR 0083).
         calls = self._stub_engine()
-        code, out, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        code, out, _ = _capture(["install", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 0)
         self.assertIn("Couches à monter", out)  # le plan affiché
         self.assertEqual(len(calls), 1)  # le moteur Python appelé une fois
@@ -2515,16 +2523,28 @@ class UpCommand(unittest.TestCase):
         # du graphe atomique. socle.example (ceph) dérive bootstrap,ceph,sc,datalake,…
         self.assertEqual(calls[0]["target"], "layers")
         seq = calls[0]["seq"]
-        # _EXAMPLE est en terrain `baremetal` (non local) → PAS de phase `up` (nœuds
-        # préexistants, ADR 0084/0108) : le socle prod commence à `bootstrap`.
+        # `install` ne monte JAMAIS le substrat → PAS de phase `up` : le socle commence à
+        # `bootstrap` (ici _EXAMPLE est baremetal, mais l'exclusion vaut aussi en local).
         self.assertNotIn("up", seq)
         self.assertEqual(seq[0], "bootstrap")
         self.assertIn("ceph", seq)  # backend ceph → socle ceph dans la séquence
         self.assertIn("datalake", seq)
 
+    def test_install_excludes_substrate_even_in_local_terrain(self):
+        # INVARIANT CARDINAL (ADR 0108 §4) : même sur une topo LOCALE (où
+        # `expected_phase_sequence` PRODUIT la phase `up`), `install` la RETIRE — il ne
+        # touche jamais au substrat (c'est le ressort exclusif de `provision`).
+        calls = self._stub_engine()
+        lima = _example_as_lima(self)  # copie de _EXAMPLE forcée en terrain local
+        code, _, _ = _capture(["install", "-f", lima, "--yes"])
+        self.assertEqual(code, 0)
+        seq = calls[0]["seq"]
+        self.assertNotIn("up", seq)  # LE test de l'invariant : jamais le substrat en install
+        self.assertEqual(seq[0], "bootstrap")
+
     def test_explicit_target_overrides_derivation(self):
         calls = self._stub_engine()
-        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--target", "atlas-ceph", "--yes"])
+        code, _, _ = _capture(["install", "-f", _EXAMPLE, "--target", "atlas-ceph", "--yes"])
         self.assertEqual(code, 0)
         self.assertEqual(calls[0]["target"], "atlas-ceph")
 
@@ -2532,21 +2552,46 @@ class UpCommand(unittest.TestCase):
         # Le NOM de la stack active (catalog.topology) est transmis au moteur (clé de
         # fraîcheur PAR STACK). _EXAMPLE (socle.example) déclare une topologie nommée.
         calls = self._stub_engine()
-        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        code, _, _ = _capture(["install", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 0)
         self.assertNotEqual(calls[0]["stack_name"], "—")  # une vraie stack, pas le défaut
 
     def test_refuses_without_yes_off_tty(self):
         calls = self._stub_engine()
-        code, _, err = _capture(["up", "-f", _EXAMPLE])  # hors TTY, pas de --yes
+        code, _, err = _capture(["install", "-f", _EXAMPLE])  # hors TTY, pas de --yes
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])  # le moteur JAMAIS appelé (confirmation refusée)
         self.assertIn("refusé", err)
 
     def test_propagates_mount_failure(self):
         self._stub_engine(rc=1)  # le moteur Python échoue
-        code, _, _ = _capture(["up", "-f", _EXAMPLE, "--yes"])
+        code, _, _ = _capture(["install", "-f", _EXAMPLE, "--yes"])
         self.assertEqual(code, 1)
+
+    def test_keeps_identity_guard(self):
+        # `install` mute une instance existante (kubectl/Ansible) → il GARDE la garde
+        # d'identité (`_assert_target_identity`, ADR 0108). On la fait LEVER : un refus doit
+        # arrêter net (code 2), AVANT tout montage (le moteur jamais atteint).
+        self._install_engine_boom()
+
+        def _refuse(action, *_a, **_k):
+            raise cli._UsageError(f"REFUS : `{action}` cible non prouvée (test)")
+
+        orig = cli._assert_target_identity
+        cli._assert_target_identity = _refuse
+        self.addCleanup(setattr, cli, "_assert_target_identity", orig)
+        code, _, err = _capture(["install", "-f", _EXAMPLE, "--yes"])
+        self.assertEqual(code, 2)
+        self.assertIn("REFUS", err)
+
+    def _install_engine_boom(self):
+        # Sentinelle : le moteur ne DOIT PAS être atteint quand la garde refuse.
+        def _boom(*_a, **_k):
+            raise AssertionError("moteur atteint malgré le refus de la garde d'identité")
+
+        orig = cli._run_path_engine
+        cli._run_path_engine = _boom
+        self.addCleanup(setattr, cli, "_run_path_engine", orig)
 
     def test_incoherent_target_is_usage_error(self):
         # ADR 0083 : `atlas` est backend-agnostique (n'est plus incohérent sur ceph). Le
@@ -2560,10 +2605,124 @@ class UpCommand(unittest.TestCase):
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
         calls = self._stub_engine()
-        code, _, err = _capture(["up", "-f", path, "--target", "storage-real", "--yes"])
+        code, _, err = _capture(["install", "-f", path, "--target", "storage-real", "--yes"])
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])
         self.assertIn("usage", err)
+
+
+class ProvisionCommand(unittest.TestCase):
+    """`provision` (ex-`up`, ADR 0108 §4) : crée le SUBSTRAT (VMs). Gate sur le terrain
+    (`local` provisionne, `baremetal` no-op, `cloud` non implémenté), monte la SEULE phase
+    amont `up`, et n'appelle JAMAIS la garde d'identité kubectl (il fait naître l'instance)."""
+
+    def _stub_engine(self, rc=0):
+        _install_graph_passthrough(self)
+        calls = []
+
+        def _spy(topo, target, seq, stack_name, a_appliquer=None):
+            calls.append(
+                {
+                    "target": target,
+                    "seq": list(seq),
+                    "stack_name": stack_name,
+                    "a_appliquer": a_appliquer,
+                }
+            )
+            return rc
+
+        orig = cli._run_path_engine
+        cli._run_path_engine = _spy
+        self.addCleanup(setattr, cli, "_run_path_engine", orig)
+        # Sonde des VMs réelles à ∅ → toutes les VMs déclarées sont « à créer » (substrat neuf).
+        orig_vms = cli._real_vms
+        cli._real_vms = lambda *_a, **_k: []
+        self.addCleanup(setattr, cli, "_real_vms", orig_vms)
+        return calls
+
+    _LIMA = (
+        "catalog: {topology: solo, terrain: local}\n"
+        "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
+        "storage: {backend: local-path}\n"
+    )
+    _BAREMETAL = (
+        "catalog: {topology: bm, terrain: baremetal}\n"
+        "nodes:\n  - {name: n1, roles: [control, worker]}\n"
+        "storage: {backend: local-path}\n"
+    )
+    _CLOUD = (
+        "catalog: {topology: cl, terrain: cloud}\n"
+        "nodes:\n  - {name: n1, roles: [control, worker]}\n"
+        "storage: {backend: local-path}\n"
+    )
+
+    def _write(self, body):
+        path = _tmp(body)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_local_mounts_substrate_only(self):
+        # Terrain local : `provision` monte la SEULE phase amont `up` (le substrat) via le
+        # moteur — jamais l'OS/k8s/plateforme. a_appliquer = {"up"} (substrat seul).
+        calls = self._stub_engine()
+        code, out, _ = _capture(["provision", "-f", self._write(self._LIMA), "--yes"])
+        self.assertEqual(code, 0)
+        self.assertIn("substrat", out)  # message orienté substrat, pas « couches »
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["seq"], ["up"])  # SUBSTRAT SEUL
+        self.assertEqual(calls[0]["a_appliquer"], {"up"})
+
+    def test_baremetal_is_noop(self):
+        # Terrain baremetal : les machines préexistent → NO-OP explicite (code 0), le moteur
+        # n'est JAMAIS appelé (rien à provisionner).
+        calls = self._stub_engine()
+        code, out, _ = _capture(["provision", "-f", self._write(self._BAREMETAL), "--yes"])
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [])  # aucun montage
+        self.assertIn("préexistent", out)
+
+    def test_cloud_is_usage_error(self):
+        # Terrain cloud : provisionnement non implémenté (ADR 0032) → usage (code 2), aucun
+        # montage. Message qui pointe l'ADR 0032.
+        calls = self._stub_engine()
+        code, _, err = _capture(["provision", "-f", self._write(self._CLOUD), "--yes"])
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])
+        self.assertIn("non implémenté", err)
+        self.assertIn("0032", err)
+
+    def test_refuses_without_yes_off_tty(self):
+        # Geste destructif/rare (crée le substrat) : refus hors TTY sans --yes, comme destroy.
+        calls = self._stub_engine()
+        code, _, err = _capture(["provision", "-f", self._write(self._LIMA)])  # pas de --yes
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])  # le moteur JAMAIS appelé (confirmation refusée)
+        self.assertIn("refusé", err)
+
+    def test_all_vms_present_is_noop(self):
+        # Terrain local mais TOUTES les VMs déclarées existent déjà → rien à provisionner
+        # (code 0), le moteur n'est PAS appelé.
+        calls = self._stub_engine()  # stubbe le moteur ET pose _real_vms → ∅ par défaut
+        # On surcharge _real_vms pour que la VM déclarée (cp1) soit déjà présente.
+        cli._real_vms = lambda *_a, **_k: ["cp1"]
+        code, out, _ = _capture(["provision", "-f", self._write(self._LIMA), "--yes"])
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [])  # aucun montage (rien à créer)
+        self.assertIn("existent déjà", out)
+
+    def test_does_not_call_identity_guard(self):
+        # `provision` fait NAÎTRE l'instance → PAS de contexte kubectl à comparer : il
+        # n'appelle JAMAIS `_assert_target_identity`. On la rend explosive.
+        self._stub_engine()
+
+        def _boom(action, *_a, **_k):
+            raise AssertionError(f"provision NE DOIT PAS appeler la garde d'identité ({action})")
+
+        orig = cli._assert_target_identity
+        cli._assert_target_identity = _boom
+        self.addCleanup(setattr, cli, "_assert_target_identity", orig)
+        code, _, _ = _capture(["provision", "-f", self._write(self._LIMA), "--yes"])
+        self.assertEqual(code, 0)  # atteint le moteur SANS déclencher la garde
 
 
 class Destroy(unittest.TestCase):
@@ -2775,13 +2934,13 @@ class TargetIdentityGuard(unittest.TestCase):
     def test_passes_when_context_matches_stack(self):
         # contexte kubectl courant == stack_id de l'instance visée → nominal, pas de refus.
         self._arm(current_context="dirqual")
-        cli._assert_target_identity("nestor up", self._Topo("dirqual"))  # ne lève pas
+        cli._assert_target_identity("nestor install", self._Topo("dirqual"))  # ne lève pas
 
     def test_refuses_when_context_targets_other_instance(self):
         # contexte courant ≠ stack_id (ex. un kubeconfig visant une AUTRE instance) → REFUS.
         self._arm(current_context="autre")
         with self.assertRaises(cli._UsageError) as ctx:
-            cli._assert_target_identity("nestor up", self._Topo("dirqual"))
+            cli._assert_target_identity("nestor install", self._Topo("dirqual"))
         self.assertIn("REFUS", str(ctx.exception))
         self.assertIn("dirqual", str(ctx.exception))
 
@@ -2790,13 +2949,13 @@ class TargetIdentityGuard(unittest.TestCase):
         # il ne porte pas le nom estampillé de l'instance (remplace l'échappatoire KUBECONFIG).
         self._arm(current_context="kubernetes-admin@kubernetes")
         with self.assertRaises(cli._UsageError):
-            cli._assert_target_identity("nestor up", self._Topo("dirqual"))
+            cli._assert_target_identity("nestor install", self._Topo("dirqual"))
 
     def test_passes_when_no_current_context(self):
         # aucun contexte courant (instance non montée / kubeconfig absent) → la garde ne
-        # bloque pas : l'inventaire (chemin SSH) garde, on n'empêche pas un up from-scratch.
+        # bloque pas : l'inventaire (chemin SSH) garde, on n'empêche pas un install from-scratch.
         self._arm(current_context=None, current_server=None)
-        cli._assert_target_identity("nestor up", self._Topo("dirqual"))  # ne lève pas
+        cli._assert_target_identity("nestor install", self._Topo("dirqual"))  # ne lève pas
 
     def test_passes_when_no_resolvable_stack(self):
         # pas d'identité résoluble (topo None + aucune stack active) → rien à prouver, passe.
@@ -2804,7 +2963,7 @@ class TargetIdentityGuard(unittest.TestCase):
         orig = cli._active_stack_name
         cli._active_stack_name = lambda _f: None
         self.addCleanup(setattr, cli, "_active_stack_name", orig)
-        cli._assert_target_identity("nestor up")  # ne lève pas
+        cli._assert_target_identity("nestor install")  # ne lève pas
 
     def test_uses_active_stack_when_no_topo(self):
         # sans topo, l'identité est la stack ACTIVE (`_active_stack_name`) : contexte ≠ elle
@@ -2814,7 +2973,7 @@ class TargetIdentityGuard(unittest.TestCase):
         cli._active_stack_name = lambda _f: "dirqual"
         self.addCleanup(setattr, cli, "_active_stack_name", orig)
         with self.assertRaises(cli._UsageError):
-            cli._assert_target_identity("nestor up")
+            cli._assert_target_identity("nestor install")
 
 
 class EnvCommandRemoved(unittest.TestCase):

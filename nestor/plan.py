@@ -319,7 +319,7 @@ class PlanState:
     """État du plan dérivé : phases tenues pour FAITES et phases À APPLIQUER.
 
     Résultat PUR (aucune I/O) de `compute_plan_state` — la source UNIQUE consommée
-    par `cmd_preview`/`cmd_next`/`cmd_up` (fin de la divergence preview≠next : les
+    par `cmd_preview`/`cmd_next`/`cmd_install` (fin de la divergence preview≠next : les
     trois dérivent du MÊME calcul). `done` = socle/couches que le RÉEL SEUL confirme
     (refonte lot 6 : plus d'historique) ; `a_appliquer` = ce qui reste à monter
     (ordonner via `seq` à l'affichage)."""

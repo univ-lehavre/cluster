@@ -32,7 +32,7 @@ le reste se dérive
 **deux produits** :
 
 - **`nestor`** — l'outil déclaratif qui lit la topologie et **dérive puis
-  converge** le cluster (`nestor up`, `preview`, `stack select`…) ;
+  converge** le cluster (`nestor install`, `preview`, `stack select`…) ;
 - **un cluster Kubernetes data fonctionnel** — multi-nœuds, hyperconvergé, dont
   les **17 briques** ([`platform/`](platform/)) s'activent par **profil
   cumulatif à 4 niveaux** (`base ⊂ store ⊂ obs ⊂ dataops`) : stockage distribué
@@ -85,7 +85,8 @@ Pour **piloter une topologie** ou **valider de bout en bout**, deux points
 d'entrée nommés (détaillés sous le tableau « Par où commencer ») :
 
 ```bash
-nestor up                          # déploie la topologie sélectionnée (façade déclarative)
+nestor provision                   # crée le substrat (VMs) — terrain local ; no-op sur parc existant
+nestor install                     # installe OS + k8s + plateforme (idempotent, façade déclarative)
 bench/lima/run-phases.sh <chemin>  # monte le banc Lima par un chemin codé (gate E2E)
 ```
 
@@ -107,8 +108,8 @@ cluster reste décrit dans le [`bootstrap/RUNBOOK.md`](bootstrap/RUNBOOK.md).
 
 Deux points d'entrée, deux rôles complémentaires (pas concurrents). **`nestor`**
 est l'outil déclaratif recommandé pour piloter une topologie
-(`nestor up`/`preview`/`stack select`, et `nestor ansible <playbook>` pour un
-geste de bootstrap prod) ; c'est une fonction shell à sourcer décrite dans
+(`nestor install`/`preview`/`stack select`, et `nestor ansible <playbook>` pour
+un geste de bootstrap prod) ; c'est une fonction shell à sourcer décrite dans
 [`docs/outils.md`](docs/outils.md)
 ([ADR 0056](docs/decisions/0056-modele-declaratif-topologies.md)).
 **`bench/lima/run-phases.sh`** est le harnais de banc par chemin nommé codé — la
@@ -266,7 +267,7 @@ est **dérivé** par un générateur **sans état**, et Ansible reste le moteur 
   l'infrastructure d'un déploiement particulier
   ([ADR 0023](docs/decisions/0023-plateforme-exemple-generique.md)).
 - **Deux produits dérivés de la déclaration** : **`nestor`**, l'outil qui lit la
-  topologie et converge le cluster (`nestor up`/`preview`/`stack select`,
+  topologie et converge le cluster (`nestor install`/`preview`/`stack select`,
   [`docs/outils.md`](docs/outils.md)), et **un cluster Kubernetes data
   fonctionnel**, hyperconvergé, dont les briques s'activent par profil cumulatif
   (`base ⊂ store ⊂ obs ⊂ dataops`).

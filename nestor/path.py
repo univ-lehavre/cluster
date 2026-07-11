@@ -4,7 +4,7 @@ LOT 6 de la refonte nestor (ADR 0097 §1) — le SECOND pilier. Aujourd'hui
 `run-phases.sh` (1903 l.) est l'orchestrateur : il DÉCIDE quoi monter, ENCHAÎNE les
 `ansible-playbook`, GATE la santé via kubectl, POSSÈDE l'état partagé (`CP`,
 `API_PORT`, `KUBECONFIG_LOCAL`) et PROVISIONNE (`phase_up`, `write_inventory`) ;
-`cmd_up`/`cmd_next` ne font que l'appeler en subprocess. Ce module porte cette
+`cmd_provision`/`cmd_install`/`cmd_next` ne font que l'appeler en subprocess. Ce module porte cette
 boucle EN PYTHON, sur le MÊME moule que `bootstrap.run_bootstrap:102` : la LOGIQUE
 (séquence ordonnée des phases + gardes + gates) est PURE et testable sans banc ;
 toute l'I/O réelle (ansible-runner, kubectl, limactl) est INJECTÉE en callbacks par
@@ -23,7 +23,7 @@ au montage. Les parties trop liées au montage réel pour être écrites sans ba
 un TODO « à câbler+prouver au banc » — voir `_BANC_TODO` en bas de fichier.
 
 ATTENTION COEXISTENCE (plan invariant 4) : ce module N'EST PAS ENCORE BRANCHÉ sur
-`cmd_up`/`cmd_next`. Le chemin par défaut reste le subprocess `run-phases.sh`. La
+`cmd_install`/`cmd_next`. Le chemin par défaut reste le subprocess `run-phases.sh`. La
 bascule réelle se fera lot par lot AVEC la preuve banc en main. Voir `run_path`.
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -33,7 +33,7 @@ Un SEUL sens d'appel — Python → bash (ADR 0097 §1). `run_path` NE rappelle 
 lit jamais leur logique, ADR 0097 §2.a) et lance les playbooks via
 `runner.launch_phase_idempotent`. La circularité `Python→bash→Python→bash`
 (`run-phases.sh:508 bootstrap-seq`) disparaît — mais SEULEMENT une fois
-`cmd_up`/`cmd_next` basculés (lot futur, après preuve banc).
+`cmd_install`/`cmd_next` basculés (lot futur, après preuve banc).
 """
 
 from __future__ import annotations
@@ -167,7 +167,7 @@ def run_path(
 
     ┌─ INVARIANT DE BOUCLE — la garde d'isolation à CHAQUE phase (ADR 0097 §1, §5.c)
     │  `assert_safe` est appelée AVANT CHAQUE phase, PAS une seule fois en tête. Le
-    │  subprocess `run-phases.sh` actuel ne traverse la garde qu'UNE fois (cmd_up la
+    │  subprocess `run-phases.sh` actuel ne traverse la garde qu'UNE fois (cmd_install la
     │  passe puis délègue tout le chemin) ; un moteur Python bouclant PAR phase DOIT
     │  la ré-affirmer à chaque itération — sinon un montage banc dont le `KUBECONFIG`
     │  prod a été exporté en cours de route taperait la PROD (faille ADR 0053). La

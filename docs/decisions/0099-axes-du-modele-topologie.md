@@ -113,7 +113,7 @@ défauts (runner/scaffold), générateur (template `inventory-lima.j2` +
 `write_inventory` bash), `EXPECTED_TARGET_KIND=bench` (`run-phases.sh`),
 l'argument `--kind` de `artifact generate/diff`, les topologies `.example` et
 les tests. Un banc déjà monté (`bench/lima/.work/inventory.yaml` portant `lima`)
-doit être **régénéré** (`nestor up`) pour redevenir conforme à la garde.
+doit être **régénéré** (`nestor install`) pour redevenir conforme à la garde.
 
 ## Alternatives écartées
 

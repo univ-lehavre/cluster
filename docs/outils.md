@@ -14,8 +14,8 @@ Ansible ne peut pas faire (poule/œuf, sans dépôt, destructif conscient).
 
 ## L'outil `nestor` — installer la commande
 
-`nestor` (l'outil déclaratif : `nestor up`/`preview`/`stack select`…) est une
-**fonction shell à sourcer**, pas un exécutable. Pourquoi ? Pour que
+`nestor` (l'outil déclaratif : `nestor install`/`preview`/`stack select`…) est
+une **fonction shell à sourcer**, pas un exécutable. Pourquoi ? Pour que
 `nestor stack select` puisse **poser `KUBECONFIG` dans ton shell** — ce qu'un
 programme lancé ne peut pas faire (un enfant ne modifie pas l'environnement de
 son parent ; patron `nvm`/`pyenv`/`direnv`). La fonction délègue à
@@ -48,7 +48,8 @@ source ~/.zshrc                                          # (ou ouvrir un nouveau
 Ensuite, depuis n'importe quel dossier :
 
 ```bash
-nestor up                  # monter le banc
+nestor provision           # créer les VMs du banc (terrain local)
+nestor install             # installer le banc (k8s + plateforme)
 nestor preview             # voir l'état (VOULU/RÉEL/PLAN)
 nestor stack select banc   # activer une stack ET pointer KUBECONFIG (banc, ou
                             #   /dev/null si pas de banc — jamais la prod, ADR 0053)

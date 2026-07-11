@@ -1,14 +1,14 @@
 """Tests de la FAÇADE du moteur de chemin Python (`nestor.path.run_path`) — LOT 6 (ADR 0097).
 
 Câblage façade du SEUL moteur de montage (`scripts/topology.py:_run_path_engine` /
-`_path_context` / `_provision_via_bash`) : depuis le retrait du filet bash, `nestor up`
-MONTE TOUJOURS via ce moteur Python. Ces tests sont PURS (I/O injectée : runner stubé,
-gates stubées, run-phases.sh espionné) — ZÉRO cluster, ZÉRO provisionnement réel (filet
-de sécurité hérité de test_topology_cli).
+`_path_context` / `_provision_via_bash`) : depuis le retrait du filet bash, `nestor install`
+(et `nestor provision`) MONTENT TOUJOURS via ce moteur Python. Ces tests sont PURS (I/O
+injectée : runner stubé, gates stubées, run-phases.sh espionné) — ZÉRO cluster, ZÉRO
+provisionnement réel (filet de sécurité hérité de test_topology_cli).
 
 Ils couvrent la LOGIQUE de câblage (le moteur lui-même est testé dans test_path.py) :
   - `_path_context` dérive PathContext de la topo (cp = 1er control, PAS codé en dur) ;
-  - `cmd_up` route vers `_run_path_engine` (seul moteur ; run-phases.sh PAS appelé) ;
+  - `cmd_install` route vers `_run_path_engine` (seul moteur ; run-phases.sh PAS appelé) ;
   - les callbacks appellent les BONNES briques (launch_phase_idempotent, gate, provision) ;
   - assert_safe REFUSE une cible non-banc (garde d'isolation à chaque phase) ;
   - les hooks e2e (dataops) LÈVENT (stub honnête) → le montage s'arrête net (pas de fallback).
@@ -51,7 +51,7 @@ _REAL_SUBPROCESS_RUN = cli.subprocess.run
 
 # ── Blindage anti-provisionnement (filet de sécurité module, copié de test_topology_cli) ──
 # Le mainteneur PEUT avoir un banc Lima RÉEL (`.kubeconfigs/banc.config` présent) : sans
-# ce filet, un test qui atteint cmd_up/`provision` lancerait un VRAI `run-phases.sh up`
+# ce filet, un test qui atteint cmd_provision/`provision` lancerait un VRAI `run-phases.sh up`
 # (limactl) et provisionnerait des VMs en silence. setUpModule installe un DEFAULT-DENY : tout
 # appel subprocess de provisionnement RÉEL échoue bruyamment (CI rouge). Les tests qui veulent
 # observer un argv réinstallent leur _spy par-dessus ; leur addCleanup restaure ce garde-fou.
@@ -193,11 +193,11 @@ class PathContextDerivation(unittest.TestCase):
 
 
 class EngineRouting(unittest.TestCase):
-    """`cmd_up` MONTE TOUJOURS via le moteur Python `_run_path_engine` — le filet bash
-    `--engine=bash`/run-phases.sh a été RETIRÉ (un seul moteur, ADR 0097)."""
+    """`cmd_install`/`cmd_provision` MONTENT TOUJOURS via le moteur Python `_run_path_engine`
+    — le filet bash `--engine=bash`/run-phases.sh a été RETIRÉ (un seul moteur, ADR 0097)."""
 
     def setUp(self):
-        # Garde d'isolation banc : on neutralise pour que cmd_up atteigne le routage (la
+        # Garde d'isolation banc : on neutralise pour que cmd_install atteigne le routage (la
         # garde elle-même est testée à part). On rend la cible "banc" et le confirm auto.
         self._patch(cli, "_assert_target_identity", lambda *_a, **_k: None)
         # Sondes RÉELLES du plan annoté (preview) → neutres (pas de cluster en test).
@@ -240,32 +240,60 @@ class EngineRouting(unittest.TestCase):
         self.addCleanup(setattr, cli, "_run_path_engine", orig)
         return calls
 
-    def test_up_routes_to_python_engine_not_run_phases(self):
-        # `nestor up` route vers le moteur Python (`_run_path_engine`) et n'appelle PAS
+    def test_install_routes_to_python_engine_not_run_phases(self):
+        # `nestor install` route vers le moteur Python (`_run_path_engine`) et n'appelle PAS
         # run-phases.sh pour le montage (le filet bash a été retiré — un seul moteur).
         rp_calls = self._spy_runphases()
         eng_calls = self._spy_engine()
         path = _tmp(_LIMA_SOLO)
         self.addCleanup(os.unlink, path)
-        code, _, _ = _capture(["up", "-f", path, "--yes"])
+        code, _, _ = _capture(["install", "-f", path, "--yes"])
         self.assertEqual(code, 0)
         self.assertEqual(len(eng_calls), 1)  # moteur python appelé (seul moteur)
         self.assertEqual(rp_calls, [])  # run-phases.sh PAS appelé pour le montage
 
-    def test_engine_receives_derived_sequence(self):
-        # Le moteur reçoit la séquence DÉRIVÉE de la topo (graphe atomique) : topo lima →
-        # commence par `up`, et la layer déclarée (storage-simple) y figure.
+    def test_provision_routes_to_python_engine_not_run_phases(self):
+        # `nestor provision` route AUSSI vers le moteur Python (un seul moteur). La sonde des
+        # VMs réelles est neutralisée à ∅ (setUp) → toutes les VMs déclarées sont « à créer ».
+        rp_calls = self._spy_runphases()
+        eng_calls = self._spy_engine()
+        path = _tmp(_LIMA_SOLO)
+        self.addCleanup(os.unlink, path)
+        code, _, _ = _capture(["provision", "-f", path, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(eng_calls), 1)  # moteur python appelé (seul moteur)
+        self.assertEqual(rp_calls, [])  # run-phases.sh PAS appelé directement (via le moteur)
+
+    def test_install_receives_derived_sequence_without_substrate(self):
+        # `install` reçoit la séquence DÉRIVÉE de la topo (graphe atomique) MAIS SANS la phase
+        # amont `up` (invariant cardinal ADR 0108 §4 : install ne touche jamais au substrat),
+        # même en terrain local. La layer déclarée (storage-simple) y figure.
         self._spy_runphases()
         eng_calls = self._spy_engine()
         path = _tmp(_LIMA_SOLO)
         self.addCleanup(os.unlink, path)
-        code, _, _ = _capture(["up", "-f", path, "--yes"])
+        code, _, _ = _capture(["install", "-f", path, "--yes"])
         self.assertEqual(code, 0)
         self.assertEqual(len(eng_calls), 1)
         target, seq, _stack, _a_appliquer = eng_calls[0]
         self.assertEqual(target, "layers")
-        self.assertEqual(seq[0], "up")  # topo lima → la séquence commence par `up`
+        self.assertNotIn("up", seq)  # INVARIANT : install EXCLUT le substrat même en local
+        self.assertEqual(seq[0], "bootstrap")  # la séquence install commence à bootstrap
         self.assertIn("storage-simple", seq)  # layer déclarée → couche storage-simple
+
+    def test_provision_receives_substrate_only_sequence(self):
+        # `provision` monte la SEULE phase amont `up` (le substrat) — jamais l'OS/k8s/plateforme.
+        self._spy_runphases()
+        eng_calls = self._spy_engine()
+        path = _tmp(_LIMA_SOLO)
+        self.addCleanup(os.unlink, path)
+        code, _, _ = _capture(["provision", "-f", path, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(eng_calls), 1)
+        target, seq, _stack, a_appliquer = eng_calls[0]
+        self.assertEqual(target, "layers")
+        self.assertEqual(seq, ["up"])  # SUBSTRAT SEUL : rien d'autre que `up`
+        self.assertEqual(a_appliquer, {"up"})
 
 
 class CallbacksWireRealBricks(unittest.TestCase):
@@ -599,9 +627,9 @@ class AssertSafeIsolation(unittest.TestCase):
             _engine(_topo(_LIMA_SOLO), "layers", ["up", "storage-simple"], "solo")
 
     def test_refusal_via_main_maps_to_code_2(self):
-        # Bout-en-bout par main() : la garde top-level de cmd_up (`_assert_target_identity`) LÈVE
-        # → main mappe _UsageError en code 2. La garde d'isolation s'applique AVANT le montage
-        # (seul moteur Python depuis le retrait du filet bash).
+        # Bout-en-bout par main() : la garde top-level de `cmd_install` (`_assert_target_identity`)
+        # LÈVE → main mappe _UsageError en code 2. La garde s'applique AVANT le montage (seul moteur
+        # Python depuis le retrait du filet bash). `install` GARDE l'identité (ADR 0108).
         def _refuse(action, *_a, **_k):
             raise cli._UsageError(f"REFUS : `{action}` cible non-banc (test)")
 
@@ -610,9 +638,27 @@ class AssertSafeIsolation(unittest.TestCase):
         self._patch(cli, "_real_vms", lambda *_a, **_k: [])
         path = _tmp(_LIMA_SOLO)
         self.addCleanup(os.unlink, path)
-        code, _, err = _capture(["up", "-f", path, "--yes"])
+        code, _, err = _capture(["install", "-f", path, "--yes"])
         self.assertEqual(code, 2)
         self.assertIn("REFUS", err)
+
+    def test_provision_does_not_call_identity_guard(self):
+        # `provision` fait NAÎTRE l'instance : PAS de contexte kubectl à comparer → il n'appelle
+        # JAMAIS `_assert_target_identity` (ADR 0108 §4). On la rend explosive : si `provision`
+        # l'appelait, le test échouerait. Le moteur (stubé) confirme le routage substrat.
+        def _boom(action, *_a, **_k):
+            raise AssertionError(f"provision NE DOIT PAS appeler la garde d'identité ({action})")
+
+        self._patch(cli, "_assert_target_identity", _boom)
+        self._patch(cli, "_ready_nodes", lambda *_a, **_k: [])
+        self._patch(cli, "_real_vms", lambda *_a, **_k: [])
+        eng_calls = []
+        self._patch(cli, "_run_path_engine", lambda *a, **k: (eng_calls.append(a), 0)[1])
+        path = _tmp(_LIMA_SOLO)
+        self.addCleanup(os.unlink, path)
+        code, _, _ = _capture(["provision", "-f", path, "--yes"])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(eng_calls), 1)  # le moteur a bien été atteint (garde non déclenchée)
 
 
 class SeedPhaseWiring(unittest.TestCase):

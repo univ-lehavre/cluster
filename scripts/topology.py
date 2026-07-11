@@ -463,7 +463,7 @@ def _inventory_for(topo: Topology):
 
     Usage : `with _inventory_for(topo) as inv_path: …`. Le banc rend un chemin réel
     (non supprimé) ; la prod un temp anonyme supprimé en `finally`. Le temp prod doit
-    vivre toute la durée du geste (montage entier pour `cmd_up`) → enrouler le `with`
+    vivre toute la durée du geste (montage entier pour `cmd_install`) → enrouler le `with`
     autour de TOUT le geste, pas juste de l'appel ansible."""
     if topo.terrain == "local":
         yield _BENCH_INVENTORY
@@ -2896,8 +2896,9 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
 # façade ICI branche les callbacks sur le réel (runner/kubectl/limactl). La construction de
 # `PathContext` (PURE, dérivée de la topo) est isolée dans `_path_context` → testable sans I/O.
 #
-# ⚠️ MOTEUR UNIQUE (ADR 0097, bascule achevée) : `cmd_up` MONTE TOUJOURS via ce câblage
-# (`_run_path_engine`) — l'ancien filet bash `--engine=bash`/run-phases.sh a été RETIRÉ
+# ⚠️ MOTEUR UNIQUE (ADR 0097, bascule achevée) : `cmd_provision`/`cmd_install` MONTENT TOUJOURS
+# via ce câblage (`_run_path_engine`) — l'ancien filet bash `--engine=bash`/run-phases.sh a été
+# RETIRÉ
 # (plus de double source de vérité). AUCUN fallback bash : un échec du moteur Python
 # s'ARRÊTE NET (corriger-le-code-pas-l-état, ADR 0046), il n'est JAMAIS masqué par un repli.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2913,12 +2914,12 @@ def _path_context(topo: Topology, inventory: str, stack: str | None = None) -> _
     - `api_port` : 6443 (= run-phases.sh:90 `API_PORT`).
     - `kubeconfig_local` : chemin du kubeconfig du BANC, NOMMÉ PAR LA STACK
       (`.kubeconfigs/<stack>.config`, ADR 0102 volet B) — `stack` = `stack_id` (nom de fichier)
-      fourni par l'appelant (`cmd_up`, depuis son `path`). Python le décide, `KUBECONFIG_LOCAL`
-      de run-phases.sh le reçoit par env (une seule source de vérité pour le chemin). `None` →
-      fallback banc générique.
+      fourni par l'appelant (`cmd_install`/`cmd_provision`, depuis son `path`). Python le décide,
+      `KUBECONFIG_LOCAL` de run-phases.sh le reçoit par env (une seule source pour le chemin).
+      `None` → fallback banc générique.
     - `inventory` : passé PAR L'APPELANT (le chemin dérivé du `with _inventory_for(topo)`,
       ADR 0098) — `_path_context` reste PUR, il n'écrit ni ne supprime rien ; l'appelant
-      (`cmd_up`) possède le cycle de vie du temporaire prod.
+      (`cmd_install`) possède le cycle de vie du temporaire prod.
     - `repo` : racine du dépôt (= `REPO` de lib.sh) — pour résoudre les playbooks.
     - `nodes` : tuple des nœuds attendus Ready (compte du gate socle `nodes_ready_all`)."""
     controls = topo.control_nodes
@@ -4563,24 +4564,115 @@ def _run_path_engine(
         return 0 if result.built else 1
 
 
-def cmd_up(args: argparse.Namespace) -> int:
-    """`up` : monte la stack active de bout en bout (calque `pulumi up`).
+def _confirm_provision(vms: list[str], *, assume_yes: bool) -> bool:
+    """Confirme la CRÉATION des VMs `vms` (substrat). --yes saute ; hors TTY sans --yes : refus.
 
-    L'ENTRÉE déclarative complète (inversion de frontière, ADR 0049/0056) : lit la
-    stack active → DÉRIVE le chemin nommé (default_target) → affiche le PLAN (les
-    couches) → CONFIRME → MONTE la séquence via le moteur Python `nestor.path.run_path`
-    (`_run_path_engine`, ADR 0097 — SEUL moteur depuis le retrait du filet bash). Le
-    code de sortie du montage est propagé.
+    `provision` fait NAÎTRE le substrat (limactl) : geste destructif/rare (ADR 0108 §4),
+    À CONFIRMER comme une destruction. Miroir de `_confirm_destroy` (même garde-fou anti-
+    geste-silencieux : refus hors TTY sans --yes, invite explicite avec la liste des VMs
+    sur TTY, défaut False = Entrée vide ne crée RIEN)."""
+    if assume_yes:
+        return True
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print(
+            "provisionnement refusé hors TTY sans --yes (pas de création silencieuse).",
+            file=sys.stderr,
+        )
+        return False
+    return _confirm(
+        f"⚠️  CRÉER le substrat (VMs {vms}) ?",
+        default=assume_yes,
+        no_input=assume_yes,
+    )
 
-    Là où `next` monte UNE couche (1er drift), `up` monte TOUTE la séquence. Code 0
-    si le montage réussit ; 1 si le montage échoue ; 2 (usage) si confirmation
-    refusée / chemin incohérent avec le backend."""
+
+def cmd_provision(args: argparse.Namespace) -> int:
+    """`provision` : crée le SUBSTRAT (VMs) de la stack active (ADR 0108 §4).
+
+    Verbe DESTRUCTIF/RARE, À CONFIRMER : il fait NAÎTRE les machines. Gate sur le
+    TERRAIN (ADR 0032/0084/0108) :
+      - `local`   : provisionne les VMs (limactl) via le moteur Python, séquence RÉDUITE
+                    à la SEULE phase amont `up` (le substrat — jamais l'OS/k8s, qui est
+                    l'affaire d'`install`) ;
+      - `baremetal` : NO-OP explicite — les machines préexistent, rien à provisionner
+                    (code 0, message clair) ;
+      - `cloud`   : NON IMPLÉMENTÉ (ADR 0032) → `_UsageError` (usage, code 2).
+
+    N'appelle PAS la garde d'identité kubectl (`_assert_target_identity`) : `provision`
+    fait naître l'instance, il n'existe PAS encore de contexte kubectl à comparer (la
+    garde d'inventaire du chemin SSH reste le filet en aval, portée par le moteur pour la
+    seule phase `up` qui n'a pas de play Ansible → garde nue inoffensive). Le chemin SSH
+    `up` (limactl) ne touche aucun hôte distant préexistant : rien à isoler côté substrat.
+
+    Codes : 0 succès (ou no-op baremetal) ; 1 échec du provisionnement ; 2 (usage) si
+    confirmation refusée / terrain cloud non implémenté."""
     path = _resolve(args.file)
     topo = load_topology(path)
-    # Garde APRÈS le chargement : `up` from-scratch d'un banc (terrain local) est légitime
-    # même sans kubeconfig de banc existant (c'est `up` qui le crée) — la topo lima est le
-    # signal sûr. Une topo prod reste sous garde stricte (cible prouvée requise).
-    _assert_target_identity("nestor up", topo)
+    stack_name = _stack_id(path)  # identité = nom de fichier (ADR 0102 volet B)
+
+    # ── GATE TERRAIN (ADR 0108 §4) : le substrat NAÎT-il ici, préexiste-t-il, ou est-ce
+    # un stub ? On tranche AVANT toute confirmation/montage (fail-fast honnête).
+    if topo.terrain == "baremetal":
+        # Les machines préexistent (nœuds physiques déclarés) : `provision` est un NO-OP.
+        print(
+            f"terrain baremetal : les machines préexistent, rien à provisionner "
+            f"(stack `{stack_name}`). Enchaîner sur `nestor install`."
+        )
+        return 0
+    if topo.terrain != "local":
+        # cloud (ou tout terrain futur) : provisionnement non câblé (ADR 0032, stub).
+        raise _UsageError(
+            f"provisionnement `{topo.terrain}` non implémenté (ADR 0032) — seul le terrain "
+            "`local` (banc Lima) provisionne des VMs ; en cloud/baremetal les nœuds préexistent."
+        )
+
+    # ── TERRAIN LOCAL : on crée les VMs (limactl). Séquence RÉDUITE à la SEULE phase amont
+    # `up` — `provision` ne touche JAMAIS l'OS/k8s (invariant symétrique d'`install`). Le NOM
+    # de PHASE reste `up` (interne, byte-stable run-phases.sh/plan/path) ; seul le VERBE CLI
+    # `up` a disparu (ADR 0108 §4).
+    target = args.target or default_target(topo)
+    stack = _stack_id(path)
+    declared = topo.control_nodes + topo.worker_nodes
+    # VMs à créer = déclarées SANS VM réelle (classify_refresh, comme `destroy`/`preview`).
+    real = classify_refresh(stack, declared, _real_vms(topo.terrain), [])
+    a_creer = real.vms_missing
+    if not a_creer:
+        print(f"stack `{stack}` : toutes les VMs déclarées existent déjà (rien à provisionner).")
+        return 0
+
+    print(f"stack : {stack_name}  →  substrat (VMs) à créer : {', '.join(a_creer)}")
+    if not _confirm_provision(a_creer, assume_yes=args.yes):
+        print("provisionnement annulé.", file=sys.stderr)
+        return 2
+
+    # Monte la SEULE phase amont `up` via le moteur Python (`_run_path_engine` route `up`
+    # vers le callback `provision` → `_provision_via_bash` → run-phases.sh up, limactl bash,
+    # ADR 0049). `a_appliquer={"up"}` : le moteur ne monte QUE le substrat.
+    return _run_path_engine(topo, target, ["up"], stack_name, {"up"})
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    """`install` : monte l'OS + k8s + la plateforme sur un substrat EXISTANT (ADR 0108 §4).
+
+    Verbe IDEMPOTENT, REJOUABLE. INVARIANT CARDINAL : `install` NE TOUCHE JAMAIS au
+    substrat → sa séquence EXCLUT TOUJOURS la phase amont `up` (quel que soit le terrain,
+    même `local`). Le substrat est l'affaire de `provision` ; `install` suppose les VMs/nœuds
+    déjà là (from-scratch banc : lancer `provision` d'abord).
+
+    Repris de l'ex-verbe `up` (dérive le chemin → PLAN annoté → confirme → moteur Python
+    `_run_path_engine`, SEUL moteur, ADR 0097) MAIS la phase `up` est RETIRÉE de la
+    séquence ET des phases à appliquer. GARDE l'isolation d'identité kubectl
+    (`_assert_target_identity` en tête + par-phase dans le moteur) : `install` mute une
+    instance existante via kubectl/Ansible, il DOIT viser la bonne.
+
+    Codes : 0 succès ; 1 échec du montage ; 2 (usage) si confirmation refusée / chemin
+    incohérent avec le backend."""
+    path = _resolve(args.file)
+    topo = load_topology(path)
+    # Garde d'identité EN TÊTE : `install` mute une instance existante (OS/k8s/couches via
+    # kubectl+Ansible) → elle doit viser la bonne (ADR 0108). From-scratch banc reste toléré
+    # (la garde rend tôt si aucun contexte kubectl — l'inventaire est alors le filet).
+    _assert_target_identity("nestor install", topo)
     target = args.target or default_target(topo)
     try:
         seq = expected_phase_sequence(topo, target)
@@ -4588,28 +4680,29 @@ def cmd_up(args: argparse.Namespace) -> int:
         raise _UsageError(str(exc)) from exc
     stack_name = _stack_id(path)  # identité = nom de fichier (ADR 0102 volet B)
 
-    # ADR 0083 : l'ordre vient TOUJOURS de `seq` (expected_phase_sequence → graphe
-    # atomique) ; le moteur Python (`_run_path_engine`) MONTE cette séquence (un seul
-    # moteur depuis le retrait du filet bash). Un `--target <preset>` explicite (atlas,
-    # ha-3cp…) ne change que le NOM du chemin, pas l'exécuteur.
+    # INVARIANT CARDINAL (ADR 0108 §4) : `install` EXCLUT TOUJOURS la phase amont `up` (le
+    # substrat) — même en terrain `local` où `expected_phase_sequence` la produit. Le
+    # provisionnement est le ressort exclusif de `nestor provision` ; `install` monte l'OS +
+    # k8s + la plateforme sur des VMs/nœuds SUPPOSÉS existants. On retire `up` de la séquence.
+    seq = [p for p in seq if p != "up"]
 
     # PLAN annoté — DÉRIVÉ du MÊME calcul que `preview`/`next` (compute_plan_state) pour
-    # que les trois rendent le même verdict (fin de la divergence preview≠next≠up). `up`
-    # monte TOUTE la séquence (idempotence run-phases.sh) ; l'annotation ✓/+ informe juste
-    # l'opérateur de ce qui est DÉJÀ en place. Sonde RÉELLE identique à preview (ADR 0090).
+    # que les trois rendent le même verdict. `install` monte TOUTE la séquence (hors substrat) ;
+    # l'annotation ✓/+ informe juste l'opérateur de ce qui est DÉJÀ en place. Sonde RÉELLE
+    # identique à preview (ADR 0090).
     declared = topo.control_nodes + topo.worker_nodes
     nodes_ready = _ready_nodes(topo.terrain)
     observed_socle = observed_done_phases(declared, _real_vms(topo.terrain), nodes_ready)
     observed_layers = _probe_observed_layers(seq, nodes_ready)
-    # `done` = RÉEL SEUL (refonte lot 6) — même calcul que preview/next. `cmd_up` monte
-    # TOUTE la séquence et n'affiche pas de verdict de fraîcheur (juste +/✓ à-jour) : il
-    # ne lit donc PLUS l'historique ici (la fraîcheur, #216, reste lue par preview/next).
     state = compute_plan_state(seq, observed_socle, observed_layers)
-    a_appliquer = set(state.a_appliquer)
+    # `up` ne fait pas partie de la séquence d'`install` : on le retire AUSSI de `a_appliquer`
+    # (defense-in-depth — même si `compute_plan_state(seq,…)` ne le contient déjà plus, `seq`
+    # ayant été filtrée). Le moteur ne montera JAMAIS le substrat depuis `install`.
+    a_appliquer = {p for p in state.a_appliquer if p != "up"}
 
     # Affiche le PLAN (les couches à monter) avant de confirmer — comme `preview`.
     print(f"stack : {stack_name}  →  chemin : {target}")
-    print("Couches à monter (séquence complète) :")
+    print("Couches à monter (OS + k8s + plateforme, hors substrat) :")
     for phase in seq:
         mark = "+" if phase in a_appliquer else "✓"
         print(f"  {mark} {phase_label(phase)}")
@@ -4619,15 +4712,10 @@ def cmd_up(args: argparse.Namespace) -> int:
         return 2
 
     # ── MOTEUR DE MONTAGE (ADR 0097) ───────────────────────────────────────────────
-    # Le moteur Python `nestor.path.run_path` est le SEUL moteur : prouvé de bout en bout
-    # au banc mono-nœud (from-scratch, 10 couches up→…→portal + preuve e2e OpenLineage→
-    # Marquez, ingestion vérifiée). L'ancien filet bash `--engine=bash`/run-phases.sh a été
-    # RETIRÉ (un seul moteur, plus de double source de vérité). La garde d'isolation banc
+    # Le moteur Python `nestor.path.run_path` est le SEUL moteur. La garde d'isolation banc
     # s'applique ICI (`_assert_target_identity` en tête) ET à CHAQUE phase (callback
-    # `assert_safe`, invariant de boucle ADR 0097 §5.c). Le moteur Python ne porte PAS l'arm
-    # HA propre (amorçage VIP/etcd) : un chemin `ha-3cp` lèvera proprement (callback `ha`
-    # stubé) plutôt que de monter à moitié — on laisse le moteur trancher (fail-fast).
-    # `a_appliquer` (le RÉEL, compute_plan_state) : le moteur SAUTE les phases déjà `done`.
+    # `assert_safe`, invariant de boucle ADR 0097 §5.c). `a_appliquer` (le RÉEL, sans `up`) :
+    # le moteur SAUTE les phases déjà `done`. La séquence NE CONTIENT PLUS `up` (invariant).
     return _run_path_engine(topo, target, list(seq), stack_name, a_appliquer)
 
 
@@ -5506,10 +5594,14 @@ _DISPATCH = {
     "scale": cmd_scale,  # ajuste les replicas au nb de nœuds Ready (ADR 0072, runtime)
     "discover": cmd_discover,  # reconstruit un topology.yaml depuis le réel (ADR 0074, inverse de generate)  # noqa: E501
     "refresh": cmd_refresh,  # réaligne la topo active sur le réel voulu (ADR 0076, fusion + confirmation)  # noqa: E501
-    "up": cmd_up,  # calque `pulumi up` : monte TOUTE la séquence (délègue à run-phases.sh)
+    # `up` SCINDÉ en deux verbes (ADR 0108 §4, sans alias) : `provision` crée le substrat
+    # (VMs), `install` monte OS + k8s + plateforme sur un substrat existant. Le NOM DE PHASE
+    # interne `up` (run-phases.sh/plan/path) est INCHANGÉ — seul le verbe CLI `up` a disparu.
+    "provision": cmd_provision,  # crée le substrat (VMs) — destructif/rare, terrain-gaté
+    "install": cmd_install,  # OS + k8s + plateforme (Ansible) — idempotent, hors substrat
     "next": cmd_next,  # applique la PROCHAINE couche (1er drift, granularité fine)
     "remove": cmd_remove,  # supprime UNE couche + sa clôture (inverse de next, ADR 0054)
-    "down": cmd_destroy,  # symétrique de `up` (run-phases.sh)
+    "down": cmd_destroy,  # symétrique de `provision`+`install` (run-phases.sh)
     "destroy": cmd_destroy,  # ALIAS rétrocompat (calque `pulumi destroy`)
     # Groupes noun-verb (annexe rangée) : artefacts dérivés/constatés + épreuves.
     "artifact": cmd_artifact,
@@ -5564,7 +5656,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  preview     voir l'état sans rien changer (voulu / réel / à monter)\n"
             "  next        monter UNE couche : la prochaine qui manque\n"
             "  remove      supprimer UNE couche (et ses dépendantes) — inverse de next\n"
-            "  up          construire le cluster en entier (machines + couches)\n"
+            "  provision   créer le substrat (VMs) — terrain local, destructif/rare\n"
+            "  install     monter OS + k8s + plateforme sur un substrat existant\n"
             "  down        supprimer les machines (VMs) de la stack active\n"
             "\n"
             "Commandes annexes :\n"
@@ -5854,17 +5947,33 @@ def _build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="sauter la confirmation (requis hors TTY pour détruire)"
     )
 
-    p_up = sub.add_parser(
-        "up", help="construire le cluster en entier (machines + toutes les couches)"
+    # `up` SCINDÉ (ADR 0108 §4) : `provision` (créer le substrat, VMs) + `install` (OS + k8s +
+    # plateforme sur substrat existant). Pas d'alias `up` (décision mainteneur).
+    p_provision = sub.add_parser(
+        "provision", help="créer le substrat (VMs) — terrain local uniquement, destructif/rare"
     )
-    _add_file(p_up)
-    p_up.add_argument(
+    _add_file(p_provision)
+    p_provision.add_argument(
         "--target", default=None, help="chemin nommé visé (défaut : dérivé de la stack active)"
     )
-    p_up.add_argument(
+    p_provision.add_argument(
+        "--yes", action="store_true", help="sauter la confirmation (requis hors TTY)"
+    )
+
+    p_install = sub.add_parser(
+        "install",
+        help="monter OS + k8s + plateforme sur un substrat existant (idempotent, hors substrat)",
+    )
+    _add_file(p_install)
+    p_install.add_argument(
+        "--target", default=None, help="chemin nommé visé (défaut : dérivé de la stack active)"
+    )
+    p_install.add_argument(
         "--history", default=None, help="chemin du runs-history.yaml (défaut : bench/lima/)"
     )
-    p_up.add_argument("--yes", action="store_true", help="sauter la confirmation (requis hors TTY)")
+    p_install.add_argument(
+        "--yes", action="store_true", help="sauter la confirmation (requis hors TTY)"
+    )
 
     p_next = sub.add_parser(
         "next", help="monter UNE seule couche : la prochaine qui manque (avancée pas à pas)"
