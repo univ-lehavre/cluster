@@ -161,6 +161,8 @@ jobs:
         run: uv run python scripts/check_code_location_manifest.py
       - name: garde-fou parité graphe↔Ansible « Marquez oublié » (ADR 0096)
         run: uv run python scripts/check_topology.py
+      - name: garde-fou audit-log par-play sur parc distant (ADR 0108/0053, #359)
+        run: uv run python scripts/check_audit_log_gate.py
 
   # Tests unitaires des fonctions pures de state.sh (bats — audit P9 #12).
   bats:
