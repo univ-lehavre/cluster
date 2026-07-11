@@ -127,10 +127,10 @@ INVENTORY="${WORKDIR}/inventory.yaml"
 # vit à l'emplacement UNIQUE nommé par la stack (in-repo, gitignoré fail-safe). C'est PYTHON
 # qui décide le chemin (topology.py `_bench_kubeconfig_path(<stack>)` = `.kubeconfigs/<stack>.config`,
 # dérivé du nom de fichier de la topo active) et le passe par env `KUBECONFIG_LOCAL` ; bash
-# l'UTILISE. Le défaut ci-dessous (`banc.config`) ne sert QUE si le script est lancé nu (hors
-# moteur Python) — fallback banc générique. Une seule source de vérité pour le chemin.
+# l'UTILISE. Le défaut ci-dessous (`local.config`) ne sert QUE si le script est lancé nu (hors
+# moteur Python) — fallback banc générique (stack `local`). Une seule source de vérité pour le chemin.
 # `${REPO}` = racine du dépôt (défini dans lib.sh).
-KUBECONFIG_LOCAL="${KUBECONFIG_LOCAL:-${REPO}/.kubeconfigs/banc.config}"
+KUBECONFIG_LOCAL="${KUBECONFIG_LOCAL:-${REPO}/.kubeconfigs/local.config}"
 
 # ── Métriques de run (matériel + temps par phase) ────────────────────────────
 # Consignées dans WORKDIR/metrics.txt à reporter en en-tête du log archivé

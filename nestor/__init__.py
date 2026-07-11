@@ -6,7 +6,7 @@ Ansible aujourd'hui ; group_vars de profil et table de nœuds Lima ensuite).
 Ansible reste le moteur de convergence (ADR 0056 §7) — l'outil ne réimplémente
 jamais la convergence ni un état réconcilié.
 
-Paliers P0-P2 (plan-modele-declaratif) : modéliser (`topologies/socle.example.yaml`) ;
+Paliers P0-P2 (plan-modele-declaratif) : modéliser (`topologies/dirqual.example.yaml`) ;
 générer les DEUX inventaires BYTE-IDENTIQUES à l'existant — prod
 (`bootstrap/hosts.example.yaml`) et banc Lima (sortie de `write_inventory`,
 bench/lima/lib.sh) ; DÉRIVER le profil (inclusion cumulative ADR 0039 + faisceau

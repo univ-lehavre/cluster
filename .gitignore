@@ -34,7 +34,7 @@ bootstrap/hosts.yaml
 # Catalogue de topologies (ADR 0023/0056 ; nommage uniforme ADR 0102) : les
 # topologies RÉELLES/locales `topologies/*.yaml` sont NON versionnées ; seuls les
 # modèles génériques `*.example.*` (yaml, README…) restent versionnés. Un seul patron :
-# le banc Lima est `banc.example.yaml` (versionné) comme tout modèle — plus d'exception.
+# le banc Lima est `local.example.yaml` (versionné) comme tout modèle — plus d'exception.
 /topologies/*
 !/topologies/*.example.yaml
 !/topologies/*.example.*

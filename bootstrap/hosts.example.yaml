@@ -21,7 +21,7 @@ cloud:
     # Le rôle audit-log, importé en pre_tasks, refuse de muter un parc dont le `stack_id`
     # ne correspond pas à l'intention (EXPECTED_STACK_ID) → un mauvais `-i` échoue AVANT
     # toute tâche distante, au lieu d'un faux-résultat silencieux. Valeur générique (ADR 0023).
-    stack_id: socle
+    stack_id: dirqual
     # Transport dédié (ADR 0108) : une instance sur nœuds préexistants s'atteint par SSH.
     transport: ssh
 
@@ -30,13 +30,13 @@ cloud:
 
 control:
   hosts:
-    cp1:
+    dirqual1:
 
 workers:
   hosts:
-    node1:
-    node2:
-    node3:
+    dirqual2:
+    dirqual3:
+    dirqual4:
 
 # Nœud(s) sur un site distant (exemple) — décommenter au besoin :
 # vm:

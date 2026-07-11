@@ -151,7 +151,7 @@ _ROOT = os.path.join(os.path.dirname(__file__), "..")
 # `topology.yaml` (racine) est un SYMLINK gitignoré vers l'entrée activée.
 _CATALOG_DIR = os.path.join(_ROOT, "topologies")
 _DEFAULT_TOPOLOGY = os.path.join(_ROOT, "topology.yaml")
-_EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "socle.example.yaml")
+_EXAMPLE_TOPOLOGY = os.path.join(_CATALOG_DIR, "dirqual.example.yaml")
 _PROD_INVENTORY = os.path.join(_ROOT, "bootstrap", "hosts.example.yaml")
 _RUNS_HISTORY = os.path.join(_ROOT, "bench", "lima", "runs-history.yaml")
 _RUNS_DIR = os.path.join(_ROOT, "bench", "lima", "runs")
@@ -390,7 +390,7 @@ def _resolve(path: str | None) -> str:
     SYMLINK vers l'entrée activée du catalogue `topologies/<x>` — le repointer
     active une autre topologie. Le catalogue `topologies/` versionne les modèles
     génériques `*.example.yaml` et abrite les topologies réelles gitignorées.
-    En l'absence du symlink on retombe sur `topologies/socle.example.yaml`
+    En l'absence du symlink on retombe sur `topologies/dirqual.example.yaml`
     (exemple générique versionné) AVEC un avis explicite sur stderr — sinon un
     opérateur croirait générer depuis sa topo réelle et obtiendrait l'exemple.
     """
@@ -399,7 +399,7 @@ def _resolve(path: str | None) -> str:
     if os.path.exists(_DEFAULT_TOPOLOGY):
         return _DEFAULT_TOPOLOGY
     print(
-        "topology.yaml absent — utilisation de topologies/socle.example.yaml "
+        "topology.yaml absent — utilisation de topologies/dirqual.example.yaml "
         "(exemple générique versionné, ADR 0023).",
         file=sys.stderr,
     )
@@ -763,7 +763,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
         eval "$(nestor stack select banc)"
 
     Le KUBECONFIG posé est celui de la cible (ADR 0053) : le **banc de la stack**
-    s'il est monté (`.kubeconfigs/banc.config`, ADR 0102 volet B), sinon **`/dev/null`** (vide) —
+    s'il est monté (`.kubeconfigs/local.config`, ADR 0102 volet B), sinon **`/dev/null`** (vide) —
     JAMAIS `~/.kube/config` (la prod). Un `kubectl`/`cilium` direct dans le shell
     vise alors la bonne cible, ou échoue proprement (« pas de banc »), au lieu de
     taper la prod par accident. Le contexte nommé permet AUSSI `kubectl --context
@@ -1341,7 +1341,7 @@ def cmd_stack_ls(args: argparse.Namespace) -> int:
             derived = f"(invalide : {exc})"
         print(f"  {mark} {name:<22} → {derived}")
     if active_base is None:
-        print("  (aucune active — `stack select <nom>` ; sinon l'outil utilise socle.example)")
+        print("  (aucune active — `stack select <nom>` ; sinon l'outil utilise dirqual.example)")
     return 0
 
 
@@ -4337,7 +4337,7 @@ def _run_path_engine(
             extravars = _phases.extravars_for(phase, derived)
             print(f"→ {phase} : montage via ansible-runner ({plan.playbook})…")
             # KUBECONFIG du play : le kubeconfig BANC rapatrié par bootstrap (ctx.kubeconfig_local
-            # → .kubeconfigs/banc.config, server: 127.0.0.1:6443 — le forward de l'API). En
+            # → .kubeconfigs/local.config, server: 127.0.0.1:6443 — le forward de l'API). En
             # FROM-SCRATCH, os.environ['KUBECONFIG'] est VIDE au démarrage (le banc n'existe pas
             # encore), donc le lire ici ferait taper le module k8s sur l'IP INTERNE de la VM
             # (10.67.x, non routable depuis l'hôte → timeout 6443, vécu sur storage-simple). On
@@ -4383,7 +4383,7 @@ def _run_path_engine(
             # ADR 0049). Env DÉRIVÉ de la topo (NODES_OVERRIDE/STACK_NAME/EXPOSITION_MODE
             # + KUBECONFIG_LOCAL) — le bash en dérive le MÊME CP/NODES/WORKDIR que `provision`
             # (un seul WORKDIR `.work` ⇒ inventaire partagé) et écrit le kubeconfig à
-            # l'emplacement décidé par Python (`.kubeconfigs/banc.config`, ADR 0102 volet B)
+            # l'emplacement décidé par Python (`.kubeconfigs/local.config`, ADR 0102 volet B)
             # ⇒ lecture (ctx.kubeconfig_local) et écriture (KUBECONFIG_LOCAL) coïncident.
             return subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
                 ["bash", os.path.join(_ROOT, "bench", "lima", "run-phases.sh"), *cmd],
@@ -5683,7 +5683,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "--file",
             default=None,
             help="chemin de la topologie (défaut : symlink topology.yaml, "
-            "sinon topologies/socle.example.yaml)",
+            "sinon topologies/dirqual.example.yaml)",
         )
         # --no-input accepté partout (uniformité CI) ; sans interactivité, no-op.
         p.add_argument("--no-input", action="store_true", help="mode non interactif (CI)")

@@ -1,0 +1,94 @@
+# code: language=yaml
+#
+# topologies/dirqual.example.yaml — image VERSIONNÉE de l'instance PROD `dirqual`
+# (4 nœuds baremetal `dirqual1-4`, `10.67.2.11-14`, ADR 0056/0090). SOURCE DE VÉRITÉ
+# déclarative : `nestor` en DÉRIVE l'inventaire Ansible, les group_vars de profil, la
+# table de nœuds. Générateur SANS ÉTAT ; Ansible reste le moteur de convergence (ADR 0056 §7).
+# Le `topology.yaml` réel (symlink d'activation) et le `dirqual.yaml` de surcharge locale
+# sont gitignorés ; ce `.example` est versionné.
+#
+# DOCTRINE de ce fichier : n'y figurent QUE les champs FONCTIONNELS — ceux qu'un accesseur
+# nestor LIT réellement et qui changent le déploiement. Les champs descriptifs
+# (catalog.arch/topology/status) et les placeholders ENV→YAML non lus (blocs ha/cilium,
+# sous-clés network.*, exposition.plage/interface, ceph.block_device…) sont OMIS : les
+# déclarer donnerait l'illusion d'un effet inexistant. `stack_id` = nom de fichier (`dirqual`).
+#
+# ⚠️ SPOF connu (audit 2026-06-24, M4) : `dirqual1` est le SEUL control-plane (etcd 1 membre).
+# La cible HA (3 CP) est un chantier séparé (plan-ha-3cp) — cette topo décrit le RÉEL, pas la cible.
+
+# ─── catalog : seuls les champs LUS. `terrain: baremetal` → pas de provisioning VM
+# (resources ignoré), pas de phase `up`. `profile: dataops` = préfixe cumulatif
+# base⊂metrics⊂store⊂obs⊂dataops (lu car aucun `layers` top-level n'est posé).
+catalog:
+  terrain: baremetal # local | cloud | baremetal (défaut fail-safe : baremetal).
+  profile: dataops # base ⊂ metrics ⊂ store ⊂ obs ⊂ dataops (inclusion cumulative, ADR 0039).
+
+# ─── nodes : les 4 nœuds RÉELS. `dirqual1` = control + worker + storage (hyperconvergé : il
+# porte l'API, CoreDNS ET des OSD Ceph, audit 2026-06-24) ; `dirqual2-4` = worker + storage.
+# `roles` cumulable (ADR 0007/0055). Les DISQUES bruts Ceph ne sont PAS déclarés ici : ce sont
+# des devices physiques (sd*/nvme*) propres au parc, renseignés dans le `dirqual.yaml` réel
+# (gitignoré) — pas dans le modèle générique. Sans `disks`, `osd_expected` reste dérivé côté run.
+nodes:
+  - name: dirqual1
+    roles: [control, worker, storage]
+  - name: dirqual2
+    roles: [worker, storage]
+  - name: dirqual3
+    roles: [worker, storage]
+  - name: dirqual4
+    roles: [worker, storage]
+
+# ─── exposition : mode d'accès applicatif. `dirqual` reste déclaré `lb-ipam` (alias historique
+# de `gateway`) — INCHANGÉ (état réel du cluster). Le mécanisme effectif est piloté à
+# l'installation (bootstrap/cni.sh). Seul `mode` est lu ; plage/interface sont des placeholders.
+exposition:
+  mode: lb-ipam # lb-ipam (→ gateway) | nodeport | none. Alias : hostport → nodeport.
+
+# ─── storage : backend Ceph (l'objet du parc dirqual). `osd_expected`/`metadata_device` sont
+# dérivés/optionnels ; en l'absence de `nodes[].disks`, ils restent non forcés (renseignés au run).
+storage:
+  backend: ceph # ceph | local-path.
+
+# ─── hardening : axe orthogonal (ADR 0045 §3). Prod : durcissement piloté séparément.
+hardening:
+  enabled: false # true → insère la phase de durcissement après le socle.
+
+# ─── ceph : devices du wipe node-side (ADR 0008). En prod baremetal, ce sont les VRAIS devices
+# physiques (sd*/nvme*) du parc — renseignés dans le `dirqual.yaml` réel, PAS ici (valeurs banc
+# /dev/vd* fausses en prod). Laissés en commentaire pour signaler la clé sans inventer sa valeur.
+# ceph:
+#   nvme_block_device: /dev/nvme1n1   # NVMe block.db réel du parc.
+#   data_device_glob: /dev/sd[b-e]    # glob des devices data réels.
+
+# ─── gitea : bootstrap GitOps/seed. Défauts génériques (nestor/seed.py), LUS par SeedConfig ;
+# en prod, l'org/repo déclaratifs (cluster/apps) et code (atlas/atlas) sont réels.
+gitea:
+  ns: gitea
+  admin_user: atlas-admin
+  admin_email: atlas-admin@example-org.lan # placeholder générique (ADR 0048).
+  svc: http://gitea-http.gitea.svc.cluster.local
+  api: http://localhost:3000
+  argocd_ns: argocd
+  org: atlas
+  repo: workflows
+  org_cluster: cluster
+  repo_apps: apps
+  org_atlas: atlas
+  repo_atlas: atlas
+
+# ─── atlas : dépôt de code externe + code-locations (build citation, ADR 0110).
+atlas:
+  repo_dir: ~/Hub/atlas # chemin du dépôt atlas EXTERNE (build des images de code-location).
+  expected_cluster: cluster-prod # garde anti-mauvaise-cible du seed (défaut prod).
+  code_locations:
+    - name: citation # nom court (dérive image/overlay). REQUIS.
+
+# ─── portal : seul `access_host` est lu (host des NodePort côté navigateur). En prod, l'hôte
+# Tailscale du control-plane : `dirqual1` (l'InternalIP 10.67.2.11 est injoignable de l'extérieur).
+portal:
+  access_host: dirqual1
+
+# ─── kubeconfig : cible de LECTURE (ADR 0090). Le chemin réel (`~/.kube/dirqual.config`,
+# admin.conf rapatrié de dirqual1) vit HORS du dépôt (credentials). Laissé absent ici →
+# résolution par défaut ; `export KUBECONFIG=…` surcharge toujours.
+# kubeconfig: ~/.kube/dirqual.config
