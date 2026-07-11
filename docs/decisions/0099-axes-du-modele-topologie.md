@@ -4,6 +4,16 @@
 
 Proposed (2026-06-30)
 
+> ⚠️ **Amendé par
+> [ADR 0108](0108-isolation-par-identite-et-verbes-provision-install.md)
+> (2026-07-11).** L'axe **criticité `target_kind`** (`bench`/`prod`) décrit
+> ci-dessous a été **entièrement supprimé** : l'isolation ne repose plus sur une
+> catégorie mais sur l'**identité d'instance** (`stack_id`). La garde de sûreté
+> ne « lit » plus la criticité ; le transport et les sondes se gatent désormais
+> sur l'axe **`terrain`** (`local`/`cloud`/`baremetal`), qui subsiste. Les axes
+> **exposition** et **architecture** restent valides. Lire ce qui suit comme le
+> témoin de l'état au 2026-06-30 ; la carte des axes à jour est dans 0108.
+
 Cadre le vocabulaire du **catalogue de topologies**
 ([ADR 0023](0023-plateforme-exemple-generique.md) : plusieurs infra déclarées,
 une activée) en explicitant ses **axes orthogonaux**. Clarifie
