@@ -28,7 +28,7 @@ license: MIT
 # `version` synchronisée AUTOMATIQUEMENT par release-please à chaque release (marqueur
 # `x-release-please-version` ci-dessous + entrée `extra-files` de release-please-config.json).
 # NE PAS éditer à la main — elle suit `package.json` / `.release-please-manifest.json`.
-version: 2.53.1 # x-release-please-version
+version: 2.53.2 # x-release-please-version
 # `date-released` estampillée automatiquement à la date de release par le workflow
 # release.yml (release-please ne synchronise que `version:`) — ne pas éditer à la main.
 date-released: '2026-07-09'

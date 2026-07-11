@@ -11,6 +11,17 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.53.2](https://github.com/univ-lehavre/cluster/compare/v2.53.1...v2.53.2) (2026-07-11)
+
+
+### Documentation
+
+* **architecture:** ADR 0107 — adaptativité matérielle (prémisse des cultures d'ingénierie) ([89ab659](https://github.com/univ-lehavre/cluster/commit/89ab659ff6703e39652d8ba89c29979649fbabdc))
+* **architecture:** adr 0107 — adaptativité matérielle (prémisse des cultures) ([e6001ee](https://github.com/univ-lehavre/cluster/commit/e6001ee8f8f728b8e90c6e19fbafd49aec79e02b))
+* **architecture:** régénère le bloc « le dépôt en chiffres » (adr 0060) ([af916d8](https://github.com/univ-lehavre/cluster/commit/af916d8cced013bc0a82c7533191eb4f01ecb8ac))
+* **architecture:** suivi drift l87 — dédup citation remontée au mart (adr atlas 0099) ([c97ef96](https://github.com/univ-lehavre/cluster/commit/c97ef9663e18a964c3c767de45010521671787a3))
+* **architecture:** suivi drift L87 — dédup citation remontée au mart (ADR atlas 0099) ([7b6d0e4](https://github.com/univ-lehavre/cluster/commit/7b6d0e4e34e43e84ea010af0c5b24b26fcce3563))
+
 ## [2.53.1](https://github.com/univ-lehavre/cluster/compare/v2.53.0...v2.53.1) (2026-07-09)
 
 
