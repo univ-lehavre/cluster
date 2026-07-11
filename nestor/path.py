@@ -171,9 +171,9 @@ def run_path(
     │  passe puis délègue tout le chemin) ; un moteur Python bouclant PAR phase DOIT
     │  la ré-affirmer à chaque itération — sinon un montage banc dont le `KUBECONFIG`
     │  prod a été exporté en cours de route taperait la PROD (faille ADR 0053). La
-    │  façade y branche `_assert_bench_target` + `_assert_inventory_safe` ; l'ÉCHAPPATOIRE
+    │  façade y branche `_assert_target_identity` + `_assert_inventory_safe` ; l'ÉCHAPPATOIRE
     │  `KUBECONFIG` exporté (« intention explicite assumée », ADR 0065) est gérée DANS
-    │  `_assert_bench_target` (elle rend tôt si `KUBECONFIG` est posé) — le moteur ne
+    │  `_assert_target_identity` (elle rend tôt si `KUBECONFIG` est posé) — le moteur ne
     └─ la court-circuite donc PAS, il appelle la garde et la garde décide.
     """
     _ = sleep  # signature homogène (cf. bootstrap.run_bootstrap) ; gates portent l'attente
@@ -307,7 +307,7 @@ _BANC_TODO = (
     #                    = chemins banc, repo=racine, nodes) — PUR, testé ;
     #      launch   → runner.launch_phase_idempotent + extravars_for + e2e_hooks_for (LÈVENT) ;
     #      gate     → topology._wait_layer_healthy (signal _LAYER_SIGNAL/graph) ;
-    #      assert_safe → topology._assert_bench_target (+ _assert_inventory_safe par-play) ;
+    #      assert_safe → topology._assert_target_identity (+ _assert_inventory_safe par-play) ;
     #      provision('up') → STUB `run-phases.sh up` (artefact node-side, §5.b) ;
     #    RESTE : la PREUVE banc du chemin python (run mono-nœud).
     "preuve banc du moteur python (nestor up, mono-nœud) — reste à faire",

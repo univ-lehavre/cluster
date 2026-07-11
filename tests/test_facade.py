@@ -199,7 +199,7 @@ class EngineRouting(unittest.TestCase):
     def setUp(self):
         # Garde d'isolation banc : on neutralise pour que cmd_up atteigne le routage (la
         # garde elle-même est testée à part). On rend la cible "banc" et le confirm auto.
-        self._patch(cli, "_assert_bench_target", lambda *_a, **_k: None)
+        self._patch(cli, "_assert_target_identity", lambda *_a, **_k: None)
         # Sondes RÉELLES du plan annoté (preview) → neutres (pas de cluster en test).
         self._patch(cli, "_ready_nodes", lambda *_a, **_k: [])
         self._patch(cli, "_real_vms", lambda *_a, **_k: [])
@@ -273,7 +273,7 @@ class CallbacksWireRealBricks(unittest.TestCase):
 
     def setUp(self):
         # Garde neutralisée (testée à part), gates stubées (pas de cluster).
-        self._patch(cli, "_assert_bench_target", lambda *_a, **_k: None)
+        self._patch(cli, "_assert_target_identity", lambda *_a, **_k: None)
         self._patch(cli, "_assert_inventory_safe", lambda *_a, **_k: None)
         # gate de santé → toujours saine (le moteur veut un bool ; pas de kubectl en test).
         self._patch(cli, "_wait_layer_healthy", lambda *_a, **_k: True)
@@ -403,7 +403,7 @@ class BootstrapCallbackWiring(unittest.TestCase):
 
     def setUp(self):
         # Gardes neutralisées (testées à part), gates → saines (pas de cluster en test).
-        self._patch(cli, "_assert_bench_target", lambda *_a, **_k: None)
+        self._patch(cli, "_assert_target_identity", lambda *_a, **_k: None)
         self._patch(cli, "_assert_inventory_safe", lambda *_a, **_k: None)
         self._patch(cli, "_wait_layer_healthy", lambda *_a, **_k: True)
 
@@ -565,13 +565,12 @@ class BootstrapCallbackWiring(unittest.TestCase):
 
 
 class AssertSafeIsolation(unittest.TestCase):
-    """assert_safe REFUSE une cible non-banc (garde d'isolation, ADR 0053, à CHAQUE phase).
+    """assert_safe REFUSE une cible non prouvée (garde d'isolation, ADR 0108, à CHAQUE phase).
 
-    Le mainteneur a un banc Lima RÉEL ici (`_BENCH_KUBECONFIG` présent) — on ne peut donc PAS
-    faire refuser `_assert_bench_target` par l'absence du banc sans toucher l'environnement. On
-    teste le CÂBLAGE (le moteur route un REFUS vers un arrêt net) en STUBANT `_assert_bench_target`
-    pour qu'il LÈVE `_UsageError`, comme il le ferait face à une cible prod (la LOGIQUE de la garde
-    elle-même est testée dans test_topology_cli)."""
+    On ne dépend pas de l'environnement kubectl du mainteneur : on teste le CÂBLAGE (le moteur
+    route un REFUS vers un arrêt net) en STUBANT `_assert_target_identity` pour qu'il LÈVE
+    `_UsageError`, comme il le ferait face à un contexte visant une AUTRE instance (la LOGIQUE
+    de la garde elle-même est testée dans test_topology_cli)."""
 
     def _patch(self, obj, name, value):
         orig = getattr(obj, name)
@@ -579,13 +578,13 @@ class AssertSafeIsolation(unittest.TestCase):
         self.addCleanup(setattr, obj, name, orig)
 
     def test_refusal_propagates_and_no_play_launched(self):
-        # `_assert_bench_target` LÈVE (cible non sûre) → le callback assert_safe lève → le
+        # `_assert_target_identity` LÈVE (cible non sûre) → le callback assert_safe lève → le
         # moteur wrappe en IsolationRefused → `_run_path_engine` re-lève en _UsageError.
         # AUCUN play lancé, AUCUNE VM touchée (sentinelles launch + provision).
         def _refuse(action, *_a, **_k):
             raise cli._UsageError(f"REFUS : `{action}` cible non-banc (test)")
 
-        self._patch(cli, "_assert_bench_target", _refuse)
+        self._patch(cli, "_assert_target_identity", _refuse)
         self._patch(cli, "_wait_layer_healthy", lambda *_a, **_k: True)
 
         def _boom_launch(*_a, **_k):
@@ -600,13 +599,13 @@ class AssertSafeIsolation(unittest.TestCase):
             _engine(_topo(_LIMA_SOLO), "layers", ["up", "storage-simple"], "solo")
 
     def test_refusal_via_main_maps_to_code_2(self):
-        # Bout-en-bout par main() : la garde top-level de cmd_up (`_assert_bench_target`) LÈVE
+        # Bout-en-bout par main() : la garde top-level de cmd_up (`_assert_target_identity`) LÈVE
         # → main mappe _UsageError en code 2. La garde d'isolation s'applique AVANT le montage
         # (seul moteur Python depuis le retrait du filet bash).
         def _refuse(action, *_a, **_k):
             raise cli._UsageError(f"REFUS : `{action}` cible non-banc (test)")
 
-        self._patch(cli, "_assert_bench_target", _refuse)
+        self._patch(cli, "_assert_target_identity", _refuse)
         self._patch(cli, "_ready_nodes", lambda *_a, **_k: [])
         self._patch(cli, "_real_vms", lambda *_a, **_k: [])
         path = _tmp(_LIMA_SOLO)
@@ -620,7 +619,7 @@ class SeedPhaseWiring(unittest.TestCase):
     """La phase DÉLÉGUÉE `gitops-seed` (playbook=None) est routée vers `seed.run_seed`,
     pas vers un playbook — et ne crashe PLUS au montage (TypeError os.path.join(None)).
 
-    On STUBE le `do(step)` réel (`_seed_do_banc`) et la garde (`_assert_bench_target`) pour
+    On STUBE le `do(step)` réel (`_seed_do_banc`) et la garde (`_assert_target_identity`) pour
     prouver le CÂBLAGE + le fail-fast, ZÉRO Gitea réel (honnêteté ADR 0034). Le seed banc
     réel (gitea-init) se prouve au banc (cf. `cli._seed_banc_todo`)."""
 
@@ -636,7 +635,7 @@ class SeedPhaseWiring(unittest.TestCase):
 
     def setUp(self):
         # Gardes neutralisées (testées à part), gate gitops-seed → saine (pas de cluster).
-        self._patch(cli, "_assert_bench_target", lambda *_a, **_k: None)
+        self._patch(cli, "_assert_target_identity", lambda *_a, **_k: None)
         self._patch(cli, "_assert_inventory_safe", lambda *_a, **_k: None)
         self._patch(cli, "_wait_layer_healthy", lambda *_a, **_k: True)
         # Gate « gitea/argocd Ready » (rollout status) → succès par défaut (pas de cluster).
@@ -701,7 +700,7 @@ class SeedPhaseWiring(unittest.TestCase):
     def test_gitops_seed_citation_prod_routes_to_seed_do_prod(self):
         # ROUTING target_kind-aware (ADR 0095 §1.b) : en target_kind=prod, gitops-seed-citation
         # route vers `_seed_do_prod` (app-of-apps multi-code-location dirqual) sous garde
-        # `assert_prod_target` — JAMAIS `_seed_do_banc_citation` / `_assert_bench_target`. Prouvé
+        # `assert_prod_target` — JAMAIS `_seed_do_banc_citation` / `_assert_target_identity`. Prouvé
         # sans toucher au cluster (stubs), les 8 étapes prod jouées dans l'ordre.
         prod_calls = []
         self._patch(cli, "assert_prod_target", lambda action, *a, **k: prod_calls.append(action))
@@ -712,7 +711,7 @@ class SeedPhaseWiring(unittest.TestCase):
         def _bc_boom(*_a, **_k):
             raise AssertionError("_seed_do_banc_citation construit en prod (routing cassé)")
 
-        self._patch(cli, "_assert_bench_target", _bench_boom)
+        self._patch(cli, "_assert_target_identity", _bench_boom)
         self._patch(cli, "_seed_do_banc_citation", _bc_boom)
         seen = self._stub_do_prod()
         code = _engine(_topo(_PROD_CITATION), "layers", ["gitops-seed-citation"], "dirqual")
@@ -724,10 +723,12 @@ class SeedPhaseWiring(unittest.TestCase):
         self.assertTrue(all("gitops-seed-citation" in a for a in prod_calls))
 
     def test_banc_guard_is_wired(self):
-        # La garde BANC est BRANCHÉE : `_assert_bench_target` est appelée pour gitops-seed
+        # La garde BANC est BRANCHÉE : `_assert_target_identity` est appelée pour gitops-seed
         # (via assert_safe du moteur ET via assert_target du seed). On compte ses appels.
         guard_calls = []
-        self._patch(cli, "_assert_bench_target", lambda action, *a, **k: guard_calls.append(action))
+        self._patch(
+            cli, "_assert_target_identity", lambda action, *a, **k: guard_calls.append(action)
+        )
         self._stub_do()
         code = _engine(_topo(_LIMA_SOLO), "layers", ["gitops-seed"], "solo")
         self.assertEqual(code, 0)
@@ -738,7 +739,7 @@ class SeedPhaseWiring(unittest.TestCase):
     def test_guard_refused_maps_to_code_2(self):
         # La garde banc REFUSE (cible prod) → SeedGuardRefused → IsolationRefused → _UsageError
         # → code 2. AUCUN step seed exécuté (la garde protège en amont). On prouve le MAPPING
-        # SeedGuardRefused → code 2 (le câblage assert_target=_assert_bench_target est prouvé
+        # SeedGuardRefused → code 2 (le câblage assert_target=_assert_target_identity est prouvé
         # par test_banc_guard_is_wired) : run_seed lève le refus AVANT tout step.
         from nestor import seed as _seed
 

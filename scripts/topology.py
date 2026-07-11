@@ -1242,7 +1242,7 @@ def cmd_destroy(args: argparse.Namespace) -> int:
 
     Codes : 0 succès (ou rien à détruire) ; 1 échec du down délégué ; 2 confirmation
     refusée / hors TTY sans --yes."""
-    _assert_bench_target("nestor down")
+    _assert_target_identity("nestor down")
     path = _resolve(args.file)
     topo = load_topology(path)
     stack = _stack_id(path)  # identité = nom de fichier (ADR 0102 volet B)
@@ -1479,7 +1479,7 @@ def _run_scenarios(jouables, pretes_fn, *, full: bool, topo) -> int:
             "`--run` exige un banc joignable (état réel) — `nestor stack select <banc>` "
             "(pose le contexte), ou monter le banc (`nestor up`)."
         )
-    _assert_bench_target("nestor test scenarios --run")
+    _assert_target_identity("nestor test scenarios --run")
     pretes = [e for e in jouables if pretes_fn(e)]
 
     def _destructif(e) -> bool:
@@ -1669,7 +1669,7 @@ def cmd_access(args: argparse.Namespace) -> int:
     Lima isolé du Mac, ADR 0092), lit les Secrets, génère `atlas/.env.cluster.local`. Plus
     de double subprocess vers run-phases.sh. `--stop` tue les port-forward. Banc-only (la
     garde refuse la prod). Code 2 si le banc n'a pas de kubeconfig (socle non monté)."""
-    _assert_bench_target("nestor access")
+    _assert_target_identity("nestor access")
     if args.stop:
         return _access_stop_forwards()
     kubeconfig = _bench_kubeconfig()
@@ -1903,44 +1903,62 @@ def _context_targets_bench() -> bool:
     return out.returncode == 0 and server.startswith(("https://127.0.0.1:", "https://localhost:"))
 
 
-def _assert_bench_target(action: str, topo: Topology | None = None) -> None:
-    """Garde d'isolation (ADR 0053) : une commande BANC mutante ne s'exécute QUE sur
-    une cible prouvée-banc. Si le kubeconfig du banc est absent ET que le contexte
-    courant ne vise pas le banc, REFUS (code 2) — protège la prod d'une mutation par
-    erreur. Échappatoire prod EXPLICITE : `KUBECONFIG` exporté = intention assumée
-    (ADR 0065) — la garde ne bloque alors pas (et `discover` n'est jamais gardé,
-    ADR 0074).
+def _assert_target_identity(action: str, topo: Topology | None = None) -> None:
+    """Garde d'isolation par IDENTITÉ pour le chemin KUBECTL (ADR 0108) — volontairement
+    MINIMALE. Une commande mutante qui agit via kubectl (scale/remove d'une couche) ne
+    s'exécute QUE si le contexte kubectl courant est estampillé au `stack_id` de l'instance
+    visée. REFUS (code 2) sinon — protège d'une mutation de la mauvaise instance.
 
-    PROVISIONNING FROM-SCRATCH (`up`) : quand `topo` est fourni ET déclare
-    `target_kind: bench`, le banc n'existe PAS ENCORE (c'est `up` qui le CRÉE) — exiger
-    un kubeconfig de banc bloquerait le cas légitime du montage depuis zéro (vécu : un
-    `down` puis `up` était refusé). La TOPOLOGIE qui déclare `lima` est alors le signal
-    sûr (= `EXPECTED_TARGET_KIND=bench` du bash), tant qu'aucun `KUBECONFIG` prod n'est
-    exporté. Une topo `prod` reste soumise à la garde stricte (jamais de from-scratch
-    prod sans cible prouvée)."""
-    if os.environ.get("KUBECONFIG"):
-        return  # intention explicite assumée par l'opérateur
-    if topo is not None and topo.target_kind == "bench":
-        return  # `up` from-scratch d'un banc déclaré : la topo lima EST le signal sûr
-    # Banc de la stack ACTIVE (ADR 0102 volet B) : `.kubeconfigs/<stack>.config`. La branche
-    # `topo bench` from-scratch est déjà sortie ci-dessus ; ici `topo` est None (garde nue)
-    # ou prod → on sonde le banc de la stack activée (`topology.yaml` → stack_id).
-    bench_kc = _bench_kubeconfig_path(_active_stack_name(None))
-    if os.path.exists(bench_kc) and _context_targets_bench():
-        return  # banc présent ET contexte = banc : nominal
-    raise _UsageError(
-        f"REFUS : `{action}` est une commande BANC mais le kubeconfig du banc est "
-        f"absent ({os.path.relpath(bench_kc, _ROOT)}) et le contexte kubectl "
-        "courant ne vise pas le banc Lima (127.0.0.1). Cette commande pourrait MUTER "
-        "la PRODUCTION par erreur (ADR 0053).\n"
-        "  • Monter le banc d'abord : `bench/lima/run-phases.sh up`\n"
-        "  • Ou, si l'intention est délibérée hors-banc, exporter KUBECONFIG "
-        "explicitement (ex. `export KUBECONFIG=~/.kube/<topo>.config`, ADR 0097 §3)"
-    )
+    POURQUOI SI SIMPLE. Le vecteur RÉEL de la faille du 2026-06-16 est le chemin SSH
+    (l'inventaire), gardé — séparément et de façon fiable — par `_assert_inventory_safe`
+    (`classify_inventory_target` : l'inventaire est dérivé de la topo, son `stack_id` est
+    collé aux vrais hôtes). Le chemin kubectl est second et borné (Deployments stateless
+    non-ArgoCD, réversible). Une preuve kubeconfig FORTE (vivacité, endpoint, ConfigMap
+    estampillé) s'est révélée fragile et sur-ingéniée (2 revues, 10 failles) : « prouver
+    qu'un kubeconfig vise telle instance » est intrinsèquement dur. On s'en tient donc à
+    l'invariant que le montage garantit DÉJÀ : `stack select` estampille le contexte au
+    `stack_id` (`apply_context` fait `use-context <stack>`). Un `KUBECONFIG` étranger
+    (`kubernetes-admin@kubernetes`, `~/.kube/config`) ou visant une AUTRE instance ne porte
+    pas ce nom → refus. C'est ce qui remplace l'échappatoire `KUBECONFIG` de l'ADR 0065 :
+    un `KUBECONFIG` exporté est COMPARÉ, plus jamais laissez-passer aveugle.
+
+    Modèle de menace : un opérateur qui se trompe de cible (le cas du 2026-06-16), pas un
+    attaquant qui forge des fichiers. FROM-SCRATCH : une instance jamais montée n'a pas de
+    contexte estampillé ; la garde d'inventaire (chemin SSH, règle « aucun hôte distant →
+    sûr ») est alors la seule preuve requise, et elle est portée ailleurs — ici on ne
+    bloque pas l'absence de contexte pour ne pas empêcher un `up` légitime."""
+    stack = topo.stack_id if topo is not None else _active_stack_name(None)
+    if not stack:
+        return  # pas d'identité résoluble (garde nue sans stack active) : rien à prouver ici
+    ctx, server = _current_context_and_server()
+    if ctx is None:
+        return  # aucun contexte courant (instance non montée / kubeconfig absent) : le chemin
+        # SSH (inventaire) est la garde ; on n'empêche pas un up/next from-scratch légitime.
+    ok, raison = _isolation.endpoint_matches_stack(ctx, server, stack, None)
+    if not ok:
+        raise _UsageError(
+            f"REFUS : `{action}` — {raison} (ADR 0108). Le contexte kubectl courant ne vise "
+            f"pas l'instance « {stack} ». Activer la bonne instance avant de la muter : "
+            f"`nestor stack select {stack}`."
+        )
+
+
+def _current_context_and_server() -> tuple[str | None, str | None]:
+    """(contexte courant, server du cluster courant) du kubeconfig actif (ADR 0108).
+
+    Lecture pure kubectl via la cible sûre (`_kubectl_env` : jamais `~/.kube/config`). Le
+    contexte estampillé au `stack_id` (posé par `stack select`) est le discriminant de la
+    garde d'identité kubectl. `(None, None)` si injoignable — fail-safe géré par l'appelant
+    (une instance non montée n'a pas de contexte : la garde ne bloque pas, l'inventaire garde)."""
+    ctx = _kubectl("config", "current-context")
+    ctx_name = ctx.stdout.strip() if ctx and ctx.returncode == 0 and ctx.stdout.strip() else None
+    srv = _kubectl("config", "view", "--minify", "-o", "jsonpath={.clusters[0].cluster.server}")
+    server = srv.stdout.strip() if srv and srv.returncode == 0 and srv.stdout.strip() else None
+    return ctx_name, server
 
 
 def assert_prod_target(action: str, config) -> None:
-    """Garde d'isolation PROD (ADR 0053), INVERSE de `_assert_bench_target` : un seed PROD
+    """Garde d'isolation PROD (ADR 0053), INVERSE de `_assert_target_identity` : un seed PROD
     mutant ne s'exécute QUE sur le cluster prod PROUVÉ — le NOM DE CLUSTER du contexte kubectl
     courant == `config.expected_cluster` (défaut `cluster-prod`). Porte la garde bash
     `assert_prod_target()` de seed-app-of-apps.sh : refus de muter une mauvaise cible (le banc,
@@ -1993,7 +2011,7 @@ def _assert_inventory_safe(action: str, inventory_path: str, topo: Topology) -> 
     """Garde de CIBLE ANSIBLE (ADR 0053) : un montage qui vise le banc (target_kind=bench)
     ne s'exécute PAS sur un inventaire de PROD.
 
-    Complément INDISPENSABLE de `_assert_bench_target` : celle-ci ne valide que le
+    Complément INDISPENSABLE de `_assert_target_identity` : celle-ci ne valide que le
     KUBECONFIG (chemin kubectl), mais un play `hosts: cloud` SSHe sur les nœuds de
     L'INVENTAIRE — chemin disjoint du KUBECONFIG. Un banc KUBECONFIG + un inventaire
     prod a déjà reconfiguré des nœuds de PROD (`next dataops`). On valide ICI, en
@@ -2180,7 +2198,7 @@ def cmd_scale(args: argparse.Namespace) -> int:
     si tout est appliqué/à-jour ; 1 si un `kubectl scale` échoue ; 2 si banc
     injoignable (usage)."""
     if args.apply:
-        _assert_bench_target("nestor scale --apply")
+        _assert_target_identity("nestor scale --apply")
     ready = _ready_nodes()
     if not ready:
         raise _UsageError(
@@ -2863,7 +2881,7 @@ def _runphases_env(topo, stack_name: str) -> dict[str, str]:
 #
 # POURQUOI ICI et non dans un module `nestor/facade.py` séparé : les callbacks RÉELS sont
 # des closures sur des fonctions PRIVÉES de CETTE façade (`_wait_layer_healthy`,
-# `_assert_bench_target`, `_assert_inventory_safe`, `_runner`, `_kubectl`, `_inventory_for`).
+# `_assert_target_identity`, `_assert_inventory_safe`, `_runner`, `_kubectl`, `_inventory_for`).
 # Un module `nestor/facade.py` devrait les ré-importer depuis `scripts/topology.py` — qui
 # n'est PAS un module de paquet (dossier `scripts/` sans `__init__`, chargé par chemin) →
 # import bancal/circulaire. Le PRÉCÉDENT du dépôt (`cmd_bootstrap_seq`) construit DÉJÀ
@@ -3589,7 +3607,7 @@ def _seed_do_app_of_apps(topo: Topology, config, *, overlay: str | None) -> Call
 
     `overlay` = cible kustomize des déclarations poussées : "bench" (SeaweedFS, banc mono-nœud
     local-path) OU None (garde le path `overlays/prod` du patron — OBC Ceph rook-ceph-datalake).
-    La GARDE (banc `_assert_bench_target` / prod `assert_prod_target`) et le KUBECONFIG sont
+    La GARDE (banc `_assert_target_identity` / prod `assert_prod_target`) et le KUBECONFIG sont
     branchés par `_launch_seed` selon le target_kind — jamais ici. C'est l'étape 1 « premier
     pas » d'ADR 0095 §1.a (prouvée au banc AVANT la prod, ADR 0034/0085). État (token, admin_pw)
     threadé par closure (le `do(step) -> bool` est sans état). Idempotent ; fail-fast."""
@@ -3764,7 +3782,7 @@ def _seed_do_app_of_apps(topo: Topology, config, *, overlay: str | None) -> Call
 
 def _seed_do_banc_citation(topo: Topology, config) -> Callable[[str], bool]:
     """Seed banc-citation = flux App-of-Apps ciblant l'overlay `bench` (SeaweedFS, banc mono-nœud
-    local-path), sous garde `_assert_bench_target` (branchée par `_launch_seed`). Wrapper mince
+    local-path), sous garde `_assert_target_identity` (branchée par `_launch_seed`). Wrapper mince
     sur `_seed_do_app_of_apps` — la logique est partagée avec le seed prod (DRY, jscpd)."""
     return _seed_do_app_of_apps(topo, config, overlay="bench")
 
@@ -4104,7 +4122,7 @@ def _e2e_hook_impl(name: str) -> Callable[..., None] | None:
 
 
 # Phases DÉLÉGUÉES de seed → (kind run_seed, NOM du constructeur do, libellé). Deux flux, MÊME
-# garde banc (`_assert_bench_target`) : `gitops-seed` (jouet atlas-workflows) et
+# garde banc (`_assert_target_identity`) : `gitops-seed` (jouet atlas-workflows) et
 # `gitops-seed-citation` (le VRAI flux App-of-Apps citation joué au banc, ADR 0095 §1.a). Le
 # seed PROD (`kind='prod'`) N'EST PAS monté au banc — il se prouve au rebuild dirqual
 # (garde `assert_prod_target`).
@@ -4114,7 +4132,7 @@ def _e2e_hook_impl(name: str) -> Callable[..., None] | None:
 # `_seed_do_banc`) ne prendrait pas effet (la référence figée du dict masquerait le stub).
 # phase → target_kind → (seed kind, NOM du constructeur do, libellé, NOM de la garde). La garde
 # est le NOM d'une fonction module (résolue TARDIVEMENT via globals(), patchable en test) —
-# `_assert_bench_target` au banc, `assert_prod_target` en prod (OPPOSÉES, ADR 0053). `gitops-seed`
+# `_assert_target_identity` (kubectl) + `assert_prod_target` (seed prod, ADR 0053).
 # (jouet `toy`) reste banc-only : il n'a aucun sens en prod (la code-location jouet ne se déploie
 # jamais sur dirqual). `gitops-seed-citation` est le SEUL flux à DEUX cibles : banc-citation prouve
 # le chemin (ADR 0034), prod le joue réellement sur dirqual (multi-code-location, ADR 0095 §1.b).
@@ -4124,7 +4142,7 @@ _SEED_PHASE_ROUTING: dict[str, dict[str, tuple[str, str, str, str]]] = {
             "banc",
             "_seed_do_banc",
             "gitea-init, jouet atlas-workflows",
-            "_assert_bench_target",
+            "_assert_target_identity",
         ),
     },
     "gitops-seed-citation": {
@@ -4132,7 +4150,7 @@ _SEED_PHASE_ROUTING: dict[str, dict[str, tuple[str, str, str, str]]] = {
             "banc-citation",
             "_seed_do_banc_citation",
             "app-of-apps citation réel (banc)",
-            "_assert_bench_target",
+            "_assert_target_identity",
         ),
         "prod": (
             "prod",
@@ -4149,7 +4167,7 @@ def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult
     ADÉQUATE au target_kind.
 
     Phases portées (`_SEED_PHASE_ROUTING`) : `gitops-seed` (banc, jouet) et `gitops-seed-citation`
-    à DEUX cibles — `banc-citation` (garde `_assert_bench_target`, prouve le chemin au banc, ADR
+    à DEUX cibles — `banc-citation` (garde `_assert_target_identity`, prouve le chemin au banc, ADR
     0095 §1.a) et `prod` (garde `assert_prod_target`, app-of-apps multi-code-location sur dirqual,
     ADR 0095 §1.b). La garde est OPPOSÉE selon la cible (banc Lima vs cluster-prod). Mappe les
     verdicts du seed (FAIL-FAST, AUCUN fallback, ADR 0046) :
@@ -4199,7 +4217,7 @@ def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult
         do = do_builder(topo, config)
         print(f"→ {phase} : seed des DONNÉES ({blurb}, garde {topo.target_kind})…")
         # GARDE branchée selon target_kind : `assert_prod_target(action, config)` en prod (cible
-        # cluster-prod, NE relâche PAS sur KUBECONFIG), `_assert_bench_target(action, topo)` au banc
+        # cluster-prod, NE relâche PAS sur KUBECONFIG) ; `_assert_target_identity` pour kubectl
         # (relâche sur KUBECONFIG explicite, ADR 0065). Signatures distinctes → branche explicite.
         if topo.target_kind == "prod":
             assert_target = lambda: guard_fn(f"nestor up ({phase})", config)  # noqa: E731
@@ -4242,7 +4260,7 @@ def _run_path_engine(
     Callbacks (cf. `nestor.path.run_path`) :
     - `sequence` : la séquence calculée (`expected_phase_sequence`), FILTRÉE sur `a_appliquer`
       (ordre de `seq` préservé), injectée au moteur.
-    - `assert_safe(phase)` : la GARDE d'isolation banc (`_assert_bench_target`) à CHAQUE phase
+    - `assert_safe(phase)` : la GARDE d'isolation banc (`_assert_target_identity`) à CHAQUE phase
       (invariant de boucle, ADR 0097 §5.c) ; l'échappatoire KUBECONFIG (ADR 0065) est gérée
       DANS la garde. Pour une phase à play unitaire, on ajoute `_assert_inventory_safe`.
     - `launch(phase)` : montage via `runner.launch_phase` (UN passage + gate, parité bash —
@@ -4269,7 +4287,7 @@ def _run_path_engine(
             # une phase à play unitaire (Ansible SSH/exec), on valide AUSSI l'inventaire.
             #
             # EXCEPTION seed PROD DÉLÉGUÉ (playbook is None, target_kind prod) : `_launch_seed`
-            # branche la garde PROD (`assert_prod_target`) — `_assert_bench_target` refuserait la
+            # branche la garde PROD (`assert_prod_target`) — `_assert_target_identity` refuserait la
             # prod À TORT. On la saute pour ces phases ; tout le reste (plays Ansible) la garde.
             _is_prod_seed = (
                 topo.target_kind == "prod"
@@ -4278,7 +4296,7 @@ def _run_path_engine(
                 and _phases.phase_plan(phase).playbook is None
             )
             if not _is_prod_seed:
-                _assert_bench_target(f"nestor up ({phase})", topo)
+                _assert_target_identity(f"nestor up ({phase})", topo)
             if _phases.has_phase_plan(phase) and _phases.phase_plan(phase).playbook is not None:
                 _assert_inventory_safe(f"nestor up ({phase})", ctx.inventory, topo)
 
@@ -4295,7 +4313,7 @@ def _run_path_engine(
             # PHASE DÉLÉGUÉE (playbook is None) : ce N'EST PAS un play Ansible mais une étape de
             # DONNÉES portée par `nestor/seed.py` (gitops-seed → gitea-init.sh). On NE fait donc
             # PAS `os.path.join(_ROOT, None)` (TypeError au montage) : on route vers le câblage
-            # seed (run_seed banc, garde _assert_bench_target). Voir `_launch_seed`.
+            # seed (run_seed banc, garde _assert_target_identity). Voir `_launch_seed`.
             if plan.playbook is None:
                 return _launch_seed(phase, topo, derived)
             playbook = os.path.relpath(os.path.join(_ROOT, plan.playbook), private_data_dir)
@@ -4546,7 +4564,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     # Garde APRÈS le chargement : `up` from-scratch d'un banc (target_kind: bench) est légitime
     # même sans kubeconfig de banc existant (c'est `up` qui le crée) — la topo lima est le
     # signal sûr. Une topo prod reste sous garde stricte (cible prouvée requise).
-    _assert_bench_target("nestor up", topo)
+    _assert_target_identity("nestor up", topo)
     target = args.target or default_target(topo)
     try:
         seq = expected_phase_sequence(topo, target)
@@ -4589,7 +4607,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     # au banc mono-nœud (from-scratch, 10 couches up→…→portal + preuve e2e OpenLineage→
     # Marquez, ingestion vérifiée). L'ancien filet bash `--engine=bash`/run-phases.sh a été
     # RETIRÉ (un seul moteur, plus de double source de vérité). La garde d'isolation banc
-    # s'applique ICI (`_assert_bench_target` en tête) ET à CHAQUE phase (callback
+    # s'applique ICI (`_assert_target_identity` en tête) ET à CHAQUE phase (callback
     # `assert_safe`, invariant de boucle ADR 0097 §5.c). Le moteur Python ne porte PAS l'arm
     # HA propre (amorçage VIP/etcd) : un chemin `ha-3cp` lèvera proprement (callback `ha`
     # stubé) plutôt que de monter à moitié — on laisse le moteur trancher (fail-fast).
@@ -4641,7 +4659,7 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict, stack_name: str)
             # Phase DÉLÉGUÉE seed (gitops-seed / gitops-seed-citation) : route vers le câblage
             # Python (parité _run_path_engine), pas un arm bash (retiré). Mappe les verdicts du
             # moteur (PathError/IsolationRefused → fail-fast / usage) comme `_run_path_engine`.
-            # La GARDE (banc `_assert_bench_target` / prod `assert_prod_target`) est branchée DANS
+            # La GARDE (`_assert_target_identity` / seed `assert_prod_target`) est branchée DANS
             # `_launch_seed` selon le target_kind — on ne la double PAS ici (elle refuserait la
             # prod à tort pour un gitops-seed-citation prod).
             print(f"→ {phase} : {_quoi_couche(phase)} via nestor/seed.py…")
@@ -4659,7 +4677,7 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict, stack_name: str)
                 f"la phase `{phase}` n'a ni play unitaire ni câblage Python/arm run-phases.sh — "
                 "non lançable via `nestor next`"
             )
-        _assert_bench_target(f"nestor next ({phase})")
+        _assert_target_identity(f"nestor next ({phase})")
         runphases = os.path.join(_ROOT, "bench", "lima", "run-phases.sh")
         print(f"→ {phase} : {_quoi_couche(phase)} via run-phases.sh…")
         rc = subprocess.run(  # noqa: S603 — chemin codé, env dérivé d'une topo validée
@@ -4688,9 +4706,9 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict, stack_name: str)
                 f"inventaire du banc absent : {rel} — monter le banc d'abord "
                 "(`bench/lima/run-phases.sh up`, qui génère l'inventaire Lima)"
             )
-        _assert_bench_target(f"nestor next ({phase})")
+        _assert_target_identity(f"nestor next ({phase})")
         # Garde de CIBLE ANSIBLE (ADR 0053) : valide que l'INVENTAIRE vise la topologie
-        # voulue AVANT de lancer ansible-runner. _assert_bench_target ne couvre que le
+        # voulue AVANT de lancer ansible-runner. _assert_target_identity ne couvre que le
         # KUBECONFIG ; un play `hosts: cloud` SSHe sur les nœuds de l'inventaire (chemin
         # disjoint). Sans ça, un banc KUBECONFIG + un inventaire prod mute la PROD.
         _assert_inventory_safe(f"nestor next ({phase})", inventory, topo)
@@ -4868,7 +4886,7 @@ def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
     0049) ; cette commande reçoit cp_ip/inventaire déjà dérivés du banc et rappelle
     l'arm `cni` pour la CNI. La logique (séquence, fail-fast) est testée sans
     banc (tests/test_bootstrap.py)."""
-    _assert_bench_target("bootstrap-seq")
+    _assert_target_identity("bootstrap-seq")
     private_data_dir = os.path.join(_ROOT, "bootstrap")
     inventory = (
         args.inventory
@@ -4989,7 +5007,7 @@ def cmd_roundtrip(args: argparse.Namespace) -> int:
     toute suppression définitive, CONFIRMATION sur TTY (ou `--yes` hors TTY). Code 0
     si réversible, 1 si une étape échoue / confirmation refusée, 2 si usage.
     """
-    _assert_bench_target("nestor test roundtrip")
+    _assert_target_identity("nestor test roundtrip")
     # Destruction par DÉCOUVERTE (ADR 0101) : `remove` défait toute la clôture en UN geste
     # (aval cascadé + node-side Ceph), au lieu de boucler `run-phases.sh rollback` (ex-bash).
     topo = load_topology(_resolve(args.file))
@@ -5384,7 +5402,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
     (≈ démontage du socle) exige `--full`. `--yes` saute la confirmation (hors TTY).
 
     Mêmes gardes d'isolation que `next` (ADR 0053) : la suppression vise le banc (kubeconfig
-    + node-side ceph) → `_assert_bench_target` (jamais la prod).
+    + node-side ceph) → `_assert_target_identity` (jamais la prod).
 
     DÉCOUVERTE — SEUL chemin (ADR 0101) : `remove` défait la clôture PAR DÉCOUVERTE
     d'appartenance (api-resources + ownerReferences) — supprime les RACINES namespacées (le GC
@@ -5407,7 +5425,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
     # (CR + finalize ns) PUIS le node-side Ceph (wipe disques via `_node_exec_script`) — plus
     # de chemin table (rollback-lib.sh supprimé). La topo (devices) + l'inventaire (transport)
     # sont requis pour le node-side.
-    _assert_bench_target(f"nestor remove ({args.phase}, découverte)")
+    _assert_target_identity(f"nestor remove ({args.phase}, découverte)")
     topo = load_topology(_resolve(args.file))
     return _remove_by_discovery(
         args.phase,

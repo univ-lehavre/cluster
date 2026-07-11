@@ -93,16 +93,17 @@ def _install_graph_passthrough(test):
     test.addCleanup(setattr, cli.subprocess, "run", orig)
 
 
-_REAL_ASSERT_BENCH = cli._assert_bench_target  # garde d'isolation réelle
+_REAL_ASSERT_IDENTITY = cli._assert_target_identity  # garde d'isolation réelle
 _REAL_WAIT_HEALTHY = cli._wait_layer_healthy  # gate de santé réelle (#355)
 
 
 def setUpModule():
     cli.subprocess.run = _deny_run
     # Garde d'isolation neutralisée PAR DÉFAUT : les tests métier (up/next/destroy/…)
-    # n'ont pas de vrai banc et ne doivent pas être bloqués par elle. La classe
-    # `BenchTargetGuard` la RÉACTIVE explicitement pour la tester (cf. _REAL_ASSERT_BENCH).
-    cli._assert_bench_target = lambda *a, **k: None
+    # n'ont pas de contexte kubectl estampillé et ne doivent pas être bloqués par elle.
+    # La classe `TargetIdentityGuard` la RÉACTIVE explicitement pour la tester
+    # (cf. _REAL_ASSERT_IDENTITY).
+    cli._assert_target_identity = lambda *a, **k: None
     # Gate de santé (#355) neutralisée PAR DÉFAUT (renvoie sain) : sans banc, sonder le
     # dernier maillon bouclerait 30×4s. Les tests de `next` stubent déjà launch_phase ;
     # la gate elle-même est testée à part (NextHealthGate) avec sa propre stub.
@@ -111,7 +112,7 @@ def setUpModule():
 
 def tearDownModule():
     cli.subprocess.run = _REAL_SUBPROCESS_RUN
-    cli._assert_bench_target = _REAL_ASSERT_BENCH
+    cli._assert_target_identity = _REAL_ASSERT_IDENTITY
     cli._wait_layer_healthy = _REAL_WAIT_HEALTHY
 
 
@@ -351,11 +352,11 @@ class Epreuves(unittest.TestCase):
         orig = {
             "_ready_nodes": cli._ready_nodes,
             "_observed_layers": cli._observed_layers,
-            "_assert_bench_target": cli._assert_bench_target,
+            "_assert_target_identity": cli._assert_target_identity,
         }
         cli._ready_nodes = lambda *_a: ["node1"]
         cli._observed_layers = lambda phases: observed
-        cli._assert_bench_target = lambda *a, **k: None
+        cli._assert_target_identity = lambda *a, **k: None
         self._orig_exists = cli.os.path.exists
         # les tests qui utilisent ce stub lancent `test scenarios -f _EXAMPLE` → stack `socle`.
         _bp = cli._bench_kubeconfig_path(cli._stack_id(_EXAMPLE))
@@ -2671,24 +2672,24 @@ class Access(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("kubeconfig banc absent", err)
 
-    def test_refuses_without_bench(self):
-        # La garde d'isolation (neutralisée par défaut dans setUpModule) est RÉACTIVÉE
-        # ici : access refuse quand le banc est absent ET le contexte ne vise pas le banc
-        # (ADR 0053). La garde lève AVANT toute I/O kubectl (1re ligne de cmd_access).
-        # On force le banc ABSENT (le kubeconfig banc peut exister sur la machine de dev).
-        orig_exists = cli.os.path.exists
-        cli._assert_bench_target = _REAL_ASSERT_BENCH
-        _bp = cli._bench_kubeconfig_path(cli._active_stack_name(None))
-        cli.os.path.exists = lambda p: False if p == _bp else orig_exists(p)
-        self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
-        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
-        orig_ctx = cli._context_targets_bench
-        cli._context_targets_bench = lambda: False
-        self.addCleanup(setattr, cli, "_context_targets_bench", orig_ctx)
+    def test_refuses_when_context_targets_other_instance(self):
+        # La garde d'isolation par IDENTITÉ (neutralisée par défaut dans setUpModule) est
+        # RÉACTIVÉE ici : access refuse quand le contexte kubectl courant ne vise pas
+        # l'instance active (ADR 0108). La garde lève AVANT toute I/O (1re ligne de
+        # cmd_access). On rend une stack active résoluble + un contexte kubectl qui pointe
+        # AILLEURS → REFUS (code 2).
+        cli._assert_target_identity = _REAL_ASSERT_IDENTITY
+        self.addCleanup(setattr, cli, "_assert_target_identity", lambda *a, **k: None)
+        orig_stack = cli._active_stack_name
+        cli._active_stack_name = lambda _f: "dirqual"
+        self.addCleanup(setattr, cli, "_active_stack_name", orig_stack)
+        orig_ctx = cli._current_context_and_server
+        cli._current_context_and_server = lambda: ("autre", "https://1.2.3.4:6443")
+        self.addCleanup(setattr, cli, "_current_context_and_server", orig_ctx)
         code, _, err = _capture(["access"])
-        self.assertEqual(code, 2)  # _UsageError → code 2 (garde d'isolation, ADR 0053)
+        self.assertEqual(code, 2)  # _UsageError → code 2 (garde d'isolation, ADR 0108)
         self.assertIn("REFUS", err)
-        self.assertIn("ADR 0053", err)
+        self.assertIn("ADR 0108", err)
 
 
 class RemoveOwnedStorageClasses(unittest.TestCase):
@@ -2744,51 +2745,69 @@ class RemoveOwnedStorageClasses(unittest.TestCase):
         self.assertEqual(cli._remove_owned_storage_classes(), [])
 
 
-class BenchTargetGuard(unittest.TestCase):
-    """Garde d'isolation (ADR 0053) : les mutations banc refusent une cible non-banc.
+class TargetIdentityGuard(unittest.TestCase):
+    """Garde d'isolation par IDENTITÉ (ADR 0108) : une mutation kubectl ne s'exécute QUE si
+    le contexte kubectl COURANT est estampillé au `stack_id` de l'instance visée.
 
-    Teste la VRAIE garde (_REAL_ASSERT_BENCH), neutralisée ailleurs par setUpModule.
-    On contrôle les 3 entrées : KUBECONFIG exporté, présence du banc, contexte kubectl."""
+    Teste la VRAIE garde (_REAL_ASSERT_IDENTITY), neutralisée ailleurs par setUpModule. Le
+    seul discriminant est le cran contexte (endpoint=None dans la garde) : on STUBE
+    `_current_context_and_server` (le contexte courant) et on fournit une topo à `.stack_id`
+    (ou une stack active résoluble)."""
 
-    def _arm(self, *, bench_exists, targets_bench, kubeconfig_env=None):
-        cli._assert_bench_target = _REAL_ASSERT_BENCH
-        self.addCleanup(setattr, cli, "_assert_bench_target", lambda *a, **k: None)
-        orig_exists = cli.os.path.exists
-        # Chemin banc de la stack active CAPTURÉ avant de poser le mock : `_active_stack_name`
-        # appelle `os.path.exists` (symlink) → le résoudre DANS le lambda récursionnerait.
-        bench_path = cli._bench_kubeconfig_path(cli._active_stack_name(None))
-        cli.os.path.exists = lambda p: bench_exists if p == bench_path else orig_exists(p)
-        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
-        orig_ctx = cli._context_targets_bench
-        cli._context_targets_bench = lambda: targets_bench
-        self.addCleanup(setattr, cli, "_context_targets_bench", orig_ctx)
-        if kubeconfig_env is not None:
-            os.environ["KUBECONFIG"] = kubeconfig_env
-            self.addCleanup(os.environ.pop, "KUBECONFIG", None)
+    class _Topo:
+        def __init__(self, stack_id):
+            self.stack_id = stack_id
 
-    def test_refuses_when_no_bench_and_ctx_not_bench(self):
-        # banc absent + contexte ≠ banc + pas de KUBECONFIG → REFUS (la prod en danger).
-        self._arm(bench_exists=False, targets_bench=False)
+    def _arm(self, *, current_context, current_server="https://1.2.3.4:6443"):
+        cli._assert_target_identity = _REAL_ASSERT_IDENTITY
+        self.addCleanup(setattr, cli, "_assert_target_identity", lambda *a, **k: None)
+        orig = cli._current_context_and_server
+        cli._current_context_and_server = lambda: (current_context, current_server)
+        self.addCleanup(setattr, cli, "_current_context_and_server", orig)
+
+    def test_passes_when_context_matches_stack(self):
+        # contexte kubectl courant == stack_id de l'instance visée → nominal, pas de refus.
+        self._arm(current_context="dirqual")
+        cli._assert_target_identity("nestor up", self._Topo("dirqual"))  # ne lève pas
+
+    def test_refuses_when_context_targets_other_instance(self):
+        # contexte courant ≠ stack_id (ex. un kubeconfig visant une AUTRE instance) → REFUS.
+        self._arm(current_context="autre")
         with self.assertRaises(cli._UsageError) as ctx:
-            cli._assert_bench_target("nestor up")
+            cli._assert_target_identity("nestor up", self._Topo("dirqual"))
         self.assertIn("REFUS", str(ctx.exception))
+        self.assertIn("dirqual", str(ctx.exception))
 
-    def test_passes_when_kubeconfig_explicitly_exported(self):
-        # KUBECONFIG exporté = intention explicite (ADR 0065) → la garde laisse passer.
-        self._arm(bench_exists=False, targets_bench=False, kubeconfig_env="/tmp/whatever")
-        cli._assert_bench_target("nestor up")  # ne lève pas
-
-    def test_passes_when_bench_present_and_ctx_bench(self):
-        # banc présent ET contexte = banc (127.0.0.1) → nominal, pas de refus.
-        self._arm(bench_exists=True, targets_bench=True)
-        cli._assert_bench_target("nestor up")  # ne lève pas
-
-    def test_refuses_when_bench_present_but_ctx_not_bench(self):
-        # banc présent mais contexte pointant AILLEURS (ex. prod) → refus (couvre le
-        # cas que l'ancienne garde os.path.exists ne voyait pas).
-        self._arm(bench_exists=True, targets_bench=False)
+    def test_refuses_when_context_is_foreign_admin(self):
+        # kubeconfig étranger (`kubernetes-admin@kubernetes`, `~/.kube/config`) → refus :
+        # il ne porte pas le nom estampillé de l'instance (remplace l'échappatoire KUBECONFIG).
+        self._arm(current_context="kubernetes-admin@kubernetes")
         with self.assertRaises(cli._UsageError):
-            cli._assert_bench_target("nestor up")
+            cli._assert_target_identity("nestor up", self._Topo("dirqual"))
+
+    def test_passes_when_no_current_context(self):
+        # aucun contexte courant (instance non montée / kubeconfig absent) → la garde ne
+        # bloque pas : l'inventaire (chemin SSH) garde, on n'empêche pas un up from-scratch.
+        self._arm(current_context=None, current_server=None)
+        cli._assert_target_identity("nestor up", self._Topo("dirqual"))  # ne lève pas
+
+    def test_passes_when_no_resolvable_stack(self):
+        # pas d'identité résoluble (topo None + aucune stack active) → rien à prouver, passe.
+        self._arm(current_context="autre")
+        orig = cli._active_stack_name
+        cli._active_stack_name = lambda _f: None
+        self.addCleanup(setattr, cli, "_active_stack_name", orig)
+        cli._assert_target_identity("nestor up")  # ne lève pas
+
+    def test_uses_active_stack_when_no_topo(self):
+        # sans topo, l'identité est la stack ACTIVE (`_active_stack_name`) : contexte ≠ elle
+        # → REFUS (prouve le chemin `topo=None` de la garde).
+        self._arm(current_context="autre")
+        orig = cli._active_stack_name
+        cli._active_stack_name = lambda _f: "dirqual"
+        self.addCleanup(setattr, cli, "_active_stack_name", orig)
+        with self.assertRaises(cli._UsageError):
+            cli._assert_target_identity("nestor up")
 
 
 class EnvCommandRemoved(unittest.TestCase):

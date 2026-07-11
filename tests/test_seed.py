@@ -191,7 +191,7 @@ class Steps(unittest.TestCase):
 class GuardsOpposed(unittest.TestCase):
     """LE point du LOT 8 : DEUX gardes OPPOSÉES — banc REFUSE la prod, prod REFUSE le banc.
 
-    On STUBE chaque garde : la façade y branche `_assert_bench_target` (banc) /
+    On STUBE chaque garde : la façade y branche `_assert_target_identity` (banc) /
     `assert_prod_target` (prod) ; ici on prouve que `run_seed` joue la garde EN TÊTE et
     qu'un refus stoppe AVANT tout geste (aucune étape exécutée)."""
 

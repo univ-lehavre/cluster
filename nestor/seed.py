@@ -5,7 +5,7 @@ le bash portait, désormais en Python testable (ADR 0017) :
 
 - BANC : `bench/lima/gitea-init.sh` (207 l.) — crée l'admin Gitea, un token API, l'org +
   le dépôt des workflows atlas, pousse la code-location jouet, pose le webhook et
-  l'Application Argo CD. Garde **banc** : `_assert_bench_target` (la cible DOIT être le
+  l'Application Argo CD. Garde **banc** : `_assert_target_identity` (la cible DOIT être le
   banc Lima, jamais la prod).
 - PROD : `bootstrap/seed-app-of-apps.sh` (595 l.) — généralise le pattern en PROD (flux
   App-of-Apps citation : org/repo déclaratif, push de l'arbre atlas figé, déclaration
@@ -270,7 +270,7 @@ _PROD_STEPS = (
 #
 #    banc-citation et prod PARTAGENT le cœur de séquence ; les SEULES divergences
 #    (INJECTÉES par la façade topology.py, jamais gravées dans les steps) sont :
-#      • la GARDE — `_assert_bench_target` (cible = banc Lima) au banc, OPPOSÉE à
+#      • la GARDE — `_assert_target_identity` (cible = banc Lima) au banc, OPPOSÉE à
 #        `assert_prod_target` (cible = cluster-prod) en prod. On ne rend JAMAIS la garde
 #        prod franchissable par paramètre (ADR 0053/0084) : deux façades distinctes.
 #      • la CIBLE de déploiement — l'overlay kustomize `overlays/bench` (SeaweedFS, pas
@@ -317,7 +317,7 @@ def run_seed(
     la LOGIQUE (garde opposée banc/prod + ordre des étapes) testable sans cluster.
 
     - `assert_target()` : LA GARDE. Pour `kind="banc"` ET `kind="banc-citation"` la façade
-      y branche `_assert_bench_target` (cible = banc) ; pour `kind="prod"`, `assert_prod_target`
+      y branche `_assert_target_identity` (cible = banc) ; pour `kind="prod"`, `assert_prod_target`
       (cible = cluster prod attendu). DEUX familles de gardes OPPOSÉES, comme l'exige le LOT 8 —
       un seed banc/banc-citation REFUSE la prod, un seed prod REFUSE le banc. Un refus lève
       (→ SeedGuardRefused). `banc-citation` joue la SÉQUENCE prod (le vrai flux App-of-Apps)
@@ -463,8 +463,8 @@ _BANC_TODO = (
     "câblage do(step) prod sur seed-app-of-apps réel (git push port-forward, kubectl apply) "
     "— à prouver sur dirqual",
     "câblage do(step) banc-citation en façade : do() du flux App-of-Apps ciblant l'overlay "
-    "bench + injection digest, garde _assert_bench_target — à prouver au banc (ADR 0095 §1.a)",
-    "brancher _assert_bench_target (banc/banc-citation) / assert_prod_target (prod) en façade "
+    "bench + injection digest, garde _assert_target_identity — à prouver au banc (ADR 0095 §1.a)",
+    "brancher _assert_target_identity (banc/banc-citation) / assert_prod_target (prod) en façade "
     "(topology.py)",
     "run banc gitea-init + run banc-citation (citation réel) + run prod app-of-apps consignés "
     "— PREUVE DÉFINITIVE, reste à faire",
