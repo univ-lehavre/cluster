@@ -75,7 +75,9 @@ class Apply(unittest.TestCase):
             name="banc", kubeconfig=self.kubeconfig, cluster="banc", user="banc-admin"
         )
 
-    def test_apply_invokes_runner_with_set_context(self):
+    def test_apply_invokes_set_then_use_context(self):
+        # ADR 0108 : apply pose le contexte (set-context) PUIS le rend courant (use-context),
+        # pour que `current-context == stack_id` (l'invariant de la garde d'identité).
         calls = []
 
         def runner(argv):
@@ -84,8 +86,19 @@ class Apply(unittest.TestCase):
 
         name = kc.apply_context(self._plan(), runner=runner)
         self.assertEqual(name, "banc")
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][:3], ["kubectl", "config", "set-context"])
+        self.assertEqual(calls[1][:3], ["kubectl", "config", "use-context"])
+        self.assertEqual(calls[1][3], "banc")  # rend COURANT le contexte nommé au stack
+
+    def test_apply_raises_when_use_context_fails(self):
+        # Si use-context échoue, on refuse : sans contexte courant estampillé, la garde
+        # d'identité refuserait tout — mieux vaut échouer tôt et clairement.
+        def runner(argv):
+            return _proc(0 if argv[2] == "set-context" else 1)
+
+        with self.assertRaises(kc.ContextError):
+            kc.apply_context(self._plan(), runner=runner)
 
     def test_apply_refuses_absent_kubeconfig(self):
         plan = kc.ContextPlan(

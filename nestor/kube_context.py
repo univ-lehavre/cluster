@@ -66,6 +66,22 @@ class ContextPlan:
             f"--kubeconfig={self.kubeconfig}",
         ]
 
+    def use_context_argv(self) -> list[str]:
+        """`kubectl config use-context` : rend le contexte `<stack>` COURANT (PUR, ADR 0108).
+
+        Indispensable à la garde d'identité : elle exige `current-context == stack_id`.
+        `set-context` CRÉE l'entrée mais ne la sélectionne pas — sans ce `use-context`, le
+        contexte courant reste celui posé au montage (jadis `cluster-banc` en dur), et la
+        garde refuserait toute instance saine (faille de faux-refus corrigée). Vise le même
+        `--kubeconfig` que `set_context_argv` (le fichier de la cible), jamais `~/.kube`."""
+        return [
+            "kubectl",
+            "config",
+            "use-context",
+            self.name,
+            f"--kubeconfig={self.kubeconfig}",
+        ]
+
 
 def context_plan(
     name: str,
@@ -128,5 +144,14 @@ def apply_context(plan: ContextPlan, *, runner: Runner | None = None) -> str:
         raise ContextError(
             f"`kubectl config set-context {plan.name}` a échoué "
             f"(rc={proc.returncode}) : {(proc.stderr or '').strip()}"
+        )
+    # Rend le contexte `<stack>` COURANT (ADR 0108) : la garde d'identité exige
+    # `current-context == stack_id`. Sans use-context, le contexte courant resterait celui
+    # du montage → faux-refus systématique de la garde. Idempotent (rejouable).
+    used = run(plan.use_context_argv())
+    if used.returncode != 0:
+        raise ContextError(
+            f"`kubectl config use-context {plan.name}` a échoué "
+            f"(rc={used.returncode}) : {(used.stderr or '').strip()}"
         )
     return plan.name
