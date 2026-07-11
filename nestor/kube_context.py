@@ -139,7 +139,8 @@ def apply_context(plan: ContextPlan, *, runner: Runner | None = None) -> str:
     if plan.kubeconfig != os.devnull and not os.path.exists(plan.kubeconfig):
         raise ContextError(
             f"kubeconfig cible absent ({plan.kubeconfig}) — monter la cible d'abord "
-            f"(`nestor up`) avant de poser le contexte « {plan.name} »."
+            f"(`nestor provision` puis `nestor install`) avant de poser le contexte "
+            f"« {plan.name} »."
         )
     proc = run(plan.set_context_argv())
     if proc.returncode != 0:

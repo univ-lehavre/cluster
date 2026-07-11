@@ -129,17 +129,17 @@ Le provisioning DÉRIVE tout de la topologie, **par nœud**. Fin de `WITH_CEPH`
 - **~9 sites de duplication kubeconfig → 1 fonction** ; suppression de
   `_BENCH_KUBECONFIG`, fusion des résolveurs, un seul fetcher (le portage Python
   continue ADR 0101).
-- **`nestor up <topo ceph>` monte réellement un banc Ceph** (disques créés) — ce
-  qui n'était pas le cas (bug constaté).
+- **`nestor provision <topo ceph>` monte réellement un banc Ceph** (disques
+  créés) — ce qui n'était pas le cas (bug constaté).
 - **Sécurité (volet B, choix in-repo)** : les kubeconfig — dont la PROD — vivent
   dans l'arbre `.kubeconfigs/` gitignoré. Le `.gitignore` DOIT être
   **fail-safe** (`/.kubeconfigs/*` ignore tout, jamais de ré-inclusion
   `!*.config`) ; un garde-fou `git check-ignore` avant tout rapatriement prod.
   C'est le contre-argument assumé (cf. Alternatives).
 - **Prouvable au banc** : le volet C touche le montage → **preuve banc
-  obligatoire** (ADR 0034) : `nestor up ceph.example.yaml` crée les disques
-  (`limactl disk list`, `lsblk` vdb/vdc/vdd), ressources par nœud respectées,
-  rejeu `changed=0`.
+  obligatoire** (ADR 0034) : `nestor provision ceph.example.yaml` crée les
+  disques (`limactl disk list`, `lsblk` vdb/vdc/vdd), ressources par nœud
+  respectées, rejeu `changed=0`.
 
 ## Mise en œuvre incrémentale (chaque lot prouvable)
 

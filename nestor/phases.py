@@ -35,7 +35,7 @@ qui RESTE À FAIRE AVANT TOUT MERGE. Le code est PROUVÉ par tests unitaires STU
 UNIQUEMENT. Les harnais e2e (`dataops`) et les gates Ceph ne sont PAS exécutés ici : leur
 câblage réel est listé dans `_BANC_TODO`. NE PRÉTENDS JAMAIS avoir prouvé au banc.
 
-COEXISTENCE (plan invariant 4) : ni `run_path` ni `cmd_up`/`cmd_next` ne sont basculés
+COEXISTENCE (plan invariant 4) : ni `run_path` ni `cmd_install`/`cmd_next` ne sont basculés
 sur cette table — le chemin par défaut reste le subprocess `run-phases.sh`. On enrichit
 la donnée À CÔTÉ ; la bascule se fera AVEC la preuve banc en main (lot 6/7 mergé).
 ═══════════════════════════════════════════════════════════════════════════════
