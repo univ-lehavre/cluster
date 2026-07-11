@@ -2,7 +2,21 @@
 
 ## Statut
 
-Proposed (2026-07-10). Complète et **réévalue partiellement**
+Superseded by 0110 (2026-07-11). Proposé le 2026-07-10.
+
+> ⚠️ **Superseded PARTIEL par
+> [ADR 0110](0110-preimage-de-build-et-build-in-pod.md).** La pré-image (0110)
+> supprime l'egress du build de code → ce build passe **in-pod** (buildkit
+> rootless), ce qui rend **caduque l'exécution node-side** décrite ici (§1, le
+> _timer systemd_ posé par `platform-build-images`). **Ce qui SURVIT de cet
+> ADR** : la **Sentinelle** (détection d'écart de révision, CronJob API-only —
+> §1 détection), désormais branchée sur un _Job de build in-pod_ au lieu du
+> timer ; la doctrine **anti-amplification / coalescing** (§2-§3), reprise sous
+> une forme adaptée au Job ; l'**acheminement `main → Gitea`** (§6), orthogonal
+> et entièrement conservé ; la **frontière** nestor/atlas/auto (§5). Lire ce qui
+> suit comme le témoin de l'état au 2026-07-10.
+
+Complète et **réévalue partiellement**
 [ADR 0105](0105-retrait-build-evenementiel-node-side-terminal.md) : on
 **conserve** le build node-side terminal (0105 §1) et on **retire**
 définitivement la chaîne événementielle Argo Events (0105 §2), mais on
