@@ -9,6 +9,29 @@
     # CRDs Gateway API AVANT cert-manager : il tourne avec --enable-gateway-api
     # et crashe au boot si elles manquent (drift L37). Téléchargées via get_url
     # (CA via SSL_CERT_FILE, cf. L23) puis appliquées en local. Idempotent.
+    # Le répertoire de cache vit sur le POSTE de contrôle (localhost) à un chemin FIXE
+    # partagé : un run antérieur sous un AUTRE utilisateur macOS (ex. renommage du compte)
+    # le laisse non-writable (propriétaire ≠ user courant → `Destination is not writable`).
+    # On le supprime s'il appartient à quelqu'un d'autre, puis on le (re)crée sous le user
+    # courant — idempotent (no-op si déjà au bon propriétaire). `chown` ne suffirait pas :
+    # sans privilège, on ne peut pas s'approprier le répertoire d'un autre.
+    - name: Stat the Gateway API CRD download directory
+      ansible.builtin.stat:
+        path: '{{ gateway_api_crd_tmp }}'
+      register: gw_crd_dir
+
+    # `ansible_user_id` n'est PAS disponible ici : le play (monitoring.yaml) tourne avec
+    # `gather_facts: false` → aucun fact peuplé. On lit le user courant via `lookup('env',
+    # 'USER')`, indépendant du fact gathering (ce rôle s'exécute sur le POSTE, localhost).
+    - name: Remove the CRD download directory if owned by another user
+      ansible.builtin.file:
+        path: '{{ gateway_api_crd_tmp }}'
+        state: absent
+      when:
+        - gw_crd_dir.stat.exists
+        - gw_crd_dir.stat.pw_name is defined
+        - gw_crd_dir.stat.pw_name != lookup('env', 'USER')
+
     - name: Ensure the Gateway API CRD download directory exists
       ansible.builtin.file:
         path: '{{ gateway_api_crd_tmp }}'

@@ -42,7 +42,18 @@ class Config(unittest.TestCase):
         self.assertEqual(cfg.admin_user, "atlas-admin")
         self.assertEqual(cfg.org, "atlas")
         self.assertEqual(cfg.repo, "workflows")
+        # stack_id ABSENT (topology_from_dict sans chemin) → fail-safe legacy `cluster-prod`.
         self.assertEqual(cfg.expected_cluster, "cluster-prod")
+
+    def test_expected_cluster_derives_from_stack_id(self):
+        # Sans `atlas.expected_cluster` déclaré, la cible prouvée de la garde prod DÉRIVE du
+        # `stack_id` (ADR 0108) : garde prod (cluster == expected_cluster) et garde d'identité
+        # (contexte == stack_id) partagent alors une seule source de vérité — le clusterName
+        # kubeadm vaut aussi le stack_id (kubeadm-config.j2). On stubbe stack_id (non posé par
+        # topology_from_dict, seulement par load_topology depuis un chemin).
+        topo = _topo()
+        object.__setattr__(topo, "stack_id", "dirqual")
+        self.assertEqual(seed.SeedConfig.from_topology(topo).expected_cluster, "dirqual")
 
     def test_gitea_block_overrides(self):
         cfg = seed.SeedConfig.from_topology(

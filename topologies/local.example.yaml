@@ -89,7 +89,7 @@ gitea:
 # ─── atlas : dépôt de code externe + code-locations (build citation, ADR 0110).
 atlas:
   repo_dir: ~/Hub/atlas # chemin du dépôt atlas EXTERNE (build des images de code-location).
-  expected_cluster: cluster-local # garde anti-mauvaise-cible du seed.
+  # expected_cluster : non déclaré → DÉRIVÉ du stack_id (`local`) par le seed (ADR 0108).
   code_locations:
     - name: citation # nom court (dérive image/overlay). REQUIS.
 

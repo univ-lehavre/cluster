@@ -380,3 +380,15 @@ runs:
     total_s: 51
     phases:
       gitops-seed-citation: 51
+  - id: 2026-07-11T20-base-e292fd21
+    date: '2026-07-11T20:17:39Z'
+    branche: refactor/topos-local-dirqual
+    commit: e292fd21
+    profil: base
+    topologie: local
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 76
+    phases:
+      up: 76

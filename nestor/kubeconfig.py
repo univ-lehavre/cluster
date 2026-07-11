@@ -57,25 +57,24 @@ def rewrite_kubeconfig(
 
 
 def _rename_identifiers(cfg: dict, ctx: str) -> None:
-    """Renomme cluster `kubernetes`→`ctx`, user `kubernetes-admin`→`ctx-admin`, contexte
-    `kubernetes-admin@kubernetes`→`ctx`, et recâble les références (PUR). Idempotent sur des
-    noms déjà uniques (un nom ≠ défaut kubeadm n'est pas touché)."""
-    cluster_map = {"kubernetes": ctx}
-    user_map = {"kubernetes-admin": f"{ctx}-admin"}
+    """Normalise cluster/user/contexte du kubeconfig sur des noms dérivés de `ctx` (PUR).
 
+    INCONDITIONNEL (ADR 0108) : le contexte est forcé à `ctx` (= stack_id), le cluster à
+    `ctx`, l'user à `ctx-admin` — QUEL QUE SOIT le nom reçu du control-plane. kubeadm pose
+    `clusterName` = valeur du template (défaut historique `cluster-prod`, ou `kubernetes` sur
+    un cluster nu) ; ne renommer QUE le défaut `kubernetes` laissait un `cluster-prod` survivre
+    au rapatriement → contexte `…@cluster-prod` ≠ stack_id → le garde d'identité kubectl
+    refusait de muter, imposant un `kubectl config rename-context` MANUEL après chaque montage.
+    En forçant, nestor produit un kubeconfig immédiatement utilisable : `nestor kubectl`/`install`
+    passent le garde sans intervention. Idempotent (rejouer sur un kubeconfig déjà normalisé
+    est un no-op). Suppose UN cluster/user/contexte (cas admin.conf kubeadm mono-cluster)."""
     for entry in cfg.get("clusters", []):
-        if entry.get("name") in cluster_map:
-            entry["name"] = cluster_map[entry["name"]]
+        entry["name"] = ctx
     for entry in cfg.get("users", []):
-        if entry.get("name") in user_map:
-            entry["name"] = user_map[entry["name"]]
+        entry["name"] = f"{ctx}-admin"
     for entry in cfg.get("contexts", []):
-        if entry.get("name") == "kubernetes-admin@kubernetes":
-            entry["name"] = ctx
+        entry["name"] = ctx
         ctx_block = entry.get("context", {})
-        if ctx_block.get("cluster") in cluster_map:
-            ctx_block["cluster"] = cluster_map[ctx_block["cluster"]]
-        if ctx_block.get("user") in user_map:
-            ctx_block["user"] = user_map[ctx_block["user"]]
-    if cfg.get("current-context") == "kubernetes-admin@kubernetes":
-        cfg["current-context"] = ctx
+        ctx_block["cluster"] = ctx
+        ctx_block["user"] = f"{ctx}-admin"
+    cfg["current-context"] = ctx

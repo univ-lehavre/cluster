@@ -225,6 +225,19 @@ write_inventory() {
     # instance locale EST une stack nommée par le fichier de sa topo. Fail-closed : sans
     # stack_id, l'assert du rôle audit-log refusera (EXPECTED_STACK_ID ne concordera pas).
     local stack_id=${4:-${STACK_ID:-}}
+    # Utilisateur invité de la VM : DÉRIVÉ du `ssh.config` que Lima génère (champ `User`),
+    # PAS codé en dur. Les images Lima modernes (`template:_images/*`, VMType `vz`)
+    # provisionnent l'utilisateur HÔTE (ex. `petrus`), et non plus un `lima` fixe comme les
+    # anciennes box. Le bootstrap référence `ansible_user` comme VARIABLE (ex. rôle
+    # k8s-initialization : /home/{{ ansible_user }}/.kube) — la connexion SSH seule (via
+    # ssh.config) ne la peuple PAS ; on la pose donc explicitement, alignée sur ce que Lima a
+    # réellement créé (sinon Ansible tente `lima@…` → `Permission denied (publickey)`).
+    local first_cp ssh_user
+    first_cp=$(echo "${control}" | awk '{print $1}')
+    local first_cfg="${HOME}/.lima/${first_cp}/ssh.config"
+    [ -f "${first_cfg}" ] || die "config SSH Lima introuvable : ${first_cfg}"
+    ssh_user=$(awk 'tolower($1) == "user" { print $2; exit }' "${first_cfg}")
+    [ -n "${ssh_user}" ] || die "impossible de dériver l'utilisateur SSH depuis ${first_cfg}"
     {
         echo "# Inventaire généré par le banc Lima — NE PAS versionner (artefact de run)."
         echo "cloud:"
@@ -232,12 +245,7 @@ write_inventory() {
         echo "    control:"
         echo "    workers:"
         echo "  vars:"
-        # Lima crée toujours l'utilisateur invité `lima` (quel que soit l'utilisateur
-        # hôte). Le bootstrap référence `ansible_user` comme VARIABLE (ex. rôle
-        # k8s-initialization : /home/{{ ansible_user }}/.kube) — la connexion SSH
-        # seule (via ssh.config) ne la peuple PAS. On la pose donc explicitement,
-        # comme l'inventaire Vagrant pose `ansible_user: debian`.
-        echo "    ansible_user: lima"
+        echo "    ansible_user: ${ssh_user}"
         # Identité (ADR 0108) : lie cet inventaire à la topo de l'instance. Le rôle
         # audit-log refuse de muter si l'intention (EXPECTED_STACK_ID) diffère.
         echo "    stack_id: ${stack_id}"

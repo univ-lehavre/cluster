@@ -79,7 +79,8 @@ gitea:
 # ─── atlas : dépôt de code externe + code-locations (build citation, ADR 0110).
 atlas:
   repo_dir: ~/Hub/atlas # chemin du dépôt atlas EXTERNE (build des images de code-location).
-  expected_cluster: cluster-prod # garde anti-mauvaise-cible du seed (défaut prod).
+  # expected_cluster : non déclaré → DÉRIVÉ du stack_id (`dirqual`) par le seed (ADR 0108) ;
+  # aligné sur le clusterName kubeadm. Ne le déclarer que pour viser un cluster au nom différent.
   code_locations:
     - name: citation # nom court (dérive image/overlay). REQUIS.
 
