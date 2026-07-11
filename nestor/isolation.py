@@ -167,46 +167,6 @@ def endpoint_matches_stack(
     return True, f"contexte et endpoint concordants pour « {expected_stack_id} »"
 
 
-def stamped_identity_verdict(
-    stamped_stack_id: str | None,
-    expected_stack_id: str,
-    *,
-    allow_unstamped: bool,
-) -> tuple[bool, str]:
-    """Le ConfigMap d'identité du cluster (ADR 0108) concorde-t-il avec l'instance visée ?
-
-    C'est ce qui LIE la vivacité à l'identité (revue adversariale, faille #3) : « l'API
-    répond » ne prouve pas QUELLE instance ; l'estampille `nestor-identity` (posée au
-    bootstrap, kube-system) le prouve. PUR — la façade lit le ConfigMap et passe la valeur.
-
-    - `stamped_stack_id == expected_stack_id` → CONCORDE (preuve d'identité côté cluster).
-    - `stamped_stack_id` présent mais ≠ attendu → REFUS ferme (on tape la mauvaise instance,
-       même si son API répond et que le contexte/endpoint concordaient par coïncidence).
-    - `stamped_stack_id is None` (ConfigMap absent) → CAS TRANSITOIRE : une instance montée
-       AVANT l'ADR 0108 n'a pas l'estampille. Toléré UNIQUEMENT si `allow_unstamped` (la
-       façade ne l'arme que lorsque l'identité est DÉJÀ prouvée par ailleurs — contexte +
-       endpoint concret concordants) ; sinon REFUS (ne pas ré-ouvrir de trou par l'absence)."""
-    if stamped_stack_id is not None and stamped_stack_id == expected_stack_id:
-        return True, f"identité de cluster estampillée « {stamped_stack_id} » concordante"
-    if stamped_stack_id is not None:
-        return (
-            False,
-            f"identité de cluster estampillée « {stamped_stack_id} » ≠ instance visée "
-            f"« {expected_stack_id} » — l'API répond mais ce n'est PAS la bonne instance",
-        )
-    if allow_unstamped:
-        return (
-            True,
-            "cluster sans estampille d'identité (monté avant ADR 0108) — toléré car "
-            "l'identité est déjà prouvée par le contexte et l'endpoint",
-        )
-    return (
-        False,
-        f"cluster sans estampille d'identité et identité « {expected_stack_id} » non "
-        "prouvée autrement — refus fail-closed (ADR 0108)",
-    )
-
-
 # Hôtes d'endpoint jamais concrets : le placeholder générique du modèle d'exemple ne
 # doit jamais servir de preuve (il neutraliserait le second cran). ADR 0108, contrainte
 # de modèle : une instance réelle sur nœuds préexistants déclare un endpoint concret.

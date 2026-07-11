@@ -19,7 +19,6 @@ from nestor.isolation import (  # noqa: E402
     classify_inventory_target,
     endpoint_matches_stack,
     resolve_node_target,
-    stamped_identity_verdict,
 )
 
 # Inventaire de l'instance massive « dirqual » : groupe cloud, stack_id dirqual, transport
@@ -174,35 +173,6 @@ class EndpointMatchesStack(unittest.TestCase):
             "local1", "https://127.0.0.1:6443", "local2", "127.0.0.1:6443"
         )
         self.assertFalse(ok2)  # contexte local1 ≠ instance local2 visée
-
-
-class StampedIdentityVerdict(unittest.TestCase):
-    """Vivacité LIÉE à l'identité (ADR 0108, faille adversariale #3) : le ConfigMap
-    `nestor-identity` du cluster prouve QUELLE instance répond, pas juste qu'elle vit."""
-
-    def test_stamped_concordant(self):
-        ok, _ = stamped_identity_verdict("dirqual", "dirqual", allow_unstamped=False)
-        self.assertTrue(ok)
-
-    def test_stamped_mismatch_is_refused_firmly(self):
-        # L'API répond, mais l'estampille dit une AUTRE instance → refus ferme, même en
-        # mode tolérant (on tape la mauvaise instance).
-        ok, raison = stamped_identity_verdict("autre", "dirqual", allow_unstamped=True)
-        self.assertFalse(ok)
-        self.assertIn("autre", raison)
-        self.assertIn("dirqual", raison)
-
-    def test_unstamped_tolerated_when_identity_already_proven(self):
-        # Instance montée AVANT 0108 (pas de ConfigMap) : toléré SI l'identité est déjà
-        # prouvée par ailleurs (contexte + endpoint concret) → allow_unstamped=True.
-        ok, _ = stamped_identity_verdict(None, "dirqual", allow_unstamped=True)
-        self.assertTrue(ok)
-
-    def test_unstamped_refused_when_identity_not_proven(self):
-        # Pas de ConfigMap ET identité non prouvée autrement → refus fail-closed (ne pas
-        # ré-ouvrir un trou par l'absence d'estampille).
-        ok, _ = stamped_identity_verdict(None, "dirqual", allow_unstamped=False)
-        self.assertFalse(ok)
 
 
 # Inventaire local réel (forme générée) : ansible_host lima-<vm> +

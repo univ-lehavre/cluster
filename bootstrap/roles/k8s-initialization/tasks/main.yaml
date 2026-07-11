@@ -202,32 +202,6 @@
       # une réplique Pending → on saute alors le durcissement.
       when: groups['all'] | length > 1
 
-    # ── Estampille l'IDENTITÉ de l'instance dans le cluster (ADR 0108) ──────────
-    # Pose un ConfigMap `nestor-identity` (kube-system) portant le `stack_id` de
-    # l'instance (lu de l'inventaire, `cloud.vars.stack_id`). La garde d'identité
-    # (`_assert_target_identity`) le LIT et le compare à l'instance visée : c'est ce
-    # qui lie la VIVACITÉ à l'identité — « l'API répond » ne prouve pas QUELLE instance
-    # sans cet ancrage côté cluster (deux instances locales partagent 127.0.0.1:6443).
-    # Via `kubectl apply` (pas le module k8s : lib Python absente sur le nœud, comme le
-    # patch CoreDNS ci-dessus). Idempotent. Sauté si `stack_id` absent (montage dégradé
-    # hors nestor) → la garde refusera alors fail-closed, cohérent.
-    - name: Stamp the cluster identity (nestor-identity ConfigMap)
-      ansible.builtin.command: >-
-        kubectl create configmap nestor-identity -n kube-system
-        --from-literal=stack_id={{ stack_id }}
-        --dry-run=client -o yaml
-      register: identity_cm_manifest
-      changed_when: false
-      when: stack_id | default('') | length > 0
-
-    - name: Apply the cluster identity ConfigMap
-      ansible.builtin.command: kubectl apply -f -
-      args:
-        stdin: '{{ identity_cm_manifest.stdout }}'
-      register: identity_cm_apply
-      changed_when: "'configured' in identity_cm_apply.stdout or 'created' in identity_cm_apply.stdout"
-      when: stack_id | default('') | length > 0
-
   # ── Reprise après incident (ADR 0050 cas (b)) ──────────────────────────────
   rescue:
     # 1. DIAGNOSTIC actionnable (ne défait rien) : dernières lignes du kubelet.
