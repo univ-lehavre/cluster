@@ -4,6 +4,19 @@
 
 Superseded by 0110 (2026-07-11). Proposé le 2026-07-10.
 
+> ⚠️ **Mise à jour (2026-07-11) — le build in-pod de 0110 a été ABANDONNÉ.** La
+> note de supersession ci-dessous décrivait un build passant **in-pod**
+> (buildkit rootless), branché sur un Job in-pod. Le run banc a réfuté ce build
+> in-pod (PodSecurity `baseline` k8s ≥ 1.34 refuse le seccomp Unconfined du
+> rootless, cf. [ADR 0110](0110-preimage-de-build-et-build-in-pod.md) amendé).
+> L'image de code se build désormais **HORS cluster** (sur le poste, `atlas`
+> `deploy/build-code.sh`). **Ce qui SURVIT de cet ADR reste vrai** : la
+> **Sentinelle** (détection d'écart de révision/digest) — incarnée côté build
+> par le garde-fou de fraîcheur `check_code_freshness.py` (« le code a changé →
+> rebuild+push ») ; l'**acheminement `main → Gitea`** (§6) ; la **frontière**
+> nestor/atlas/auto (§5). Seul le _support_ du build change (hors cluster au
+> lieu d'in-pod).
+
 > ⚠️ **Superseded PARTIEL par
 > [ADR 0110](0110-preimage-de-build-et-build-in-pod.md).** La pré-image (0110)
 > supprime l'egress du build de code → ce build passe **in-pod** (buildkit

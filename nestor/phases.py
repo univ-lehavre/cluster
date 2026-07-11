@@ -416,15 +416,11 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     #    dérivé du bloc `portal.access_host` de la topo (ex. `dirqual1` en prod, où l'InternalIP
     #    est injoignable de l'extérieur — accès Tailscale) → repro `nestor up` sans env manuel. ─
     "portal": _plan("portal", extravars_keys=("portal_access_host",)),
-    # ── citation : BUILD de l'image applicative de la code-location atlas `citation`
-    #    (ADR 0094/0095 §1.a). Layer node-side pure (build+push+lit digest) — le
-    #    DÉPLOIEMENT est GitOps (Argo CD tire par digest), pas un signal de couche ici.
-    #    `citation_repo_dir` (chemin du dépôt atlas EXTERNE) est une valeur d'instance
-    #    injectée (ADR 0023) — passée en -e ; le play garde son absence. ────────────
-    "citation": _plan("citation", extravars_keys=("citation_repo_dir",)),
-    # NB (ADR 0105) : la phase `eventful` (chaîne événementielle Argo Workflows/Events,
-    # ADR 0095 §1.b) est RETIRÉE — le build node-side (`citation`/platform-build-images)
-    # est le mécanisme terminal, le déploiement reste GitOps par digest figé.
+    # NB (ADR 0110 amendé) : la phase `citation` (BUILD node-side de l'image de code) a été
+    # RETIRÉE — l'image de code se build hors cluster (poste, atlas build-code.sh). Le
+    # DÉPLOIEMENT reste GitOps par digest figé (gitops-seed-citation). La phase `eventful`
+    # (chaîne événementielle Argo Workflows/Events, ADR 0095 §1.b) avait déjà été retirée
+    # (ADR 0105).
 }
 
 # ── Phases NON PORTÉES dans cette table (déléguées / stubées ailleurs) ────────

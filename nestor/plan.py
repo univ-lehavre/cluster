@@ -108,15 +108,9 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
         "portail d'accès aux UI (NodePort L4, lecture seule)",
         "portail d'accès aux UI",
     ),
-    # Citation (ADR 0094/0095 §1.a) : layer AUTONOME node-side qui BUILD l'image
-    # applicative de la code-location atlas `citation` (contexte multi-dossier dataops/,
-    # comme portal) et lit son digest. Le DÉPLOIEMENT est GitOps (Argo CD tire par
-    # digest), pas un signal de couche ici. Montée via le chemin générique `layers`.
-    "citation": PhaseSpec(
-        "bootstrap/citation.yaml",
-        "build de l'image applicative citation (code-location atlas)",
-        "image citation (build applicatif)",
-    ),
+    # NB (ADR 0110 amendé) : la phase `citation` (build node-side de l'image de code) a été
+    # RETIRÉE — l'image de code se build hors cluster (poste, atlas build-code.sh). Le
+    # DÉPLOIEMENT reste GitOps par digest (gitops-seed-citation).
     # NB (ADR 0105) : la phase `eventful` (chaîne événementielle Argo Workflows/Events,
     # ADR 0095 §1.b) est RETIRÉE — le build node-side (platform-build-images) est le
     # mécanisme terminal. Plus aucune PhaseSpec associée.

@@ -207,14 +207,10 @@ def derive_run_params(topo: Topology) -> dict:
     # (classe matérielle jetable), ADR 0108.
     if topo.terrain == "local":
         out["build_emitter_image"] = "true"
-    # Bloc `atlas` (ADR 0023, config locale) → extravars du build citation
-    # (bootstrap/citation.yaml, ADR 0094/0095 §1.a). `citation_repo_dir` = chemin du
-    # dépôt atlas EXTERNE requis par la garde du play ; sa dérivation depuis
-    # `atlas.repo_dir` évite de le passer en `-e` à la main (parité des autres clés).
-    # Absent → on ne pose pas la clé (la garde du play lève, message explicite).
-    atlas_block = getattr(topo, "atlas", {}) or {}
-    if atlas_block.get("repo_dir"):
-        out["citation_repo_dir"] = atlas_block["repo_dir"]
+    # NB (ADR 0110 amendé) : `citation_repo_dir` (chemin du dépôt atlas dérivé de
+    # `atlas.repo_dir`, extravar du build node-side citation) n'est plus dérivé — le build
+    # node-side a été retiré (l'image de code se build hors cluster). Le bloc `atlas` de la
+    # topo reste lu pour le seed (code_locations/digest), pas pour un build.
     # Bloc `portal` (ADR 0023, config locale) → extravar du déploiement portail. `access_host`
     # = le HOST par lequel les navigateurs joignent les NodePort (ex. `dirqual1` en prod, où
     # l'InternalIP est injoignable de l'extérieur — accès Tailscale). Sa dérivation depuis
