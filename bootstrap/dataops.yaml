@@ -129,6 +129,15 @@
         name: platform-build-images
       tags: build-images
 
+    # Moteur de build IN-POD (buildkit rootless, ADR 0110) : pendant in-pod du
+    # build node-side ci-dessus, pour builder l'image de CODE des code-locations
+    # sans réseau (sur pré-image). Posé APRÈS build-images (registry configuré,
+    # même famille build) et AVANT Dagster (qui consomme les images buildées).
+    - name: Moteur de build in-pod (buildkit rootless)
+      ansible.builtin.import_role:
+        name: platform-buildkit
+      tags: buildkit
+
 - name: Plateforme DataOps — étape applicative (Dagster + Marquez)
   hosts: "{{ dataops_k8s_host | default('localhost') }}"
   gather_facts: false

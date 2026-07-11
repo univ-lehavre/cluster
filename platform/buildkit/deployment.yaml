@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buildkitd
+  namespace: buildkit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: buildkitd
+  template:
+    metadata:
+      labels:
+        app: buildkitd
+      annotations:
+        # DÉROGATION rootless (ADR 0110) : buildkit rootless a besoin d'un profil
+        # seccomp permissif (syscalls `clone`/`unshare`/`mount` du build sans
+        # privilège) et d'AppArmor unconfined. `RuntimeDefault` (le durcissement
+        # maison) bloquerait le build. Tolérée par PodSecurity `baseline` du ns.
+        container.apparmor.security.beta.kubernetes.io/buildkitd: unconfined
+    spec:
+      # Durcissement maison CONSERVÉ au maximum (cf. platform/container-registry),
+      # SAUF les deux dérogations minimales du rootless (seccomp + /dev/fuse).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        # DÉROGATION : Unconfined (et non RuntimeDefault) — requis par le rootless.
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: buildkitd
+          # buildkit rootless officiel. Épinglé par digest (ADR 0006) ; le tag
+          # reste pour lisibilité. Mirroré au registre interne au banc air-gappé
+          # (un pod ne tire pas d'Internet — comme le reconciler ADR 0103) : la
+          # ref de prod sera `registry:80/moby/buildkit:<ver>-rootless@sha256:…`.
+          # <DIGEST À FIGER au lot 2, après mirroring de l'image au registre.>
+          image: moby/buildkit:v0.19.0-rootless
+          imagePullPolicy: IfNotPresent
+          args:
+            - --addr
+            - tcp://0.0.0.0:1234
+            - --config
+            - /home/user/.config/buildkit/buildkitd.toml
+          ports:
+            - containerPort: 1234
+              name: buildkit
+          readinessProbe:
+            exec:
+              command: ['buildctl', 'debug', 'workers']
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          livenessProbe:
+            exec:
+              command: ['buildctl', 'debug', 'workers']
+            initialDelaySeconds: 15
+            periodSeconds: 60
+          resources:
+            requests:
+              memory: '1Gi'
+              cpu: '500m'
+            limits:
+              # Build de l'image de CODE seule (pas la deps-base) : léger (COPY src
+              # + install --no-deps + dbt parse). Marge confortable, à affiner au
+              # lot 2 selon la mesure réelle.
+              memory: '2Gi'
+              cpu: '2'
+          securityContext:
+            # allowPrivilegeEscalation TRUE : le rootless en a besoin (newuidmap).
+            # C'est la seule concession au-delà de seccomp/fuse ; jamais `privileged`.
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          # NB (lot 2) : le snapshotter fuse-overlayfs exigerait un mount /dev/fuse
+          # (device plugin ou hostPath selon ce que le banc permet) — non ajouté ici
+          # tant que le choix fuse-vs-native n'est pas prouvé au banc (ADR 0110).
+          volumeMounts:
+            - name: config
+              mountPath: /home/user/.config/buildkit
+              readOnly: true
+            - name: buildkitd
+              mountPath: /home/user/.local/share/buildkit
+      volumes:
+        - name: config
+          configMap:
+            name: buildkitd-config
+        - name: buildkitd
+          emptyDir: {}
