@@ -28,10 +28,12 @@
 # Pourquoi Lima (vs kind figé en 1.31 / Vagrant lourd) : ADR 0006.
 set -euo pipefail
 
-# Intention de cible (ADR 0053 (c)) : ce script ne pilote QUE le banc Lima. On
-# déclare l'intention `bench` pour TOUS les ansible-playbook lancés d'ici → le
-# garde-fou du rôle audit-log refuse un inventaire prod passé par erreur.
-export EXPECTED_TARGET_KIND=bench
+# Intention d'IDENTITÉ (ADR 0108) : ce script pilote l'instance locale dont nestor a
+# posé le STACK_ID (le nom de fichier de sa topo). On propage l'intention à TOUS les
+# ansible-playbook lancés d'ici → le garde-fou du rôle audit-log refuse un inventaire
+# d'une AUTRE instance passé par erreur. Sans STACK_ID (invocation hors nestor), la
+# valeur reste vide et l'assert refuse fail-closed.
+export EXPECTED_STACK_ID="${STACK_ID:-}"
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=bench/lima/lib.sh

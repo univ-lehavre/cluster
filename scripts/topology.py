@@ -112,6 +112,7 @@ from nestor import (  # noqa: E402
     render_lima_inventory,
     render_prod_inventory,
     resolve_layers,
+    stack_id_from_path,
     suggest_next,
     verdict_for_run,
 )
@@ -157,27 +158,17 @@ _RUNS_DIR = os.path.join(_ROOT, "bench", "lima", "runs")
 
 
 def _stack_id(path: str) -> str:
-    """Identité de STACK = nom de FICHIER de la topologie (ADR 0102 volet B), source
-    UNIQUE de l'identité SYSTÈME (kubeconfig `.kubeconfigs/<stack>.config` + contexte
-    kubectl nommé). PUR (os.path seulement, ne lit AUCUN champ YAML → robuste à une
-    topo illisible).
+    """Identité de STACK = nom de FICHIER de la topologie (ADR 0102 volet B, 0108).
 
-    On RÉSOUT le symlink d'abord (`os.path.realpath`) : `topology.yaml` (le symlink
-    d'activation) pointe la topo active — sans realpath, son basename serait `topology`,
-    jamais `ceph`. Puis on retire l'extension COMPOSÉE `.example.yaml` (modèle générique
-    versionné, ADR 0023) AVANT `.yaml`/`.yml` (ordre critique : sinon `ceph.example.yaml`
-    → `ceph.example`). Conséquence VOULUE : `ceph.example.yaml` et `ceph.yaml` (surcharge
-    locale) partagent le MÊME `stack_id` `ceph` — c'est UNE stack, deux variantes de contenu
-    (une seule active à la fois).
+    Délègue à `model.stack_id_from_path` (source unique de la règle : realpath → basename →
+    retrait de l'extension composée `.example.yaml` avant `.yaml`). Conséquence VOULUE :
+    `ceph.example.yaml` et `ceph.yaml` partagent le MÊME `stack_id` `ceph`. PUR, robuste à
+    une topo illisible (ne lit aucun champ YAML).
 
-    NB : distinct de `catalog.topology` (désormais un champ DESCRIPTIF : la classe de topo,
-    `multi-node-3`…) qui, lui, reste la clé de l'HISTORIQUE de runs (jamais réécrit, ADR 0052 ;
-    réconcilié en lecture via `history.STACK_ID_ALIASES`)."""
-    base = os.path.basename(os.path.realpath(path))
-    for suffix in (".example.yaml", ".example.yml", ".yaml", ".yml"):
-        if base.endswith(suffix):
-            return base[: -len(suffix)]
-    return base
+    NB : distinct de `catalog.topology` (champ DESCRIPTIF : la classe de topo,
+    `multi-node-3`…) qui reste la clé de l'HISTORIQUE de runs (ADR 0052 ; réconcilié via
+    `history.STACK_ID_ALIASES`)."""
+    return stack_id_from_path(path)
 
 
 # Kubeconfig d'un banc = `.kubeconfigs/<stack>.config` (ADR 0102 volet B) : un banc EST une
@@ -437,12 +428,14 @@ def _active_stack_name(file_arg: str | None) -> str | None:
 
 
 def _render_inventory(topo, kind: str, lima_home: str | None) -> str:
-    """Rend l'inventaire selon le `kind` (prod ou lima). Façade sur le paquet."""
+    """Rend l'inventaire selon le `kind` (local/lima ou nœuds préexistants). Façade sur le
+    paquet. L'identité (`topo.stack_id`, ADR 0108) est émise dans l'inventaire pour la
+    garde d'audit-log."""
     if kind == "bench":
         if not lima_home:
             raise _UsageError("--kind bench exige --lima-home (chemin du $HOME du poste)")
-        return render_lima_inventory(topo, lima_home)
-    return render_prod_inventory(topo)
+        return render_lima_inventory(topo, lima_home, topo.stack_id)
+    return render_prod_inventory(topo, topo.stack_id)
 
 
 @contextlib.contextmanager
@@ -2015,16 +2008,15 @@ def _assert_inventory_safe(action: str, inventory_path: str, topo: Topology) -> 
             inv = yaml.safe_load(f) or {}
     except (OSError, yaml.YAMLError) as exc:
         raise _UsageError(f"inventaire illisible ({inventory_path}) : {exc}") from exc
-    ok, raison = _isolation.classify_inventory_target(inv, topo.target_kind)
+    ok, raison = _isolation.classify_inventory_target(inv, topo.stack_id)
     if not ok:
         raise _UsageError(
-            f"REFUS : `{action}` vise la topologie `{topo.target_kind}` mais "
+            f"REFUS : `{action}` vise l'instance `{topo.stack_id}` mais "
             f"l'inventaire `{os.path.relpath(inventory_path, _ROOT)}` n'est pas une cible "
-            f"sûre — {raison} (ADR 0053). Risque de MUTER la mauvaise cible (la PROD).\n"
-            "  • Banc : utiliser l'inventaire Lima (target_kind: bench) — il est généré "
-            "par le montage du banc (`bench/lima/run-phases.sh up`).\n"
-            "  • Prod : lancer le geste via `nestor ansible <playbook>`, qui dérive "
-            "l'inventaire de la stack active (ADR 0098 — plus de `hosts.yaml` à régénérer)."
+            f"sûre — {raison} (ADR 0108). Risque de MUTER la mauvaise instance.\n"
+            "  • Lancer le geste via `nestor ansible <playbook>`, qui dérive l'inventaire "
+            "de la stack active et pose son `stack_id` (ADR 0098/0108 — plus de `hosts.yaml` "
+            "à régénérer, plus de marqueur de catégorie)."
         )
 
 

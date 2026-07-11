@@ -8,6 +8,7 @@ la stdlib + pyyaml (ADR 0049 : pas de dépendance avant le besoin).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -164,6 +165,11 @@ class Topology:
     # DAG (resolve_layers). Vide → rétrocompat : dérivé de `catalog.profile` (alias
     # déprécié-doux). Voir la propriété `declared_layers`.
     layers: list[str] = field(default_factory=list)
+    # `stack_id` (ADR 0108) : IDENTITÉ de l'instance = nom de fichier de la topo (sans
+    # extension), dérivé du CHEMIN, PAS du YAML. Rempli par `load_topology` (qui connaît
+    # le chemin) ; vide pour une topo construite en mémoire sans fichier (tests). C'est le
+    # pivot de la garde d'isolation et le nom du contexte/kubeconfig de l'instance.
+    stack_id: str = ""
 
     # ── Dérivations pures (le cœur de la génération sans état) ──────────────
     @property
@@ -368,12 +374,31 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
     return topo
 
 
+def stack_id_from_path(path: str) -> str:
+    """Identité de STACK = nom de FICHIER de la topo (ADR 0102 volet B, 0108), PUR.
+
+    Source UNIQUE de l'identité SYSTÈME (kubeconfig `.kubeconfigs/<stack>.config` + contexte
+    kubectl nommé). RÉSOUT le symlink d'abord (`realpath` : `topology.yaml` — le symlink
+    d'activation — pointe la topo active), puis retire l'extension COMPOSÉE `.example.yaml`
+    AVANT `.yaml` (ordre critique). Conséquence VOULUE : `ceph.example.yaml` et `ceph.yaml`
+    partagent le MÊME `stack_id` `ceph` (une stack, deux variantes de contenu). Ne lit AUCUN
+    champ YAML → robuste à une topo illisible."""
+    base = os.path.basename(os.path.realpath(path))
+    for suffix in (".example.yaml", ".example.yml", ".yaml", ".yml"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
+
 def load_topology(path: str) -> Topology:
-    """Charge un topology.yaml depuis un fichier."""
+    """Charge un topology.yaml depuis un fichier ; pose son `stack_id` (identité) depuis
+    le CHEMIN (ADR 0108 : l'identité voyage avec la topo)."""
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
         raise TopologyError(
             f"{path} : racine YAML attendue = mapping, obtenu {type(data).__name__}"
         )
-    return topology_from_dict(data)
+    topo = topology_from_dict(data)
+    topo.stack_id = stack_id_from_path(path)
+    return topo

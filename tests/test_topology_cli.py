@@ -229,7 +229,7 @@ class Generate(unittest.TestCase):
         # generate doit ré-émettre EXACTEMENT render_prod_inventory (invariant P1).
         code, out, _ = _capture(["artifact", "generate", "-f", _EXAMPLE, "--kind", "prod"])
         self.assertEqual(code, 0)
-        self.assertEqual(out, render_prod_inventory(load_topology(_EXAMPLE)))
+        self.assertEqual(out, render_prod_inventory(load_topology(_EXAMPLE), "socle"))
 
     def test_lima_inventory_matches_facade(self):
         topo = load_topology(_EXAMPLE)
@@ -238,7 +238,7 @@ class Generate(unittest.TestCase):
             ["artifact", "generate", "-f", _EXAMPLE, "--kind", "bench", "--lima-home", "/H"]
         )
         self.assertEqual(code, 0)
-        self.assertEqual(out, render_lima_inventory(topo, "/H"))
+        self.assertEqual(out, render_lima_inventory(topo, "/H", "socle"))
 
     def test_run_params_yaml_reparses_to_derivation(self):
         import yaml
@@ -254,7 +254,7 @@ class Generate(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out, "")  # rien sur stdout quand -o
         with open(dst, encoding="utf-8") as f:
-            self.assertEqual(f.read(), render_prod_inventory(load_topology(_EXAMPLE)))
+            self.assertEqual(f.read(), render_prod_inventory(load_topology(_EXAMPLE), "socle"))
 
     def test_output_to_invalid_dir_is_usage_error(self):
         # -o vers un répertoire absent = destination invalide fournie en argument
@@ -764,7 +764,7 @@ class Ansible(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(seen["argv"][0], "ansible-playbook")
         self.assertIn("dirqual1", seen["inv_body"])  # nœuds RÉELS dérivés de la topo
-        self.assertIn("target_kind: prod", seen["inv_body"])  # garde préservée
+        self.assertIn("transport: ssh", seen["inv_body"])  # garde préservée (marqueur ADR 0108)
         self.assertNotIn("hosts.yaml", seen["inv_path"])  # PAS le fichier statique
         self.assertEqual(seen["env"].get("EXPECTED_TARGET_KIND"), "prod")
         # le temp est nettoyé après l'exécution (finally).
@@ -1590,15 +1590,17 @@ storage:
   backend: local-path
 target_kind: bench
 """
-    # Inventaire PROD résiduel (le cas exact de la faille) : target_kind prod, hôtes
-    # génériques cp1/node1 + IP d'exemple 10.0.0.0/22 (ADR 0023).
+    # Inventaire PROD résiduel (le cas exact de la faille) : identité d'une AUTRE
+    # instance (`stack_id: dirqual` + transport ssh, ADR 0108), hôtes génériques
+    # cp1/node1 + IP d'exemple 10.0.0.0/22 (ADR 0023).
     _INV_PROD = """\
 cloud:
   children:
     control:
     workers:
   vars:
-    target_kind: prod
+    stack_id: dirqual
+    transport: ssh
 control:
   hosts:
     cp1: {ansible_host: 10.0.0.11}
@@ -1662,24 +1664,30 @@ workers:
             ["next", "-f", topo, "--target", "atlas", "--history", hist, "--yes"]
         )
         self.assertEqual(code, 2)  # REFUS (usage)
-        self.assertIn("cp1", err)  # nomme les hôtes prod menacés
-        self.assertIn("0053", err)  # cite la doctrine d'isolation
-        self.assertEqual(self.launched, [])  # ansible-runner JAMAIS lancé sur la prod
+        self.assertIn("cp1", err)  # nomme les hôtes de l'autre instance menacés
+        self.assertIn("0108", err)  # cite la doctrine d'isolation par identité
+        self.assertEqual(self.launched, [])  # ansible-runner JAMAIS lancé sur l'autre instance
 
     def test_lima_topo_uses_bench_inventory(self):
-        # CŒUR du fix : une topo lima vise l'inventaire BANC (target_kind: bench), pas
-        # le prod codé en dur. Ici l'inventaire banc est PROPRE → la garde passe et
-        # ansible-runner est lancé sur le BANC (inventaire = _BENCH_INVENTORY).
+        # CŒUR du fix : une topo lima vise l'inventaire BANC, pas le prod codé en dur. Ici
+        # l'inventaire banc est PROPRE et porte l'identité de la stack (`stack_id`, ADR 0108)
+        # + le transport `lima` → la garde d'isolation passe (stack_id concordant) et
+        # ansible-runner est lancé sur le BANC (inventaire = _BENCH_INVENTORY). L'identité
+        # (`stack_id`) est le NOM DE FICHIER de la topo → on l'ancre via un fichier nommé.
+        stack = "banc-citation"
         clean_banc_inv = (
-            "cloud:\n  vars:\n    target_kind: bench\n"
+            f"cloud:\n  vars:\n    stack_id: {stack}\n    transport: lima\n"
             "control:\n  hosts:\n    node1: {ansible_host: lima-node1}\n"
             "workers:\n  hosts:\n    node2: {ansible_host: lima-node2}\n"
         )
         with open(self._inv, "w", encoding="utf-8") as f:
             f.write(clean_banc_inv)
-        topo = _tmp(self._TOPO_LIMA)
+        topo_dir = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(topo_dir, ignore_errors=True))
+        topo = os.path.join(topo_dir, f"{stack}.yaml")  # stack_id == nom de fichier
+        with open(topo, "w", encoding="utf-8") as f:
+            f.write(self._TOPO_LIMA)
         hist = _tmp("runs: []\n")
-        self.addCleanup(os.unlink, topo)
         self.addCleanup(os.unlink, hist)
         code, _, _ = _capture(["next", "-f", topo, "--target", "atlas", "--history", hist, "--yes"])
         self.assertEqual(code, 0)
@@ -3357,12 +3365,12 @@ class NodeExec(unittest.TestCase):
 
     _LIMA_INV = (
         "cloud:\n"
-        "  vars:\n    ansible_user: lima\n    target_kind: bench\n"
+        "  vars:\n    ansible_user: lima\n    stack_id: banc-citation\n    transport: lima\n"
         "control:\n  hosts:\n    node1:\n      ansible_host: lima-node1\n"
     )
     _PROD_INV = (
         "cloud:\n"
-        "  vars:\n    ansible_user: debian\n    target_kind: prod\n"
+        "  vars:\n    ansible_user: debian\n    stack_id: dirqual\n    transport: ssh\n"
         "control:\n  hosts:\n    cp1:\n      ansible_host: 10.0.0.11\n"
     )
 

@@ -35,30 +35,35 @@ def _env() -> Environment:
     )
 
 
-def render_prod_inventory(topo: Topology) -> str:
-    """Rend l'inventaire Ansible prod (= bootstrap/hosts.example.yaml).
+def render_prod_inventory(topo: Topology, stack_id: str) -> str:
+    """Rend l'inventaire Ansible d'une instance sur nœuds préexistants (= hosts.example.yaml).
 
-    BYTE-IDENTIQUE attendu pour le profil prod générique (invariant P1).
+    BYTE-IDENTIQUE attendu pour le profil générique (invariant P1). `stack_id` (ADR 0108)
+    est l'identité de l'instance — le nom de fichier de sa topo, dérivé du CHEMIN (hors
+    dataclass `Topology`), donc passé explicitement. Il est émis dans l'inventaire pour la
+    garde d'audit-log ; le transport `ssh` est fixe pour cette classe.
     """
     template = _env().get_template("hosts.yaml.j2")
     return template.render(
-        target_kind=topo.target_kind,
+        stack_id=stack_id,
         control_nodes=topo.control_nodes,
         worker_nodes=topo.worker_nodes,
     )
 
 
-def render_lima_inventory(topo: Topology, lima_home: str) -> str:
-    """Rend l'inventaire du banc Lima (= sortie de `write_inventory`, lib.sh).
+def render_lima_inventory(topo: Topology, lima_home: str, stack_id: str) -> str:
+    """Rend l'inventaire d'une instance locale Lima (= sortie de `write_inventory`, lib.sh).
 
-    BYTE-IDENTIQUE attendu par rapport à `write_inventory` (invariant P1, côté
-    banc). `lima_home` est DÉRIVÉ DU TERRAIN (le `$HOME` du poste — chemin SSH
-    `<home>/.lima/<vm>/ssh.config`), donc fourni explicitement : c'est la seule
-    valeur non byte-stable de cette sortie. `workers` vide → `hosts: {}`.
+    BYTE-IDENTIQUE attendu par rapport à `write_inventory` (invariant P1). `lima_home` est
+    DÉRIVÉ DU TERRAIN (le `$HOME` du poste — chemin SSH `<home>/.lima/<vm>/ssh.config`),
+    fourni explicitement. `stack_id` (ADR 0108) est l'identité de l'instance, émise pour la
+    garde d'audit-log ; le transport `lima` est fixe pour cette classe. `workers` vide →
+    `hosts: {}`.
     """
     template = _env().get_template("inventory-lima.yaml.j2")
     return template.render(
         control_nodes=topo.control_nodes,
         worker_nodes=topo.worker_nodes,
         lima_home=lima_home,
+        stack_id=stack_id,
     )

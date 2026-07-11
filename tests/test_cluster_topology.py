@@ -228,7 +228,9 @@ class ByteExactInvariant(unittest.TestCase):
 
     def test_prod_inventory_is_byte_identical(self):
         topo = load_topology(os.path.join(_ROOT, "topologies", "socle.example.yaml"))
-        generated = render_prod_inventory(topo)
+        # `load_topology` a posé topo.stack_id = "socle" (dérivé du chemin, ADR 0108) ;
+        # hosts.example.yaml porte le même marqueur → invariant byte-identique préservé.
+        generated = render_prod_inventory(topo, topo.stack_id)
         with open(os.path.join(_ROOT, "bootstrap", "hosts.example.yaml"), encoding="utf-8") as f:
             expected = f.read()
         self.assertEqual(
@@ -249,6 +251,8 @@ class LimaInventoryByteExact(unittest.TestCase):
 
     HOME = "/H"
 
+    STACK = "banc-citation"
+
     def test_multi_node_3(self):
         topo = topology_from_dict(
             _base(
@@ -268,7 +272,8 @@ class LimaInventoryByteExact(unittest.TestCase):
             "    workers:\n"
             "  vars:\n"
             "    ansible_user: lima\n"
-            "    target_kind: bench\n"
+            f"    stack_id: {self.STACK}\n"
+            "    transport: lima\n"
             "control:\n"
             "  hosts:\n"
             "    cp1:\n"
@@ -287,13 +292,13 @@ class LimaInventoryByteExact(unittest.TestCase):
             "    localhost:\n"
             "      ansible_connection: local\n"
         )
-        self.assertEqual(render_lima_inventory(topo, self.HOME), expected)
+        self.assertEqual(render_lima_inventory(topo, self.HOME, self.STACK), expected)
 
     def test_single_cp_no_worker_emits_empty_hosts(self):
         topo = topology_from_dict(
             _base(nodes=[{"name": "cp1", "roles": ["control"]}], target_kind="bench")
         )
-        out = render_lima_inventory(topo, self.HOME)
+        out = render_lima_inventory(topo, self.HOME, self.STACK)
         # le cas workers-vide doit émettre EXACTEMENT `  hosts: {}` (write_inventory)
         self.assertIn("workers:\n  hosts: {}\n", out)
         self.assertNotIn("    node", out)
