@@ -202,6 +202,25 @@
       # une réplique Pending → on saute alors le durcissement.
       when: groups['all'] | length > 1
 
+    # Nombre de répliques CoreDNS DÉRIVÉ du nombre de nœuds — kubeadm pose `replicas: 2`
+    # en dur, mais un 2ᵉ CoreDNS n'apporte de résilience que sur un 2ᵉ NŒUD. En mono-nœud
+    # (banc 1 VM), le 2ᵉ réplica reste Pending (anti-affinité par hostname : aucun autre
+    # nœud) et bloque le Deployment à 1/2 — faux « non sain » pour les gates. On aligne
+    # donc : 1 nœud → 1 réplique (soft, patch hard sauté ci-dessus) ; ≥ 2 nœuds → 2 (hard).
+    # Corriger le code, pas l'état (ADR 0046) : idempotent, rejoué à chaque rebuild.
+    - name: Scale CoreDNS replicas to match node count (1 node → 1, ≥2 nodes → 2)
+      ansible.builtin.command: >-
+        kubectl scale deployment coredns -n kube-system
+        --replicas={{ 1 if (groups['all'] | length) <= 1 else 2 }}
+        --current-replicas={{ 2 if (groups['all'] | length) <= 1 else 1 }}
+      register: coredns_scale
+      # --current-replicas gate le scale : no-op (rc≠0, « current replicas … doesn't match »)
+      # si le compte est déjà celui voulu → idempotent sans lire l'état au préalable.
+      changed_when: coredns_scale.rc == 0
+      failed_when: >-
+        coredns_scale.rc != 0
+        and 'current replicas' not in coredns_scale.stderr
+
   # ── Reprise après incident (ADR 0050 cas (b)) ──────────────────────────────
   rescue:
     # 1. DIAGNOSTIC actionnable (ne défait rien) : dernières lignes du kubelet.
