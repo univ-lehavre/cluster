@@ -237,6 +237,18 @@ containerd côté nœuds pour le tirer en HTTP. On le référence en
 `registry:80/<repo>:<tag>` dans les manifestes. Manifestes :
 [`platform/container-registry/`](../platform/container-registry/).
 
+### buildkit (build de code in-pod)
+
+Le moteur qui **construit l'image de code** d'une code-location **dans le
+cluster**, sans réseau, sur une **pré-image** de dépendances figée
+([ADR 0110](decisions/0110-preimage-de-build-et-build-in-pod.md)). Les
+dépendances lourdes (qui exigent Internet) sont figées une fois dans la
+pré-image, buildée hors cluster ; l'image de code (`FROM` pré-image) n'a plus
+aucun egress → elle se build **in-pod** (buildkit rootless), ce qui rend le
+cluster air-gappé pour le build courant. Manifestes :
+[`platform/buildkit/`](../platform/buildkit/) ; procédure de preuve au banc :
+[RUNBOOK](../platform/buildkit/RUNBOOK.md).
+
 ### La boucle GitOps de bout en bout
 
 Les briques ci-dessus (Argo CD, Gitea, registry) s'articulent en une **boucle**

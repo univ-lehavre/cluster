@@ -103,6 +103,16 @@ build_images:
     tag: 4.2.2
     mirror_only: true
     public: docker.io/dtzar/helm-kubectl@sha256:d815939dfc36d06dde3baaa3d122dc017753006e712c111a72d7f3e1e1744807
+  # PASSTHROUGH (mirror_only) — buildkit rootless, moteur de build IN-POD (ADR 0110).
+  # Publique multi-arch (arm64+amd64 vérifiés `docker buildx imagetools`), épinglée par
+  # DIGEST d'index (ADR 0006). Ni build ni retag : pull → tag → push. Sans elle, le
+  # Deployment buildkitd fait ImagePullBackOff au banc air-gappé (ADR 0011). La ref
+  # interne `registry:80/moby/buildkit:v0.19.0-rootless` est consommée par
+  # platform/buildkit/deployment.yaml (épinglée par digest).
+  - name: moby/buildkit
+    tag: v0.19.0-rootless
+    mirror_only: true
+    public: docker.io/moby/buildkit@sha256:e901cffdad753892a7c3afb8b9972549fca02c73888cf340c91ed801fdd96d71
 
 # Image maison MLflow (ADR 0082 amendé) : officielle + psycopg2. Liste SÉPARÉE de
 # build_images — consommée UNIQUEMENT par la layer autonome bootstrap/mlflow.yaml

@@ -31,12 +31,15 @@ spec:
           type: Unconfined
       containers:
         - name: buildkitd
-          # buildkit rootless officiel. Épinglé par digest (ADR 0006) ; le tag
-          # reste pour lisibilité. Mirroré au registre interne au banc air-gappé
-          # (un pod ne tire pas d'Internet — comme le reconciler ADR 0103) : la
-          # ref de prod sera `registry:80/moby/buildkit:<ver>-rootless@sha256:…`.
-          # <DIGEST À FIGER au lot 2, après mirroring de l'image au registre.>
-          image: moby/buildkit:v0.19.0-rootless
+          # buildkit rootless, tiré du REGISTRE INTERNE (banc air-gappé : un pod ne
+          # tire pas d'Internet). L'image publique `moby/buildkit:v0.19.0-rootless`
+          # est mirrorée par `platform-build-images` (mirror_only, épinglée par
+          # DIGEST d'index upstream — ADR 0006/0011) puis servie ici PAR TAG interne :
+          # le mirror node-side produit une image mono-arch dont le digest interne
+          # diffère de l'index upstream, exactement comme le reconciler helm-kubectl
+          # (registry:80/dtzar/helm-kubectl:4.2.2, ADR 0103). L'immuabilité upstream
+          # est tracée côté mirror (le `public: …@sha256:…`), pas ici.
+          image: registry:80/moby/buildkit:v0.19.0-rootless
           imagePullPolicy: IfNotPresent
           args:
             - --addr
