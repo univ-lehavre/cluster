@@ -56,6 +56,20 @@ def _inventory_transport(inventory: dict) -> str | None:
     return _inventory_group_var(inventory, "transport")
 
 
+def _looks_tunneled(attrs: dict) -> bool:
+    """Un hôte `127.0.0.1`/`localhost` cache-t-il un TUNNEL vers du distant ? (PUR, revue #5).
+
+    Signes qu'un `localhost` n'est pas vraiment local : un `ansible_port` déclaré (port-forward
+    local vers un nœud distant), ou un saut SSH dans `ansible_ssh_common_args`
+    (`ProxyCommand`, `-J`, `-o ProxyJump`). Fail-closed : au moindre signe, on ne fait pas
+    confiance à l'adresse locale. Le banc Lima nominal n'a ni `ansible_port` ni ProxyCommand
+    (il vise `lima-<vm>` en direct), donc il n'est pas faussement classé distant."""
+    if attrs.get("ansible_port"):
+        return True
+    ssh_args = str(attrs.get("ansible_ssh_common_args", ""))
+    return "ProxyCommand" in ssh_args or "ProxyJump" in ssh_args or " -J" in f" {ssh_args}"
+
+
 def _remote_hosts(inventory: dict) -> list[str]:
     """Hôtes du groupe `cloud` qui ne sont PAS locaux (→ SSH distant possible).
 
@@ -76,7 +90,14 @@ def _remote_hosts(inventory: dict) -> list[str]:
                 if attrs.get("ansible_connection") == "local":
                     continue
                 host_ip = str(attrs.get("ansible_host", name))
-                if name not in _LOCAL_HOSTS and host_ip not in _LOCAL_HOSTS:
+                is_local_addr = name in _LOCAL_HOSTS or host_ip in _LOCAL_HOSTS
+                # Un `127.0.0.1` peut MASQUER un tunnel : un `ansible_port` déclaré ou un
+                # `ProxyCommand`/`-J`/`-o ProxyJump` dans les args SSH trahit un forward vers
+                # un nœud DISTANT (revue #5). On ne le classe alors PAS local — sinon un
+                # inventaire « localhost + tunnel » passerait la règle 1 « aucun hôte distant ».
+                if is_local_addr and _looks_tunneled(attrs):
+                    is_local_addr = False
+                if not is_local_addr:
                     remote.append(name)
         for child in (node.get("children") or {}).values():
             walk(child)

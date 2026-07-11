@@ -99,6 +99,28 @@ class SafeCases(unittest.TestCase):
     def test_empty_inventory_is_safe(self):
         self.assertTrue(classify_inventory_target({}, "banc-citation")[0])
 
+    def test_tunneled_localhost_is_not_trusted_as_local(self):
+        # revue #5 : un 127.0.0.1 avec ansible_port (port-forward) OU un ProxyCommand cache un
+        # tunnel vers du distant → ne PAS le classer local, sinon la règle 1 laisserait passer.
+        for attrs in (
+            {"ansible_host": "127.0.0.1", "ansible_port": 2222},
+            {"ansible_host": "127.0.0.1", "ansible_ssh_common_args": "-o ProxyCommand=ssh bastion"},
+            {"ansible_host": "127.0.0.1", "ansible_ssh_common_args": "-J bastion@10.0.0.1"},
+        ):
+            inv = {"cloud": {"vars": {"stack_id": "x"}, "hosts": {"tunnel": attrs}}}
+            # sans marqueur concordant (intention ≠ x) → l'hôte tunnelé compte comme distant → refus
+            ok, _ = classify_inventory_target(inv, "autre")
+            self.assertFalse(ok, f"tunnel non détecté pour {attrs}")
+
+    def test_plain_lima_localhost_stays_local(self):
+        # Non-régression : le banc Lima nominal (lima-<vm>, pas d'ansible_port ni ProxyCommand)
+        # reste classé local — on ne le refuse pas faussement.
+        inv = {
+            "control_host": {"hosts": {"localhost": {"ansible_connection": "local"}}},
+            "control": {"hosts": {"node1": {"ansible_host": "127.0.0.1"}}},
+        }
+        self.assertTrue(classify_inventory_target(inv, "banc")[0])
+
 
 class FailClosed(unittest.TestCase):
     """Défaut prudent : sans marqueur prouvant l'instance, on REFUSE (avec hôtes distants)."""
