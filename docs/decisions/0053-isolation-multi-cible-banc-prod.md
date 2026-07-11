@@ -1,5 +1,15 @@
 # 0053 — Isolation multi-cible : banc Lima et prod sur le même poste
 
+> ⚠️ **Amendé par
+> [ADR 0108](0108-isolation-par-identite-et-verbes-provision-install.md)
+> (2026-07-11).** La garde d'isolation décrite ici reposait sur la **catégorie**
+> `target_kind` (banc/prod) portée par l'inventaire ; elle repose désormais sur
+> l'**identité d'instance** (`stack_id`), qui corrige la faille du 2026-06-16
+> (un geste visant le banc a SSHé sur la prod). Le besoin fondateur — **ne
+> jamais muter la mauvaise cible depuis un poste qui en pilote plusieurs** — est
+> conservé et renforcé ; c'est l'**unité de garde** qui change (catégorie →
+> identité). Lire ce qui suit comme le témoin de l'état à sa date.
+
 ## Contexte
 
 Le dépôt est un **catalogue de topologies** (« plusieurs infra déclarées, une

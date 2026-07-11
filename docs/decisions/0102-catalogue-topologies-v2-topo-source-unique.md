@@ -12,6 +12,16 @@ topo est la source de vérité) /
 [0053](0053-isolation-multi-cible-banc-prod.md) (garde d'isolation banc/prod).
 Valeurs génériques ([0023](0023-plateforme-exemple-generique.md)).
 
+> ⚠️ **Amendé par
+> [ADR 0108](0108-isolation-par-identite-et-verbes-provision-install.md)
+> (2026-07-11).** L'axe `target_kind` mentionné ici (les branchements
+> `if target_kind == "bench"` du volet B) a été **supprimé** : la résolution du
+> kubeconfig et la garde reposent désormais sur l'**identité** (`stack_id`) et
+> la classe **`terrain`**, non sur la criticité. Le principe de cet ADR — **la
+> topologie est la source de vérité unique** (nommage, kubeconfig, provisioning)
+> — est **renforcé** par 0108, pas contredit ; seul l'axe `target_kind`
+> disparaît.
+
 ## Contexte
 
 Trois frictions, toutes des **entorses au même principe** — « la topologie est
