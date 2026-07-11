@@ -2,11 +2,12 @@
 
 ## État
 
-> **État : Brouillon** (depuis 2026-07-11) · **Fonde :
+> **État : Actif** (depuis 2026-07-11) · **Fonde :
 > [ADR 0110](../decisions/0110-preimage-de-build-et-build-in-pod.md)**
-> (Proposed) · **Issue de pilotage : à créer** · **Pas d'implémentation active**
-> tant que l'ADR n'est pas `Accepted`
-> ([ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6).
+> (Accepted) · **Issue de pilotage :
+> [#637](https://github.com/univ-lehavre/cluster/issues/637)** ·
+> **Implémentation débloquée** (ADR 0110 acté le 2026-07-11,
+> [ADR 0057](../decisions/0057-gouvernance-documentaire-adr-plan-issue.md) §6).
 
 Met en œuvre [ADR 0110](../decisions/0110-preimage-de-build-et-build-in-pod.md)
 : faire construire l'**image de code** d'une code-location Dagster **dans le
@@ -97,12 +98,13 @@ seulement en `warn`) — plus permissif, ce qui **autorise** la dérogation
 
 ## Découpage en lots (issues)
 
-> Tous **gelés** tant que l'ADR 0110 n'est pas `Accepted`. Le lot 0 est le seul
-> qui peut avancer sous `Proposed` (il sert à **acter** l'ADR).
+> ADR 0110 **acté** (`Accepted`, 2026-07-11) → les lots sont **débloqués** (ADR
+> 0057 §6). Un lot = une PR, re-prouvée sur banc avant la suivante.
 
-0. **Acter l'ADR** — revue de l'ADR 0110 + ce plan ; passage
-   `Proposed → Accepted` ; bascule de cet en-tête `Brouillon → Actif`.
-   (Pré-requis de tous les autres lots, ADR 0057 §6.)
+0. **Acter l'ADR** — ✅ fait : ADR 0110 `Proposed → Accepted`, cet en-tête
+   `Brouillon → Actif`, issue de pilotage
+   [#637](https://github.com/univ-lehavre/cluster/issues/637) ouverte
+   (2026-07-11).
 1. **Socle `buildkitd`** — `platform/buildkit/` : `namespace.yaml`
    (`enforce: baseline`/`warn: restricted`, idiome gitea/registry),
    `buildkitd-deployment.yaml` (durci comme container-registry, image par
@@ -152,19 +154,19 @@ de banc consigné.
 
 ## Suivi (ADR 0057)
 
-Issue de pilotage : **à créer** (les lots ci-dessous y seront des cases à
-cocher), à ouvrir au passage `Brouillon → Actif` (lot 0).
+Issue de pilotage : [#637](https://github.com/univ-lehavre/cluster/issues/637)
+(les lots ci-dessous y sont des cases à cocher).
 
-| Lot                                          | État                                              |
-| -------------------------------------------- | ------------------------------------------------- |
-| 0. Acter l'ADR 0110 (`Accepted`)             | 🔲 à faire — débloque tout le reste (ADR 0057 §6) |
-| 1. Socle `buildkitd` + netpol + graphe       | 🔲 gelé tant que 0110 `Proposed`                  |
-| 2. Preuve « un pod qui build » (fuse/native) | 🔲 gelé — **le lot décisif** (ADR 0034/0052)      |
-| 3. Job de build (moule reconciler)           | 🔲 gelé                                           |
-| 4. Sentinelle (détection → Job)              | 🔲 gelé                                           |
-| 5. Amender ADR 0106 (timer → pré-image)      | 🔲 gelé                                           |
-| 6. Preuve bout-en-bout (`RESULTS.md`)        | 🔲 gelé — le « push = auto » (ADR 0034)           |
+| Lot                                          | État                                            |
+| -------------------------------------------- | ----------------------------------------------- |
+| 0. Acter l'ADR 0110 (`Accepted`)             | ✅ fait (2026-07-11) — débloque le reste        |
+| 1. Socle `buildkitd` + netpol + graphe       | 🔲 à faire                                      |
+| 2. Preuve « un pod qui build » (fuse/native) | 🔲 à faire — **le lot décisif** (ADR 0034/0052) |
+| 3. Job de build (moule reconciler)           | 🔲 à faire                                      |
+| 4. Sentinelle (détection → Job)              | 🔲 à faire                                      |
+| 5. Amender ADR 0106 (timer → pré-image)      | 🔲 à faire                                      |
+| 6. Preuve bout-en-bout (`RESULTS.md`)        | 🔲 à faire — le « push = auto » (ADR 0034)      |
 
 **Achèvement** : quand les lots 1-6 sont livrés sur `main` et les runs de preuve
 (2, 6) consignés, l'en-tête `## État` passe **Achevé**. Le passage **Brouillon →
-Actif** intervient au lot 0 (acceptation de l'ADR 0110).
+Actif** a eu lieu au lot 0 (acceptation de l'ADR 0110, 2026-07-11).
