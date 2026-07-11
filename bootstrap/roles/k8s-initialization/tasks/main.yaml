@@ -184,8 +184,10 @@
         dest: '{{ ansible_facts.env.HOME }}/coredns-antiaffinity-patch.yaml'
         mode: '0644'
       # Mono-nœud (banc 1 VM) : `required` laisserait une réplique Pending → on
-      # saute le durcissement (et son staging).
-      when: groups['all'] | length > 1
+      # saute le durcissement (et son staging). On compte `cloud` (control+workers =
+      # les NŒUDS k8s), PAS `all` : `all` inclut aussi le `control_host` localhost (le
+      # poste), ce qui ferait croire à 2 hôtes en mono-nœud (bug de seuil).
+      when: groups['cloud'] | length > 1
 
     # `kubectl patch --type=strategic` est idempotent : no-op (« no change ») si
     # l'anti-affinité `required` est déjà en place — d'où le changed_when ciblé.
@@ -199,8 +201,9 @@
       changed_when: "'no change' not in coredns_patch.stdout"
       # Sûr seulement s'il existe ≥ 2 nœuds schedulables éligibles (CoreDNS tolère
       # les taints control-plane) ; en mono-nœud (banc 1 VM) `required` laisserait
-      # une réplique Pending → on saute alors le durcissement.
-      when: groups['all'] | length > 1
+      # une réplique Pending → on saute alors le durcissement. `cloud` (nœuds k8s),
+      # pas `all` (qui inclut le control_host localhost).
+      when: groups['cloud'] | length > 1
 
     # Nombre de répliques CoreDNS DÉRIVÉ du nombre de nœuds — kubeadm pose `replicas: 2`
     # en dur, mais un 2ᵉ CoreDNS n'apporte de résilience que sur un 2ᵉ NŒUD. En mono-nœud
@@ -208,18 +211,17 @@
     # nœud) et bloque le Deployment à 1/2 — faux « non sain » pour les gates. On aligne
     # donc : 1 nœud → 1 réplique (soft, patch hard sauté ci-dessus) ; ≥ 2 nœuds → 2 (hard).
     # Corriger le code, pas l'état (ADR 0046) : idempotent, rejoué à chaque rebuild.
+    # `cloud` (control+workers = nœuds k8s), PAS `all` (inclut le control_host localhost).
     - name: Scale CoreDNS replicas to match node count (1 node → 1, ≥2 nodes → 2)
       ansible.builtin.command: >-
         kubectl scale deployment coredns -n kube-system
-        --replicas={{ 1 if (groups['all'] | length) <= 1 else 2 }}
-        --current-replicas={{ 2 if (groups['all'] | length) <= 1 else 1 }}
+        --replicas={{ 1 if (groups['cloud'] | length) <= 1 else 2 }}
       register: coredns_scale
-      # --current-replicas gate le scale : no-op (rc≠0, « current replicas … doesn't match »)
-      # si le compte est déjà celui voulu → idempotent sans lire l'état au préalable.
-      changed_when: coredns_scale.rc == 0
-      failed_when: >-
-        coredns_scale.rc != 0
-        and 'current replicas' not in coredns_scale.stderr
+      # `kubectl scale --replicas=N` est DÉJÀ idempotent : rc=0 avec « scaled » si le compte
+      # change, « unchanged » s'il est déjà à N. (On N'utilise PAS `--current-replicas` : il
+      # exigerait de connaître le compte courant — inconnu ici — et ferait échouer un no-op.)
+      # `changed` seulement quand le compte a réellement changé (pas sur « unchanged »).
+      changed_when: "'unchanged' not in coredns_scale.stdout"
 
   # ── Reprise après incident (ADR 0050 cas (b)) ──────────────────────────────
   rescue:
