@@ -542,6 +542,36 @@ class Kubectl(unittest.TestCase):
             code = cli.main(["kubectl", "-f", self._topo_file(), "get", "nodes"])
         self.assertEqual(code, 7)
 
+    def test_poison_kubeconfig_env_is_ignored_when_bench_exists(self):
+        # RÉGRESSION (banc 2026-07-12) : un `KUBECONFIG=/dev/null` POISON dans le shell
+        # (posé par un `stack select` fait avant que le banc soit monté, puis figé) ne doit
+        # PAS primer — sinon tout `nestor kubectl` retombe sur localhost:8080 alors que le
+        # banc est vivant. `_bench_kubeconfig` l'IGNORE (via `_operator_kubeconfig`) et résout
+        # le banc. On crée un kubeconfig de banc valide et on vérifie qu'il l'emporte sur le
+        # poison. (Sans banc, /dev/null resterait la cible LÉGITIME du point 4 — autre cas.)
+        stack = cli._active_stack_name(None)
+        bench = cli._bench_kubeconfig_path(stack)
+        os.makedirs(os.path.dirname(bench), exist_ok=True)
+        created = not os.path.exists(bench)
+        with open(bench, "w", encoding="utf-8") as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+        if created:
+            self.addCleanup(lambda: os.path.exists(bench) and os.unlink(bench))
+
+        with mock.patch.dict(os.environ, {"KUBECONFIG": os.devnull}):
+            resolved = cli._bench_kubeconfig()
+        # Le poison /dev/null est ignoré → on résout le banc, pas /dev/null.
+        self.assertEqual(resolved, bench)
+        self.assertNotEqual(resolved, os.devnull)
+
+    def test_valid_kubeconfig_env_is_respected(self):
+        # L'inverse : un `KUBECONFIG` exporté RÉELLEMENT exploitable (intention opérateur,
+        # ADR 0090) prime toujours — on ne l'ignore pas comme le poison.
+        valid = _tmp("apiVersion: v1\nkind: Config\n")
+        self.addCleanup(os.unlink, valid)
+        with mock.patch.dict(os.environ, {"KUBECONFIG": valid}):
+            self.assertEqual(cli._bench_kubeconfig(), valid)
+
     def test_flag_in_head_passes_through(self):
         # Régression (vécu au banc) : `nestor kubectl -n rook-ceph get pods` échouait
         # « unrecognized arguments: -n » — argparse `nargs=REMAINDER` ne capture pas un flag

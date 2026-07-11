@@ -224,8 +224,14 @@ def _bench_kubeconfig(declared: str | None = None) -> str:
     silencieusement sur le contexte du poste (= la prod). Pointer `/dev/null` fait
     échouer kubectl proprement → lectures « vides » (honnête), au lieu de lire/muter
     la prod par accident. Le point (2) (ADR 0090) ajoute la cible prod déclarée :
-    une stack prod vise SON kubeconfig (`~/.kube/<stack>.config`), pas le banc."""
-    explicit = os.environ.get("KUBECONFIG")
+    une stack prod vise SON kubeconfig (`~/.kube/<stack>.config`), pas le banc.
+
+    Au point (1), un `KUBECONFIG` POISON (`/dev/null`, fichier vide/inexistant — posé par
+    un `nestor stack select` fait AVANT que le banc soit monté, puis figé dans le shell)
+    est IGNORÉ : `_operator_kubeconfig` ne rend que les chemins réellement exploitables.
+    Sinon ce poison primait éternellement et faisait retomber tout `nestor kubectl` sur
+    `localhost:8080` alors que le banc est vivant — le vrai bug vécu au banc."""
+    explicit = _operator_kubeconfig()
     if explicit:
         return explicit
     if declared:
