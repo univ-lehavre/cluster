@@ -8,6 +8,7 @@ la stdlib + pyyaml (ADR 0049 : pas de dépendance avant le besoin).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,12 +20,16 @@ import yaml
 from nestor.errors import TopologyError
 
 VALID_ROLES = {"control", "worker", "storage"}
-# `target_kind` = la CRITICITÉ (la garde d'isolation, ADR 0099) : `bench` (parc jetable,
-# on peut tout casser) | `prod` (parc réel, mutation encadrée). NE PAS confondre avec la
-# TECHNO d'infra (`catalog.terrain` : local/cloud/baremetal) ni avec le TRANSPORT de
-# connexion (`lima`=limactl / `ssh`, dérivé en aval). `bench` a remplacé l'ancien `lima`
-# (qui nommait l'outil, pas la sûreté).
-VALID_TARGET_KINDS = {"prod", "bench"}
+# `terrain` = la CLASSE MATÉRIELLE de l'infra (`catalog.terrain`, ADR 0039/0040/0108) :
+# `local` (banc Lima jetable, provisionné par limactl) | `cloud` (VM publique) | `baremetal`
+# (parc réel, hyperconvergé). C'est la propriété qui gate désormais le TRANSPORT/PROVISIONNING
+# (`local` → phase `up`/limactl/ssh ; `cloud`/`baremetal` → pas de `up`) ET la jetabilité
+# (offensif/chaos autorisés sur `local` seul). Remplace l'ancien champ prod/bench de criticité
+# (ADR 0108 : identité=`stack_id`, criticité=garde d'isolation sur `stack_id`, déjà en place).
+# DÉFAUT = `baremetal` (fail-closed/fail-safe : une topo sans `terrain` déclaré ne doit PAS
+# être provisionnable ni offensif-jouable — comportement prod prudent, cf. `Topology.terrain`).
+VALID_TERRAINS = {"local", "cloud", "baremetal"}
+_DEFAULT_TERRAIN = "baremetal"
 # Modes du point d'entrée HA devant les CP (ADR 0047/0055). kube-vip-arp =
 # bare-metal/local (pod statique, annonce ARP) ; kube-vip-lb = via LB-IPAM ;
 # external = LB fourni par le terrain (cloud, ADR 0040).
@@ -147,7 +152,6 @@ class Topology:
     cilium: dict[str, Any] = field(default_factory=dict)
     atlas: dict[str, Any] = field(default_factory=dict)
     portal: dict[str, Any] = field(default_factory=dict)
-    target_kind: str = "prod"
     # Chemin du kubeconfig de la cible (ADR 0090) — UNIQUEMENT pour la PROD. QUI décide :
     #   • BANC   → nestor IMPOSE : le provisioning génère `.kubeconfigs/banc.config`
     #              (phase cni, ADR 0102 volet B — le banc EST la stack `banc`) et
@@ -164,6 +168,11 @@ class Topology:
     # DAG (resolve_layers). Vide → rétrocompat : dérivé de `catalog.profile` (alias
     # déprécié-doux). Voir la propriété `declared_layers`.
     layers: list[str] = field(default_factory=list)
+    # `stack_id` (ADR 0108) : IDENTITÉ de l'instance = nom de fichier de la topo (sans
+    # extension), dérivé du CHEMIN, PAS du YAML. Rempli par `load_topology` (qui connaît
+    # le chemin) ; vide pour une topo construite en mémoire sans fichier (tests). C'est le
+    # pivot de la garde d'isolation et le nom du contexte/kubeconfig de l'instance.
+    stack_id: str = ""
 
     # ── Dérivations pures (le cœur de la génération sans état) ──────────────
     @property
@@ -196,6 +205,21 @@ class Topology:
     def is_ha_control_plane(self) -> bool:
         """> 1 control-plane → exige un control_plane_lb (VIP), ADR 0047/0055."""
         return len(self.control_nodes) > 1
+
+    @property
+    def terrain(self) -> str:
+        """Classe MATÉRIELLE de l'infra (`catalog.terrain`, ADR 0039/0040/0108) : `local`
+        (banc Lima jetable) | `cloud` | `baremetal`. C'est le pivot qui gate en aval le
+        TRANSPORT/PROVISIONNING (`local` → phase `up`/limactl/ssh) et la JETABILITÉ (offensif
+        /chaos autorisés sur `local` seul) — remplace l'ancien champ prod/bench (ADR 0108, retiré).
+
+        DÉFAUT `baremetal` (fail-closed/fail-safe) : une topo qui NE DÉCLARE PAS `catalog.
+        terrain` ne doit PAS devenir provisionnable ni offensif-jouable par accident (on ne
+        crée/détruit pas de VM et on ne lance pas de chaos sur un parc muet) — le défaut sûr
+        est donc le comportement prod prudent, jamais `local`. Une valeur hors enum est
+        RAMENÉE au défaut (lecture tolérante — la validation stricte vit dans le scaffold)."""
+        raw = self.catalog.get("terrain") if isinstance(self.catalog, dict) else None
+        return raw if raw in VALID_TERRAINS else _DEFAULT_TERRAIN
 
     @property
     def exposition_mode(self) -> str:
@@ -312,11 +336,10 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
     if "nodes" not in data or not data["nodes"]:
         raise TopologyError("topology sans `nodes`")
     nodes = [_parse_node(n) for n in data["nodes"]]
-    target_kind = data.get("target_kind", "prod")
-    if target_kind not in VALID_TARGET_KINDS:
-        raise TopologyError(
-            f"target_kind `{target_kind}` invalide (valides : {sorted(VALID_TARGET_KINDS)})"
-        )
+    # ADR 0108 : l'ancien champ prod/bench de criticité est RETIRÉ du modèle au profit de
+    # l'identité (`stack_id`) + de la classe matérielle (`catalog.terrain`). Une clé résiduelle
+    # prod/bench dans un YAML historique est TOLÉRÉE en étant simplement IGNORÉE (ni lue, ni
+    # validée, ni source d'erreur) — pas de rupture de chargement des topos existantes.
     topo = Topology(
         catalog=data.get("catalog", {}),
         nodes=nodes,
@@ -333,7 +356,6 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
         cilium=data.get("cilium", {}) or {},
         atlas=data.get("atlas", {}) or {},
         portal=data.get("portal", {}) or {},
-        target_kind=target_kind,
         kubeconfig=data.get("kubeconfig"),  # ADR 0090 ; None → résolution par défaut
         layers=list(data.get("layers") or []),  # ADR 0069 ; vide → dérivé du profil
     )
@@ -368,12 +390,31 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
     return topo
 
 
+def stack_id_from_path(path: str) -> str:
+    """Identité de STACK = nom de FICHIER de la topo (ADR 0102 volet B, 0108), PUR.
+
+    Source UNIQUE de l'identité SYSTÈME (kubeconfig `.kubeconfigs/<stack>.config` + contexte
+    kubectl nommé). RÉSOUT le symlink d'abord (`realpath` : `topology.yaml` — le symlink
+    d'activation — pointe la topo active), puis retire l'extension COMPOSÉE `.example.yaml`
+    AVANT `.yaml` (ordre critique). Conséquence VOULUE : `ceph.example.yaml` et `ceph.yaml`
+    partagent le MÊME `stack_id` `ceph` (une stack, deux variantes de contenu). Ne lit AUCUN
+    champ YAML → robuste à une topo illisible."""
+    base = os.path.basename(os.path.realpath(path))
+    for suffix in (".example.yaml", ".example.yml", ".yaml", ".yml"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
+
 def load_topology(path: str) -> Topology:
-    """Charge un topology.yaml depuis un fichier."""
+    """Charge un topology.yaml depuis un fichier ; pose son `stack_id` (identité) depuis
+    le CHEMIN (ADR 0108 : l'identité voyage avec la topo)."""
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
         raise TopologyError(
             f"{path} : racine YAML attendue = mapping, obtenu {type(data).__name__}"
         )
-    return topology_from_dict(data)
+    topo = topology_from_dict(data)
+    topo.stack_id = stack_id_from_path(path)
+    return topo

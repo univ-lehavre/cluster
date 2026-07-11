@@ -28,10 +28,14 @@
 # Pourquoi Lima (vs kind figé en 1.31 / Vagrant lourd) : ADR 0006.
 set -euo pipefail
 
-# Intention de cible (ADR 0053 (c)) : ce script ne pilote QUE le banc Lima. On
-# déclare l'intention `bench` pour TOUS les ansible-playbook lancés d'ici → le
-# garde-fou du rôle audit-log refuse un inventaire prod passé par erreur.
-export EXPECTED_TARGET_KIND=bench
+# Identité de l'instance (ADR 0108) : nestor pose STACK_NAME (= stack_id, le nom de
+# fichier de la topo, cf. _runphases_env). On en dérive STACK_ID, source unique lue par
+# le reste du script (contexte kubeconfig estampillé, marqueur d'inventaire). Sans
+# STACK_NAME (invocation hors nestor), STACK_ID reste vide → fail-closed en aval.
+export STACK_ID="${STACK_NAME:-}"
+# Intention d'IDENTITÉ propagée à TOUS les ansible-playbook lancés d'ici → le garde-fou
+# du rôle audit-log refuse un inventaire d'une AUTRE instance. Vide → assert fail-closed.
+export EXPECTED_STACK_ID="${STACK_ID}"
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=bench/lima/lib.sh
@@ -323,7 +327,7 @@ phase_cni() {
     # et retire tout CR d'exposition résiduel. Aucune variable d'exposition à passer ;
     # les CRD Gateway API ne sont plus pré-installées (plus aucun objet Gateway).
     run_cni "${CP}"
-    fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc
+    fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" "${STACK_ID}"
 }
 
 # NB : l'orchestration HA (bootstrap primaire, gates VIP/etcd, promotion des CP) vit
@@ -362,7 +366,7 @@ emit_facts() {
 # bash `layers`/phases applicatives a été retiré).
 case "${1:-}" in
     up) time_phase up phase_up ;;
-    kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" cluster-banc ;;
+    kubeconfig) preflight; fetch_kubeconfig_node "${CP}" "${KUBECONFIG_LOCAL}" "${API_PORT}" "${STACK_ID}" ;;
     # cni : rappel interne du moteur Python (la CNI reste bash, ADR 0049). Pose Cilium
     # (L4 NodePort) + fetch le kubeconfig banc. Aucun argument (geste 100 % CNI : le
     # vestige `ha-cni <vip_iface>` a été renommé — plus de VIP/iface au banc).

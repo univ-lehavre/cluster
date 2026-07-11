@@ -45,7 +45,13 @@ from nestor.kube_context import (
 )
 from nestor.layers import layers_from_profile, phase_deps, resolve_layers
 from nestor.metrics import RunMetrics, format_metrics, metrics_of
-from nestor.model import NodeResources, Topology, TopologyError, load_topology
+from nestor.model import (
+    NodeResources,
+    Topology,
+    TopologyError,
+    load_topology,
+    stack_id_from_path,
+)
 from nestor.plan import (
     KNOWN_TARGETS,
     PlanError,
@@ -108,6 +114,7 @@ __all__ = [
     "Topology",
     "TopologyError",
     "load_topology",
+    "stack_id_from_path",
     "NodeResources",
     "render_prod_inventory",
     "render_lima_inventory",

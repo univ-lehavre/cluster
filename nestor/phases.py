@@ -121,7 +121,7 @@ def gate_kind_for(phase: str) -> str:
 # par le rôle `platform-build-images` SOUS `build_emitter_image=true` (banc e2e seulement,
 # JAMAIS en prod). Le Job la matérialise (`dagster asset materialize`) → START/COMPLETE
 # OpenLineage vers Marquez. Le play `dataops` du moteur Python PASSE désormais
-# `build_emitter_image=true` au banc (derive_run_params le pose si target_kind==bench ; clé
+# `build_emitter_image=true` au banc (derive_run_params le pose si terrain==local ; clé
 # dans extravars_keys de dataops) → l'image est buildée au montage, le hook e2e la trouve.
 # Si pour une raison le build manque, le hook échoue HONNÊTEMENT (Job ImagePullBackOff →
 # poll non `succeeded`), jamais un faux vert.
@@ -402,7 +402,7 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
             "cnpg_storage_class",
             "cnpg_s3_backing",
             "cnpg_s3_endpoint",
-            # banc Lima seulement (derive_run_params le pose si target_kind==bench) : build
+            # banc Lima seulement (derive_run_params le pose si terrain==local) : build
             # l'émetteur OpenLineage jetable requis par le hook e2e dataops_chain_emit_and_verify.
             "build_emitter_image",
         ),

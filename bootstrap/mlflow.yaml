@@ -20,14 +20,14 @@
 - name: Layer MLflow — étape nœuds (containerd registry + build image maison)
   hosts: cloud
   # GARDE D'ISOLATION (ADR 0053, #359) : ce play SSH sur les nœuds (`cloud`) et
-  # build/pousse dans le registry → il DOIT vérifier EXPECTED_TARGET_KIND via audit-log
+  # build/pousse dans le registry → il DOIT vérifier EXPECTED_STACK_ID via audit-log
   # AVANT toute tâche distante (comme dataops.yaml Play 2). gather_facts requis :
   # platform-build-images teste ansible_architecture.
   # force_handlers : même filet que dataops.yaml (incident 2026-06-16) — garantit le
   # restart containerd même si platform-build-images échoue en aval (sinon handler perdu).
   force_handlers: true
   pre_tasks:
-    - name: Audit-log — record playbook execution (+ garde target_kind)
+    - name: Audit-log — record playbook execution (+ garde d'identité stack_id)
       ansible.builtin.import_role:
         name: audit-log
       vars:

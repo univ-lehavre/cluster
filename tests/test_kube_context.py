@@ -27,9 +27,7 @@ class Plan(unittest.TestCase):
     """context_plan : décide CE QU'IL FAUT poser, PUR (pas d'I/O)."""
 
     def test_lima_targets_bench_kubeconfig(self):
-        plan = kc.context_plan(
-            "banc", kubeconfig=None, target_kind="bench", bench_kubeconfig=_BENCH
-        )
+        plan = kc.context_plan("banc", kubeconfig=None, terrain="local", bench_kubeconfig=_BENCH)
         self.assertEqual(plan.name, "banc")
         self.assertEqual(plan.kubeconfig, _BENCH)
         self.assertEqual(plan.cluster, "banc")
@@ -39,7 +37,7 @@ class Plan(unittest.TestCase):
         plan = kc.context_plan(
             "dirqual",
             kubeconfig="~/.kube/dirqual.config",
-            target_kind="prod",
+            terrain="baremetal",
             bench_kubeconfig=_BENCH,
         )
         self.assertEqual(plan.kubeconfig, os.path.expanduser("~/.kube/dirqual.config"))
@@ -47,12 +45,12 @@ class Plan(unittest.TestCase):
 
     def test_prod_without_kubeconfig_raises(self):
         with self.assertRaises(kc.ContextError):
-            kc.context_plan("dirqual", kubeconfig=None, target_kind="prod", bench_kubeconfig=_BENCH)
+            kc.context_plan(
+                "dirqual", kubeconfig=None, terrain="baremetal", bench_kubeconfig=_BENCH
+            )
 
     def test_set_context_argv_is_idempotent_set_context(self):
-        plan = kc.context_plan(
-            "banc", kubeconfig=None, target_kind="bench", bench_kubeconfig=_BENCH
-        )
+        plan = kc.context_plan("banc", kubeconfig=None, terrain="local", bench_kubeconfig=_BENCH)
         argv = plan.set_context_argv()
         self.assertEqual(argv[:3], ["kubectl", "config", "set-context"])
         self.assertIn("banc", argv)
@@ -75,7 +73,9 @@ class Apply(unittest.TestCase):
             name="banc", kubeconfig=self.kubeconfig, cluster="banc", user="banc-admin"
         )
 
-    def test_apply_invokes_runner_with_set_context(self):
+    def test_apply_invokes_set_then_use_context(self):
+        # ADR 0108 : apply pose le contexte (set-context) PUIS le rend courant (use-context),
+        # pour que `current-context == stack_id` (l'invariant de la garde d'identité).
         calls = []
 
         def runner(argv):
@@ -84,8 +84,19 @@ class Apply(unittest.TestCase):
 
         name = kc.apply_context(self._plan(), runner=runner)
         self.assertEqual(name, "banc")
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][:3], ["kubectl", "config", "set-context"])
+        self.assertEqual(calls[1][:3], ["kubectl", "config", "use-context"])
+        self.assertEqual(calls[1][3], "banc")  # rend COURANT le contexte nommé au stack
+
+    def test_apply_raises_when_use_context_fails(self):
+        # Si use-context échoue, on refuse : sans contexte courant estampillé, la garde
+        # d'identité refuserait tout — mieux vaut échouer tôt et clairement.
+        def runner(argv):
+            return _proc(0 if argv[2] == "set-context" else 1)
+
+        with self.assertRaises(kc.ContextError):
+            kc.apply_context(self._plan(), runner=runner)
 
     def test_apply_refuses_absent_kubeconfig(self):
         plan = kc.ContextPlan(

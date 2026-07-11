@@ -252,10 +252,10 @@ def expected_phase_sequence(topo: Topology, target: str | None = None) -> list[s
     # Socle DÉRIVÉ : ceph (bloc dans le socle) ou léger. Le stockage local-path n'est
     # PAS dans le socle (ADR 0039) : il vient des layers déclarés (resolve_layers).
     seq = list(_SOCLE_CEPH if backend == "ceph" else _SOCLE_LIGHT)
-    # `up` = PROVISIONNER les VMs (limactl) : propre au banc Lima. En prod (target_kind:
-    # prod), les nœuds baremetal PRÉEXISTENT → pas de phase `up`, le socle commence à
-    # `bootstrap` (k8s sur les nœuds existants), ADR 0084.
-    if topo.target_kind != "bench":
+    # `up` = PROVISIONNER les VMs (limactl) : propre au terrain `local` (banc Lima). Sur un
+    # terrain non local (cloud/baremetal), les nœuds PRÉEXISTENT → pas de phase `up`, le socle
+    # commence à `bootstrap` (k8s sur les nœuds existants), ADR 0084/0108.
+    if topo.terrain != "local":
         seq = [p for p in seq if p != "up"]
     if _hardening_requested(topo):
         seq.append("hardening")

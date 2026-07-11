@@ -5,7 +5,12 @@ cloud:
     workers:
   vars:
     ansible_user: lima
-    target_kind: bench
+{# Identité de l'instance (ADR 0108) : lie cet inventaire à la topo dont il dérive ; le
+   rôle audit-log refuse de muter si l'intention (EXPECTED_STACK_ID) diffère. Commentaires
+   Jinja (non émis) : la sortie doit rester byte-identique à write_inventory (lib.sh). #}
+    stack_id: {{ stack_id }}
+{# Transport dédié (ADR 0108) : une instance sur classe locale s'atteint par limactl. #}
+    transport: lima
 control:
   hosts:
 {% for vm in control_nodes %}    {{ vm }}:

@@ -205,6 +205,10 @@ lima_delete_node() {
 # listes de noms de VM séparés par des espaces ($workers peut être vide).
 write_inventory() {
     local inv=$1 control=$2 workers=$3
+    # Identité de l'instance (ADR 0108) : 4e arg, sinon $STACK_ID posé par nestor. Une
+    # instance locale EST une stack nommée par le fichier de sa topo. Fail-closed : sans
+    # stack_id, l'assert du rôle audit-log refusera (EXPECTED_STACK_ID ne concordera pas).
+    local stack_id=${4:-${STACK_ID:-}}
     {
         echo "# Inventaire généré par le banc Lima — NE PAS versionner (artefact de run)."
         echo "cloud:"
@@ -218,10 +222,11 @@ write_inventory() {
         # seule (via ssh.config) ne la peuple PAS. On la pose donc explicitement,
         # comme l'inventaire Vagrant pose `ansible_user: debian`.
         echo "    ansible_user: lima"
-        # Marqueur de CRITICITÉ (ADR 0053 (c) / 0099) : le banc déclare `bench` (parc
-        # jetable) ; l'assert du rôle audit-log refuse de tourner si l'intention diffère.
-        # NB : `ansible_user: lima` reste l'utilisateur de la VM Lima (l'outil), distinct.
-        echo "    target_kind: bench"
+        # Identité (ADR 0108) : lie cet inventaire à la topo de l'instance. Le rôle
+        # audit-log refuse de muter si l'intention (EXPECTED_STACK_ID) diffère.
+        echo "    stack_id: ${stack_id}"
+        # Transport dédié (ADR 0108) : une instance sur classe locale s'atteint par limactl.
+        echo "    transport: lima"
         echo "control:"
         echo "  hosts:"
         local vm ssh_cfg

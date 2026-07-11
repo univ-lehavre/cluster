@@ -3,7 +3,7 @@
   serial: 1
   pre_tasks:
     # Garde de cible (ADR 0053) : full-upgrade + reboot du parc (hosts: all) → vérifier
-    # que l'inventaire vise la topologie attendue (EXPECTED_TARGET_KIND) AVANT de muter.
+    # que l'inventaire vise la topologie attendue (EXPECTED_STACK_ID) AVANT de muter.
     - name: Audit-log — record playbook execution
       ansible.builtin.import_role:
         name: audit-log

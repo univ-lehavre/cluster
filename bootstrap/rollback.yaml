@@ -12,9 +12,9 @@
   hosts: cloud
   become: true
   # GARDE D'ISOLATION (ADR 0053, #359) : rollback DESTRUCTIF sur les nœuds → vérifier la
-  # cible (EXPECTED_TARGET_KIND) AVANT toute tâche distante, comme tout play `hosts: cloud`.
+  # cible (EXPECTED_STACK_ID) AVANT toute tâche distante, comme tout play `hosts: cloud`.
   pre_tasks:
-    - name: Audit-log — record playbook execution (+ garde target_kind)
+    - name: Audit-log — record playbook execution (+ garde d'identité stack_id)
       ansible.builtin.import_role:
         name: audit-log
       vars:

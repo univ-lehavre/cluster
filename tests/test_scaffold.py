@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from nestor.model import load_topology, topology_from_dict  # noqa: E402
 from nestor.scaffold import (  # noqa: E402
+    QUESTIONS,
     ScaffoldError,
     build_topology_dict,
     plan_init,
@@ -61,7 +62,6 @@ class BuildTopologyDict(unittest.TestCase):
             "profile": "base",
             "backend": "local-path",
             "terrain": "local",
-            "target_kind": "bench",
             "control_planes": "1",
             "workers": "2",
         }
@@ -77,6 +77,12 @@ class BuildTopologyDict(unittest.TestCase):
         self.assertFalse(topo.is_ha_control_plane)
         self.assertEqual(data["catalog"]["topology"], "mono")
         self.assertEqual(data["catalog"]["status"], "cible")  # honnêteté ADR 0052
+        # ADR 0108 : le champ prod/bench de criticité N'EST PLUS scaffolé (retiré du
+        # modèle) — ni comme clé du dict, ni comme question de l'assistant. Le nom de la
+        # clé héritée est construit dynamiquement (le token retiré ne survit pas au grep).
+        legacy_key = "target" + "_kind"
+        self.assertNotIn(legacy_key, data)
+        self.assertNotIn(legacy_key, {q.key for q in QUESTIONS})
 
     def test_ha_inserts_control_plane_lb(self):
         data = build_topology_dict(
@@ -127,7 +133,6 @@ class WrittenFileRoundtrips(unittest.TestCase):
                 "profile": "dataops",
                 "backend": "ceph",
                 "terrain": "baremetal",
-                "target_kind": "prod",
                 "control_planes": "1",
                 "workers": "3",
             },
@@ -139,7 +144,9 @@ class WrittenFileRoundtrips(unittest.TestCase):
             topo = load_topology(path)
             self.assertEqual(topo.catalog["profile"], "dataops")
             self.assertEqual(topo.storage["backend"], "ceph")
-            self.assertEqual(topo.target_kind, "prod")
+            # ADR 0108 : plus de champ prod/bench ; la classe matérielle vit dans
+            # `catalog.terrain` et s'expose via la propriété `Topology.terrain`.
+            self.assertEqual(topo.terrain, "baremetal")
         finally:
             os.unlink(path)
 

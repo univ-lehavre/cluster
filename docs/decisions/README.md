@@ -126,3 +126,4 @@ Format léger inspiré de Michael Nygard :
 | 0104 | [Doctrine de preuve à deux étages : banc-logique / prod-intégration](0104-doctrine-preuve-deux-etages-banc-logique-prod-integration.md)            | Accepted           |
 | 0105 | [Retrait du build événementiel : le build node-side devient terminal](0105-retrait-build-evenementiel-node-side-terminal.md)                       | Accepted           |
 | 0107 | [Adaptativité matérielle (prémisse des cultures d'ingénierie)](0107-adaptativite-materielle-premisse-cultures.md)                                  | Proposed           |
+| 0108 | [Isolation par identité d'instance et séparation des verbes provisionner / installer](0108-isolation-par-identite-et-verbes-provision-install.md)  | Proposed           |

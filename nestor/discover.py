@@ -129,18 +129,18 @@ def build_topology(
     backend: str,
     exposition: str,
     topology_name: str = "discovered",
-    target_kind: str = "prod",
 ) -> dict:
     """Assemble un dict `topology.yaml` VALIDE depuis le réel sondé (PUR, ADR 0074 §4).
 
     `nodes` : [{name, roles}] (rôles dérivés des labels par la façade). `layers` :
     couches applicatives présentes (set ordonné). `backend`/`exposition` : dérivés du
-    réel. Le résultat passe `topology_from_dict` (clés génériques, ADR 0023)."""
+    réel. Le résultat passe `topology_from_dict` (clés génériques, ADR 0023). Le champ
+    prod/bench de criticité N'EST PLUS reconstruit (retiré du modèle, ADR 0108) : la
+    classe matérielle vit dans `catalog.terrain`, non sondable à coup sûr → non écrit."""
     topo: dict = {
         "catalog": {"topology": topology_name, "status": "cible"},
         "nodes": nodes,
         "storage": {"backend": backend},
-        "target_kind": target_kind,
     }
     if layers:
         topo["layers"] = sorted(layers)
@@ -300,7 +300,6 @@ def assemble(
     extra_unknown: list[Unknown] | None = None,
     health: list[HealthItem] | None = None,
     topology_name: str = "discovered",
-    target_kind: str = "prod",
 ) -> DiscoverResult:
     """Orchestrateur PUR (ADR 0074 §1+2+6) : compose la topologie reconstruite +
     l'inconnu + le bilan de santé depuis des sondes déjà réduites par la façade.
@@ -326,7 +325,6 @@ def assemble(
         backend=backend,
         exposition=exposition,
         topology_name=topology_name,
-        target_kind=target_kind,
     )
     unknown = unknown_ns + list(extra_unknown or [])
     return DiscoverResult(topology=topo, unknown=unknown, health=list(health or []))

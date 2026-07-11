@@ -66,26 +66,44 @@ class ContextPlan:
             f"--kubeconfig={self.kubeconfig}",
         ]
 
+    def use_context_argv(self) -> list[str]:
+        """`kubectl config use-context` : rend le contexte `<stack>` COURANT (PUR, ADR 0108).
+
+        Indispensable à la garde d'identité : elle exige `current-context == stack_id`.
+        `set-context` CRÉE l'entrée mais ne la sélectionne pas — sans ce `use-context`, le
+        contexte courant reste celui posé au montage (jadis `cluster-banc` en dur), et la
+        garde refuserait toute instance saine (faille de faux-refus corrigée). Vise le même
+        `--kubeconfig` que `set_context_argv` (le fichier de la cible), jamais `~/.kube`."""
+        return [
+            "kubectl",
+            "config",
+            "use-context",
+            self.name,
+            f"--kubeconfig={self.kubeconfig}",
+        ]
+
 
 def context_plan(
     name: str,
     *,
     kubeconfig: str | None,
-    target_kind: str,
+    terrain: str,
     bench_kubeconfig: str,
 ) -> ContextPlan:
-    """Décide le contexte à poser pour la topologie `name` (PUR, LOT 8).
+    """Décide le contexte à poser pour la topologie `name` (PUR, LOT 8, ADR 0108).
 
-    - PROD (`target_kind != "bench"`) : la cible est le `kubeconfig:` DÉCLARÉ (ADR 0090).
-      Absent → `ContextError` (on ne devine pas une cible prod ; `stack select` complète
-      déjà le champ). `~` est expansé.
-    - BANC (`target_kind == "bench"`) : la cible est le kubeconfig du banc Lima
-      (`bench_kubeconfig`, écrit par le montage). On ne vérifie PAS son existence ici
+    Gaté sur la CLASSE MATÉRIELLE (`Topology.terrain`) et non plus sur l'ancien champ
+    prod/bench de criticité (ADR 0108 : ce champ est retiré du modèle) :
+    - PROD (`terrain != "local"` — `cloud`/`baremetal`) : la cible est le `kubeconfig:`
+      DÉCLARÉ (ADR 0090). Absent → `ContextError` (on ne devine pas une cible prod ;
+      `stack select` complète déjà le champ). `~` est expansé.
+    - BANC (`terrain == "local"` — banc Lima jetable) : la cible est le kubeconfig du banc
+      Lima (`bench_kubeconfig`, écrit par le montage). On ne vérifie PAS son existence ici
       (logique pure) — l'I/O `apply_context` le fera.
 
     Les noms cluster/user dérivent du nom de la topologie (uniques, parité
     `nestor.kubeconfig._rename_identifiers`)."""
-    if target_kind == "bench":
+    if terrain == "local":
         source = bench_kubeconfig
     elif kubeconfig:
         source = os.path.expanduser(kubeconfig)
@@ -128,5 +146,14 @@ def apply_context(plan: ContextPlan, *, runner: Runner | None = None) -> str:
         raise ContextError(
             f"`kubectl config set-context {plan.name}` a échoué "
             f"(rc={proc.returncode}) : {(proc.stderr or '').strip()}"
+        )
+    # Rend le contexte `<stack>` COURANT (ADR 0108) : la garde d'identité exige
+    # `current-context == stack_id`. Sans use-context, le contexte courant resterait celui
+    # du montage → faux-refus systématique de la garde. Idempotent (rejouable).
+    used = run(plan.use_context_argv())
+    if used.returncode != 0:
+        raise ContextError(
+            f"`kubectl config use-context {plan.name}` a échoué "
+            f"(rc={used.returncode}) : {(used.stderr or '').strip()}"
         )
     return plan.name

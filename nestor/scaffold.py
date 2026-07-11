@@ -26,10 +26,10 @@ from dataclasses import dataclass, field
 VALID_PROFILES = ["base", "store", "obs", "dataops"]
 # Backends de stockage (profile.PROFILE_BY_BACKEND).
 VALID_BACKENDS = ["local-path", "ceph"]
-# Terrain (catalog ADR 0039/0040) — métadonnée de catalogue.
+# Terrain (catalog ADR 0039/0040) — classe MATÉRIELLE de l'infra : local (banc
+# jetable) | cloud | baremetal. Pivot qui gate en aval le transport/provisionning
+# et la jetabilité (ADR 0108) — remplace l'ancien couple prod/bench (retiré).
 VALID_TERRAINS = ["local", "cloud", "baremetal"]
-# Cible d'exécution = criticité (model.VALID_TARGET_KINDS).
-VALID_TARGET_KINDS = ["bench", "prod"]
 # Mode du load-balancer de control-plane si HA (model.VALID_LB_MODES).
 VALID_LB_MODES = ["kube-vip-arp", "kube-vip-lb", "external"]
 
@@ -83,14 +83,7 @@ QUESTIONS = [
         "Terrain",
         "local",
         VALID_TERRAINS,
-        "local (banc Lima) | cloud | baremetal",
-    ),
-    Question(
-        "target_kind",
-        "Cible d'exécution",
-        "bench",
-        VALID_TARGET_KINDS,
-        "bench (banc jetable) ou prod (parc réel)",
+        "local (banc Lima jetable) | cloud | baremetal",
     ),
     Question(
         "control_planes",
@@ -207,8 +200,10 @@ def build_topology_dict(name: str, answers: dict[str, str]) -> dict:
       hyperconvergé, chaque CP cumule control+worker n'est PAS supposé ici : on déclare
       des CP `control` purs + des workers `worker` purs (variante CP dédiés) — le
       modèle accepte les deux ; l'opérateur ajuste les rôles ensuite ;
-    - `storage.backend` ; `network.control_plane_lb.mode` si HA (≥ 2 CP, ADR 0047/0055) ;
-    - `target_kind`.
+    - `storage.backend` ; `network.control_plane_lb.mode` si HA (≥ 2 CP, ADR 0047/0055).
+
+    Le champ prod/bench de criticité N'EST PLUS scaffolé (retiré du modèle, ADR 0108) :
+    la classe matérielle est portée par `catalog.terrain` (local/cloud/baremetal).
 
     Lève ScaffoldError sur une réponse hors enum / un entier invalide. La validation
     de SCHÉMA finale (cohérence HA↔VIP, rôles) reste à `load_topology` (réutilisé).
@@ -216,9 +211,6 @@ def build_topology_dict(name: str, answers: dict[str, str]) -> dict:
     profile = _check_choice(answers.get("profile", "base"), VALID_PROFILES, "profil")
     backend = _check_choice(answers.get("backend", "local-path"), VALID_BACKENDS, "backend")
     terrain = _check_choice(answers.get("terrain", "local"), VALID_TERRAINS, "terrain")
-    target_kind = _check_choice(
-        answers.get("target_kind", "bench"), VALID_TARGET_KINDS, "target_kind"
-    )
     n_cp = _as_positive_int(answers.get("control_planes", "1"), "control_planes")
     n_workers = _as_positive_int(answers.get("workers", "2"), "workers")
     if n_cp < 1:
@@ -236,7 +228,6 @@ def build_topology_dict(name: str, answers: dict[str, str]) -> dict:
         },
         "nodes": nodes,
         "storage": {"backend": backend},
-        "target_kind": target_kind,
     }
     if n_cp >= 2:  # HA → un control_plane_lb (VIP) est EXIGÉ par le modèle (ADR 0047/0055)
         lb_mode = _check_choice(answers.get("lb_mode", "kube-vip-arp"), VALID_LB_MODES, "lb_mode")
