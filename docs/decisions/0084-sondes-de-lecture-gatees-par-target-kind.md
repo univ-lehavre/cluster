@@ -4,6 +4,16 @@
 
 Proposed (2026-06-17)
 
+> ⚠️ **Amendé par
+> [ADR 0108](0108-isolation-par-identite-et-verbes-provision-install.md)
+> (2026-07-11).** Le gate des sondes de lecture ne repose plus sur la criticité
+> `target_kind` (supprimée) mais sur la classe matérielle **`terrain`** : une
+> sonde propre au banc (`limactl`, VMs Lima) se gate sur `terrain == "local"`,
+> non sur `bench`. Le principe de cet ADR — **borner les sondes qui touchent le
+> réel pour ne pas agir sur la mauvaise cible** — est conservé ; seul l'axe de
+> gate change (`target_kind` → `terrain`). Lire le titre et le corps comme le
+> témoin de l'état au 2026-06-17.
+
 ## Contexte
 
 L'[ADR 0053](0053-isolation-multi-cible-banc-prod.md) a isolé banc et prod côté

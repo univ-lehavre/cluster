@@ -1,5 +1,17 @@
 # 0056 — Modèle déclaratif unifié des topologies (un fichier décrit, Ansible converge)
 
+> ⚠️ **Amendé par
+> [ADR 0108](0108-isolation-par-identite-et-verbes-provision-install.md)
+> (2026-07-11).** Deux points. (1) Le champ **`target_kind`** (prod/lima) cité
+> ici comme garde-fou d'intention a été **supprimé** : l'isolation passe à
+> l'**identité** (`stack_id`) et la classe **`terrain`**. Le banc et la prod ne
+> se distinguent plus « au `target_kind` près » mais par leur identité. (2) La
+> frontière **décrire / converger** posée en §5/§7 est enfin **matérialisée dans
+> la CLI** : le verbe `up` (qui provisionnait _et_ installait) est scindé en
+> **`provision`** (crée le substrat) et **`install`** (converge, idempotent) —
+> l'invariant « installer ne re-provisionne jamais » devient explicite. Le corps
+> de cet ADR reste valide ; seuls ces deux points sont mis à jour par 0108.
+
 ## Contexte
 
 [ADR 0023](0023-plateforme-exemple-generique.md) acte la **vision** d'un

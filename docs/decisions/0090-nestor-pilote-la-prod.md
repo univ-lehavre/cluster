@@ -10,6 +10,16 @@ Accepted (2026-06-22) — mise en œuvre **incrémentale** suivie par
 [ADR 0084](0084-sondes-de-lecture-gatees-par-target-kind.md) (sondes gatées par
 `target_kind`).
 
+> ⚠️ **Amendé par
+> [ADR 0108](0108-isolation-par-identite-et-verbes-provision-install.md)
+> (2026-07-11).** Deux évolutions. (1) La posture **lecture seule** de `nestor`
+> sur la prod est **renversée en mutation encadrée** : `nestor` mute l'instance
+> **explicitement nommée** (par son `stack_id`), sous garde d'identité — il n'y
+> a plus « la prod » implicite, seulement des instances isolées par leur
+> identité. (2) La notion de **`target_kind`/prod disparaît** : les cibles ne
+> sont plus des catégories mais des instances. Lire ce qui suit comme le témoin
+> de l'état au 2026-06-22.
+
 ## Contexte
 
 `nestor` est l'outil **déclaratif** du dépôt (ADR 0056). Mais en pratique il ne
