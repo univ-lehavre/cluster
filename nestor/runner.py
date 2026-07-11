@@ -16,7 +16,7 @@ La façade n'appelle QUE `launch_phase`/`launch_phase_idempotent`, jamais
 `launch_phase` invoque le MÊME playbook avec les MÊMES `-e` dérivés
 (`derive_run_params`, P2) et la MÊME cible que `run-phases.sh` (ADR 0063 G3) :
 inventaire et `private_data_dir` sont fournis par l'appelant (jamais codés en dur),
-`ANSIBLE_CONFIG`/`KUBECONFIG`/`EXPECTED_TARGET_KIND` posés dans l'environnement du
+`ANSIBLE_CONFIG`/`KUBECONFIG`/`EXPECTED_STACK_ID` posés dans l'environnement du
 run comme le fait `lib.sh`.
 """
 
@@ -133,7 +133,7 @@ def launch_phase(
     *,
     ansible_config: str | None = None,
     kubeconfig: str | None = None,
-    target_kind: str = "bench",
+    stack_id: str = "",
     limit: str | None = None,
 ) -> RunResult:
     """Lance UN playbook via ansible-runner ; renvoie (rc, status).
@@ -141,7 +141,7 @@ def launch_phase(
     `playbook` : chemin relatif à `private_data_dir/project` (ex.
     `bootstrap/dataops.yaml`). `extravars` : le faisceau `-e` dérivé. `inventory`
     et `private_data_dir` sont fournis par l'appelant (jamais ambiants — ADR 0063
-    G3). On pose `ANSIBLE_CONFIG`/`KUBECONFIG`/`EXPECTED_TARGET_KIND` comme `lib.sh`
+    G3). On pose `ANSIBLE_CONFIG`/`KUBECONFIG`/`EXPECTED_STACK_ID` comme `lib.sh`
     (sinon roles_path / interpréteur / garde-fou de cible non chargés).
 
     `limit` : restreint le play à un sous-ensemble d'hôtes (ha-3cp promeut UN CP à
@@ -151,7 +151,7 @@ def launch_phase(
     # Purge les artefacts env/* d'un run PRÉCÉDENT : sinon ansible-runner réutilise
     # ses extravars persistés (ex. la VIP d'un run HA) et contamine ce run (ADR 0046).
     _purge_runner_env(private_data_dir)
-    envvars: dict[str, str] = {"EXPECTED_TARGET_KIND": target_kind}
+    envvars: dict[str, str] = {"EXPECTED_STACK_ID": stack_id}
     if ansible_config:
         envvars["ANSIBLE_CONFIG"] = ansible_config
     if kubeconfig:
@@ -181,7 +181,7 @@ def launch_phase_idempotent(
     *,
     ansible_config: str | None = None,
     kubeconfig: str | None = None,
-    target_kind: str = "bench",
+    stack_id: str = "",
     limit: str | None = None,
 ) -> IdempotenceResult:
     """Lance un playbook puis le REJOUE pour PROUVER l'idempotence (ADR 0052).
@@ -197,7 +197,7 @@ def launch_phase_idempotent(
         inventory,
         ansible_config=ansible_config,
         kubeconfig=kubeconfig,
-        target_kind=target_kind,
+        stack_id=stack_id,
         limit=limit,
     )
     if deployed.rc != 0:
@@ -214,7 +214,7 @@ def launch_phase_idempotent(
         inventory,
         ansible_config=ansible_config,
         kubeconfig=kubeconfig,
-        target_kind=target_kind,
+        stack_id=stack_id,
         limit=limit,
     )
     if replayed.rc != 0:

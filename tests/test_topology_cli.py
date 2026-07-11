@@ -745,9 +745,9 @@ class Ansible(unittest.TestCase):
         return path
 
     def test_prod_derive_l_inventaire_de_la_topo_dans_un_temp(self):
-        # `nestor ansible checks.yaml` sur une topo prod → l'inventaire passé à
-        # ansible-playbook est un TEMP dérivé (contient les nœuds réels dirqual*), JAMAIS
-        # bootstrap/hosts.yaml. Et il porte EXPECTED_TARGET_KIND=prod (réarme l'audit-log).
+        # `nestor ansible checks.yaml` sur une topo → l'inventaire passé à ansible-playbook
+        # est un TEMP dérivé (contient les nœuds réels), JAMAIS bootstrap/hosts.yaml. Et il
+        # porte EXPECTED_STACK_ID=<stack_id> (réarme l'audit-log par identité, ADR 0108).
         seen = {}
 
         def _fake_run(argv, *a, **k):
@@ -767,7 +767,14 @@ class Ansible(unittest.TestCase):
         self.assertIn("dirqual1", seen["inv_body"])  # nœuds RÉELS dérivés de la topo
         self.assertIn("transport: ssh", seen["inv_body"])  # garde préservée (marqueur ADR 0108)
         self.assertNotIn("hosts.yaml", seen["inv_path"])  # PAS le fichier statique
-        self.assertEqual(seen["env"].get("EXPECTED_TARGET_KIND"), "prod")
+        # EXPECTED_STACK_ID posé et non vide = l'audit-log est réarmé par identité (ADR 0108).
+        # La valeur = le stack_id dérivé du fichier de topo (un temp ici) → on vérifie la
+        # présence + la concordance avec le marqueur stack_id de l'inventaire dérivé.
+        expected = seen["env"].get("EXPECTED_STACK_ID")
+        self.assertTrue(expected)  # posé (non vide)
+        self.assertIn(
+            f"stack_id: {expected}", seen["inv_body"]
+        )  # inventaire et intention concordent
         # le temp est nettoyé après l'exécution (finally).
         self.assertFalse(os.path.exists(seen["inv_path"]))
 

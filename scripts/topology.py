@@ -347,7 +347,7 @@ def cmd_ansible(args: argparse.Namespace) -> int:
         _assert_inventory_safe(f"nestor ansible ({args.playbook})", inv_path, topo)
         env = {
             **os.environ,
-            "EXPECTED_TARGET_KIND": topo.target_kind,
+            "EXPECTED_STACK_ID": topo.stack_id,
             "ANSIBLE_CONFIG": os.path.join(_ROOT, "bootstrap", "ansible.cfg"),
         }
         proc = subprocess.run(  # noqa: S603 — playbook du dépôt + args opérateur, inventaire sûr
@@ -4335,7 +4335,7 @@ def _run_path_engine(
                 ctx.inventory,
                 ansible_config=ansible_cfg,
                 kubeconfig=_operator_kubeconfig() or ctx.kubeconfig_local,
-                target_kind=topo.target_kind,
+                stack_id=topo.stack_id,
             )
             # Harnais e2e post-montage (preuve au-delà de _wait_layer_healthy). On ne les joue
             # QUE si le montage a réussi (un hook après un play KO n'a pas de sens). `RunResult`
@@ -4437,7 +4437,7 @@ def _run_path_engine(
                     # `_operator_kubeconfig` écarte `/dev/null`/vide (garde 0053) pour ne pas
                     # hériter d'un kubeconfig poison exporté dans le shell.
                     kubeconfig=_operator_kubeconfig() or ctx.kubeconfig_local,
-                    target_kind=topo.target_kind,
+                    stack_id=topo.stack_id,
                 )
 
             # 4. CALLBACK run_cni : la CNI (Cilium dans la VM) reste un artefact bash (ADR 0049).
@@ -4725,7 +4725,7 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict, stack_name: str)
                 # l'opérateur, comme run-phases.sh/lib.sh) ; transmis explicitement
                 # plutôt que laissé ambiant dans le sous-processus runner.
                 kubeconfig=os.environ.get("KUBECONFIG"),
-                target_kind=topo.target_kind,
+                stack_id=topo.stack_id,
             )
         except _runner.RunnerUnavailable as exc:
             raise _UsageError(str(exc)) from exc
@@ -4900,6 +4900,10 @@ def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
         )
     kubeconfig = os.environ.get("KUBECONFIG")
 
+    # bootstrap-seq est un chemin interne (appelé par run-phases.sh pendant `up`) : pas de
+    # `topo` en scope → l'identité vient de la stack active (symlink), comme la garde (ADR 0108).
+    stack_id = _active_stack_name(None) or ""
+
     def launch(playbook: str, extravars: dict):
         return _runner.launch_phase(
             playbook,
@@ -4908,7 +4912,7 @@ def cmd_bootstrap_seq(args: argparse.Namespace) -> int:
             inventory,
             ansible_config=ansible_cfg,
             kubeconfig=kubeconfig,
-            target_kind="bench",
+            stack_id=stack_id,
         )
 
     def run_cni() -> int:

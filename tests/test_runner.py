@@ -2,7 +2,7 @@
 
 On _stubbe_ l'indirection `_runner_run` (qui wrappe ansible_runner.run) : aucun
 play réel, aucun SSH, aucun cluster en CI. On vérifie le mapping rc/status et que
-les envvars (ANSIBLE_CONFIG/KUBECONFIG/EXPECTED_TARGET_KIND) + l'inventaire fourni
+les envvars (ANSIBLE_CONFIG/KUBECONFIG/EXPECTED_STACK_ID) + l'inventaire fourni
 sont bien passés (pas l'ambiant).
 """
 
@@ -55,10 +55,10 @@ class LaunchPhase(unittest.TestCase):
             "/d/inv",
             ansible_config="/d/project/bootstrap/ansible.cfg",
             kubeconfig="/home/u/.kube/config",
-            target_kind="bench",
+            stack_id="banc",
         )
         env = self.calls[0]["envvars"]
-        self.assertEqual(env["EXPECTED_TARGET_KIND"], "bench")
+        self.assertEqual(env["EXPECTED_STACK_ID"], "banc")
         self.assertEqual(env["ANSIBLE_CONFIG"], "/d/project/bootstrap/ansible.cfg")
         self.assertEqual(env["KUBECONFIG"], "/home/u/.kube/config")
 

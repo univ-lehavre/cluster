@@ -12,35 +12,34 @@
 #     vars:
 #       audit_log_playbook: <nom du playbook>
 
-# ── Garde-fou de cible Ansible (ADR 0053 (c)) ──────────────────────────────
-# Banc et prod déclarent les MÊMES groupes/noms d'hôtes (cp1/node1…) ; seul
-# `target_kind` (porté par l'inventaire au niveau du groupe `cloud`) les
-# distingue. On vérifie ICI, en pre_tasks et AVANT toute tâche distante, que la
-# topologie ciblée correspond à l'intention de l'invocation : EXPECTED_TARGET_KIND
-# (défaut `prod` — une invocation nue du RUNBOOK exige un inventaire prod ; le
-# banc préfixe EXPECTED_TARGET_KIND=bench). Un mauvais `-i` échoue alors
-# immédiatement, zéro tâche mutante (au lieu d'un faux-résultat silencieux,
-# ADR 0052). delegate_to localhost + run_once : un seul check côté poste, pas de
-# SSH ; changed_when:false (lecture). Les playbooks `localhost` (plateforme :
-# pas de groupe cloud, donc target_kind absent) sont tolérés via le défaut ''.
-- name: Assert the inventory target matches the intended topology
+# ── Garde-fou de cible Ansible par IDENTITÉ (ADR 0108) ─────────────────────
+# Deux instances déclarent les MÊMES groupes/noms d'hôtes (cp1/node1…) ; seul le
+# `stack_id` (porté par l'inventaire au niveau du groupe `cloud`, dérivé de la topo)
+# les distingue. On vérifie ICI, en pre_tasks et AVANT toute tâche distante, que
+# l'instance ciblée correspond à l'intention de l'invocation : EXPECTED_STACK_ID
+# (posé par nestor). Un mauvais `-i` (inventaire d'une AUTRE instance) échoue alors
+# immédiatement, zéro tâche mutante (au lieu d'un faux-résultat silencieux, ADR 0052).
+# PLUS de défaut `prod` : l'unité de garde est une identité, pas une catégorie — il
+# n'existe pas d'« instance par défaut ». delegate_to localhost + run_once : un seul
+# check côté poste, pas de SSH ; changed_when:false (lecture). Les playbooks `localhost`
+# (plateforme : pas de groupe cloud, donc stack_id absent) sont tolérés via le défaut ''.
+- name: Assert the inventory target matches the intended instance
   run_once: true
   delegate_to: localhost
   become: false
   ansible.builtin.assert:
     that:
       - >-
-        (target_kind | default('')) == ''
-        or (target_kind | default('')) == (lookup('env', 'EXPECTED_TARGET_KIND') | default('prod', true))
+        (stack_id | default('')) == ''
+        or (stack_id | default('')) == (lookup('env', 'EXPECTED_STACK_ID') | default(''))
     fail_msg: >-
       Cible Ansible INCOHÉRENTE : l'inventaire déclare
-      target_kind={{ target_kind | default('(absent)') }} mais l'intention est
-      {{ lookup('env', 'EXPECTED_TARGET_KIND') | default('prod', true) }}.
+      stack_id={{ stack_id | default('(absent)') }} mais l'intention est
+      {{ lookup('env', 'EXPECTED_STACK_ID') | default('(non posée)') }}.
       Lancer le geste via `nestor ansible <playbook>` (l'inventaire est dérivé de la
-      topologie active, ADR 0098) ; banc = bench/lima/.work/inventory.yaml
-      (target_kind: bench, EXPECTED_TARGET_KIND=bench).
+      topologie active et pose son stack_id + EXPECTED_STACK_ID, ADR 0098/0108).
     success_msg: >-
-      Cible confirmée : target_kind={{ target_kind | default('(localhost)') }}.
+      Cible confirmée : stack_id={{ stack_id | default('(localhost)') }}.
     quiet: true
   changed_when: false
 
