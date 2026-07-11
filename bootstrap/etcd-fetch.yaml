@@ -29,7 +29,7 @@
     etcd_fetch_dest: '{{ playbook_dir }}/../etcd-snapshots'
   pre_tasks:
     # Garde de cible (ADR 0053) : ce play SSHe sur le control plane → vérifier que
-    # l'inventaire vise bien la topologie attendue (EXPECTED_TARGET_KIND) AVANT toute
+    # l'inventaire vise bien la topologie attendue (EXPECTED_STACK_ID) AVANT toute
     # action distante. `nestor ansible` la pose ; sinon défaut `prod`.
     - name: Audit-log — record playbook execution
       ansible.builtin.import_role:

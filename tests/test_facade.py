@@ -117,35 +117,35 @@ def _capture(argv):
     return code, out.getvalue(), err.getvalue()
 
 
-# Topo BANC mono-nœud (target_kind: bench) : cp1 control+worker, local-path, AVEC une couche
+# Topo BANC mono-nœud (terrain local) : cp1 control+worker, local-path, AVEC une couche
 # applicative (storage-simple) déclarée → la séquence a un play unitaire (storage-simple) APRÈS
 # le socle (up, bootstrap). Le chemin du moteur Python se TESTE au banc mono-nœud (ADR 0097).
 _LIMA_SOLO = (
-    "catalog: {topology: solo}\n"
+    "catalog: {topology: solo, terrain: local}\n"
     "layers: [storage-simple]\n"
     "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-    "storage: {backend: local-path}\ntarget_kind: bench\n"
+    "storage: {backend: local-path}\n"
 )
 
 # Topo BANC à DEUX nœuds (cp choisi PARMI eux) : node-a worker, cp-b control. Sert à
 # prouver que `_path_context.cp` = 1er CONTROL (pas le 1er nœud), DÉRIVÉ, jamais `cp1` codé.
 _LIMA_CP_SECOND = (
-    "catalog: {topology: duo, profile: base}\n"
+    "catalog: {topology: duo, profile: base, terrain: local}\n"
     "nodes:\n"
     "  - {name: node-a, roles: [worker]}\n"
     "  - {name: cp-b, roles: [control, worker]}\n"
-    "storage: {backend: local-path}\ntarget_kind: bench\n"
+    "storage: {backend: local-path}\n"
 )
 
 
-# Topo PROD (target_kind: prod) avec bloc atlas multi-code-location — prouve que
+# Topo PROD (terrain baremetal) avec bloc atlas multi-code-location — prouve que
 # gitops-seed-citation route vers `_seed_do_prod` (garde `assert_prod_target`), pas le banc.
 _PROD_CITATION = (
-    "catalog: {topology: multi-node-4}\n"
+    "catalog: {topology: multi-node-4, terrain: baremetal}\n"
     "nodes:\n"
     "  - {name: dirqual1, roles: [control, worker]}\n"
     "  - {name: dirqual2, roles: [worker]}\n"
-    "storage: {backend: ceph}\ntarget_kind: prod\n"
+    "storage: {backend: ceph}\n"
     "atlas:\n"
     "  org_atlas: atlas\n"
     "  repo_atlas: atlas\n"
@@ -698,10 +698,11 @@ class SeedPhaseWiring(unittest.TestCase):
         return seen
 
     def test_gitops_seed_citation_prod_routes_to_seed_do_prod(self):
-        # ROUTING target_kind-aware (ADR 0095 §1.b) : en target_kind=prod, gitops-seed-citation
-        # route vers `_seed_do_prod` (app-of-apps multi-code-location dirqual) sous garde
-        # `assert_prod_target` — JAMAIS `_seed_do_banc_citation` / `_assert_target_identity`. Prouvé
-        # sans toucher au cluster (stubs), les 8 étapes prod jouées dans l'ordre.
+        # ROUTING terrain-aware (ADR 0095 §1.b, ADR 0108) : sur terrain non local (baremetal),
+        # gitops-seed-citation route vers `_seed_do_prod` (app-of-apps multi-code-location
+        # dirqual) sous garde `assert_prod_target` — JAMAIS `_seed_do_banc_citation` /
+        # `_assert_target_identity`. Prouvé sans toucher au cluster (stubs), les 8 étapes
+        # prod jouées dans l'ordre.
         prod_calls = []
         self._patch(cli, "assert_prod_target", lambda action, *a, **k: prod_calls.append(action))
 
@@ -1282,10 +1283,9 @@ class NodesOverrideEnrichment(unittest.TestCase):
         # Mono-nœud local-path (pas de disque déclaré) → 4e champ VIDE, un seul segment.
         topo = topology_from_dict(
             {
-                "catalog": {"topology": "solo"},
+                "catalog": {"topology": "solo", "terrain": "local"},
                 "nodes": [{"name": "cp1", "roles": ["control", "worker"]}],
                 "storage": {"backend": "local-path"},
-                "target_kind": "bench",
             }
         )
         # control+worker → `control` (le banc détaint) ; ressources = défauts (4/12/40).
@@ -1297,7 +1297,7 @@ class NodesOverrideEnrichment(unittest.TestCase):
         # (string nue → taille/rôle par défaut : 10GiB=data).
         topo = topology_from_dict(
             {
-                "catalog": {"topology": "multi-node-3"},
+                "catalog": {"topology": "multi-node-3", "terrain": "local"},
                 "nodes": [
                     {
                         "name": "node1",
@@ -1311,7 +1311,6 @@ class NodesOverrideEnrichment(unittest.TestCase):
                     {"name": "node3", "roles": ["worker", "storage"], "disks": ["vdb"]},
                 ],
                 "storage": {"backend": "ceph"},
-                "target_kind": "bench",
             }
         )
         self.assertEqual(
@@ -1325,7 +1324,7 @@ class NodesOverrideEnrichment(unittest.TestCase):
         # Une surcharge `nodes[].resources` prime dans le 3e champ (ressources PAR NŒUD).
         topo = topology_from_dict(
             {
-                "catalog": {"topology": "duo"},
+                "catalog": {"topology": "duo", "terrain": "local"},
                 "resources": {"cpus": 4, "memory": "12GiB", "disk": "40GiB"},
                 "nodes": [
                     {
@@ -1336,7 +1335,6 @@ class NodesOverrideEnrichment(unittest.TestCase):
                     {"name": "node1", "roles": ["worker"]},
                 ],
                 "storage": {"backend": "local-path"},
-                "target_kind": "bench",
             }
         )
         self.assertEqual(

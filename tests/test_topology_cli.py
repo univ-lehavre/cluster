@@ -40,7 +40,7 @@ cli = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(cli)
 
 # Sondes RÉELLES captées au chargement, AVANT tout stub de test — pour vérifier le
-# gating par target_kind (ADR 0084) indépendamment de l'ordre des tests (les setUp
+# gating par terrain (ADR 0084/0108) indépendamment de l'ordre des tests (les setUp
 # remplacent cli._real_vms/_ready_nodes ; ces références-ci restent les vraies).
 _PRISTINE_REAL_VMS = cli._real_vms
 _PRISTINE_READY_NODES = cli._ready_nodes
@@ -128,14 +128,14 @@ _EXAMPLE = os.path.join(_ROOT, "topologies", "socle.example.yaml")
 
 
 def _example_as_lima(test):
-    """Copie temporaire de _EXAMPLE forcée en `target_kind: bench` (nettoyée en cleanup).
+    """Copie temporaire de _EXAMPLE forcée en terrain `local` (nettoyée en cleanup).
 
     Les tests du comportement BANC (créer les VMs `up`, warning d'alignement shell,
-    délégation `run-phases.sh up`) doivent viser une topo lima : depuis ADR 0084, une
-    topo prod n'a plus la phase `up` ni le warning banc. _EXAMPLE est prod → on en dérive
-    une variante lima pour ces cas."""
+    délégation `run-phases.sh up`) doivent viser une topo lima : depuis ADR 0084/0108, une
+    topo prod (terrain non local) n'a plus la phase `up` ni le warning banc. _EXAMPLE est prod
+    (`terrain: baremetal`) → on flippe `catalog.terrain` vers `local` pour ces cas."""
     with open(_EXAMPLE, encoding="utf-8") as f:
-        body = f.read().replace("target_kind: prod", "target_kind: bench")
+        body = f.read().replace("terrain: baremetal", "terrain: local")
     path = _tmp(body)
     test.addCleanup(os.unlink, path)
     return path
@@ -144,21 +144,21 @@ def _example_as_lima(test):
 _INVALID_TOPO = """\
 catalog:
   topology: bancal
+  terrain: baremetal
 nodes:
   - name: x
     roles: [master]
-target_kind: prod
 """
 
 _HA_NO_VIP = """\
 catalog:
   topology: ha
+  terrain: baremetal
 nodes:
   - name: cp1
     roles: [control]
   - name: cp2
     roles: [control]
-target_kind: prod
 """
 
 
@@ -304,7 +304,7 @@ class Diff(unittest.TestCase):
         self.assertTrue(cli._PROD_INVENTORY.endswith("bootstrap/hosts.example.yaml"))
 
     def test_default_kind_and_against_resolve_to_prod(self):
-        # sans --kind ni --against, l'exemple (target_kind: prod) doit tenir
+        # sans --kind ni --against, l'exemple (terrain baremetal → rendu prod) doit tenir
         # l'invariant — garantit que le défaut de la cible CI est exécutable tel quel.
         code, out, _ = _capture(["artifact", "diff", "-f", _EXAMPLE])
         self.assertEqual(code, 0)
@@ -503,10 +503,10 @@ class Kubectl(unittest.TestCase):
     """`nestor kubectl …` : kubectl sur la cible de la stack active (ex-`nestor env`)."""
 
     _BANC_TOPO = (
-        "catalog: {topology: banc}\n"
+        "catalog: {topology: banc, terrain: local}\n"
         "layers: [storage-simple]\n"
         "nodes:\n  - {name: node1, roles: [control, worker]}\n"
-        "storage: {backend: local-path}\ntarget_kind: bench\n"
+        "storage: {backend: local-path}\n"
     )
 
     def _topo_file(self) -> str:
@@ -611,9 +611,9 @@ class Kubectl(unittest.TestCase):
         # PAS le banc — même si main() pose un défaut banc auto (_KUBECONFIG_AUTO_BENCH).
         # Régression : sinon `nestor kubectl` taperait le banc avec la prod sélectionnée.
         prod = (
-            "catalog: {topology: dirqual}\n"
+            "catalog: {topology: dirqual, terrain: baremetal}\n"
             "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
-            "storage: {backend: ceph}\ntarget_kind: prod\n"
+            "storage: {backend: ceph}\n"
             "kubeconfig: ~/.kube/dirqual.config\n"
         )
         fd, path = tempfile.mkstemp(suffix=".yaml")
@@ -730,11 +730,11 @@ class Ansible(unittest.TestCase):
     topologie (ADR 0098 — `hosts.yaml` supprimé, plus de fichier inventaire pointable)."""
 
     _PROD_TOPO = (
-        "catalog: {topology: dirqual}\n"
+        "catalog: {topology: dirqual, terrain: baremetal}\n"
         "nodes:\n"
         "  - {name: dirqual1, roles: [control, worker]}\n"
         "  - {name: dirqual2, roles: [worker]}\n"
-        "storage: {backend: ceph}\ntarget_kind: prod\n"
+        "storage: {backend: ceph}\n"
     )
 
     def _topo_file(self, body: str) -> str:
@@ -898,12 +898,11 @@ runs:
         # provisionnées hors nestor). preview ne ment plus (« VMs à créer : dirqual* »).
         cli._ready_nodes = lambda *_a, **_k: ["dirqual1", "dirqual2", "dirqual3", "dirqual4"]
         topo_yaml = (
-            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "catalog: {topology: multi-node-4, profile: dataops, terrain: baremetal}\n"
             "nodes:\n"
             "  - {name: dirqual1, roles: [control, worker]}\n"
             "  - {name: dirqual2, roles: [worker]}\n"
             "storage: {backend: ceph}\n"
-            "target_kind: prod\n"
             "kubeconfig: ~/.kube/dirqual.config\n"
         )
         path = _tmp(topo_yaml)
@@ -923,9 +922,9 @@ runs:
         # ADR 0090 : preview prod SANS `kubeconfig:` déclaré ne plante pas et ne ment
         # pas — il RÉORIENTE vers `stack select` (qui déclare/rapatrie la cible).
         topo_yaml = (
-            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "catalog: {topology: multi-node-4, profile: dataops, terrain: baremetal}\n"
             "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
-            "storage: {backend: ceph}\ntarget_kind: prod\n"  # PAS de kubeconfig:
+            "storage: {backend: ceph}\n"  # PAS de kubeconfig:
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -943,9 +942,9 @@ runs:
     def test_hyperconverged_node_annotated_in_voulu(self):
         # Section VOULU : un nœud control+worker s'affiche `<nom>+worker` (ex-status).
         topo_yaml = (
-            "catalog: {topology: hc, profile: base}\n"
+            "catalog: {topology: hc, profile: base, terrain: local}\n"
             "nodes:\n  - {name: node1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: bench\n"
+            "storage: {backend: local-path}\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -956,9 +955,9 @@ runs:
     def test_voulu_omits_storage_for_base_profile(self):
         # VOULU : profil base = k8s+CRI+CNI nus → PAS de ligne stockage (ADR 0039).
         topo_yaml = (
-            "catalog: {topology: b, profile: base}\n"
+            "catalog: {topology: b, profile: base, terrain: local}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: bench\n"  # backend déclaré mais inactif en base
+            "storage: {backend: ceph}\n"  # backend déclaré mais inactif en base
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -971,9 +970,9 @@ runs:
     def test_voulu_shows_storage_for_store_plus(self):
         # VOULU : un profil store+ (dataops) consomme du stockage → backend affiché.
         topo_yaml = (
-            "catalog: {topology: d, profile: dataops}\n"
+            "catalog: {topology: d, profile: dataops, terrain: local}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: bench\n"
+            "storage: {backend: ceph}\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -1063,11 +1062,11 @@ runs:
         self.assertIn("cp9", out)
 
     def test_prod_probes_return_empty_without_explicit_kubeconfig(self):
-        # ADR 0084 (issue #405) : pour `target_kind: prod` sans KUBECONFIG explicite, les
-        # sondes du RÉEL rendent [] — elles ne sondent PAS le banc Lima (limactl/kubectl
-        # banc). `_real_vms("prod")` court-circuite avant `limactl` ; `_ready_nodes("prod")`
-        # avant `kubectl` (KUBECONFIG absent / auto-banc). Test PUR : pas de subprocess à
-        # simuler (le gating retourne [] AVANT tout appel système).
+        # ADR 0084/0108 (issue #405) : sur terrain NON local (baremetal) sans KUBECONFIG
+        # explicite, les sondes du RÉEL rendent [] — elles ne sondent PAS le banc Lima
+        # (limactl/kubectl banc). `_real_vms("baremetal")` court-circuite avant `limactl` ;
+        # `_ready_nodes("baremetal")` avant `kubectl` (KUBECONFIG absent / auto-banc). Test PUR :
+        # pas de subprocess à simuler (le gating retourne [] AVANT tout appel système).
         os.environ.pop("KUBECONFIG", None)
         orig_auto = cli._KUBECONFIG_AUTO_BENCH
         cli._KUBECONFIG_AUTO_BENCH = True  # auto-export banc de main() ≠ intention prod
@@ -1075,8 +1074,8 @@ runs:
         # `_PRISTINE_*` : les vraies sondes captées au chargement du module (avant tout
         # stub) → indépendant de l'ordre des tests. En prod sans KUBECONFIG explicite,
         # le gating (ADR 0084) court-circuite AVANT limactl/kubectl → [].
-        self.assertEqual(_PRISTINE_REAL_VMS("prod"), [])
-        self.assertEqual(_PRISTINE_READY_NODES("prod"), [])
+        self.assertEqual(_PRISTINE_REAL_VMS("baremetal"), [])
+        self.assertEqual(_PRISTINE_READY_NODES("baremetal"), [])
 
     def test_never_launches(self):
         # preview est READ-ONLY : le runner ansible n'est JAMAIS appelé.
@@ -1101,10 +1100,9 @@ runs:
         self.addCleanup(setattr, cli._runner, "launch_phase", orig_launch)
         self.addCleanup(setattr, cli, "_fetch_kubeconfig", orig_fetch)
         topo_yaml = (
-            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "catalog: {topology: multi-node-4, profile: dataops, terrain: baremetal}\n"
             "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
             "storage: {backend: ceph}\n"
-            "target_kind: prod\n"
             "kubeconfig: ~/.kube/dirqual.config\n"
         )
         path = _tmp(topo_yaml)
@@ -1133,9 +1131,9 @@ runs:
         # incohérent reste un preset CEPH-ONLY (`storage-real`) sur une topo local-path →
         # erreur d'usage (code 2), comme `next`/`up`.
         topo_yaml = (
-            "catalog: {topology: lp, profile: base}\n"
+            "catalog: {topology: lp, profile: base, terrain: local}\n"
             "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: bench\n"
+            "storage: {backend: local-path}\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -1151,9 +1149,9 @@ runs:
         # #356 : topo local-path (banc.example), mais des SC ceph observées sur le cluster
         # → rook-ceph résiduel orphelin → preview AVERTIT (backend réel ≠ déclaré).
         topo = _tmp(
-            "catalog: {topology: t}\n"
+            "catalog: {topology: t, terrain: local}\n"
             "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
-            "storage: {backend: local-path}\ntarget_kind: bench\n"
+            "storage: {backend: local-path}\n"
         )
         self.addCleanup(os.unlink, topo)
         cli._ready_nodes = lambda *_a: ["node1"]  # cluster joignable → on sonde les SC
@@ -1169,9 +1167,9 @@ runs:
     def test_no_backend_drift_warning_when_cluster_down(self):
         # Aucun nœud Ready → on NE sonde pas les SC → pas de faux drift.
         topo = _tmp(
-            "catalog: {topology: t}\n"
+            "catalog: {topology: t, terrain: local}\n"
             "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
-            "storage: {backend: local-path}\ntarget_kind: bench\n"
+            "storage: {backend: local-path}\n"
         )
         self.addCleanup(os.unlink, topo)
         cli._ready_nodes = lambda *_a: []  # cluster down
@@ -1239,9 +1237,9 @@ runs:
         }
         self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
         topo_yaml = (
-            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "catalog: {topology: multi-node-4, profile: dataops, terrain: baremetal}\n"
             "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
-            "storage: {backend: ceph}\ntarget_kind: prod\n"
+            "storage: {backend: ceph}\n"
             "kubeconfig: ~/.kube/dirqual.config\n"
         )
         path = _tmp(topo_yaml)
@@ -1263,9 +1261,9 @@ runs:
         cli._observed_layers = lambda phases: set(phases)  # TOUTES les couches observées
         self.addCleanup(setattr, cli, "_observed_layers", orig_obs)
         topo_yaml = (
-            "catalog: {topology: multi-node-4, profile: dataops}\n"
+            "catalog: {topology: multi-node-4, profile: dataops, terrain: baremetal}\n"
             "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
-            "storage: {backend: ceph}\ntarget_kind: prod\n"
+            "storage: {backend: ceph}\n"
             "kubeconfig: ~/.kube/dirqual.config\n"
         )
         path = _tmp(topo_yaml)
@@ -1481,13 +1479,13 @@ class PreviewNextParityCLI(unittest.TestCase):
 catalog:
   topology: atlas-local
   profile: dataops
+  terrain: local
 nodes:
   - {name: cp1, roles: [control]}
   - {name: node1, roles: [worker]}
   - {name: node2, roles: [worker]}
 storage:
   backend: local-path
-target_kind: bench
 """
 
     def setUp(self):
@@ -1586,17 +1584,17 @@ class NextInventoryGuard(unittest.TestCase):
     """Garde de CIBLE ANSIBLE (ADR 0053) : `next` visant le banc REFUSE un inventaire
     prod AVANT de lancer ansible-runner. Régression de la faille `next dataops` → prod."""
 
-    # Topo banc (target_kind=bench) visant une couche applicative (dataops local-path).
+    # Topo banc (terrain local) visant une couche applicative (dataops local-path).
     _TOPO_LIMA = """\
 catalog:
   topology: banc
   profile: dataops
+  terrain: local
 nodes:
   - {name: node1, roles: [control, worker]}
   - {name: node2, roles: [worker]}
 storage:
   backend: local-path
-target_kind: bench
 """
     # Inventaire PROD résiduel (le cas exact de la faille) : identité d'une AUTRE
     # instance (`stack_id: dirqual` + transport ssh, ADR 0108), hôtes génériques
@@ -1622,7 +1620,7 @@ workers:
         # via ansible-runner (le chemin gardé).
         for name, val in (("_real_vms", ["node1", "node2"]), ("_ready_nodes", ["node1"])):
             orig = getattr(cli, name)
-            # ADR 0084 : les sondes prennent désormais `target_kind` → la lambda doit
+            # ADR 0084/0108 : les sondes prennent désormais `terrain` → la lambda doit
             # l'accepter (et l'ignorer), sinon l'arg positionnel écrase la valeur stubée.
             setattr(cli, name, lambda *_a, _v=val: _v)
             self.addCleanup(setattr, cli, name, orig)
@@ -1643,8 +1641,8 @@ workers:
         )
         self.addCleanup(setattr, cli._runner, "launch_phase", orig_lp)
         # Une topo lima vise `_BENCH_INVENTORY` : on y écrit un inventaire CONTAMINÉ par
-        # des hôtes PROD (target_kind prod, cp1/node1) pour prouver que la garde refuse
-        # même via le chemin banc (sauvegarde/restaure l'existant du banc réel).
+        # des hôtes d'une AUTRE instance (`stack_id: dirqual`, cp1/node1) pour prouver que la
+        # garde refuse même via le chemin banc (sauvegarde/restaure l'existant du banc réel).
         self._inv = cli._BENCH_INVENTORY
         self._backup = self._inv + ".test-backup"
         os.makedirs(os.path.dirname(self._inv), exist_ok=True)
@@ -1662,8 +1660,8 @@ workers:
         self.addCleanup(setattr, cli, name, orig)
 
     def test_lima_topo_refuses_prod_contaminated_inventory(self):
-        # Garde en aval : même si l'inventaire banc est contaminé par des hôtes prod,
-        # la garde target_kind refuse (filet ultime, indépendant du choix d'inventaire).
+        # Garde en aval : même si l'inventaire banc est contaminé par des hôtes d'une autre
+        # instance, la garde d'identité refuse (filet ultime, indépendant du choix d'inventaire).
         topo = _tmp(self._TOPO_LIMA)
         hist = _tmp("runs: []\n")
         self.addCleanup(os.unlink, topo)
@@ -1713,13 +1711,13 @@ class NextMenu(unittest.TestCase):
 catalog:
   topology: atlas-local
   profile: dataops
+  terrain: local
 nodes:
   - {name: cp1, roles: [control]}
   - {name: node1, roles: [worker]}
   - {name: node2, roles: [worker]}
 storage:
   backend: local-path
-target_kind: bench
 """
     # Socle local-path fait (up+bootstrap), rien d'autre → le menu doit proposer
     # storage-simple (défaut) ET metrics-server.
@@ -1768,7 +1766,7 @@ runs:
         orig_safe = cli._assert_inventory_safe
         cli._assert_inventory_safe = lambda *a, **k: None
         self.addCleanup(setattr, cli, "_assert_inventory_safe", orig_safe)
-        # Les topos de NextMenu sont `target_kind: bench` → `_inventory_for` renvoie
+        # Les topos de NextMenu sont en terrain `local` → `_inventory_for` renvoie
         # l'inventaire BANC (`_BENCH_INVENTORY`), pas bootstrap/hosts.yaml. On garantit
         # sa présence (absent en CI où le banc n'existe pas) — créé puis retiré, en
         # sauvegardant un éventuel inventaire banc réel (poste dev).
@@ -2113,9 +2111,9 @@ runs:
         # PAR DÉFAUT (-f pointe une topo), metrics ne montre QUE les runs de CETTE stack
         # (filtre par `stack_id` = nom de fichier, ADR 0102 volet B) — pas tout l'historique.
         topo = _tmp(
-            "catalog: {topology: multi-node-3, profile: base}\n"
+            "catalog: {topology: multi-node-3, profile: base, terrain: local}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: bench\n"
+            "storage: {backend: ceph}\n"
         )
         self.addCleanup(os.unlink, topo)
         stack = cli._stack_id(topo)  # nom de fichier du temp (identité, pas catalog.topology)
@@ -2141,9 +2139,9 @@ runs:
         )
         self.addCleanup(os.unlink, hist)
         topo = _tmp(
-            "catalog: {topology: absente, profile: base}\n"
+            "catalog: {topology: absente, profile: base, terrain: local}\n"
             "nodes:\n  - {name: cp1, roles: [control]}\n"
-            "storage: {backend: ceph}\ntarget_kind: bench\n"
+            "storage: {backend: ceph}\n"
         )
         self.addCleanup(os.unlink, topo)
         code, out, _ = _capture(["artifact", "metrics", "--history", hist, "-f", topo])
@@ -2308,10 +2306,12 @@ class Stack(unittest.TestCase):
 
     def test_create_ha_via_answers_inserts_lb(self):
         # 3 CP fournis via stdin → l'assistant demande le mode LB, puis « activer ? » (non).
+        # Ordre des prompts (scaffold, ADR 0108) : profil, backend, terrain, control_planes,
+        # workers, lb_mode (car HA), puis « activer ? ».
         name = "zz-test-ctx-ha"
         target = self._catalog(name)
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
-        answers = "base\nlocal-path\nlocal\nbench\n3\n0\nkube-vip-arp\nn\n"
+        answers = "base\nlocal-path\nlocal\n3\n0\nkube-vip-arp\nn\n"
         with (
             contextlib.redirect_stdout(io.StringIO()),
             contextlib.redirect_stderr(io.StringIO()),
@@ -2407,9 +2407,9 @@ class Stack(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
         with open(target, "w", encoding="utf-8") as f:
             f.write(
-                "catalog: {topology: multi-node-4, profile: dataops}\n"
+                "catalog: {topology: multi-node-4, profile: dataops, terrain: baremetal}\n"
                 "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
-                "storage: {backend: ceph}\ntarget_kind: prod\n"
+                "storage: {backend: ceph}\n"
             )
         # Pas de banc ET pas de KUBECONFIG hérité (sinon `_default_kubeconfig_to_bench`
         # ou un env pollué sauterait la branche « topo sans kubeconfig »). On force les
@@ -2436,9 +2436,9 @@ class Stack(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(target) and os.unlink(target))
         with open(target, "w", encoding="utf-8") as f:
             f.write(
-                "catalog: {topology: multi-node-4, profile: dataops}\n"
+                "catalog: {topology: multi-node-4, profile: dataops, terrain: baremetal}\n"
                 "nodes:\n  - {name: dirqual1, roles: [control, worker]}\n"
-                "storage: {backend: ceph}\ntarget_kind: prod\n"
+                "storage: {backend: ceph}\n"
             )
         # Le résidu à ignorer = le banc de la stack ACTIVE. `stack select` REPOINTE le symlink
         # AVANT `_select_prod_kubeconfig`, donc la stack active y est déjà `name` : le résidu
@@ -2515,8 +2515,8 @@ class UpCommand(unittest.TestCase):
         # du graphe atomique. socle.example (ceph) dérive bootstrap,ceph,sc,datalake,…
         self.assertEqual(calls[0]["target"], "layers")
         seq = calls[0]["seq"]
-        # _EXAMPLE est `target_kind: prod` → PAS de phase `up` (nœuds baremetal
-        # préexistants, ADR 0084) : le socle prod commence à `bootstrap`.
+        # _EXAMPLE est en terrain `baremetal` (non local) → PAS de phase `up` (nœuds
+        # préexistants, ADR 0084/0108) : le socle prod commence à `bootstrap`.
         self.assertNotIn("up", seq)
         self.assertEqual(seq[0], "bootstrap")
         self.assertIn("ceph", seq)  # backend ceph → socle ceph dans la séquence
@@ -2553,9 +2553,9 @@ class UpCommand(unittest.TestCase):
         # vrai cas incohérent reste un preset CEPH-ONLY (`storage-real`) sur une topo
         # local-path → PlanError → usage (2), avant tout montage.
         topo_yaml = (
-            "catalog: {topology: lp, profile: base}\n"
+            "catalog: {topology: lp, profile: base, terrain: local}\n"
             "nodes:\n  - {name: cp1, roles: [control, worker]}\n"
-            "storage: {backend: local-path}\ntarget_kind: bench\n"
+            "storage: {backend: local-path}\n"
         )
         path = _tmp(topo_yaml)
         self.addCleanup(os.unlink, path)
@@ -3012,6 +3012,7 @@ class Refresh(unittest.TestCase):
 catalog:
   topology: banc
   profile: dataops
+  terrain: local
   status: cible
 nodes:
   - name: node1
@@ -3023,7 +3024,6 @@ nodes:
       - worker
 storage:
   backend: local-path
-target_kind: bench
 """
 
     # Couches du profil dataops résolues en phases (== ce que resolve_layers rend).
@@ -3110,10 +3110,10 @@ target_kind: bench
 
     # Topo avec une liste `layers:` LITTÉRALE (pour --prune) : monitoring y est écrit.
     _TOPO_LAYERS = (
-        "catalog: {topology: banc, profile: dataops}\n"
+        "catalog: {topology: banc, profile: dataops, terrain: local}\n"
         "nodes: [{name: node1, roles: [control, worker]}, {name: node2, roles: [worker]}]\n"
         "layers: [metrics-server, monitoring]\n"
-        "storage: {backend: local-path}\ntarget_kind: bench\n"
+        "storage: {backend: local-path}\n"
     )
 
     def test_prune_removes_absent_layer(self):
@@ -3480,14 +3480,13 @@ class RollbackNodeSideCeph(unittest.TestCase):
         # Topo ceph 3-nœuds EN MÉMOIRE (pas topologies/ceph.yaml, gitignoré → absent en CI).
         return topology_from_dict(
             {
-                "catalog": {"topology": "multi-node-3"},
+                "catalog": {"topology": "multi-node-3", "terrain": "local"},
                 "nodes": [
                     {"name": "node1", "roles": ["control", "worker", "storage"]},
                     {"name": "node2", "roles": ["worker", "storage"]},
                     {"name": "node3", "roles": ["worker", "storage"]},
                 ],
                 "storage": {"backend": "ceph"},
-                "target_kind": "bench",
             }
         )
 
@@ -3547,7 +3546,7 @@ class FetchKubeconfig(unittest.TestCase):
         "    context:\n      cluster: kubernetes\n      user: kubernetes-admin\n"
         "current-context: kubernetes-admin@kubernetes\n"
     )
-    _INV = "cloud:\n  vars:\n    target_kind: bench\ncontrol:\n  hosts:\n    node1: {}\n"
+    _INV = "cloud:\n  vars:\n    stack_id: banc\ncontrol:\n  hosts:\n    node1: {}\n"
 
     def test_fetches_rewrites_and_writes(self):
         inv = _tmp(self._INV)
@@ -3596,7 +3595,7 @@ class FetchKubeconfig(unittest.TestCase):
 class DiscoverNodeside(unittest.TestCase):
     """ADR 0081 étape 3 : _discover_nodeside sonde le node-side via node_exec (sans nœud)."""
 
-    _INV = "cloud:\n  vars:\n    target_kind: bench\ncontrol:\n  hosts:\n    node1: {}\n"
+    _INV = "cloud:\n  vars:\n    stack_id: banc\ncontrol:\n  hosts:\n    node1: {}\n"
 
     def _stub_probes(self, table):
         # table: argv-clé (1er mot après 'sh -c' ou la commande) → stdout. None = injoignable.

@@ -104,35 +104,35 @@ class NeedsRepatriation(unittest.TestCase):
 
 class AddKubeconfigField(unittest.TestCase):
     def test_appends_when_absent(self):
-        src = "catalog:\n  topology: dirqual\ntarget_kind: prod\n"
+        src = "catalog:\n  topology: dirqual\n  terrain: baremetal\n"
         out = add_kubeconfig_field(src, "~/.kube/dirqual.config")
         self.assertIn("kubeconfig: ~/.kube/dirqual.config", out)
-        self.assertIn("target_kind: prod", out)  # le reste préservé
+        self.assertIn("terrain: baremetal", out)  # le reste préservé
 
     def test_replaces_commented_placeholder(self):
         # un placeholder `# kubeconfig: …` (comme dans socle.example) est remplacé,
         # pas dupliqué.
-        src = "target_kind: prod\n# kubeconfig: ~/.kube/socle.config\n"
+        src = "catalog:\n  terrain: baremetal\n# kubeconfig: ~/.kube/socle.config\n"
         out = add_kubeconfig_field(src, "~/.kube/dirqual.config")
         self.assertEqual(out.count("kubeconfig:"), 1)
         self.assertIn("kubeconfig: ~/.kube/dirqual.config", out)
         self.assertNotIn("# kubeconfig:", out)
 
     def test_replaces_active_line(self):
-        src = "target_kind: prod\nkubeconfig: ~/.kube/old.config\n"
+        src = "catalog:\n  terrain: baremetal\nkubeconfig: ~/.kube/old.config\n"
         out = add_kubeconfig_field(src, "~/.kube/new.config")
         self.assertEqual(out.count("kubeconfig:"), 1)
         self.assertIn("~/.kube/new.config", out)
         self.assertNotIn("old.config", out)
 
     def test_idempotent(self):
-        src = "target_kind: prod\n"
+        src = "catalog:\n  terrain: baremetal\n"
         once = add_kubeconfig_field(src, "~/.kube/dirqual.config")
         twice = add_kubeconfig_field(once, "~/.kube/dirqual.config")
         self.assertEqual(once, twice)
 
     def test_preserves_comments(self):
-        src = "# topo réelle (ADR 0023)\ncatalog:\n  topology: dirqual\ntarget_kind: prod\n"
+        src = "# topo réelle (ADR 0023)\ncatalog:\n  topology: dirqual\n  terrain: baremetal\n"
         out = add_kubeconfig_field(src, "~/.kube/dirqual.config")
         self.assertIn("# topo réelle (ADR 0023)", out)
 

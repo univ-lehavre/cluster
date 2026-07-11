@@ -27,9 +27,7 @@ class Plan(unittest.TestCase):
     """context_plan : décide CE QU'IL FAUT poser, PUR (pas d'I/O)."""
 
     def test_lima_targets_bench_kubeconfig(self):
-        plan = kc.context_plan(
-            "banc", kubeconfig=None, target_kind="bench", bench_kubeconfig=_BENCH
-        )
+        plan = kc.context_plan("banc", kubeconfig=None, terrain="local", bench_kubeconfig=_BENCH)
         self.assertEqual(plan.name, "banc")
         self.assertEqual(plan.kubeconfig, _BENCH)
         self.assertEqual(plan.cluster, "banc")
@@ -39,7 +37,7 @@ class Plan(unittest.TestCase):
         plan = kc.context_plan(
             "dirqual",
             kubeconfig="~/.kube/dirqual.config",
-            target_kind="prod",
+            terrain="baremetal",
             bench_kubeconfig=_BENCH,
         )
         self.assertEqual(plan.kubeconfig, os.path.expanduser("~/.kube/dirqual.config"))
@@ -47,12 +45,12 @@ class Plan(unittest.TestCase):
 
     def test_prod_without_kubeconfig_raises(self):
         with self.assertRaises(kc.ContextError):
-            kc.context_plan("dirqual", kubeconfig=None, target_kind="prod", bench_kubeconfig=_BENCH)
+            kc.context_plan(
+                "dirqual", kubeconfig=None, terrain="baremetal", bench_kubeconfig=_BENCH
+            )
 
     def test_set_context_argv_is_idempotent_set_context(self):
-        plan = kc.context_plan(
-            "banc", kubeconfig=None, target_kind="bench", bench_kubeconfig=_BENCH
-        )
+        plan = kc.context_plan("banc", kubeconfig=None, terrain="local", bench_kubeconfig=_BENCH)
         argv = plan.set_context_argv()
         self.assertEqual(argv[:3], ["kubectl", "config", "set-context"])
         self.assertIn("banc", argv)

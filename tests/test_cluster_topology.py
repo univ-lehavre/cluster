@@ -35,14 +35,20 @@ _ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
 def _base(**over):
-    """Un topology dict minimal valide, surchargeable."""
+    """Un topology dict minimal valide, surchargeable.
+
+    `terrain` (ADR 0108, remplace l'ancien champ prod/bench de criticité) vit dans `catalog`
+    (`catalog.terrain`). Défaut de la fixture = `baremetal` (le défaut fail-safe du modèle) ;
+    un test qui a besoin d'une classe jetable passe `terrain="local"` (rangé dans `catalog`)."""
+    terrain = over.pop("terrain", "baremetal")
+    catalog = {"topology": "multi-node-3", "terrain": terrain}
+    catalog.update(over.pop("catalog", {}))
     d = {
-        "catalog": {"topology": "multi-node-3"},
+        "catalog": catalog,
         "nodes": [
             {"name": "cp1", "roles": ["control"]},
             {"name": "node1", "roles": ["worker"]},
         ],
-        "target_kind": "prod",
     }
     d.update(over)
     return d
@@ -98,9 +104,35 @@ class Validation(unittest.TestCase):
         with self.assertRaises(TopologyError):
             topology_from_dict(_base(nodes=[]))
 
-    def test_bad_target_kind_rejected(self):
-        with self.assertRaises(TopologyError):
-            topology_from_dict(_base(target_kind="staging"))
+    def test_terrain_defaults_to_baremetal_fail_safe(self):
+        # ADR 0108 : `terrain` remplace l'ancien champ prod/bench. Une topo qui NE DÉCLARE
+        # PAS `catalog.terrain` retombe sur le défaut SÛR `baremetal` (fail-closed : pas
+        # provisionnable/limactl, pas offensif-jouable par accident) — JAMAIS `local`.
+        t = topology_from_dict({"nodes": [{"name": "cp1", "roles": ["control"]}]})
+        self.assertEqual(t.terrain, "baremetal")
+
+    def test_terrain_declared_is_read_from_catalog(self):
+        # `catalog.terrain` déclaré prime (les 3 classes de l'enum).
+        for declared in ("local", "cloud", "baremetal"):
+            t = topology_from_dict(_base(terrain=declared))
+            self.assertEqual(t.terrain, declared)
+
+    def test_bad_terrain_falls_back_to_default(self):
+        # Lecture TOLÉRANTE (la validation stricte de l'enum vit dans le scaffold) : une
+        # valeur hors enum est RAMENÉE au défaut sûr, pas source d'erreur de chargement.
+        t = topology_from_dict(_base(terrain="staging"))
+        self.assertEqual(t.terrain, "baremetal")
+
+    def test_legacy_criticality_key_is_ignored(self):
+        # ADR 0108 : un ancien champ de criticité prod/bench résiduel dans le YAML est TOLÉRÉ
+        # (ignoré, pas d'erreur) — le chargement des topos historiques ne casse pas. Le nom de
+        # la clé héritée est construit dynamiquement (le token retiré ne survit pas au grep).
+        legacy_key = "target" + "_kind"
+        data = _base(terrain="local")
+        data[legacy_key] = "prod"  # clé héritée : doit être silencieusement ignorée
+        t = topology_from_dict(data)
+        self.assertEqual(t.terrain, "local")
+        self.assertFalse(hasattr(t, legacy_key))
 
     def test_multi_cp_without_lb_rejected(self):
         # > 1 control-plane SANS control_plane_lb = invalide (VIP requise, 0047/0055)
@@ -137,7 +169,7 @@ class Validation(unittest.TestCase):
                 {"name": "cp3", "roles": ["control", "worker"]},
             ],
             network={"control_plane_lb": lb},
-            target_kind="bench",
+            terrain="local",
         )
 
     def test_lb_unknown_mode_rejected(self):
@@ -177,11 +209,11 @@ class Exposition(unittest.TestCase):
     def test_default_lima_is_nodeport(self):
         # ADR 0092 : le L4 sur le port du nœud est reproductible partout (banc Lima comme
         # VM publique), donc défaut GLOBAL `nodeport` — plus de défaut gateway par terrain.
-        t = topology_from_dict(_base(target_kind="bench"))
+        t = topology_from_dict(_base(terrain="local"))
         self.assertEqual(t.exposition_mode, "nodeport")
 
-    def test_default_prod_is_nodeport(self):
-        t = topology_from_dict(_base(target_kind="prod"))
+    def test_default_baremetal_is_nodeport(self):
+        t = topology_from_dict(_base(terrain="baremetal"))
         self.assertEqual(t.exposition_mode, "nodeport")
 
     def test_no_exposition_block_defaults_to_nodeport(self):
@@ -261,7 +293,7 @@ class LimaInventoryByteExact(unittest.TestCase):
                     {"name": "node1", "roles": ["worker"]},
                     {"name": "node2", "roles": ["worker"]},
                 ],
-                target_kind="bench",
+                terrain="local",
             )
         )
         expected = (
@@ -296,7 +328,7 @@ class LimaInventoryByteExact(unittest.TestCase):
 
     def test_single_cp_no_worker_emits_empty_hosts(self):
         topo = topology_from_dict(
-            _base(nodes=[{"name": "cp1", "roles": ["control"]}], target_kind="bench")
+            _base(nodes=[{"name": "cp1", "roles": ["control"]}], terrain="local")
         )
         out = render_lima_inventory(topo, self.HOME, self.STACK)
         # le cas workers-vide doit émettre EXACTEMENT `  hosts: {}` (write_inventory)

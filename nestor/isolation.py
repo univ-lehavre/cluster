@@ -11,7 +11,7 @@ sur l'instance massive en service).
 Ce module est PUR : il CLASSE un inventaire déjà chargé (dict YAML) + l'IDENTITÉ visée
 (`stack_id` de la topo) en un verdict. La LECTURE du fichier et le REFUS restent à la
 façade. Le marqueur de vérité est l'`stack_id` porté par le groupe `cloud` de
-l'inventaire (ADR 0108, remplaçant l'ancien `target_kind` de catégorie) : chaque
+l'inventaire (ADR 0108, remplaçant l'ancien champ prod/bench de catégorie) : chaque
 inventaire est DÉRIVÉ d'une topo, il porte donc l'identité de CETTE instance. Défaut
 prudent : un inventaire SANS marqueur, ou dont les hôtes ne sont pas tous locaux, est
 traité comme non prouvé (fail-closed). Le TRANSPORT (limactl/ssh) est porté par un
@@ -52,7 +52,7 @@ def _inventory_transport(inventory: dict) -> str | None:
 
     Marqueur DÉDIÉ de l'ADR 0108, distinct de l'identité : il dit COMMENT atteindre les
     nœuds (limactl pour une classe locale, SSH direct sinon), pas QUI ils sont. Séparer ce
-    signal de l'identité évite que la disparition de `target_kind` ne perde le transport."""
+    signal de l'identité évite que la disparition du champ prod/bench ne perde le transport."""
     return _inventory_group_var(inventory, "transport")
 
 
@@ -259,7 +259,7 @@ def resolve_node_target(inventory: dict, node: str) -> NodeTarget:
     """Résout `node` → `NodeTarget` depuis l'inventaire (PUR, ADR 0081, 0108).
 
     Le transport est DÉRIVÉ du marqueur `transport:` DÉDIÉ de l'inventaire (ADR 0108,
-    `lima` → `limactl shell` ; sinon `ssh` direct) — plus de l'ancien `target_kind` : le
+    `lima` → `limactl shell` ; sinon `ssh` direct) — plus de l'ancien champ prod/bench : le
     transport est un signal propre (comment atteindre), distinct de l'identité (qui). Un
     inventaire sans marqueur `transport` retombe sur `ssh` (défaut prudent : le SSH direct
     vaut pour toute classe sur nœuds préexistants). Coordonnées prises sur l'hôte

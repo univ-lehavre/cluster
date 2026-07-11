@@ -23,9 +23,10 @@ from nestor.model import topology_from_dict  # noqa: E402
 def _topo(**over):
     """Topology minimale valide, surchargeable (blocs gitea/atlas)."""
     d = {
-        "catalog": {"topology": "t"},
+        # ADR 0108 : la classe matérielle vit dans `catalog.terrain` (`local` = ex-banc) ;
+        # l'ancien champ prod/bench de criticité est retiré du modèle.
+        "catalog": {"topology": "t", "terrain": "local"},
         "nodes": [{"name": "n1", "roles": ["control", "worker"]}],
-        "target_kind": "bench",
     }
     d.update(over)
     return topology_from_dict(d)

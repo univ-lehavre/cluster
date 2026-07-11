@@ -87,21 +87,23 @@ def context_plan(
     name: str,
     *,
     kubeconfig: str | None,
-    target_kind: str,
+    terrain: str,
     bench_kubeconfig: str,
 ) -> ContextPlan:
-    """Décide le contexte à poser pour la topologie `name` (PUR, LOT 8).
+    """Décide le contexte à poser pour la topologie `name` (PUR, LOT 8, ADR 0108).
 
-    - PROD (`target_kind != "bench"`) : la cible est le `kubeconfig:` DÉCLARÉ (ADR 0090).
-      Absent → `ContextError` (on ne devine pas une cible prod ; `stack select` complète
-      déjà le champ). `~` est expansé.
-    - BANC (`target_kind == "bench"`) : la cible est le kubeconfig du banc Lima
-      (`bench_kubeconfig`, écrit par le montage). On ne vérifie PAS son existence ici
+    Gaté sur la CLASSE MATÉRIELLE (`Topology.terrain`) et non plus sur l'ancien champ
+    prod/bench de criticité (ADR 0108 : ce champ est retiré du modèle) :
+    - PROD (`terrain != "local"` — `cloud`/`baremetal`) : la cible est le `kubeconfig:`
+      DÉCLARÉ (ADR 0090). Absent → `ContextError` (on ne devine pas une cible prod ;
+      `stack select` complète déjà le champ). `~` est expansé.
+    - BANC (`terrain == "local"` — banc Lima jetable) : la cible est le kubeconfig du banc
+      Lima (`bench_kubeconfig`, écrit par le montage). On ne vérifie PAS son existence ici
       (logique pure) — l'I/O `apply_context` le fera.
 
     Les noms cluster/user dérivent du nom de la topologie (uniques, parité
     `nestor.kubeconfig._rename_identifiers`)."""
-    if target_kind == "bench":
+    if terrain == "local":
         source = bench_kubeconfig
     elif kubeconfig:
         source = os.path.expanduser(kubeconfig)

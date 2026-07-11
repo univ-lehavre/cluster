@@ -4,8 +4,9 @@ Un *scénario* (`bench/scenarios/NN-*.sh`) est une **épreuve** passée à un ba
 déjà monté — il **requiert** une catégorie, une topologie (mono/multi/agnostique)
 et un terrain (SSH hôte, offensif…). L'outil **FILTRE** ce catalogue selon
 l'intention déclarée (`topology.yaml` : profil, backend, nombre de nœuds,
-target_kind) et liste ce qui est **jouable**. Il n'en LANCE aucun (lancer relève
-de P5 / ansible-runner) : la frontière du palier est *décrire et filtrer*.
+classe matérielle `catalog.terrain`) et liste ce qui est **jouable**. Il n'en
+LANCE aucun (lancer relève de P5 / ansible-runner) : la frontière du palier est
+*décrire et filtrer*.
 
 `EPREUVES` est le **miroir machine** de la table prose
 `docs/architecture/matrice-catalogue.md §2` ; la classification destructif /
@@ -27,8 +28,11 @@ from nestor.model import Topology
 from nestor.profile import required_profiles
 
 # Terrains particuliers (run-all.sh) : un scénario offensif ne se joue que sur un
-# banc jetable, JAMAIS en prod (ADR 0025) ; un scénario SSH/etcdctl exige l'accès
-# hôte (hors périmètre d'un simple `topology.yaml`, mais jouable sur un banc).
+# banc jetable (`catalog.terrain == "local"`), JAMAIS sur un terrain non jetable
+# (cloud/baremetal, ADR 0025/0108) ; un scénario SSH/etcdctl exige l'accès hôte
+# (hors périmètre d'un simple `topology.yaml`, mais jouable sur un banc).
+# NB : le `terrain` de l'Epreuve (offensif/ssh/api) et le `terrain` de la Topology
+# (classe matérielle local/cloud/baremetal) sont deux dimensions HOMONYMES distinctes.
 TERRAIN_AGNOSTIQUE = "—"
 TERRAIN_SSH = "ssh"  # SSH hôte / etcdctl / state.sh
 TERRAIN_OFFENSIF = "offensif"  # offensif ou chaos host-side (BANC=1, ADR 0025)
@@ -467,8 +471,9 @@ def epreuve_jouable(ep: Epreuve, topo: Topology) -> tuple[bool, str | None]:
     """Verdict (jouable, raison-d'exclusion) d'une épreuve face à une topologie.
 
     On filtre sur l'INTENTION déclarée — profil cumulatif, backend de stockage,
-    nombre de nœuds, et l'interdit prod des épreuves offensives (ADR 0025). On NE
-    constate PAS l'état réel du cluster (ça, c'est le lancement, P5).
+    nombre de nœuds, et l'interdit des épreuves offensives hors terrain jetable
+    (`catalog.terrain == "local"`, ADR 0025/0108). On NE constate PAS l'état réel
+    du cluster (ça, c'est le lancement, P5).
     """
     profil_topo = topo.catalog.get("profile", "base")
     backend = topo.storage.get("backend", "local-path")
@@ -477,7 +482,7 @@ def epreuve_jouable(ep: Epreuve, topo: Topology) -> tuple[bool, str | None]:
 
     if ep.statut == "caduc":
         return False, f"caduc — {ep.raison_caduc or 'sans terrain'}"
-    if ep.terrain == TERRAIN_OFFENSIF and topo.target_kind == "prod":
+    if ep.terrain == TERRAIN_OFFENSIF and topo.terrain != "local":
         return False, "offensif — interdit hors banc jetable (ADR 0025)"
     if not _profil_couvre(ep.profil_min, profil_topo):
         return False, f"profil `{profil_topo}` ne couvre pas `{ep.profil_min}` (ADR 0039)"

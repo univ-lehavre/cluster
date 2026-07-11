@@ -36,10 +36,9 @@ def _topo(profile="dataops", backend="ceph", hardening=None, nodes=None):
         {"name": "node2", "roles": ["worker"]},
     ]
     d = {
-        "catalog": {"topology": "t", "profile": profile},
+        "catalog": {"topology": "t", "profile": profile, "terrain": "local"},
         "nodes": nodes,
         "storage": {"backend": backend},
-        "target_kind": "bench",
     }
     if hardening:
         d["hardening"] = hardening
@@ -114,14 +113,13 @@ class ExpectedSequence(unittest.TestCase):
         self.assertEqual(seq[:3], ["up", "bootstrap", "storage-simple"])
 
     def test_prod_target_skips_up(self):
-        # ADR 0084 : en `target_kind: prod`, les nœuds baremetal PRÉEXISTENT → pas de
-        # phase `up` (provisioning VM limactl) ; le socle commence à `bootstrap`.
+        # ADR 0084/0108 : sur un terrain non local (baremetal), les nœuds PRÉEXISTENT → pas
+        # de phase `up` (provisioning VM limactl) ; le socle commence à `bootstrap`.
         prod = topology_from_dict(
             {
-                "catalog": {"topology": "p", "profile": "base"},
+                "catalog": {"topology": "p", "profile": "base", "terrain": "baremetal"},
                 "nodes": [{"name": "n1", "roles": ["control", "worker"]}],
                 "storage": {"backend": "ceph"},
-                "target_kind": "prod",
             }
         )
         seq = expected_phase_sequence(prod, "socle")
@@ -164,11 +162,10 @@ class TargetValidation(unittest.TestCase):
     def _topo_layers(self, layers, backend="local-path"):
         return topology_from_dict(
             {
-                "catalog": {"topology": "t"},
+                "catalog": {"topology": "t", "terrain": "local"},
                 "layers": layers,
                 "nodes": [{"name": "cp1", "roles": ["control", "worker"]}],
                 "storage": {"backend": backend},
-                "target_kind": "bench",
             }
         )
 
@@ -225,7 +222,7 @@ class TargetValidation(unittest.TestCase):
         # voie 2 : chemin d'exécution HA supprimé, commit fd04ee0).
         return topology_from_dict(
             {
-                "catalog": {"topology": "ha", "profile": "base"},
+                "catalog": {"topology": "ha", "profile": "base", "terrain": "local"},
                 "nodes": [
                     {"name": "cp1", "roles": ["control", "worker"]},
                     {"name": "cp2", "roles": ["control", "worker"]},
@@ -233,7 +230,6 @@ class TargetValidation(unittest.TestCase):
                 ],
                 "network": {"control_plane_lb": {"mode": "kube-vip-arp"}},
                 "storage": {"backend": "local-path"},
-                "target_kind": "bench",
             }
         )
 

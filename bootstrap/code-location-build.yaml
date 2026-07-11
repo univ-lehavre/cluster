@@ -29,11 +29,11 @@
     cl_src_dir: '{{ citation_repo_dir }}/dataops/{{ code_location }}-dagster'
     cl_dbt_dir: '{{ citation_repo_dir }}/dataops/{{ code_location }}-dbt'
   # GARDE D'ISOLATION (ADR 0053) : SSH sur les nœuds + push registry → vérifie
-  # EXPECTED_TARGET_KIND via audit-log AVANT toute tâche distante. force_handlers : filet
+  # EXPECTED_STACK_ID via audit-log AVANT toute tâche distante. force_handlers : filet
   # restart containerd même si un build échoue (incident 2026-06-16, parité citation).
   force_handlers: true
   pre_tasks:
-    - name: Audit-log — record playbook execution (+ garde target_kind)
+    - name: Audit-log — record playbook execution (+ garde d'identité stack_id)
       ansible.builtin.import_role:
         name: audit-log
       vars:

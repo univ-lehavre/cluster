@@ -27,6 +27,7 @@ _SRC = """\
 catalog:
   topology: banc
   profile: dataops
+  terrain: local
   status: cible
 nodes:
   - name: node1
@@ -38,7 +39,6 @@ nodes:
       - worker
 storage:
   backend: local-path
-target_kind: bench
 """
 
 

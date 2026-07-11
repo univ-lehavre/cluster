@@ -30,13 +30,13 @@
   vars:
     citation_build_workdir: /tmp/dataops-build/citation
   # GARDE D'ISOLATION (ADR 0053) : ce play SSH sur les nœuds (`cloud`) et build/pousse
-  # dans le registry → il DOIT vérifier EXPECTED_TARGET_KIND via audit-log AVANT toute
+  # dans le registry → il DOIT vérifier EXPECTED_STACK_ID via audit-log AVANT toute
   # tâche distante (comme portal/mlflow/dataops). gather_facts requis : platform-build-images
   # teste ansible_architecture. force_handlers : filet restart containerd même si un build
   # échoue en aval (incident 2026-06-16).
   force_handlers: true
   pre_tasks:
-    - name: Audit-log — record playbook execution (+ garde target_kind)
+    - name: Audit-log — record playbook execution (+ garde d'identité stack_id)
       ansible.builtin.import_role:
         name: audit-log
       vars:

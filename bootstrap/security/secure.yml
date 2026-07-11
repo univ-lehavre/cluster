@@ -23,7 +23,7 @@
   hosts: all
   pre_tasks:
     # Garde de cible (ADR 0053) : ce playbook DURCIT le parc (hosts: all, SSH distant) →
-    # vérifier que l'inventaire vise la topologie attendue (EXPECTED_TARGET_KIND) AVANT
+    # vérifier que l'inventaire vise la topologie attendue (EXPECTED_STACK_ID) AVANT
     # toute mutation. Le rôle vit dans bootstrap/roles/ (résolu via roles_path), distinct
     # des rôles security/roles/ de ce playbook. `tags: always` → la garde tourne quel que
     # soit le tag de durcissement choisi.

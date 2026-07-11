@@ -25,7 +25,7 @@ _ROOT = os.path.join(os.path.dirname(__file__), "..")
 _SCENARIOS_DIR = os.path.join(_ROOT, "bench", "scenarios")
 
 
-def _topo(profile="dataops", backend="ceph", nodes=None, kind="prod"):
+def _topo(profile="dataops", backend="ceph", nodes=None, terrain="baremetal"):
     nodes = nodes or [
         {"name": "cp1", "roles": ["control"]},
         {"name": "node1", "roles": ["worker"]},
@@ -33,10 +33,9 @@ def _topo(profile="dataops", backend="ceph", nodes=None, kind="prod"):
     ]
     return topology_from_dict(
         {
-            "catalog": {"topology": "t", "profile": profile},
+            "catalog": {"topology": "t", "profile": profile, "terrain": terrain},
             "nodes": nodes,
             "storage": {"backend": backend},
-            "target_kind": kind,
         }
     )
 
@@ -76,11 +75,11 @@ class Catalogue(unittest.TestCase):
         # celle qui, sans la caducité, la rendrait jouable.
         caducs = {e.num for e in EPREUVES if e.statut == "caduc"}
         self.assertEqual(caducs, {"03", "04", "19", "30"})
-        for kind in ("prod", "bench"):
+        for terrain in ("baremetal", "local"):
             for backend in ("ceph", "local-path"):
-                jouables, _ = filter_epreuves(_topo(kind=kind, backend=backend))
+                jouables, _ = filter_epreuves(_topo(terrain=terrain, backend=backend))
                 nums_j = {e.num for e in jouables}
-                self.assertEqual(caducs & nums_j, set(), f"caduc jouable en {kind}/{backend}")
+                self.assertEqual(caducs & nums_j, set(), f"caduc jouable en {terrain}/{backend}")
 
 
 class Filtrage(unittest.TestCase):
@@ -123,15 +122,15 @@ class Filtrage(unittest.TestCase):
         self.assertTrue({"03", "05", "14", "19"}.issubset(nums_ex))
 
     def test_offensif_autorise_sur_banc_jetable(self):
-        # En target_kind=bench (banc), les offensifs ne sont PLUS exclus pour ce motif.
-        jouables, _ = filter_epreuves(_topo(kind="bench"))
+        # Sur un terrain `local` (banc jetable), les offensifs ne sont PLUS exclus (ADR 0108).
+        jouables, _ = filter_epreuves(_topo(terrain="local"))
         nums = {e.num for e in jouables}
         self.assertIn("20", nums)  # chaos kill pods, agnostique → jouable sur banc
         self.assertIn("21", nums)
 
     def test_offensif_interdit_en_prod(self):
         ep_17 = next(e for e in EPREUVES if e.num == "17")
-        ok, raison = epreuve_jouable(ep_17, _topo(kind="prod"))
+        ok, raison = epreuve_jouable(ep_17, _topo(terrain="baremetal"))
         self.assertFalse(ok)
         self.assertIn("offensif", raison)
 
