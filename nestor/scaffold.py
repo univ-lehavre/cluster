@@ -153,9 +153,9 @@ def catalog_entry(name: str) -> str:
     Sert `activate <nom>` : contrairement à `init`, on ACCEPTE un modèle versionné
     (`<nom>.example`) comme cible d'activation — activer un `.example` est légitime
     (banc générique). On normalise donc le suffixe :
-    - `socle`        → topologies/socle.yaml
-    - `socle.example`→ topologies/socle.example.yaml
-    - `layers.example.yaml` (suffixe complet) → topologies/layers.example.yaml
+    - `dirqual`        → topologies/dirqual.yaml
+    - `dirqual.example`→ topologies/dirqual.example.yaml
+    - `local.example.yaml` (suffixe complet) → topologies/local.example.yaml
 
     Garde-fou conservé : refus d'une traversée de chemin (`/`, `\\`, `..`). L'EXISTENCE
     réelle du fichier est vérifiée par la façade (I/O), pas ici.

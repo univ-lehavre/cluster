@@ -124,7 +124,7 @@ from nestor import (  # noqa: E402
 )
 from nestor.model import topology_from_dict  # noqa: E402
 
-_EXAMPLE = os.path.join(_ROOT, "topologies", "socle.example.yaml")
+_EXAMPLE = os.path.join(_ROOT, "topologies", "dirqual.example.yaml")
 
 
 def _example_as_lima(test):
@@ -230,7 +230,7 @@ class Generate(unittest.TestCase):
         # generate doit ré-émettre EXACTEMENT render_prod_inventory (invariant P1).
         code, out, _ = _capture(["artifact", "generate", "-f", _EXAMPLE, "--kind", "prod"])
         self.assertEqual(code, 0)
-        self.assertEqual(out, render_prod_inventory(load_topology(_EXAMPLE), "socle"))
+        self.assertEqual(out, render_prod_inventory(load_topology(_EXAMPLE), "dirqual"))
 
     def test_lima_inventory_matches_facade(self):
         topo = load_topology(_EXAMPLE)
@@ -239,7 +239,7 @@ class Generate(unittest.TestCase):
             ["artifact", "generate", "-f", _EXAMPLE, "--kind", "bench", "--lima-home", "/H"]
         )
         self.assertEqual(code, 0)
-        self.assertEqual(out, render_lima_inventory(topo, "/H", "socle"))
+        self.assertEqual(out, render_lima_inventory(topo, "/H", "dirqual"))
 
     def test_run_params_yaml_reparses_to_derivation(self):
         import yaml
@@ -255,7 +255,7 @@ class Generate(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out, "")  # rien sur stdout quand -o
         with open(dst, encoding="utf-8") as f:
-            self.assertEqual(f.read(), render_prod_inventory(load_topology(_EXAMPLE), "socle"))
+            self.assertEqual(f.read(), render_prod_inventory(load_topology(_EXAMPLE), "dirqual"))
 
     def test_output_to_invalid_dir_is_usage_error(self):
         # -o vers un répertoire absent = destination invalide fournie en argument
@@ -842,7 +842,7 @@ runs:
     # Run PÉRIMÉ de _EXAMPLE (date vieille → freshness=perime, pas jamais) : le socle
     # est « déjà monté mais pas frais » → « à rejouer », distinct de l'inédit.
     # `topologie` = `stack_id` (nom de fichier, ADR 0102 volet B) : `_EXAMPLE` =
-    # `socle.example.yaml` → stack `socle`. (Un run RÉEL antérieur keyé `multi-node-4`
+    # `dirqual.example.yaml` → stack `dirqual`. (Un run RÉEL antérieur keyé `multi-node-4`
     # serait réconcilié par `STACK_ID_ALIASES` ; ici on écrit directement la clé actuelle.)
     _SOCLE_STALE = """\
 runs:
@@ -850,7 +850,7 @@ runs:
     date: 2020-01-01T00:00:00Z
     target: atlas-ceph
     profil: ceph
-    topologie: socle
+    topologie: dirqual
     phases:
       up: 1
       bootstrap: 1
@@ -1361,6 +1361,12 @@ runs:
         # provisioning, peut manquer son fichier (banc non monté).
         if os.path.exists(cli._BENCH_INVENTORY):
             self.skipTest("inventaire banc présent localement — cas testé en CI")
+        # VMs présentes (dirqual1-4 déclarés par l'exemple lima) → `next` SAUTE le
+        # provisioning `up` et atteint le garde-fou d'inventaire, but du test.
+        self._set_real(
+            vms=["dirqual1", "dirqual2", "dirqual3", "dirqual4"],
+            ready=["dirqual1", "dirqual2", "dirqual3", "dirqual4"],
+        )
         orig = cli._runner.launch_phase
         cli._runner.launch_phase = lambda *a, **k: None
         self.addCleanup(setattr, cli._runner, "launch_phase", orig)
@@ -2468,17 +2474,17 @@ class Stack(unittest.TestCase):
 
     def test_list_marks_active_and_derives(self):
         # Active une entrée connue, puis `stack ls` doit la marquer ★ + son chemin.
-        # `--no-input` : socle.example est prod (ADR 0090) → ne pas prompter/écrire le
+        # `--no-input` : dirqual.example est prod (ADR 0090) → ne pas prompter/écrire le
         # kubeconfig de la topo en test (on ne teste ici que l'activation).
-        _capture(["stack", "select", "socle.example", "--no-input"])
+        _capture(["stack", "select", "dirqual.example", "--no-input"])
         code, out, _ = _capture(["stack", "ls"])
         self.assertEqual(code, 0)
-        self.assertIn("socle.example", out)
+        self.assertIn("dirqual.example", out)
         self.assertIn("★", out)
         # ADR 0083 : `default_target` rend `layers` pour toute topo non-HA (plus de preset
         # dérivé comme `atlas-ceph`) — l'ordre vient du graphe atomique, pas d'un nom figé.
-        # La ligne active affiche donc `socle.example → layers`.
-        self.assertRegex(out, r"★ socle\.example\s+→ layers")
+        # La ligne active affiche donc `dirqual.example → layers`.
+        self.assertRegex(out, r"★ dirqual\.example\s+→ layers")
 
 
 class InstallCommand(unittest.TestCase):
@@ -2747,16 +2753,18 @@ class Destroy(unittest.TestCase):
         return calls
 
     def test_destroys_stack_vms_with_yes(self):
-        # cp1 est déclaré par _EXAMPLE et présent → destroy le cible, --yes saute le prompt.
-        self._stub_vms(["cp1"])
+        # destroy ne vise que le terrain local (VMs Lima) → topo forcée local (_example_as_lima).
+        # dirqual1 est déclaré par l'exemple et présent → destroy le cible, --yes saute le prompt.
+        topo_path = _example_as_lima(self)
+        self._stub_vms(["dirqual1"])
         calls = self._stub_down()
-        code, out, _ = _capture(["destroy", "-f", _EXAMPLE, "--yes"])
+        code, out, _ = _capture(["destroy", "-f", topo_path, "--yes"])
         self.assertEqual(code, 0)
         self.assertIn("détruite", out)
-        # Délégation à run-phases.sh down cp1 (les VMs de la stack passées en args).
+        # Délégation à run-phases.sh down dirqual1 (les VMs de la stack passées en args).
         self.assertEqual(len(calls), 1)
         self.assertIn("down", calls[0]["cmd"])
-        self.assertIn("cp1", calls[0]["cmd"])
+        self.assertIn("dirqual1", calls[0]["cmd"])
         # Régression : l'env DOIT porter NODES_OVERRIDE (sinon `phase_down` ne voit aucun
         # disque déclaré → les disques Lima SURVIVENT au down, vécu au banc ceph).
         env = calls[0]["env"]
@@ -2774,7 +2782,7 @@ class Destroy(unittest.TestCase):
         with open(kc, "w", encoding="utf-8") as f:
             f.write("apiVersion: v1\nkind: Config\n")
         self.addCleanup(lambda: os.path.exists(kc) and os.unlink(kc))
-        self._stub_vms(["cp1"])
+        self._stub_vms(["dirqual1"])
         self._stub_down()  # down réussit (rc=0) → la suppression du kubeconfig est atteinte
         code, out, _ = _capture(["destroy", "-f", topo_path, "--yes"])
         self.assertEqual(code, 0)
@@ -2793,18 +2801,20 @@ class Destroy(unittest.TestCase):
 
     def test_refuses_without_yes_off_tty(self):
         # Hors TTY (test) sans --yes : refus (pas de suppression silencieuse), code 2,
-        # et down JAMAIS appelé.
-        self._stub_vms(["cp1"])
+        # et down JAMAIS appelé. Topo local (destroy ⇒ terrain local).
+        topo_path = _example_as_lima(self)
+        self._stub_vms(["dirqual1"])
         calls = self._stub_down()
-        code, _, err = _capture(["destroy", "-f", _EXAMPLE])
+        code, _, err = _capture(["destroy", "-f", topo_path])
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])
         self.assertIn("refusée", err)
 
     def test_propagates_down_failure(self):
-        self._stub_vms(["cp1"])
+        topo_path = _example_as_lima(self)
+        self._stub_vms(["dirqual1"])
         self._stub_down(rc=3)  # run-phases.sh down échoue
-        code, _, err = _capture(["destroy", "-f", _EXAMPLE, "--yes"])
+        code, _, err = _capture(["destroy", "-f", topo_path, "--yes"])
         self.assertEqual(code, 1)
         self.assertIn("échec", err)
 

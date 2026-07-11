@@ -153,7 +153,7 @@ class Topology:
     atlas: dict[str, Any] = field(default_factory=dict)
     portal: dict[str, Any] = field(default_factory=dict)
     # Chemin du kubeconfig de la cible (ADR 0090) — UNIQUEMENT pour la PROD. QUI décide :
-    #   • BANC   → nestor IMPOSE : le provisioning génère `.kubeconfigs/banc.config`
+    #   • BANC   → nestor IMPOSE : le provisioning génère `.kubeconfigs/local.config`
     #              (phase cni, ADR 0102 volet B — le banc EST la stack `banc`) et
     #              `_bench_kubeconfig` le trouve seul → laisser ce champ à None (le
     #              déclarer serait redondant).

@@ -26,13 +26,13 @@ from nestor.profile import derive_run_params  # noqa: E402
 
 # Les DEUX cas de stockage du dépôt (invariant 2 du plan : un lot vaut sur local-path ET
 # Ceph). On dérive leurs séquences RÉELLES pour prouver la complétude du mapping. On vise
-# les topologies *.example.yaml VERSIONNÉES (les banc.yaml/dirqual.yaml réels sont une
-# config locale gitignorée, ADR 0023 — absente en CI) : socle.example (Ceph + profil
-# dataops, séquence la plus large) et layers.example (local-path).
+# les topologies *.example.yaml VERSIONNÉES (les local.yaml/dirqual.yaml réels sont une
+# config locale gitignorée, ADR 0023 — absente en CI) : local.example (local-path, la plus
+# simple) et dirqual.example (Ceph + profil dataops, séquence la plus large).
 _REPO = os.path.join(os.path.dirname(__file__), "..")
 _TOPO_FILES = (
-    os.path.join(_REPO, "topologies", "layers.example.yaml"),  # local-path (≈ banc)
-    os.path.join(_REPO, "topologies", "socle.example.yaml"),  # Ceph + dataops (≈ dirqual)
+    os.path.join(_REPO, "topologies", "local.example.yaml"),  # local-path (banc Lima)
+    os.path.join(_REPO, "topologies", "dirqual.example.yaml"),  # Ceph + dataops (prod)
 )
 # Phases AMONT portées par path._run_amont (provisioning/socle), HORS table phases.py.
 _AMONT = {"up", "bootstrap", "bootstrap-ha", "join-cp"}
@@ -280,10 +280,18 @@ class ExtravarsAreRestrictedPerPhase(unittest.TestCase):
         self.assertNotIn("cnpg_storage_class", ev)
 
     def test_trivial_storage_phases_get_no_derived_keys(self):
-        # storage-simple/metrics-server/portal : aucun -e dérivé (au-delà du commun).
-        for phase in ("storage-simple", "metrics-server", "portal"):
+        # storage-simple/metrics-server : aucun -e dérivé (au-delà du commun).
+        for phase in ("storage-simple", "metrics-server"):
             ev = phases.extravars_for(phase, self.derived)
             self.assertEqual(ev, {"dataops_k8s_host": "localhost"})
+
+    def test_portal_gets_access_host_when_declared(self):
+        # portal reçoit `portal_access_host` dès que la topo déclare `portal.access_host`
+        # (ici local.example : 127.0.0.1). Les autres phases ne le voient jamais (mapping
+        # strict phases.py:418). Sans `portal.access_host` déclaré, la clé serait absente.
+        ev = phases.extravars_for("portal", self.derived)
+        self.assertIn("portal_access_host", ev)
+        self.assertEqual(ev["dataops_k8s_host"], "localhost")
 
     def test_missing_derived_key_is_ignored(self):
         # ceph déclare `ceph_osd_expected` mais derive_run_params peut ne pas le fournir

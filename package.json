@@ -24,7 +24,7 @@
     "lint:contract": "uv run python scripts/check_contract.py",
     "lint:code-location": "uv run python scripts/check_code_location_manifest.py",
     "lint:topology": "uv run python scripts/check_topology.py",
-    "lint:topology-drift": "uv run python scripts/topology.py artifact diff -f topologies/socle.example.yaml --kind prod",
+    "lint:topology-drift": "uv run python scripts/topology.py artifact diff -f topologies/dirqual.example.yaml --kind prod",
     "topology": "uv run python scripts/topology.py",
     "check:gouvernance": "uv run python scripts/check_gouvernance.py",
     "test:shell": "bats bench/unit/",

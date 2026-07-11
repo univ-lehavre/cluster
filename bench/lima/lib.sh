@@ -143,7 +143,14 @@ lima_render_node() {
         -e "s/@@DISK@@/${disk}/" \
         "${tmpl}" > "${out}"
 
-    # Forward de l'API (control-plane uniquement) : guest 6443 → host 127.0.0.1.
+    # Forwards (control-plane uniquement) : l'IP user-v2 n'est pas routable depuis l'hôte
+    # macOS (NAT), donc TOUT accès depuis le poste passe par un portForward Lima déclaré.
+    # On forwarde :
+    #   • l'API 6443 → host 127.0.0.1:${api_port} (déterministe, gate kubectl) ;
+    #   • l'exposition L4 des UI (ADR 0092) : la PLAGE NodePort 30000-32767 et les hostPort
+    #     des briques maison (mailpit 1025) → `http://127.0.0.1:<port>`, SANS DNS (pas de SNI).
+    #     On NE forwarde PAS 443/gateway L7 : il routerait par SNI/hostname, or on refuse tout
+    #     DNS local (ADR 0048/0092 — zéro /etc/hosts). Le 80→8080 sert un hostPort HTTP nu.
     if [ -n "${api_port}" ]; then
         {
             echo ""
@@ -152,6 +159,15 @@ lima_render_node() {
             echo "  - guestPort: 6443"
             echo "    hostIP: 127.0.0.1"
             echo "    hostPort: ${api_port}"
+            echo "  # Exposition L4 des UI (ADR 0092) : plage NodePort servie en eBPF sur l'IP du nœud."
+            echo "  - guestPortRange: [30000, 32767]"
+            echo "    hostIP: 127.0.0.1"
+            echo "  # hostPort des briques maison (SMTP mailpit 1025) + HTTP nu (80 → 8080)."
+            echo "  - guestPort: 1025"
+            echo "    hostIP: 127.0.0.1"
+            echo "  - guestPort: 80"
+            echo "    hostIP: 127.0.0.1"
+            echo "    hostPort: 8080"
         } >> "${out}"
     fi
 

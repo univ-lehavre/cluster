@@ -259,7 +259,7 @@ class ByteExactInvariant(unittest.TestCase):
     """P1 : le profil prod générique régénère hosts.example.yaml à l'octet."""
 
     def test_prod_inventory_is_byte_identical(self):
-        topo = load_topology(os.path.join(_ROOT, "topologies", "socle.example.yaml"))
+        topo = load_topology(os.path.join(_ROOT, "topologies", "dirqual.example.yaml"))
         # `load_topology` a posé topo.stack_id = "socle" (dérivé du chemin, ADR 0108) ;
         # hosts.example.yaml porte le même marqueur → invariant byte-identique préservé.
         generated = render_prod_inventory(topo, topo.stack_id)

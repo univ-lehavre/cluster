@@ -1,0 +1,102 @@
+# code: language=yaml
+#
+# topologies/local.example.yaml — modèle VERSIONNÉ d'un banc Lima (terrain=local),
+# valeurs génériques (ADR 0023 ; nommage .example ADR 0102). Copier en
+# `topologies/local.yaml` (gitignoré) pour une surcharge locale, ou l'activer tel quel
+# via `nestor stack select local.example`.
+#
+# DOCTRINE de ce fichier : n'y figurent QUE les champs FONCTIONNELS — ceux qu'un
+# accesseur nestor LIT réellement et qui changent le déploiement. Les champs purement
+# descriptifs (catalog.arch/topology/status) et les placeholders ENV→YAML non encore
+# lus (blocs ha/cilium, sous-clés network.*, exposition.plage/interface, ceph.block_device…)
+# sont VOLONTAIREMENT omis : les déclarer donnerait l'illusion d'un effet inexistant.
+# Le `stack_id` (identité de l'instance) est dérivé du NOM DE FICHIER (`local`), pas déclaré.
+#
+# `status` implicite : cible tant qu'aucun run réel ne l'a montée (honnêteté ADR 0052).
+
+# ─── catalog : seuls les champs LUS. `terrain` gate le provisioning (phase `up`/limactl,
+# jetabilité offensif/chaos). `profile` est le préfixe cumulatif base⊂…⊂dataops — mais il
+# est IGNORÉ dès que `layers` (ci-dessous) est posé, donc omis ici au profit de `layers`.
+catalog:
+  terrain: local # local | cloud | baremetal. `local` = VM Lima jetable (défaut fail-safe : baremetal).
+
+# ─── layers : ENSEMBLE de couches voulu (ADR 0069), PRIME sur catalog.profile. `atlas` =
+# alias de la chaîne MLOps complète (ADR 0083) : metrics-server + monitoring + gitops +
+# gitops-seed + dataops + mlflow + portal.
+layers:
+  - metrics-server
+  - monitoring
+  - gitops
+  - gitops-seed
+  - dataops
+  - mlflow
+  - portal
+
+# ─── nodes : déclaration nœuds/rôles (REQUIS, non vide). `roles` cumulable (hyperconvergence,
+# ADR 0007/0055). Banc mono-nœud : control+worker (pas de HA, pas de storage brut = local-path).
+nodes:
+  - name: node1
+    roles: [control, worker]
+
+# ─── exposition : mode d'accès applicatif (ADR 0092). `nodeport` (défaut) = L4 sur le port du
+# nœud, ZÉRO DNS/LB-IPAM, reproductible partout. Sur ce banc Lima l'accès UI se fait en L4 via
+# le portForward (cf. `access`), sans DNS local → PAS de `gateway` (qui exigerait un SNI/hostname).
+exposition:
+  mode: nodeport # nodeport | gateway (legacy L7) | none. Alias : hostport→nodeport, lb-ipam→gateway.
+
+# ─── access : DÉCLARATIF (non lu par nestor, mais PORTÉ ici car spécifique au terrain local) —
+# documente COMMENT le poste macOS joint les UI. Réseau Lima = NAT (user-v2) : l'IP de la VM
+# n'est pas routable depuis l'hôte. `bench/lima/lib.sh` génère un portForward large (plage
+# NodePort + hostPort maison) sur le control-plane ; les UI se joignent en `http://127.0.0.1:<port>`.
+# Accès L4 pur, SANS DNS local (cohérent ADR 0092/0048 : zéro /etc/hosts, zéro résolution SNI).
+access:
+  via: portForward # portForward (Lima/NAT) | direct (baremetal/cloud : IP du nœud routable).
+  host: 127.0.0.1 # les forwards Lima aboutissent sur la loopback macOS.
+  nodeport_range: '30000-32767' # plage NodePort forwardée en bloc (accès UI L4 sans DNS).
+
+# ─── storage : backend. Banc local-path : pas de disques bruts, pas de paramètres Ceph.
+storage:
+  backend: local-path # ceph | local-path.
+
+# ─── hardening : axe orthogonal (ADR 0045 §3). Banc : non durci.
+hardening:
+  enabled: false # true → insère la phase de durcissement après le socle.
+
+# ─── resources : dimensionnement VM Lima (LOT 8, ADR 0097 §3). ACTIF terrain=local uniquement.
+# `disk` = disque SYSTÈME (vda : OS+containerd+images+logs), distinct de `nodes[].disks` (Ceph).
+# 128 GiB : la chaîne MLOps complète (layers ci-dessus) y vit.
+resources:
+  cpus: 6
+  memory: 16GiB
+  disk: 128GiB
+
+# ─── gitea : bootstrap GitOps/seed. Tous les champs ont un défaut générique (nestor/seed.py) ;
+# montrés avec leur valeur par défaut pour la lisibilité (ils SONT lus par SeedConfig).
+gitea:
+  ns: gitea
+  admin_user: atlas-admin
+  admin_email: atlas-admin@example-org.lan # placeholder générique (ADR 0048).
+  svc: http://gitea-http.gitea.svc.cluster.local
+  api: http://localhost:3000
+  argocd_ns: argocd
+  org: atlas
+  repo: workflows
+  org_cluster: cluster
+  repo_apps: apps
+  org_atlas: atlas
+  repo_atlas: atlas
+
+# ─── atlas : dépôt de code externe + code-locations (build citation, ADR 0110).
+atlas:
+  repo_dir: ~/Hub/atlas # chemin du dépôt atlas EXTERNE (build des images de code-location).
+  expected_cluster: cluster-local # garde anti-mauvaise-cible du seed.
+  code_locations:
+    - name: citation # nom court (dérive image/overlay). REQUIS.
+
+# ─── portal : seul `access_host` est lu (host des NodePort côté navigateur). Banc : loopback.
+portal:
+  access_host: 127.0.0.1
+
+# ─── kubeconfig : PAS posé en banc (ADR 0102 volet B) — nestor le DÉRIVE à
+# `.kubeconfigs/local.config`. Ne déclarer que pour un chemin custom. `export KUBECONFIG=…`
+# surcharge toujours (ADR 0053/0065).
