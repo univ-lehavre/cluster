@@ -12,6 +12,25 @@ monitoring_namespace: monitoring
 # RWO suffit — monitoring n'a aucun besoin de stockage objet ni résilient).
 monitoring_storage_class: rook-ceph-block-replicated
 
+# ── Rétention Prometheus (métriques), dérivée du curseur persistence.mode (ADR 0109) ──
+# `persistence_mode` passé en `-e` (défaut `full`). La rétention Prometheus EN DÉRIVE, posée
+# À L'INSTALLATION dans le CR Prometheus (le TSDB applique ensuite la borne native — nestor
+# ne l'exécute pas). full = 15d/9GB (le CR ACTUEL À L'OCTET, aucune régression) ; bounded =
+# fenêtre + taille resserrées (classe contrainte) ; ephemeral = rétention courte (jetable).
+persistence_mode: full
+# Deux tables plates (time / size) indexées par le mode — pas de dict inline (conflit
+# prettier↔yamllint sur les accolades). Repli `full` si mode inconnu.
+_prometheus_retention_time_by_mode:
+  full: 15d
+  bounded: 3d
+  ephemeral: 6h
+_prometheus_retention_size_by_mode:
+  full: 9GB
+  bounded: 3GB
+  ephemeral: 1GB
+prometheus_retention: "{{ _prometheus_retention_time_by_mode[persistence_mode] | default(_prometheus_retention_time_by_mode['full']) }}"
+prometheus_retention_size: "{{ _prometheus_retention_size_by_mode[persistence_mode] | default(_prometheus_retention_size_by_mode['full']) }}"
+
 # Gate : operator Ready (300s/10s).
 monitoring_ready_retries: 30
 monitoring_ready_delay: 10

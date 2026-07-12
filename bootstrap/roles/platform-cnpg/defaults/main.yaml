@@ -14,6 +14,22 @@ cnpg_operator_namespace: cnpg-system
 # JAMAIS EC 2+1 pour ce stateful) ; banc léger surcharge en local-path.
 cnpg_storage_class: rook-ceph-block-replicated
 
+# ── Rétention des sauvegardes, dérivée du curseur persistence.mode (ADR 0109) ──────
+# `persistence_mode` passé en `-e` (défaut `full`). Deux effets, posés À L'INSTALLATION :
+#   - retentionPolicy de l'ObjectStore Barman (WAL + base) : ABSENTE en `full` (l'actuel à
+#     l'octet — le template ne rend aucun retentionPolicy) ; bornée en `bounded`/`ephemeral`.
+#   - ScheduledBackup : ARMÉ en `full`/`bounded`, DÉSARMÉ (`suspend: true`) en `ephemeral`
+#     (instance jetable — on ne conserve rien ; perte au recyclage assumée, ADR 0109 §2).
+persistence_mode: full
+# retentionPolicy Barman : chaîne vide = clé NON rendue (full). Bornée pour les autres modes.
+_cnpg_retention_by_mode:
+  full: ''
+  bounded: '7d'
+  ephemeral: '1d'
+cnpg_retention_policy: "{{ _cnpg_retention_by_mode[persistence_mode] | default('') }}"
+# ScheduledBackup suspendu ? true seulement en ephemeral (on ne sauvegarde pas le jetable).
+cnpg_backup_suspend: "{{ persistence_mode == 'ephemeral' }}"
+
 # requests/limits par instance pg (audit code-first 2026-07-05, plan right-sizing).
 # Défaut = valeurs PROD (identiques à cluster.yaml, ADR 0033). Le banc léger mono-nœud
 # (~12 GiB) peut alléger via group_vars (ADR 0023) — 3 instances × limits.memory doit

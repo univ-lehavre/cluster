@@ -68,6 +68,11 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
     "datalake": PhaseSpec(
         "bootstrap/ceph-datalake.yaml", "RGW + bucket datalake", "datalake S3 (RGW)"
     ),
+    "volume-snapshots": PhaseSpec(
+        "bootstrap/volume-snapshots.yaml",
+        "CronJob snapshots des PVC applicatifs (persistence.mode)",
+        "snapshots des données applicatives",
+    ),
     "monitoring": PhaseSpec(
         "bootstrap/monitoring.yaml",
         "kube-prometheus-stack + Loki",

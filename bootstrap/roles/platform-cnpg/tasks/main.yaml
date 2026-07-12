@@ -130,10 +130,27 @@
         state: present
         src: '{{ platform_repo_dir }}/platform/cloudnative-pg/database.yaml'
 
+    # ScheduledBackup : manifeste figé appliqué, puis `suspend` dérivé de persistence.mode
+    # (ADR 0109). En `full`/`bounded` → armé (suspend absent du manifeste = false, défaut
+    # CNPG : inchangé à l'octet). En `ephemeral` → suspend: true (instance jetable, on ne
+    # sauvegarde pas). Le patch n'écrit `suspend` QUE s'il vaut true → full reste inchangé.
     - name: Apply scheduled backup
       kubernetes.core.k8s:
         state: present
         src: '{{ platform_repo_dir }}/platform/cloudnative-pg/backup.yaml'
+
+    - name: Suspend the scheduled backup on ephemeral persistence (ADR 0109)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: postgresql.cnpg.io/v1
+          kind: ScheduledBackup
+          metadata:
+            name: pg-daily
+            namespace: '{{ cnpg_namespace }}'
+          spec:
+            suspend: true
+      when: cnpg_backup_suspend | bool
 
     # NetworkPolicies du namespace postgres : default-deny d'abord, puis les flux
     # légitimes (DNS, intra-ns, ingress 5432 depuis les SEULS consommateurs

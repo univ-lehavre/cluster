@@ -2,7 +2,8 @@
 
 ## Statut
 
-Proposed (2026-07-11). **ADR d'implémentation** du volet §2 de
+Accepted (2026-07-12, promu depuis `Proposed 2026-07-11`). **ADR
+d'implémentation** du volet §2 de
 [ADR 0107](0107-adaptativite-materielle-premisse-cultures.md) (adaptativité
 matérielle — « Le cache des données s'adapte »), au même titre
 qu'[ADR 0108](0108-isolation-par-identite-et-verbes-provision-install.md)
@@ -18,9 +19,32 @@ présentes en pièces détachées (cache-flux CNPG
 backups CNPG). Conception détaillée du volet données :
 [audit du 2026-07-10](../audit/2026-07-10-doctrine-adaptativite-materielle.md)
 §3 (volet B). Sous-tâche de l'épique d'implémentation de l'adaptativité
-(cluster#627, volet B). **Conçu, non câblé** : cet ADR pose le contrat
-déclaratif et nomme où chaque mode mordra ; le câblage par composant est
-explicitement différé en issues (§Conséquences).
+(cluster#627, volet B). **Câblé côté `cluster` le 2026-07-12** (#631) : le
+curseur circule par `derive_run_params` (profile.py) → `extravars_keys` des
+phases → rôles Ansible, et mord sur les 6 briques cluster (StorageClass
+`reclaimPolicy`, CNPG `retentionPolicy`+ScheduledBackup, Loki
+`retention_period`, Prometheus `retention.time/size`, datalake
+`preservePoolsOnDelete`, et le CronJob de snapshots des PVC — désormais monté
+par nestor comme composant `volume-snapshots`). Le mode est appliqué **à
+l'installation** (nestor CONFIGURE la rétention selon le mode ; il n'exécute
+aucune éviction — le mécanisme natif de chaque brique applique la borne, et une
+dérive ultérieure du live est **signalée**, pas réconciliée). Le **versant
+`atlas`** (§3, pipeline Dagster) reste à câbler (#630).
+
+> **Précision opposable sur `full` (byte-identité prime).** La colonne `full` de
+> la table §2 décrit une **intention-cible** (`Retain`, buckets conservés), PAS
+> l'état actuel. Le garde-fou « `full` reproduit le comportement ACTUEL à
+> l'octet » (§Conséquences) **prime** : le câblage `full` reproduit donc
+> l'existant réel — StorageClass en `reclaimPolicy: Delete`, datalake
+> `preservePoolsOnDelete: false`, pas de `retentionPolicy` Barman rendue (cf.
+> [ADR 0013](0013-sauvegarde-donnees-applicatives.md)). **Seuls
+> `bounded`/`ephemeral` modifient** l'existant. **Exception assumée** : le
+> CronJob de snapshots n'était pas monté par nestor auparavant (apply manuel) —
+> le monter est un **changement** (armé en `full`/`bounded`, désarmé en
+> `ephemeral`), au nom de « les données applicatives sont sauvegardées par
+> défaut ».
+
+<!-- deux notes distinctes (MD028) -->
 
 > **Dépendance.** L'axe `terrain` et la propriété `Topology.terrain` sur
 > lesquels cet ADR calque `persistence` sont introduits par

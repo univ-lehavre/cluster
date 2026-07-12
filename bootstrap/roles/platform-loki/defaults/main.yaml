@@ -41,6 +41,21 @@ loki_buckets:
 loki_bucket_chunks: loki-chunks
 loki_bucket_ruler: loki-ruler
 
+# ── Rétention des logs, dérivée du curseur persistence.mode (ADR 0109) ──────────
+# `persistence_mode` est passé en `-e` par la phase monitoring (défaut `full` si absent —
+# le rôle reste jouable seul). La rétention Loki EN DÉRIVE, appliquée À L'INSTALLATION
+# (le compactor Loki, déjà armé, exécute ensuite la borne — nestor ne l'exécute pas).
+#   full      → 168h : le comportement ACTUEL À L'OCTET (aucune régression).
+#   bounded   → 72h  : fenêtre glissante courte (classe contrainte, ADR 0107 §2).
+#   ephemeral → 24h  : rétention minimale (instance jetable).
+persistence_mode: full
+_loki_retention_by_mode:
+  full: 168h
+  bounded: 72h
+  ephemeral: 24h
+# Valeur effective : la table ci-dessus indexée par le mode (repli `full` si mode inconnu).
+loki_retention_period: "{{ _loki_retention_by_mode[persistence_mode] | default(_loki_retention_by_mode['full']) }}"
+
 # Gate : Loki StatefulSet Ready (300s/10s).
 loki_ready_retries: 30
 loki_ready_delay: 10

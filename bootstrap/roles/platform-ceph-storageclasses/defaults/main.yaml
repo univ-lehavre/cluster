@@ -9,6 +9,22 @@ ceph_sc_dir: '{{ platform_repo_dir }}/storage/ceph/storageClass'
 # StorageClass à marquer « default » du cluster (valeur prod ET banc).
 ceph_default_storage_class: rook-ceph-block-replicated
 
+# ── reclaimPolicy de la SC bloc PAR DÉFAUT, dérivé du curseur persistence.mode (ADR 0109) ──
+# `persistence_mode` passé en `-e` (défaut `full`). Une StorageClass est IMMUABLE en k8s → on
+# substitue la valeur AVANT apply (pas de patch après). NE touche QUE `rook-ceph-block-replicated`
+# (les SC EC-retain/EC-delete gardent leur politique intentionnelle propre). Posé À L'INSTALLATION.
+#   full      → Delete : le reclaimPolicy ACTUEL À L'OCTET (block-replicated.yaml:86 — aucune
+#                        régression ; la SC par défaut a toujours été en Delete, cf. ADR 0013).
+#   bounded   → Retain : on GARDE les volumes de la fenêtre (l'éviction du brut ancien se fait
+#                        par quota/lifecycle ailleurs, pas en supprimant le PV au release).
+#   ephemeral → Delete : instance jetable (le PV meurt avec sa PVC).
+persistence_mode: full
+_sc_reclaim_by_mode:
+  full: Delete
+  bounded: Retain
+  ephemeral: Delete
+sc_reclaim_policy: "{{ _sc_reclaim_by_mode[persistence_mode] | default('Delete') }}"
+
 # Attente de la config CSI peuplée (mons en quorum) avant de prouver un PVC.
 ceph_csi_ready_retries: 36
 ceph_csi_ready_delay: 5

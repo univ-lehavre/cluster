@@ -13,7 +13,27 @@
     # même mécanisme que le CephCluster. hidden_fields:[metadata.managedFields,
     # status] retire ce bruit du diff (sans effet sur les SC/objets simples qui
     # n'ont pas ces champs) ; force_conflicts car Rook co-possède le spec.
-    - name: Apply the Ceph StorageClasses (block + CephFS)
+    # SC bloc PAR DÉFAUT : reclaimPolicy substitué selon persistence.mode (ADR 0109) AVANT
+    # apply (SC immuable en k8s). `full` → `Delete` (le littéral actuel → inchangé à l'octet).
+    # from_yaml_all : le fichier contient AUSSI le CephBlockPool (2 docs) → on préserve les deux.
+    - name: Apply the default block StorageClass (reclaimPolicy from persistence.mode)
+      kubernetes.core.k8s:
+        state: present
+        definition: '{{ item }}'
+        server_side_apply:
+          field_manager: ansible-ceph-sc
+          force_conflicts: true
+        hidden_fields:
+          - metadata.managedFields
+          - status
+      loop: >-
+        {{ lookup('file', ceph_sc_dir ~ '/block-replicated.yaml')
+           | replace('reclaimPolicy: Delete', 'reclaimPolicy: ' ~ sc_reclaim_policy)
+           | from_yaml_all | select | list }}
+      loop_control:
+        label: "{{ item.kind | default('?') }}/{{ item.metadata.name | default('?') }}"
+
+    - name: Apply the other Ceph StorageClasses (block EC + CephFS, politique propre)
       kubernetes.core.k8s:
         state: present
         src: '{{ ceph_sc_dir }}/{{ item }}'
@@ -24,7 +44,6 @@
           - metadata.managedFields
           - status
       loop:
-        - block-replicated.yaml
         - block-ec-retain.yaml
         - block-ec-delete.yaml
         - filesystem/fs.yaml

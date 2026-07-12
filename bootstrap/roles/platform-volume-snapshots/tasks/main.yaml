@@ -1,0 +1,45 @@
+# code: language=ansible
+# Rôle platform-volume-snapshots (ADR 0013/0109) — CronJob de snapshots des PVC applicatifs
+# (RPO ≈ 24 h), régi par le curseur persistence.mode. Monté par nestor (avant : apply manuel).
+
+- name: Deploy the application-data VolumeSnapshot CronJob
+  run_once: true
+  block:
+    - name: Apply the VolumeSnapshotClass (RBD)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ ceph_backup_dir }}/volume-snapshot-class.yaml'
+
+    # CronJob + RBAC (ServiceAccount/ClusterRole/ClusterRoleBinding, plusieurs docs). Appliqué
+    # tel quel — le CronJob n'a PAS de `suspend` (= false = armé, l'intention par défaut).
+    - name: Apply the snapshot CronJob + RBAC
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ ceph_backup_dir }}/snapshot-cronjob.yaml'
+
+    # persistence.mode (ADR 0109) : en `ephemeral`, on DÉSARME le CronJob (suspend: true) —
+    # instance jetable, on ne conserve rien. Patch appliqué UNIQUEMENT si ephemeral → en
+    # full/bounded le CronJob reste inchangé (armé). Idempotent.
+    - name: Suspend the snapshot CronJob on ephemeral persistence (ADR 0109)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata:
+            name: volume-snapshot-daily
+            namespace: '{{ snapshots_namespace }}'
+          spec:
+            suspend: true
+      when: snapshots_suspend | bool
+
+    - name: Gate — the snapshot CronJob is present
+      kubernetes.core.k8s_info:
+        api_version: batch/v1
+        kind: CronJob
+        name: volume-snapshot-daily
+        namespace: '{{ snapshots_namespace }}'
+      register: _snapshot_cronjob
+      until: _snapshot_cronjob.resources | default([]) | length > 0
+      retries: '{{ snapshots_ready_retries }}'
+      delay: '{{ snapshots_ready_delay }}'

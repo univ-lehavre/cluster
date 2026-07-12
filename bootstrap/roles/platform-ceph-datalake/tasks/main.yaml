@@ -13,10 +13,17 @@
     # mécanisme que CephCluster/CephFilesystem. hidden_fields:[managedFields,
     # status] retire ce bruit du diff ; on boucle ensuite jusqu'à changed=0 pour
     # absorber la densification résiduelle avant de finir (idempotence rejeu).
-    - name: Apply the CephObjectStore (server-side)
+    # preservePoolsOnDelete dérivé de persistence.mode (ADR 0109) — substitué AVANT apply.
+    # Les 3 modes valent aujourd'hui `false` (= l'actuel à l'octet) ; la mécanique est en
+    # place pour évoluer sans retoucher le manifeste figé. `from_yaml` : 1 seul doc.
+    - name: Apply the CephObjectStore (server-side, preservePoolsOnDelete from persistence.mode)
       kubernetes.core.k8s:
         state: present
-        src: '{{ ceph_datalake_dir }}/datalake-ec.yaml'
+        definition: >-
+          {{ lookup('file', ceph_datalake_dir ~ '/datalake-ec.yaml')
+             | replace('preservePoolsOnDelete: false',
+                       'preservePoolsOnDelete: ' ~ datalake_preserve_pools)
+             | from_yaml }}
         server_side_apply:
           field_manager: ansible-ceph-datalake
           force_conflicts: true

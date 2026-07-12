@@ -82,6 +82,7 @@ class Closure(unittest.TestCase):
                 "ceph",
                 "sc",
                 "datalake",
+                "volume-snapshots",
                 "monitoring",
                 "gitops",
                 "registry",
@@ -98,6 +99,7 @@ class Closure(unittest.TestCase):
             [
                 "sc",
                 "datalake",
+                "volume-snapshots",
                 "monitoring",
                 "gitops",
                 "registry",
