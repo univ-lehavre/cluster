@@ -8,6 +8,19 @@ diagnostic cluster et amorçage de l'implémentation — App-of-Apps posé
 [`bootstrap/seed-app-of-apps.sh`](../../bootstrap/seed-app-of-apps.sh) ; plan de
 mise en œuvre [Actif](../plans/plan-build-evenementiel-gitops.md)).
 
+> **Amendé (2026-07-12) par
+> [ADR 0111](0111-atlas-instancie-application-argocd.md) sur un point précis —
+> _qui INSTANCIE l'`Application` Argo CD_.** Le présent ADR plaçait
+> l'instanciation côté cluster (§1 « cluster VALIDE + **INSTANCIE** + ORCHESTRE
+> » ; §2 App-of-Apps `cluster/apps`). Depuis 0108 (nestor pilote la plateforme,
+> pas le code atlas) et 0110 (le build de code est sorti du cluster),
+> l'`Application` d'une code-location — qui pointe le repo/overlay/révision
+> atlas — est reconnue comme un artefact du **code atlas** : 0111 la fait
+> **instancier par atlas**. Le reste de cet ADR (cluster valide le manifeste
+> montant, provisionne l'infra, applique la migration, fournit le contenant)
+> reste en vigueur. Lire les passages « cluster instancie » / « App-of-Apps
+> `cluster/apps` » ci-dessous à la lumière de 0111.
+
 Comble un **implicite** des ADR [0022](0022-argocd-gitops-applicatif.md) (Argo
 CD déploie l'applicatif), [0033](0033-orchestration-ansible-platform-dataops.md)
 (Ansible converge l'infra), [0043](0043-contrat-interface-cluster-atlas.md)

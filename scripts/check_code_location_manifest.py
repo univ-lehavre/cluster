@@ -4,11 +4,13 @@
 Une code-location applicative atlas FOURNIT un `code-location.manifest.yaml` qui
 DÉCLARE ce qu'elle apporte et consomme (base, secret dérivé, OBC, migration,
 dépendances inter-apps) et CONTRE QUELLE version du contrat cluster elle code.
-Avant de créer l'`Application` Argo CD (App-of-Apps, ADR 0094 §2), cluster LIT et
-VALIDE ce manifeste. Ce validateur EST cette étape « cluster VALIDE » : il attrape
-EN REVUE une déclaration incohérente (version de contrat inconnue, dépendance
-absente du socle, schéma cassé) qui, sinon, ne se verrait qu'au run — ou pire,
-dériverait en silence (la copie figée = cause racine de l'audit #499).
+cluster LIT et VALIDE ce manifeste et PROVISIONNE les dépendances qu'il déclare.
+Ce validateur EST l'étape « cluster VALIDE » : il attrape EN REVUE une déclaration
+incohérente (version de contrat inconnue, dépendance absente du socle, schéma
+cassé) qui, sinon, ne se verrait qu'au run — ou pire, dériverait en silence (la
+copie figée = cause racine de l'audit #499). NB (ADR 0111) : cluster ne CRÉE plus
+l'`Application` Argo CD — c'est atlas qui l'instancie ; cluster valide le manifeste
+montant et fournit le contenant (base/secret/OBC/migration).
 
 Ce qu'il REMPLACE : la proposition montante initiale faisait COPIER le contrat
 cluster côté atlas (« D3 »). On supprime la copie figée : atlas DÉCLARE ce qu'il

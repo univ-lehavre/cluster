@@ -7,6 +7,14 @@ atlas, citation + mediawatch tous deux `LOADED`, idempotence `changed=0`,
 découverte d'une code-location neuve, survie au re-apply Ansible, absence de
 conflit Argo CD).
 
+> **Précisé par [ADR 0111](0111-atlas-instancie-application-argocd.md)
+> (2026-07-12).** Le **reconciler de workspace reste PLATEFORME** (côté cluster,
+> Ansible) : il découvre les fragments `dagster-workspace-<nom>` par label,
+> indifférent à qui a créé l'`Application`. Ce qui change (0111) : chaque
+> code-location applicative est instanciée par **atlas** (l'`Application` Argo
+> CD distincte), pas par le seed cluster. Le mécanisme décrit ici (fragments
+> disjoints + reconciler agrégateur) fonctionne à l'identique.
+
 Supersede partiellement [0086](0086-code-location-jouet-du-socle.md) (le patch
 per-CL du ConfigMap partagé + le hook PostSync reload). Prolonge
 [0026](0026-orchestration-dagster.md) (orchestrateur Dagster),

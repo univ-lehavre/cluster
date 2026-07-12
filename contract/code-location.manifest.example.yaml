@@ -3,11 +3,16 @@
 # C'EST LE FICHIER QU'ATLAS FOURNIT, VERSIONNÉ DANS SON DÉPÔT, pour DÉCLARER ce
 # qu'une code-location / app applicative apporte et consomme. cluster le LIT et
 # le VALIDE (validateur `scripts/check_code_location_manifest.py`, `pnpm
-# lint:code-location`) AVANT de créer l'`Application` Argo CD (App-of-Apps §2) :
-# version de contrat connue, dépendances présentes (base, secret dérivé, OBC,
-# migration), capacité suffisante. Une `contractVersion` inconnue ou une
-# dépendance absente ÉCHOUE BRUYAMMENT — c'est ce qui remplace la copie figée
-# silencieuse (cause racine de l'audit #499).
+# lint:code-location`) : version de contrat connue, dépendances présentes (base,
+# secret dérivé, OBC, migration), capacité suffisante. Une `contractVersion`
+# inconnue ou une dépendance absente ÉCHOUE BRUYAMMENT — c'est ce qui remplace la
+# copie figée silencieuse (cause racine de l'audit #499).
+#
+# NB (ADR 0111) : cluster VALIDE ce manifeste et PROVISIONNE les dépendances
+# (base/secret/OBC/migration), mais n'INSTANCIE PLUS l'`Application` Argo CD —
+# c'est ATLAS qui crée+pousse l'`Application` de sa code-location (elle pointe le
+# repo/overlay/révision atlas). cluster fournit le contenant (plateforme) ; atlas
+# instancie le contenu (l'`Application`).
 #
 # Patron `*.example` (ADR 0023) : `codeLocation`/`revision`/noms d'apps sont des
 # EXEMPLES génériques (`citation`, `mediawatch`, `atlas-datalake`) — les valeurs
