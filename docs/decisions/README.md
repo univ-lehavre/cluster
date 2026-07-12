@@ -130,3 +130,4 @@ Format léger inspiré de Michael Nygard :
 | 0108 | [Isolation par identité d'instance et séparation des verbes provisionner / installer](0108-isolation-par-identite-et-verbes-provision-install.md)  | Proposed           |
 | 0109 | [Persistance déclarative de l'instance (curseur de rétention des données)](0109-persistance-declarative-topologie.md)                              | Proposed           |
 | 0110 | [Pré-image de build : l'image de code se construit sans réseau (in-pod), la base lourde hors cluster](0110-preimage-de-build-et-build-in-pod.md)   | Accepted           |
+| 0111 | [Déplacement de frontière : atlas instancie l'Application Argo CD de ses code-locations](0111-atlas-instancie-application-argocd.md)               | Accepted           |
