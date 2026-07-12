@@ -392,3 +392,55 @@ runs:
     total_s: 76
     phases:
       up: 76
+  - id: 2026-07-12T13-base-844224f0
+    date: '2026-07-12T13:06:09Z'
+    branche: feat/cicd-in-cluster-buildkit
+    commit: 844224f0
+    profil: base
+    topologie: cicd
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 65
+    phases:
+      up: 65
+  - id: 2026-07-12T14-base-121b09bc-dirty
+    date: '2026-07-12T14:00:40Z'
+    branche: feat/cicd-in-cluster-buildkit
+    commit: 121b09bc-dirty
+    profil: base
+    topologie: cicd
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 64
+    phases:
+      up: 64
+  - id: 2026-07-12T14-base-121b09bc-dirty
+    date: '2026-07-12T14:04:52Z'
+    branche: feat/cicd-in-cluster-buildkit
+    commit: 121b09bc-dirty
+    profil: base
+    topologie: cicd
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 64
+    phases:
+      up: 64
+  - id: 2026-07-12T14-base-121b09bc-dirty
+    date: '2026-07-12T14:20:33Z'
+    branche: feat/cicd-in-cluster-buildkit
+    commit: 121b09bc-dirty
+    profil: base
+    topologie: cicd
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 932
+    phases:
+      bootstrap: 380
+      storage-simple: 9
+      gitops: 72
+      registry: 59
+      buildkit: 412
