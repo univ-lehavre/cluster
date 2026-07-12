@@ -165,6 +165,14 @@ def derive_run_params(topo: Topology) -> dict:
     out = {
         "profiles": required_profiles(topo.catalog.get("profile", "base")),
         "storage_backend": backend,
+        # persistence.mode (ADR 0109) : curseur de rétention des données applicatives, posé
+        # une fois pour tout le faisceau (comme `storage_backend`). Circule jusqu'aux briques
+        # via les `extravars_keys` des phases (Loki, Prometheus, CNPG, sc, datalake). Le mode
+        # est appliqué À L'INSTALLATION (nestor CONFIGURE la rétention selon le mode ; il
+        # n'exécute aucune éviction — le mécanisme natif de chaque brique applique la borne).
+        # `full` = comportement ACTUEL à l'octet (le rôle ne tire aucune valeur différente de
+        # son défaut) ; `bounded`/`ephemeral` = bornes posées au montage. Défaut `full`.
+        "persistence_mode": topo.persistence_mode,
         # storageClass : même valeur consommée par chaque brique (dataops,
         # monitoring, gitops) — le bash la passe sous des clés distinctes.
         "registry_storage_class": sc,

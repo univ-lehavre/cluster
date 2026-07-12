@@ -52,11 +52,19 @@
     # Manifeste figé chargé puis storageClass substitué par la variable de
     # topologie (toutes les occurrences de la valeur prod SONT des storageClass —
     # vérifié ; pas de .j2 du rendu helm, ADR 0033).
-    - name: Load the monitoring manifest with the topology storageClass
+    # Substitutions ciblées sur le manifeste figé (pas de .j2 du rendu helm, ADR 0033) :
+    #   - storageClass (toutes les occurrences de la valeur prod SONT des storageClass) ;
+    #   - rétention Prometheus (persistence.mode, ADR 0109) : on remplace les littéraux EXACTS
+    #     `retention: "15d"` / `retentionSize: "9GB"` du CR Prometheus (uniques, guillemets
+    #     inclus → aucun faux positif ; l'Alertmanager porte `retention: "120h"`, non matché).
+    #     En mode `full`, retention=15d/size=9GB → le manifeste est INCHANGÉ à l'octet.
+    - name: Load the monitoring manifest with the topology storageClass + persistence retention
       ansible.builtin.set_fact:
         monitoring_defs: >-
           {{ lookup('file', platform_repo_dir ~ '/platform/kube-prometheus-stack/kube-prometheus-stack.yaml')
              | replace('rook-ceph-block-replicated', monitoring_storage_class)
+             | replace('retention: "15d"', 'retention: "' ~ prometheus_retention ~ '"')
+             | replace('retentionSize: "9GB"', 'retentionSize: "' ~ prometheus_retention_size ~ '"')
              | from_yaml_all | list }}
 
     # Deux passes (drift L36) : les PrometheusRule passent par le webhook

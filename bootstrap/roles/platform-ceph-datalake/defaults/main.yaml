@@ -6,6 +6,28 @@
 platform_repo_dir: '{{ playbook_dir }}/..'
 ceph_datalake_dir: '{{ platform_repo_dir }}/storage/ceph/storageClass/datalake'
 
+# ── Rétention du datalake objet, dérivée du curseur persistence.mode (ADR 0109) ────
+# `persistence_mode` passé en `-e` (défaut `full`). Le CephObjectStore porte
+# `preservePoolsOnDelete` (sort des pools RGW quand le store est supprimé). Posé À
+# L'INSTALLATION. full = `false` = l'ACTUEL À L'OCTET (datalake-ec.yaml:21 — aucune
+# régression). ephemeral = `false` (pass-through, ADR 0109 §2). bounded n'a pas de valeur
+# `preservePoolsOnDelete` distincte : sa borne réelle est un lifecycle S3 (`Expiration`) sur
+# les buckets, exposé ci-dessous comme durée transmise (application S3 par bucket : suivi
+# séparé, non construit ici — la borne CephObjectStore ne borne pas le CONTENU des buckets).
+persistence_mode: full
+_datalake_preserve_by_mode:
+  full: 'false'
+  bounded: 'false'
+  ephemeral: 'false'
+datalake_preserve_pools: "{{ _datalake_preserve_by_mode[persistence_mode] | default('false') }}"
+# Durée d'expiration S3 (jours) pour le mode `bounded` — transmise pour le lifecycle des
+# buckets (à appliquer côté OBC/bucket, hors de ce rôle). 0 = pas d'expiration (full/ephemeral).
+_datalake_expiration_by_mode:
+  full: 0
+  bounded: 30
+  ephemeral: 0
+datalake_bucket_expiration_days: '{{ _datalake_expiration_by_mode[persistence_mode] | default(0) }}'
+
 # Attente du RGW Ready (gateway instances:3 → on exige >= 1, pas == 1, drift L33).
 ceph_rgw_ready_retries: 30
 ceph_rgw_ready_delay: 10

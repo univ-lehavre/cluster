@@ -1,0 +1,26 @@
+---
+# Valeurs par défaut du rôle platform-volume-snapshots (ADR 0013/0109).
+# CronJob de snapshots VolumeSnapshot des PVC applicatifs (RPO ≈ 24 h), + sa
+# VolumeSnapshotClass et son RBAC. AUPARAVANT appliqué à la main (storage/ceph/backup/) ;
+# désormais monté par nestor pour être régi par le curseur persistence.mode (ADR 0109).
+#
+# GARDE-FOU control-plane (ADR 0109) : ce CronJob ne snapshote QUE les données APPLICATIVES
+# (PVC). Le plan de contrôle (etcd) est sauvegardé séparément (rôle etcd-backup, ADR 0013) —
+# le curseur persistence.mode ne le touche JAMAIS.
+
+platform_repo_dir: '{{ playbook_dir }}/..'
+ceph_backup_dir: '{{ platform_repo_dir }}/storage/ceph/backup'
+snapshots_namespace: rook-ceph
+
+# ── Armement dérivé du curseur persistence.mode (ADR 0109) ──────────────────────
+# `persistence_mode` passé en `-e` (défaut `full`). Le CronJob est monté dans tous les
+# cas, mais SUSPENDU en `ephemeral` (instance jetable — on ne conserve rien). En
+# `full`/`bounded` il est armé (suspend: false). NB : monter ce CronJob est un CHANGEMENT
+# assumé (il n'était pas monté par nestor avant, ADR 0109) — les snapshots font désormais
+# partie du socle « les données applicatives sont sauvegardées par défaut ».
+persistence_mode: full
+snapshots_suspend: "{{ persistence_mode == 'ephemeral' }}"
+
+# Gate : CronJob présent (objet déclaratif, pas de replicas).
+snapshots_ready_retries: 12
+snapshots_ready_delay: 5

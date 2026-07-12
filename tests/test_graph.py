@@ -91,14 +91,14 @@ class Invariant3Determinism(unittest.TestCase):
 class Acyclicite(unittest.TestCase):
     """topo_sort sur tout le catalogue réussit ; un cycle est détecté."""
 
-    def test_all_components_sortable_29(self):
+    def test_all_components_sortable_30(self):
         order = graph.topo_sort(list(graph.COMPONENT_ALL))
         # 29 composants : citation (build node-side) RETIRÉ (ADR 0110) ; eventful RETIRÉ
         # (ADR 0105) ; gitops-seed-citation (instanciation Application, passée côté atlas)
         # RETIRÉ (ADR 0111). `gitops-seed` (jouet atlas-workflows) reste. `buildkit` (moteur
         # de build in-pod rootless) RÉTABLI (2026-07-12, le diagnostic d'abandon 0110 était faux).
         # `gitea-runner` (orchestrateur CI Gitea Actions, couche gitops) AJOUTÉ (ADR 0112).
-        self.assertEqual(len(order), 29)
+        self.assertEqual(len(order), 30)
         self.assertEqual(set(order), set(graph.COMPONENT_ALL))
 
     def test_injected_cycle_detected(self):
@@ -191,6 +191,7 @@ class PhaseClosureCeph(unittest.TestCase):
                 "ceph",
                 "sc",
                 "datalake",
+                "volume-snapshots",
                 "monitoring",
                 "gitops",
                 "registry",
@@ -210,6 +211,7 @@ class PhaseClosureCeph(unittest.TestCase):
             [
                 "sc",
                 "datalake",
+                "volume-snapshots",
                 "monitoring",
                 "gitops",
                 "registry",
@@ -325,6 +327,7 @@ class SignalIsAGraphProperty(unittest.TestCase):
         "ceph": ("cephcluster.ceph.rook.io", "rook-ceph", "rook-ceph", "phase"),
         "sc": ("storageclass", "rook-ceph-block-replicated", None, False),
         "datalake": ("cephobjectstore.ceph.rook.io", "datalake", "rook-ceph", "phase"),
+        "volume-snapshots": ("cronjob", "volume-snapshot-daily", "rook-ceph", False),
         "monitoring": ("statefulset", "loki", "monitoring", True),
         "gitops": ("deployment", "argocd-server", "argocd", True),
         "registry": ("deployment", "registry", "registry", True),

@@ -53,8 +53,11 @@ data:
       max_cache_freshness_per_query: 10m
       query_timeout: 300s
       reject_old_samples: true
-      reject_old_samples_max_age: 168h
-      retention_period: 168h
+      # Rétention dérivée de persistence.mode (ADR 0109) ; full=168h (actuel à l'octet).
+      # reject_old_samples_max_age suit retention_period (cohérence : ne pas rejeter des
+      # échantillons plus récents que la fenêtre conservée).
+      reject_old_samples_max_age: {{ loki_retention_period }}
+      retention_period: {{ loki_retention_period }}
       split_queries_by_interval: 15m
       volume_enabled: true
     memberlist:

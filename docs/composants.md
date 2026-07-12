@@ -335,6 +335,32 @@ Image Volume Extensions, sans image PostgreSQL custom. On écrit sur le service
 primary (`pg-rw`), on lit sur le replica (`pg-ro`). Manifestes :
 [`platform/cloudnative-pg/`](../platform/cloudnative-pg/).
 
+### Persistance déclarative (`persistence.mode`) et snapshots
+
+La topologie porte un **curseur de rétention global**,
+`persistence.mode ∈ {full, bounded, ephemeral}`
+([ADR 0109](decisions/0109-persistance-declarative-topologie.md), volet de
+l'adaptativité matérielle
+[ADR 0107](decisions/0107-adaptativite-materielle-premisse-cultures.md)) :
+l'exploitant déclare **une fois** l'intention de rétention des données
+applicatives, et nestor la fait **dériver** sur chaque brique. `full` (le
+défaut) reproduit le comportement actuel ; `bounded` pose des bornes (fenêtre
+glissante, quotas) ; `ephemeral` rend l'instance jetable. Le curseur circule par
+le faisceau `derive_run_params` → variables Ansible, et mord sur six briques :
+StorageClass (`reclaimPolicy`), CNPG (`retentionPolicy` + `ScheduledBackup`),
+Loki (`retention_period`), Prometheus (`retention.time/size`), datalake
+(`preservePoolsOnDelete`), et le CronJob de **snapshots**. Le mode est appliqué
+**à l'installation** — nestor _configure_ la rétention, il n'_exécute_ aucune
+éviction (chaque brique applique sa borne nativement) ; une dérive ultérieure
+est **signalée**, pas réconciliée. Le plan de contrôle (etcd) n'est **jamais**
+régi par ce curseur (sauvegardé séparément,
+[ADR 0013](decisions/0013-sauvegarde-donnees-applicatives.md)).
+
+Les **snapshots des PVC applicatifs** (VolumeSnapshot, RPO ≈ 24 h) sont
+désormais un composant nestor à part entière (`volume-snapshots`, rôle
+`platform-volume-snapshots`) — armé par défaut, désarmé en `ephemeral`.
+Manifestes : [`storage/ceph/backup/`](../storage/ceph/backup/).
+
 ### Dagster (orchestration)
 
 Dagster est l'**orchestrateur** de pipelines de données : il déclenche, planifie

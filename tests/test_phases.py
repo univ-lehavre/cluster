@@ -279,6 +279,20 @@ class ExtravarsAreRestrictedPerPhase(unittest.TestCase):
         self.assertIn("gitea_storage_class", ev)
         self.assertNotIn("cnpg_storage_class", ev)
 
+    def test_persistence_mode_reaches_data_bearing_phases(self):
+        # persistence.mode (ADR 0109) circule vers les phases qui portent une brique de
+        # rétention : sc (reclaimPolicy), datalake (preservePools), monitoring (Loki+Prom),
+        # dataops (CNPG), volume-snapshots (CronJob). Le faisceau le pose toujours (défaut
+        # `full`) ; chaque phase le reçoit car elle le déclare dans ses extravars_keys.
+        self.assertEqual(self.derived.get("persistence_mode"), "full")
+        for phase in ("sc", "datalake", "monitoring", "dataops", "volume-snapshots"):
+            with self.subTest(phase=phase):
+                self.assertEqual(
+                    phases.extravars_for(phase, self.derived).get("persistence_mode"), "full"
+                )
+        # Une phase qui ne porte PAS de brique de rétention ne le reçoit PAS (mapping strict).
+        self.assertNotIn("persistence_mode", phases.extravars_for("gitops", self.derived))
+
     def test_trivial_storage_phases_get_no_derived_keys(self):
         # storage-simple/metrics-server : aucun -e dérivé (au-delà du commun).
         for phase in ("storage-simple", "metrics-server"):

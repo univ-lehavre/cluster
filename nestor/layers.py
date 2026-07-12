@@ -66,6 +66,7 @@ _QUEUE_PHASES = frozenset(
         "ceph",
         "sc",
         "datalake",
+        "volume-snapshots",
         "monitoring",
         "gitops",
         "registry",

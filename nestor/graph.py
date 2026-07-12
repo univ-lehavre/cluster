@@ -205,6 +205,23 @@ _CATALOGUE: tuple[Component, ...] = (
         signal=("cephobjectstore.ceph.rook.io", "datalake", "rook-ceph", "phase"),
         weight=3,
     ),
+    # Snapshots des PVC applicatifs (ADR 0013/0109) — CronJob `volume-snapshot-daily` régi par
+    # le curseur persistence.mode (armé full/bounded, désarmé ephemeral). Monté par nestor
+    # (avant : apply manuel). Dépend de `sc` (il snapshote des PVC bloc Ceph via la
+    # VolumeSnapshotClass RBD). Signal = PRÉSENCE du CronJob (objet déclaratif sans replicas).
+    # NE snapshote QUE les données applicatives — etcd/le plan de contrôle est régi séparément
+    # (etcd-backup, ADR 0013), JAMAIS par ce curseur (garde-fou 0109).
+    Component(
+        name="volume-snapshots",
+        role="platform-volume-snapshots",
+        deps=("sc",),
+        profile="ceph",
+        # Pas de `namespace` : le ns `rook-ceph` est POSSÉDÉ par `ceph` (invariant ≤1
+        # possesseur) ; ce composant y DÉPOSE seulement un CronJob (tenant, comme loki/barman).
+        targeted=("-n rook-ceph cronjob.batch volume-snapshot-daily",),
+        signal=("cronjob", "volume-snapshot-daily", "rook-ceph", False),
+        weight=3,
+    ),
     Component(
         name="seaweedfs",
         role="platform-seaweedfs",
@@ -511,6 +528,8 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     "ceph": ("ceph",),
     "sc": ("sc",),
     "datalake": ("datalake",),
+    # volume-snapshots : phase autonome (CronJob de snapshots des PVC, ADR 0013/0109).
+    "volume-snapshots": ("volume-snapshots",),
     "storage-simple": ("storage-simple",),
     "metrics-server": ("metrics-server",),
     "monitoring": ("prometheus-stack", "loki", "s3-backing-loki"),
@@ -654,6 +673,7 @@ ROUNDTRIP_PHASES: tuple[str, ...] = (
     "ceph",
     "sc",
     "datalake",
+    "volume-snapshots",
     "metrics-server",
     "monitoring",
     # registry AVANT dataops : registry est une phase autonome (socle CI/CD) ; dataops
@@ -790,6 +810,7 @@ _PHASE_SIGNAL_COMPONENT: dict[str, str] = {
     "ceph": "ceph",
     "sc": "sc",
     "datalake": "datalake",
+    "volume-snapshots": "volume-snapshots",  # phase autonome (ADR 0013/0109) : CronJob présent
     "monitoring": "loki",  # DERNIER maillon ≠ nom de phase
     "gitops": "argocd",  # DERNIER maillon ≠ nom de phase (argocd-server)
     "registry": "registry",  # phase autonome (ADR 0112) : Deployment registry Ready

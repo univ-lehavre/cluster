@@ -11,6 +11,11 @@ spec:
   configuration:
     destinationPath: s3://{{ s3b_bucket_resolved | default(cnpg_s3_bucket) }}/
     endpointURL: {{ cnpg_s3_endpoint }}
+{% if cnpg_retention_policy %}
+    # Rétention Barman dérivée de persistence.mode (ADR 0109). ABSENTE en `full` (bloc non
+    # rendu → objectstore inchangé à l'octet) ; bornée en bounded/ephemeral.
+    retentionPolicy: "{{ cnpg_retention_policy }}"
+{% endif %}
     s3Credentials:
       accessKeyId:
         name: pg-backup-s3

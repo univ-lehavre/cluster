@@ -49,6 +49,18 @@ _EXPOSITION_ALIASES = {"hostport": "nodeport", "lb-ipam": "gateway"}
 # banc Lima que sur une VM publique mono-NIC (plus de défaut par terrain, plus de défaut
 # gateway). `gateway` ne s'arme que si la topologie le DÉCLARE explicitement.
 _EXPOSITION_DEFAULT = "nodeport"
+# Persistance déclarative des DONNÉES APPLICATIVES (ADR 0109, volet B de l'adaptativité
+# matérielle ADR 0107 §2). Curseur GLOBAL à l'instance, EXPLICITE (ne dérive pas du terrain) :
+#   `full`      = on stocke tout (PVC durables, buckets conservés, backups gardés) — le
+#                 comportement ACTUEL, et le DÉFAUT (fail-safe : on ne perd jamais de données
+#                 par surprise quand la topo est muette) ;
+#   `bounded`   = cache adapté (fenêtre glissante temporelle bornée ; le brut lourd est évincé
+#                 du plus ancien au plus récent, les dérivés épinglés hors quota) ;
+#   `ephemeral` = jetable/pass-through (pas de volume durable, snapshots désarmés).
+# Le curseur régit les données APPLICATIVES, JAMAIS le plan de contrôle (etcd/quorum, régi par
+# ADR 0013 — garde-fou). Frère de l'axe `exposition`, calqué sur le patron `terrain` (ADR 0108).
+VALID_PERSISTENCE = {"full", "bounded", "ephemeral"}
+_DEFAULT_PERSISTENCE = "full"
 
 
 # Ressources VM par défaut (LOT 8, ADR 0097 §3) — remontent les VM_CPUS/VM_MEMORY/VM_DISK
@@ -128,6 +140,9 @@ class Topology:
     network: dict[str, Any] = field(default_factory=dict)
     exposition: dict[str, Any] = field(default_factory=dict)
     storage: dict[str, Any] = field(default_factory=dict)
+    # persistence : bloc racine, frère d'`exposition`/`storage` (ADR 0109). Porte le curseur
+    # de rétention des données applicatives (`mode: full|bounded|ephemeral`). Absent → `full`.
+    persistence: dict[str, Any] = field(default_factory=dict)
     hardening: dict[str, Any] = field(default_factory=dict)
     resources: dict[str, Any] | None = None
     # ── Blocs de config remontés de l'ENV vers le YAML (LOT 8, ADR 0097 §3) ──────
@@ -235,6 +250,20 @@ class Topology:
         if declared:
             return _EXPOSITION_ALIASES.get(declared, declared)
         return _EXPOSITION_DEFAULT
+
+    @property
+    def persistence_mode(self) -> str:
+        """Curseur de rétention des DONNÉES APPLICATIVES (ADR 0109) : `full` | `bounded` |
+        `ephemeral`.
+
+        `persistence.mode` déclaré prime ; sinon défaut GLOBAL `full` — le comportement ACTUEL
+        et prudent (on ne perd jamais de données par surprise quand la topo est muette,
+        fail-safe). Le curseur est EXPLICITE : il ne dérive PAS du terrain (un banc peut être
+        persistant, un parc cloud jetable — deux axes distincts, ADR 0109 §4). Une valeur hors
+        enum est RAMENÉE au défaut (lecture tolérante ; la validation stricte vit au scaffold).
+        Ne régit JAMAIS le plan de contrôle (etcd, régi par ADR 0013 — garde-fou 0109)."""
+        raw = self.persistence.get("mode") if isinstance(self.persistence, dict) else None
+        return raw if raw in VALID_PERSISTENCE else _DEFAULT_PERSISTENCE
 
     @property
     def default_resources(self) -> NodeResources:
@@ -346,6 +375,7 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
         network=data.get("network", {}) or {},
         exposition=data.get("exposition", {}) or {},
         storage=data.get("storage", {}) or {},
+        persistence=data.get("persistence", {}) or {},  # ADR 0109 ; absent → `full` (accesseur)
         hardening=data.get("hardening", {}) or {},
         resources=data.get("resources"),
         # LOT 8 (ADR 0097 §3) : blocs de config remontés de l'env vers le YAML. Tous
@@ -387,6 +417,14 @@ def topology_from_dict(data: dict[str, Any]) -> Topology:
                 f"(valides : {sorted(VALID_EXPOSITION_MODES)} ; "
                 f"alias hostport → nodeport, lb-ipam → gateway — ADR 0092)"
             )
+    # persistence.mode : enum validé si déclaré (ADR 0109). Un mode inconnu lève (un champ
+    # déclaratif sans effet est une étiquette morte, ADR 0056). Absent → `full` (accesseur).
+    persist = topo.persistence.get("mode") if isinstance(topo.persistence, dict) else None
+    if persist is not None and persist not in VALID_PERSISTENCE:
+        raise TopologyError(
+            f"`persistence.mode` = {persist!r} inconnu "
+            f"(valides : {sorted(VALID_PERSISTENCE)} — ADR 0109)"
+        )
     return topo
 
 

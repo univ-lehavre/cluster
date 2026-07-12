@@ -372,11 +372,19 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
         extravars_keys=("ceph_osd_expected", "ceph_metadata_device"),
         note="gate cr-phase (CephCluster status.phase=Ready) ; OSD up/HEALTH_OK = preuve banc",
     ),
-    "sc": _plan("sc", note="gate présence SC ; gate_test_pvc (PVC Bound) = preuve banc (STUB)"),
+    "sc": _plan(
+        "sc",
+        extravars_keys=("persistence_mode",),  # reclaimPolicy des SC bloc dérivé (ADR 0109)
+        note="gate présence SC ; gate_test_pvc (PVC Bound) = preuve banc (STUB)",
+    ),
     "datalake": _plan(
         "datalake",
+        extravars_keys=("persistence_mode",),  # preservePoolsOnDelete du CephObjectStore (ADR 0109)
         note="gate cr-phase (CephObjectStore Ready) ; RGW S3 PUT/GET = preuve banc (STUB)",
     ),
+    # volume-snapshots : CronJob de snapshots des PVC applicatifs (ADR 0013/0109), armé/désarmé
+    # selon persistence.mode. Playbook dédié bootstrap/volume-snapshots.yaml. Signal = présence.
+    "volume-snapshots": _plan("volume-snapshots", extravars_keys=("persistence_mode",)),
     # ── metrics-server : API ressources (kubectl top), aucun -e dérivé ────────
     "metrics-server": _plan("metrics-server", extravars_keys=()),
     # ── monitoring : Prometheus + Grafana + Loki (S3). Consomme storageClass +
@@ -388,6 +396,9 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
             "loki_storage_class",
             "loki_s3_backing",
             "loki_s3_endpoint",
+            # persistence.mode (ADR 0109) : Loki (retention_period) + Prometheus
+            # (retention.time/size) dérivent leur borne du mode. `full` = actuel.
+            "persistence_mode",
         ),
     ),
     # ── gitops : Gitea (forge) + Argo CD (moteur). Consomme gitea_storage_class. ─
@@ -415,6 +426,9 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
             # banc Lima seulement (derive_run_params le pose si terrain==local) : build
             # l'émetteur OpenLineage jetable requis par le hook e2e dataops_chain_emit_and_verify.
             "build_emitter_image",
+            # persistence.mode (ADR 0109) : CNPG dérive sa rétention WAL/backup du mode.
+            # `full` = actuel (pas de retentionPolicy rendue, ScheduledBackup armé).
+            "persistence_mode",
         ),
         e2e_hooks=("dataops_chain_emit_and_verify", "dataops_egress_internet_check"),
         note="playbook + gate Marquez Ready, PUIS 2 harnais e2e CÂBLÉS façade "
