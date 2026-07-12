@@ -48,6 +48,15 @@ nodes:
 exposition:
   mode: nodeport # nodeport | gateway (legacy L7) | none. Alias : hostport→nodeport, lb-ipam→gateway.
 
+# ─── persistence : curseur de rétention des DONNÉES APPLICATIVES (ADR 0109). Axe déclaratif
+# GLOBAL et EXPLICITE (ne dérive PAS du terrain — un banc jetable peut rester persistant). `full`
+# = on stocke tout (comportement actuel à l'octet, et défaut si le bloc est absent) ; `bounded` =
+# bornes finies (fenêtres/quotas resserrés, classe contrainte, ADR 0107 §2) ; `ephemeral` = jetable
+# (rétention minimale, sauvegardes/snapshots désarmés). Ne régit JAMAIS etcd/le plan de contrôle.
+# Dérivé par nestor sur six briques (sc, cnpg, loki, prometheus, datalake, volume-snapshots).
+persistence:
+  mode: full # full | bounded | ephemeral.
+
 # ─── access : DÉCLARATIF (non lu par nestor, mais PORTÉ ici car spécifique au terrain local) —
 # documente COMMENT le poste macOS joint les UI. Réseau Lima = NAT (user-v2) : l'IP de la VM
 # n'est pas routable depuis l'hôte. `bench/lima/lib.sh` génère un portForward large (plage
