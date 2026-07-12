@@ -103,7 +103,9 @@ Le composant `buildkit` est de nouveau câblé dans nestor (graphe, rôle
 exception `.trivyignore` KSV-0014) — le socle est montable par `nestor`, plus
 par `kubectl apply` manuel. Le déroulé opérationnel (montage, corrections du
 rootless, dépannage) est dans le
-[RUNBOOK buildkit](../../platform/buildkit/RUNBOOK.md).
+[RUNBOOK buildkit](../../platform/buildkit/RUNBOOK.md) ; l'exploitation du
+runner (montage en phase autonome, enregistrement par token, dépannage réseau)
+dans le [RUNBOOK gitea-runner](../../platform/gitea-runner/RUNBOOK.md).
 
 ### Ce qui est RÉTABLI (vs ADR 0110 amendé)
 

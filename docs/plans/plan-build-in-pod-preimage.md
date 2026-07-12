@@ -2,7 +2,23 @@
 
 ## État
 
-> **État : Actif** (depuis 2026-07-11) · **Fonde :
+> **État : Superseded** (2026-07-12) par
+> [ADR 0112](../decisions/0112-cicd-in-cluster-gitea-actions-buildkit.md)
+> (Accepted). Ce plan fondait
+> [ADR 0110](../decisions/0110-preimage-de-build-et-build-in-pod.md) et
+> proposait un **déclencheur Sentinelle/Job** (« Pas Gitea Actions »). La
+> réalité livrée diverge : l'**ADR 0112 a rétabli le build in-pod** (moteur
+> BuildKit rootless prouvé au banc — scénario 35, PR #650) mais **via Gitea
+> Actions**, pas la Sentinelle. Le « comment » réel vit désormais dans l'ADR
+> 0112 et dans
+> [`platform/buildkit/RUNBOOK.md`](../../platform/buildkit/RUNBOOK.md) /
+> [`platform/gitea-runner/RUNBOOK.md`](../../platform/gitea-runner/RUNBOOK.md).
+> Ce plan est conservé pour trace historique du raisonnement ; ses lots sont
+> relus ci-dessous (moteur prouvé, point dur fuse-vs-native tranché).
+>
+> <!-- historique -->
+>
+> **État initial (2026-07-11)** · **Fonde :
 > [ADR 0110](../decisions/0110-preimage-de-build-et-build-in-pod.md)**
 > (Accepted) · **Issue de pilotage :
 > [#637](https://github.com/univ-lehavre/cluster/issues/637)** ·
@@ -90,6 +106,13 @@ tranche à la **preuve du lot 2**. **Aucun** recours à `privileged`/`hostPath`/
 `hostNetwork` (aucun précédent dans un ns PodSecurity-labellisé, et `baseline`
 les bloque).
 
+> **Tranché (2026-07-12, ADR 0112).** Le point dur est **résolu** : le
+> snapshotter `auto` démarre en **overlayfs sans `/dev/fuse`** et le build
+> in-pod réussit (aucune dérogation `fuse` finalement nécessaire). Le moteur
+> BuildKit rootless est prouvé au banc (scénario 35, PR #650). Détail
+> d'exploitation :
+> [`platform/buildkit/RUNBOOK.md`](../../platform/buildkit/RUNBOOK.md) §3.
+
 Note de cadrage (corrige l'ADR) : l'ADR 0110 dit « à prouver sous `restricted` »
 ; l'enforce **réel** du dépôt est `baseline`
 ([ADR 0014](../decisions/0014-durcissement-kubeadm-init.md), `restricted`
@@ -157,15 +180,20 @@ de banc consigné.
 Issue de pilotage : [#637](https://github.com/univ-lehavre/cluster/issues/637)
 (les lots ci-dessous y sont des cases à cocher).
 
-| Lot                                          | État                                            |
-| -------------------------------------------- | ----------------------------------------------- |
-| 0. Acter l'ADR 0110 (`Accepted`)             | ✅ fait (2026-07-11) — débloque le reste        |
-| 1. Socle `buildkitd` + netpol + graphe       | 🔲 à faire                                      |
-| 2. Preuve « un pod qui build » (fuse/native) | 🔲 à faire — **le lot décisif** (ADR 0034/0052) |
-| 3. Job de build (moule reconciler)           | 🔲 à faire                                      |
-| 4. Sentinelle (détection → Job)              | 🔲 à faire                                      |
-| 5. Amender ADR 0106 (timer → pré-image)      | 🔲 à faire                                      |
-| 6. Preuve bout-en-bout (`RESULTS.md`)        | 🔲 à faire — le « push = auto » (ADR 0034)      |
+> **Relu 2026-07-12 (ADR 0112).** Le moteur et la preuve bout-en-bout sont
+> **acquis**, mais par une chaîne **différente** de celle planifiée : le
+> déclencheur retenu est **Gitea Actions** (ADR 0112), pas la Sentinelle/Job des
+> lots 3-4 (qui deviennent **caducs**). États réels ci-dessous.
+
+| Lot                                          | État                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------- |
+| 0. Acter l'ADR 0110 (`Accepted`)             | ✅ fait (2026-07-11) — débloque le reste                                  |
+| 1. Socle `buildkitd` + netpol + graphe       | ✅ fait — `platform/buildkit/` rétabli (ADR 0112)                         |
+| 2. Preuve « un pod qui build » (fuse/native) | ✅ prouvé au banc (ADR 0112 ; snapshotter `auto`/overlayfs, **pas** fuse) |
+| 3. Job de build (moule reconciler)           | ⛔ caduc — remplacé par Gitea Actions (ADR 0112)                          |
+| 4. Sentinelle (détection → Job)              | ⛔ caduc — remplacé par Gitea Actions (ADR 0112)                          |
+| 5. Amender ADR 0106 (timer → pré-image)      | 🔲 à faire                                                                |
+| 6. Preuve bout-en-bout (`RESULTS.md`)        | ✅ prouvé — scénario 35, PR #650 (via Gitea Actions)                      |
 
 **Achèvement** : quand les lots 1-6 sont livrés sur `main` et les runs de preuve
 (2, 6) consignés, l'en-tête `## État` passe **Achevé**. Le passage **Brouillon →
