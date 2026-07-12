@@ -183,7 +183,7 @@ vérifications sont requises** avant qu'une PR ne puisse fusionner.
 - **Scripts bash** — **248 cas de tests `bats`** répartis en **10 suites**
   ([`bench/unit/`](bench/unit/)), exécutés à chaque `pre-push` et en CI ; tout
   script shell passe par ailleurs ShellCheck, **zéro avertissement**.
-- **End-to-end** — **33 scénarios E2E reproductibles** au banc Lima : Phases 1 à
+- **End-to-end** — **34 scénarios E2E reproductibles** au banc Lima : Phases 1 à
   5 + DataOps sur 3 VMs Debian 13 avec disques Ceph, **_from scratch_** (depuis
   le code seul, [ADR 0034](docs/decisions/0034-validation-e2e-from-scratch.md)).
 - **Idempotence prouvée** : un rôle n'est validé que si son rejeu donne
@@ -553,7 +553,7 @@ juger en 5 min : [docs/preuves.md](docs/preuves.md).
 - **112 ADR** (94 Accepted, 13 Proposed, 5 Superseded)
 - **18 plans** vivants (1 Abandonné, 7 Achevé, 9 Actif, 1 Brouillon)
 - **99 drifts** indexés (3 caduc, 93 corrige, 1 en-cours, 2 ouvert)
-- **33 scénarios** E2E reproductibles
+- **34 scénarios** E2E reproductibles
 
 <!-- STATS:FIN -->
 
