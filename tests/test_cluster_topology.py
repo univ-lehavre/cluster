@@ -250,6 +250,38 @@ class Exposition(unittest.TestCase):
             topology_from_dict(_base(exposition={"mode": "bogus"}))
 
 
+class Persistence(unittest.TestCase):
+    """persistence.mode (ADR 0109) : curseur de rétention des données applicatives, à trois
+    crans `full`|`bounded`|`ephemeral`. Défaut GLOBAL `full` (fail-safe : on ne perd jamais de
+    données par surprise), EXPLICITE (ne dérive pas du terrain), enum strict au scaffold."""
+
+    def test_default_when_absent_is_full(self):
+        # Une topo SANS bloc `persistence` retombe sur le défaut prudent `full` — le
+        # comportement ACTUEL (le curseur n'évince rien tant qu'il n'est pas déclaré).
+        topo = topology_from_dict(_base())
+        self.assertNotIn("mode", topo.persistence)
+        self.assertEqual(topo.persistence_mode, "full")
+
+    def test_three_modes_declared(self):
+        for mode in ("full", "bounded", "ephemeral"):
+            t = topology_from_dict(_base(persistence={"mode": mode}))
+            self.assertEqual(t.persistence_mode, mode)
+
+    def test_does_not_derive_from_terrain(self):
+        # Curseur EXPLICITE (ADR 0109 §4) : un banc `local` peut être persistant, un parc
+        # peut être jetable — la persistance ne dérive PAS du terrain. Sans déclaration,
+        # `local` reste `full` (pas d'`ephemeral` implicite parce que jetable).
+        self.assertEqual(topology_from_dict(_base(terrain="local")).persistence_mode, "full")
+        # Et un `ephemeral` déclaré sur un `baremetal` est ACCEPTÉ (aucun couple interdit).
+        t = topology_from_dict(_base(terrain="baremetal", persistence={"mode": "ephemeral"}))
+        self.assertEqual(t.persistence_mode, "ephemeral")
+
+    def test_unknown_mode_rejected(self):
+        # Un champ déclaratif sans effet est une étiquette morte (ADR 0056) → enum strict.
+        with self.assertRaises(TopologyError):
+            topology_from_dict(_base(persistence={"mode": "sometimes"}))
+
+
 # (Classe HaThreeCpExample retirée : la topologie ha-3cp est abandonnée 2026-06-29 —
 # ADR 0055 Superseded by 0097, topologies/ha-3cp.example.yaml supprimée. La HA multi-CP se
 # reprend si de nouvelles ressources permettent un banc multi-nœud.)

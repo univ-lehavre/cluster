@@ -55,6 +55,14 @@ nodes:
 exposition:
   mode: lb-ipam # lb-ipam (→ gateway) | nodeport | none. Alias : hostport → nodeport.
 
+# ─── persistence : curseur de rétention des DONNÉES APPLICATIVES (ADR 0109). Global à
+# l'instance, EXPLICITE (ne dérive pas du terrain). `full` = on stocke tout (le comportement
+# actuel, et le défaut si le bloc est absent) ; `bounded` = fenêtre glissante bornée (classe
+# HDD-only, ADR 0107 §2) ; `ephemeral` = jetable (pas de volume durable). Ne régit JAMAIS
+# etcd/le plan de contrôle (garde-fou). Sur le parc massif dirqual : `full` (on garde tout).
+persistence:
+  mode: full # full | bounded | ephemeral.
+
 # ─── storage : backend Ceph (l'objet du parc dirqual). `osd_expected`/`metadata_device` sont
 # dérivés/optionnels ; en l'absence de `nodes[].disks`, ils restent non forcés (renseignés au run).
 storage:
