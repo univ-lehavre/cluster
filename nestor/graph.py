@@ -389,9 +389,22 @@ _CATALOGUE: tuple[Component, ...] = (
     # côté ATLAS (le geste de déploiement atlas crée+pousse son Application) — cluster ne
     # l'instancie plus (nestor ne touche pas au code atlas, ADR 0108). Le composant `gitops-seed`
     # (code-location JOUET `atlas-workflows`, un artefact du socle) RESTE ci-dessus.
-    # NB (ADR 0110 amendé) : le composant `buildkit` (moteur de build IN-POD) a été RETIRÉ —
-    # PodSecurity baseline (k8s ≥ 1.34) refuse le seccomp Unconfined du rootless, et le build
-    # de code est déplacé HORS cluster (poste, atlas build-code.sh). Plus de rôle platform-buildkit.
+    # Moteur de build IN-POD (buildkit rootless) — RÉTABLI (2026-07-12). L'abandon ADR 0110
+    # (#644) reposait sur un mauvais diagnostic : PodSecurity baseline ne bloque pas le rootless
+    # « par nature » — c'est le namespace de build labellisé `enforce: baseline` qui refusait le
+    # seccomp Unconfined. Le socle (platform/buildkit/) ne labellise PLUS ce ns → le build in-pod
+    # FONCTIONNE (prouvé au banc Lima : build cible code FROM pré-image + push). buildkitd builde
+    # l'image de CODE des code-locations (`FROM deps-base`, zéro egress). Dépend de `registry`
+    # (pull la pré-image + push le résultat) et de `build-images` (mirror node-side de l'image
+    # buildkit). PAS de `signal` : outillage de build, il n'atteste aucune couche applicative
+    # (un signal serait orphelin, test only_signal_components_carry_a_signal).
+    Component(
+        name="buildkit",
+        role="platform-buildkit",
+        deps=("registry", "build-images"),
+        namespace="buildkit",
+        weight=8,
+    ),
 )
 # NB (ADR 0105) : la couche `eventful` (build applicatif événementiel in-cluster, Argo Events +
 # Argo Workflows + NATS, ADR 0095 §1.b) a été RETIRÉE — le build node-side (platform-build-images,

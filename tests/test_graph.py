@@ -91,12 +91,13 @@ class Invariant3Determinism(unittest.TestCase):
 class Acyclicite(unittest.TestCase):
     """topo_sort sur tout le catalogue réussit ; un cycle est détecté."""
 
-    def test_all_components_sortable_27(self):
+    def test_all_components_sortable_28(self):
         order = graph.topo_sort(list(graph.COMPONENT_ALL))
-        # 27 composants : buildkit + citation (build) RETIRÉS (ADR 0110) ; eventful RETIRÉ
+        # 28 composants : citation (build node-side) RETIRÉ (ADR 0110) ; eventful RETIRÉ
         # (ADR 0105) ; gitops-seed-citation (instanciation Application, passée côté atlas)
-        # RETIRÉ (ADR 0111). `gitops-seed` (jouet atlas-workflows) reste.
-        self.assertEqual(len(order), 27)
+        # RETIRÉ (ADR 0111). `gitops-seed` (jouet atlas-workflows) reste. `buildkit` (moteur
+        # de build in-pod rootless) RÉTABLI (2026-07-12, le diagnostic d'abandon 0110 était faux).
+        self.assertEqual(len(order), 28)
         self.assertEqual(set(order), set(graph.COMPONENT_ALL))
 
     def test_injected_cycle_detected(self):

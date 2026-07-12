@@ -18,13 +18,15 @@
 > 4. `deployment.yaml` : probes `buildctl --addr tcp://127.0.0.1:1234 …` (le
 >    daemon écoute en TCP, pas sur le socket unix).
 >
-> **État du câblage nestor** : le socle a été prouvé en l'appliquant à la main
-> (`kubectl apply -f platform/buildkit/`) + un client `buildctl` durci → le
-> daemon (Option B). Le composant `buildkit` du graphe nestor (retiré par #644)
-> N'A PAS encore été recâblé — la « séquence `nestor` » ci-dessous décrit donc
-> un ÉTAT-CIBLE, pas l'état courant. Câblage graphe + registry montable seul =
-> travail d'industrialisation à suivre. La chaîne CI/CD complète (Gitea Actions
-> → buildctl → daemon → Argo CD) a été démontrée.
+> **État du câblage nestor** : le composant `buildkit` du graphe nestor (retiré
+> par #644) a été RECÂBLÉ — composant (`nestor/graph.py`), rôle
+> `platform-buildkit` importé (`bootstrap/dataops.yaml`, tag `buildkit`), mirror
+> `moby/buildkit` (`platform-build-images`), exception `.trivyignore` KSV-0014.
+> La « séquence `nestor` » ci-dessous est donc de nouveau opérante. RAFFINEMENT
+> restant : rendre `registry` montable SEUL (il est aujourd'hui tiré via la
+> phase `dataops`, donc monter `buildkit` tire aussi CNPG/Dagster) — pour un
+> socle CI/CD léger. La chaîne CI/CD complète (Gitea Actions → buildctl → daemon
+> → Argo CD) a été démontrée au banc.
 
 Ce runbook donne la **séquence `nestor`** pour monter le socle buildkitd (lot 1,
 déjà mergé) et **prouver au banc** qu'un `buildctl` in-pod build l'image de CODE
@@ -99,42 +101,38 @@ disponible au pod. Le point à observer et à consigner :
   dérogation `seccomp Unconfined` posée (lot 1) ? Si `buildctl debug workers`
   échoue → le rootless ne tient pas en l'état.
 
-## 3. Départager fuse-overlayfs vs native (le point dur ADR 0110)
+## 3. Snapshotter : native/overlayfs — TRANCHÉ au banc (2026-07-12)
 
 Le `buildkitd.toml` (ConfigMap `buildkitd-config`) porte `snapshotter = "auto"`.
-Observer ce que le worker a choisi :
+**Résultat mesuré au banc Lima** : le worker démarre en **overlayfs** (log
+`auto snapshotter: using overlayfs`), SANS `/dev/fuse` monté, et le build de la
+cible code (`FROM` pré-image interne + `COPY` + `RUN` + push) RÉUSSIT. Le point
+dur ADR 0110 (fuse vs native) est donc tranché : **`auto` suffit**, aucune
+dérogation `/dev/fuse` n'a été nécessaire. Deux corrections au daemon ont été
+requises (cf. note en tête) : `--oci-worker-no-process-sandbox` (sinon `RUN`
+échoue au `mount proc`) et les capabilities `SETUID/SETGID` (sinon `newuidmap`
+échoue). Vérifier au besoin :
 
 ```bash
-nestor kubectl -n buildkit exec "$POD" -- buildctl debug workers -v
-# → le champ 'snapshotter' du worker oci. `auto` = fuse-overlayfs si /dev/fuse
-#   est disponible, sinon native.
+nestor kubectl -n buildkit exec "$POD" -- buildctl --addr tcp://127.0.0.1:1234 debug workers -v
+# → worker oci, snapshotter overlayfs (ou fuse-overlayfs si /dev/fuse un jour monté).
 ```
-
-Deux cas, à trancher au run :
-
-- **fuse-overlayfs indisponible** (pas de `/dev/fuse` monté — le lot 1 ne l'a
-  PAS monté volontairement) : le worker tombe en `native`. Si le build passe en
-  `native` → **on fige `snapshotter = "native"`** dans le ConfigMap (plus
-  simple, aucune dérogation `/dev/fuse`, acceptable car l'image de code est
-  petite).
-- **native trop lent / échoue** : monter `/dev/fuse` (device plugin ou, au banc,
-  `hostPath: /dev/fuse` + `securityContext` adapté) et figer
-  `snapshotter = "fuse-overlayfs"`. C'est la dérogation supplémentaire annoncée.
-
-**Ne pas présumer** : ce qui tient au banc fige le choix. Consigner le verdict
-(worker démarré ? snapshotter retenu ? build réussi ? durée ?) dans
-`bench/lima/RESULTS.md` — sans ce run, le moteur reste **déclaré mais non
-prouvé** (ADR 0034/0052).
 
 ## En cas d'échec du worker (le rootless ne démarre pas)
 
 Symptômes probables et pistes, à documenter comme _drifts_ :
 
 - `operation not permitted` sur `unshare`/`mount` → le seccomp `Unconfined`
-  n'est pas effectif (vérifier que l'annotation AppArmor `unconfined` est prise
-  et que le ns est bien en `enforce: baseline`, pas `restricted`).
-- `newuidmap: permission denied` → `allowPrivilegeEscalation: true` (posé au
-  lot 1) est requis pour le setuid ; vérifier qu'il n'est pas écrasé.
+  n'est pas effectif. CAUSE la plus fréquente (prouvée) : le namespace de build
+  est labellisé `pod-security.kubernetes.io/enforce: baseline`, qui REFUSE
+  `Unconfined` → le pod est rejeté à l'admission (ou dégradé). Le ns de build ne
+  DOIT PAS être labellisé baseline (cf. `platform/buildkit/namespace.yaml`).
+- `mounting "proc" … operation not permitted` sur un `RUN` → il manque l'arg
+  daemon `--oci-worker-no-process-sandbox` (le worker sandboxe chaque `RUN` et
+  monte /proc).
+- `newuidmap: permission denied` → il faut `allowPrivilegeEscalation: true` ET
+  les capabilities `SETUID`/`SETGID` (le `drop: [ALL]` seul les enlève) ;
+  vérifier qu'elles ne sont pas écrasées.
 - registre injoignable au push → vérifier la NetworkPolicy
   `allow-registry-egress` (port 80) et la résolution DNS `registry.registry.svc`
   (le pod n'a pas le `/etc/hosts` du nœud) ; tester
