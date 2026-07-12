@@ -11,6 +11,67 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.54.0](https://github.com/univ-lehavre/cluster/compare/v2.53.2...v2.54.0) (2026-07-12)
+
+
+### Features
+
+* **config:** forward large Lima pour l'accès L4 aux UI depuis l'hôte ([e292fd2](https://github.com/univ-lehavre/cluster/commit/e292fd21080d026f58541b7ce2f9cd625894a353))
+* **dataops:** prépare la preuve banc du build in-pod (adr 0110, lot 2) ([2f60f04](https://github.com/univ-lehavre/cluster/commit/2f60f0493323639acbb785ca875f2db4b62321e7))
+* **dataops:** prépare la preuve banc du build in-pod + RUNBOOK nestor (ADR 0110, lot 2) ([6e83997](https://github.com/univ-lehavre/cluster/commit/6e8399735a0805282513a3470e5bbea23ad690c9))
+* **dataops:** socle buildkitd rootless in-pod (adr 0110, lot 1) ([0550a89](https://github.com/univ-lehavre/cluster/commit/0550a892933662d2eaf60abf061599a1418bd815))
+* **dataops:** socle buildkitd rootless in-pod (ADR 0110, lot 1) ([34f6701](https://github.com/univ-lehavre/cluster/commit/34f6701553bc9e4aeb459969070ff8b4acc2cfd0))
+* **nestor:** brique pure de vivacité liée à l'identité (adr 0108) ([e83aca0](https://github.com/univ-lehavre/cluster/commit/e83aca09eb407934274717c7c1a3eb47aa29c328))
+* **nestor:** estampille l'identité de l'instance côté cluster (adr 0108) ([181f17c](https://github.com/univ-lehavre/cluster/commit/181f17c960d02b785e4d480d93068868c2a426ce))
+* **nestor:** estampille le contexte kubeconfig au stack_id (adr 0108) ([233b8d1](https://github.com/univ-lehavre/cluster/commit/233b8d19b3ec85664fd2079a4a3d815092089358))
+* **nestor:** garde d'identité kubectl MINIMALE (adr 0108) ([e9bc791](https://github.com/univ-lehavre/cluster/commit/e9bc7913d53937ce110d77749a9090791206634d))
+* **nestor:** isolation par identité stack_id — socle (adr 0108) ([ce5b811](https://github.com/univ-lehavre/cluster/commit/ce5b811fc7a33324eaf7ae2831b1ca24f958c88d))
+* **nestor:** isolation par identité stack_id + retrait target_kind (ADR 0108) ([ad655a1](https://github.com/univ-lehavre/cluster/commit/ad655a1830253830a60b3290a0725f54f90066f8))
+
+
+### Bug Fixes
+
+* **config:** 5 correctifs de première-installation révélés par un run banc ([3d2a17d](https://github.com/univ-lehavre/cluster/commit/3d2a17d56304a1942bb816e684f9354973dfdc30))
+* **config:** aligne l'identité du kubeconfig sur le stack_id (fin du rename manuel) ([bae43db](https://github.com/univ-lehavre/cluster/commit/bae43db889ed567f084d95af3066f0370a15aeeb))
+* **config:** aligne le nombre de répliques CoreDNS sur le nombre de nœuds ([c886854](https://github.com/univ-lehavre/cluster/commit/c886854a36a4a4a412677a71bfaf7467d9cd88ec))
+* **config:** comptage des nœuds (groups cloud) + KUBECONFIG poison ignoré ([48d2ccb](https://github.com/univ-lehavre/cluster/commit/48d2ccb49aff9f3f2420bee9038ead1be632c19b))
+* **config:** compte les nœuds k8s via groups['cloud'], pas groups['all'] ([3260acf](https://github.com/univ-lehavre/cluster/commit/3260acfdf80009af528ab1395fab73f1adfc84b9))
+* **config:** dérive ansible_user du ssh.config Lima (images modernes) ([a2976a3](https://github.com/univ-lehavre/cluster/commit/a2976a3fb5bd2ea745148e767bd48837bf43d55f))
+* **config:** ignore un KUBECONFIG poison (/dev/null) dans la résolution du banc ([36edfb3](https://github.com/univ-lehavre/cluster/commit/36edfb3f3030b77aba286ae42ab9518697ee77f0))
+* **config:** recrée le cache CRD cert-manager si un autre user le possède ([189320d](https://github.com/univ-lehavre/cluster/commit/189320da5db1eb2f50dc5b552231bc963a896278))
+* **config:** topos local/dirqual — expected_cluster dérivé du stack_id ([b43470c](https://github.com/univ-lehavre/cluster/commit/b43470c9dced574b8cf15a89b0b045f3a6bcd13b))
+* **nestor:** audit-log Ansible gardé par identité stack_id (adr 0108) ([8b1ca1f](https://github.com/univ-lehavre/cluster/commit/8b1ca1f648c40236a86255682b108dd982ed25fc))
+* **nestor:** un localhost tunnelé n'est plus classé local (adr 0108) ([193fa2c](https://github.com/univ-lehavre/cluster/commit/193fa2c4887567407a0faa1cf095077c184a1cfb))
+
+
+### Refactor
+
+* **config:** catalogue topos local + dirqual, accès L4 Lima ([e87b83f](https://github.com/univ-lehavre/cluster/commit/e87b83f40eb399e28da7e40ab08adc8edc3a8c0e))
+* **config:** catalogue topos réduit à local + dirqual (fonctionnel, miroir d'instance) ([318cfcb](https://github.com/univ-lehavre/cluster/commit/318cfcb1607aed11daf788410dfd7bbdf66dcc5a))
+* **dataops:** build de l'image de code hors cluster (abandon in-pod + node-side) ([e404a3e](https://github.com/univ-lehavre/cluster/commit/e404a3eb5194a273da6346b5ef86a389733f8726))
+* **dataops:** build de l'image de code hors cluster (abandon in-pod + node-side) ([ec64f2e](https://github.com/univ-lehavre/cluster/commit/ec64f2ee6c001a6fd8b0ea58ac669bc9b1606942))
+* **nestor:** retire l'estampille de cluster (sur-ingénierie, adr 0108) ([71e854a](https://github.com/univ-lehavre/cluster/commit/71e854a70da9f1bd3adc166027a9019d53616e09))
+* **nestor:** retire target_kind au profit du terrain (adr 0108) ([3b3984a](https://github.com/univ-lehavre/cluster/commit/3b3984acb936ef3f57a4922ade48351206a4fbff))
+* **nestor:** scinde le verbe up en provision et install (ADR 0108 §4) ([41c1cbd](https://github.com/univ-lehavre/cluster/commit/41c1cbda62738037920be7b90215e04c94de2dc5))
+* **nestor:** scinde le verbe up en provision et install (adr 0108) ([ed5f38c](https://github.com/univ-lehavre/cluster/commit/ed5f38c713e83d227374d50f377094bad8554598))
+
+
+### Documentation
+
+* **dataops:** corrige le statut ADR 0110 et un blockquote 0106 (CI) ([dfcf1c5](https://github.com/univ-lehavre/cluster/commit/dfcf1c59ae21a1fb0409e7fbb87474918b640b6f))
+* **docs:** acte l'adr 0110 (accepted) et active son plan d'implémentation ([62fa811](https://github.com/univ-lehavre/cluster/commit/62fa8113dbce8e49e528a2d644e2af84d26f89f7))
+* **docs:** acte l'ADR 0110 (Accepted) et active son plan d'implémentation ([56f3c3e](https://github.com/univ-lehavre/cluster/commit/56f3c3ef74087368817d2d266dc646e70c2d1222))
+* **docs:** adr 0106 — gitops zéro-geste (la sentinelle) ([203dabc](https://github.com/univ-lehavre/cluster/commit/203dabc60100c6c5fc1ac22557291e720d558b26))
+* **docs:** ADR 0106 — GitOps zéro-geste (la Sentinelle) ([7e4f264](https://github.com/univ-lehavre/cluster/commit/7e4f264c277d585c31f79c633d38c2bddd008e59))
+* **docs:** adr 0109 — persistance déclarative de l'instance ([eed2448](https://github.com/univ-lehavre/cluster/commit/eed2448186f78094ed083d168ed7991a263e4989))
+* **docs:** ADR 0109 — persistance déclarative de l'instance ([6cde534](https://github.com/univ-lehavre/cluster/commit/6cde5346b55e2a70ce5beafd0ea69110a2fcf99f))
+* **docs:** adr 0110 — pré-image de build, build de code in-pod ([f504d7d](https://github.com/univ-lehavre/cluster/commit/f504d7d512f1d4e9f3d19c0315982a53cd9bc51b))
+* **docs:** ADR 0110 — pré-image de build, build de code in-pod ([17eea89](https://github.com/univ-lehavre/cluster/commit/17eea897c1ec63a411afc402a11d4464f3816230))
+* **docs:** note d'amendement adr 0108 sur les adr impactés ([c495f2c](https://github.com/univ-lehavre/cluster/commit/c495f2cff5f09d257f2d76a7f76fed745deac63c))
+* **docs:** notes d'amendement ADR 0108 sur les 6 ADR impactés ([bee668c](https://github.com/univ-lehavre/cluster/commit/bee668c1b047c221814c2546893b0fe5915c9a83))
+* **docs:** plan d'implémentation du build de code in-pod (adr 0110) ([363f8d9](https://github.com/univ-lehavre/cluster/commit/363f8d9ef5d8c6caa5c89213ee78aa3030f16651))
+* **docs:** plan d'implémentation du build de code in-pod (ADR 0110) ([c47d000](https://github.com/univ-lehavre/cluster/commit/c47d000419f55ce9bd2291c86834b9158f823afe))
+
 ## [2.53.2](https://github.com/univ-lehavre/cluster/compare/v2.53.1...v2.53.2) (2026-07-11)
 
 
