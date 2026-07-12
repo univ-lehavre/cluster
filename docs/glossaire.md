@@ -273,6 +273,18 @@ Modes d'accès d'un volume. **RWO** : montable en écriture par un seul nœud à
 fois (stockage bloc). **RWX** : montable par plusieurs nœuds simultanément
 (nécessite un système de fichiers partagé, ici **CephFS**).
 
+### Persistance (`persistence.mode`)
+
+Un **curseur de rétention** des données applicatives, **global à l'instance** et
+déclaré une seule fois dans la topologie, à trois crans : `full` (défaut — on
+stocke tout, comportement actuel à l'octet, aucune éviction), `bounded` (bornes
+finies : fenêtres et quotas resserrés) et `ephemeral` (jetable — rétention
+minimale, sauvegardes/snapshots désarmés). Posé **à l'installation** : nestor le
+fait dériver sur six briques (StorageClass, CNPG, Loki, Prometheus, datalake,
+CronJob de snapshots), qui appliquent chacune leur borne **nativement** — nestor
+n'exécute aucune éviction. Ne régit **jamais** le plan de contrôle (etcd). Voir
+[ADR 0109](decisions/0109-persistance-declarative-topologie.md).
+
 ## Stockage objet (S3)
 
 ### RGW (RADOS Gateway)

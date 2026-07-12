@@ -122,6 +122,9 @@ les dimensions aujourd'hui éparpillées, regroupées :
   — NOUVELLE dimension (voir §4).
 - **`storage`** : `backend` (ceph/local-path), `osd_expected?`,
   `metadata_device?`, disques bruts (banc).
+- **`persistence`** : **`{mode: full | bounded | ephemeral}`** — curseur global
+  de rétention des données applicatives, frère d'`exposition`/`storage`, dérivé
+  sur six briques infra ([ADR 0109](0109-persistance-declarative-topologie.md)).
 - **`hardening`** : `{enabled, tags?}` — axe orthogonal
   ([ADR 0045](0045-chemins-installation-banc-couches.md) §3), enfin dans le
   modèle.
