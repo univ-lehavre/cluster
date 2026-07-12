@@ -31,6 +31,10 @@ layers:
   - dataops
   - mlflow
   - portal
+  # `build` (ADR 0112) : registry + buildkit (moteur de build in-pod rootless). Le banc de
+  # dev builde ses images de code IN-POD (buildctl → daemon buildkitd) au lieu du build
+  # hors-cluster. registry est déjà tiré par dataops ; `build` ajoute buildkit.
+  - build
 
 # ─── nodes : déclaration nœuds/rôles (REQUIS, non vide). `roles` cumulable (hyperconvergence,
 # ADR 0007/0055). Banc mono-nœud : control+worker (pas de HA, pas de storage brut = local-path).

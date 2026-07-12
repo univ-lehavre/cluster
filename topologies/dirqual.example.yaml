@@ -17,11 +17,22 @@
 # La cible HA (3 CP) est un chantier séparé (plan-ha-3cp) — cette topo décrit le RÉEL, pas la cible.
 
 # ─── catalog : seuls les champs LUS. `terrain: baremetal` → pas de provisioning VM
-# (resources ignoré), pas de phase `up`. `profile: dataops` = préfixe cumulatif
-# base⊂metrics⊂store⊂obs⊂dataops (lu car aucun `layers` top-level n'est posé).
+# (resources ignoré), pas de phase `up`. `profile` documentaire ici : `layers` (ci-dessous)
+# est posé, donc il PRIME (ADR 0069) — on rend explicite le préfixe dataops PLUS `build`.
 catalog:
   terrain: baremetal # local | cloud | baremetal (défaut fail-safe : baremetal).
-  profile: dataops # base ⊂ metrics ⊂ store ⊂ obs ⊂ dataops (inclusion cumulative, ADR 0039).
+  profile: dataops # documentaire (base ⊂ metrics ⊂ store ⊂ obs ⊂ dataops) — `layers` prime.
+
+# ─── layers : le profil `dataops` rendu explicite (metrics ⊂ store ⊂ obs ⊂ dataops) PLUS
+# `build` (ADR 0112) = registry + buildkit. dirqual builde ses images de code IN-POD (buildctl
+# → daemon buildkitd). RELÂCHEMENT PodSecurity ASSUMÉ : le ns de build (`buildkit`) n'est pas
+# labellisé `enforce: baseline` (privilège du builder isolé à ce ns ; reste du cluster durci).
+layers:
+  - metrics
+  - store
+  - obs
+  - dataops
+  - build
 
 # ─── nodes : les 4 nœuds RÉELS. `dirqual1` = control + worker + storage (hyperconvergé : il
 # porte l'API, CoreDNS ET des OSD Ceph, audit 2026-06-24) ; `dirqual2-4` = worker + storage.
