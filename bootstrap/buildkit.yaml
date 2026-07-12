@@ -24,9 +24,14 @@
   tasks:
     # Mirror `moby/buildkit` (mirror_only) → registry:80/moby/buildkit:v0.19.0-rootless,
     # consommé par platform/buildkit/deployment.yaml. Idempotent (rejouable).
+    # OVERRIDE build_images → buildkit_build_images : mirror UNIQUEMENT le builder, PAS le
+    # catalogue dataops (dagster/marquez) — un socle `layers: [build]` n'a que faire de dataops
+    # (même pattern que mlflow.yaml / portal.yaml). Défaut = liste dataops complète : à éviter ici.
     - name: Mirror de l'image buildkit vers le registre interne
       ansible.builtin.import_role:
         name: platform-build-images
+      vars:
+        build_images: '{{ buildkit_build_images }}'
       tags: build-images
 
 - name: Layer Buildkit — étape k8s (socle buildkitd rootless)

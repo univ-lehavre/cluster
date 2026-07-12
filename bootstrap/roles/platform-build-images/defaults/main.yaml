@@ -103,12 +103,26 @@ build_images:
     tag: 4.2.2
     mirror_only: true
     public: docker.io/dtzar/helm-kubectl@sha256:d815939dfc36d06dde3baaa3d122dc017753006e712c111a72d7f3e1e1744807
-  # PASSTHROUGH (mirror_only) — buildkit rootless, moteur de build IN-POD (ADR 0110, RÉTABLI
-  # 2026-07-12). Le Deployment buildkitd (platform/buildkit/deployment.yaml) consomme la ref
-  # interne `registry:80/moby/buildkit:v0.19.0-rootless` (sans quoi ImagePullBackOff au banc
-  # air-gappé, ADR 0011). Épinglée par digest d'index upstream (le mirror node produit une image
-  # mono-arch dont le digest interne diffère — traçabilité de l'immuabilité côté `public`).
+
+# NB — l'image `moby/buildkit` (moteur du build IN-POD) N'EST PAS dans build_images ci-dessus :
+# elle vit dans la liste SÉPARÉE `buildkit_build_images` juste en dessous, consommée UNIQUEMENT
+# par la layer autonome bootstrap/buildkit.yaml (override `build_images` au niveau import_role),
+# JAMAIS par dataops (buildkit ≠ dataops — un socle CI/CD `layers: [build]` ne doit pas mirrorer
+# dagster/marquez). Même séparation que mlflow/redcap/portal.
+#
+# Image buildkit (ADR 0110/0112) — moteur de build IN-POD (buildkit rootless). Liste
+# SÉPARÉE de build_images : consommée UNIQUEMENT par la layer autonome bootstrap/buildkit.yaml
+# (override `build_images` au niveau import_role), JAMAIS par dataops (buildkit ≠ dataops —
+# un socle CI/CD `layers: [build]` ne doit mirrorer QUE le builder, pas dagster/marquez).
+# PASSTHROUGH (mirror_only) : le Deployment buildkitd (platform/buildkit/deployment.yaml)
+# consomme la ref interne `registry:80/moby/buildkit:v0.19.0-rootless` (sans quoi
+# ImagePullBackOff en air-gap, ADR 0011). Épinglée par digest d'index upstream (le mirror
+# node produit une image mono-arch dont le digest interne diffère — traçabilité de
+# l'immuabilité côté `public`). Ni build ni retag : pull digest d'index → tag → push.
+buildkit_build_images:
   - name: moby/buildkit
+    tag: v0.19.0-rootless # tag interne consommé par platform/buildkit/deployment.yaml
+    mirror_only: true # passthrough (pull digest d'index → retag → push), pas de build
     public: docker.io/moby/buildkit@sha256:e901cffdad753892a7c3afb8b9972549fca02c73888cf340c91ed801fdd96d71
 
 # Image maison MLflow (ADR 0082 amendé) : officielle + psycopg2. Liste SÉPARÉE de

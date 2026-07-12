@@ -7,9 +7,12 @@
 # `insecure` (pas de TLS à vérifier) — sinon « HTTP response to HTTPS client » au
 # push (même symptôme que le fix node-side `use_local_image_pull`).
 #
-# La résolution de nom `registry:80` passe par le **DNS cluster** : le pod cible le
-# Service `registry.registry.svc.cluster.local:80` (pas `/etc/hosts` du nœud). Le
-# tag reste le nom logique `registry:80/…` ; buildkit résout via le DNS.
+# Résolution de nom : le nom COURT `registry:80` ne résout PAS via le DNS cluster (qui
+# sert `registry.registry.svc.cluster.local`). Deux entrées `[registry."…"]` sont donc
+# déclarées insecure : le nom logique `registry:80` (si un client le mappe, ex. /etc/hosts)
+# ET le FQDN `registry.registry.svc.cluster.local:80` (ce que RÉSOUT le DNS cluster). Un
+# client `buildctl` DISTANT (Option B, ADR 0112, autre namespace) doit utiliser le FQDN
+# pour le `FROM` et le `--output` — d'où la nécessité de le déclarer insecure ici aussi.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,8 +23,11 @@ data:
     debug = false
 
     # Registre interne HTTP sans TLS (ADR 0011). Requis pour pull la pré-image
-    # `citation-deps-base` ET push l'image de code produite.
+    # `citation-deps-base` ET push l'image de code produite. Nom court + FQDN.
     [registry."registry:80"]
+      http = true
+      insecure = true
+    [registry."registry.registry.svc.cluster.local:80"]
       http = true
       insecure = true
 

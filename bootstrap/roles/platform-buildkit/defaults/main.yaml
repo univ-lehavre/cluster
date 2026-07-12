@@ -1,0 +1,6 @@
+# code: language=ansible
+# Racine du dépôt (source des manifestes platform/buildkit/). Défini ICI pour que le rôle
+# soit AUTONOME : montable via son playbook dédié bootstrap/buildkit.yaml (ADR 0112), sans
+# dépendre d'un autre rôle (ex. platform-registry) pour poser cette variable. `playbook_dir`
+# = bootstrap/ ; le dépôt est un cran au-dessus. Parité platform-registry/defaults.
+platform_repo_dir: '{{ playbook_dir }}/..'
