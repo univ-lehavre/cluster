@@ -13,6 +13,8 @@ promu depuis `Proposed (2026-06-18)`.
 > mediawatch, pageviews) dont l'`Application` Argo CD est désormais instanciée
 > par atlas (0111 amende 0094).
 
+<!-- deux notes d'amendement distinctes (MD028) -->
+
 > **Partiellement superseded par
 > [0103](0103-workspace-dagster-multi-code-location-reconciler.md)**
 > (2026-07-03) : le mécanisme de **workspace** décrit ici (patch du ConfigMap

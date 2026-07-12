@@ -26,17 +26,14 @@ class Closure(unittest.TestCase):
         # OBSERVE les UI des autres couches sans arête de données) → clôture = lui-même.
         self.assertEqual(roundtrip.closure("portal"), ["portal"])
 
-    def test_dataops_pulls_mlflow_and_portal(self):
-        # mlflow (layer autonome ADR 0082) dépend de la base CNPG posée par dataops ;
-        # le portail (ADR 0091) dépend du registry/build-images de dataops (image maison)
-        # → défaire dataops oblige à défaire mlflow ET portail d'abord (ordre inverse,
-        # ADR 0054). portail en QUEUE (poids 9, après mlflow poids 8).
-        # ADR 0110 : phase `citation` (build) retirée ; ADR 0111 : gitops-seed-citation
-        # (instanciation Application) passée côté atlas → plus aucun consommateur de dataops
-        # côté code atlas → la clôture de `dataops` se limite à mlflow + portail.
+    def test_dataops_pulls_mlflow(self):
+        # mlflow (layer autonome ADR 0082) dépend de la base CNPG posée par dataops.
+        # ADR 0112 : `registry`/`build-images` sont désormais des phases AUTONOMES (hors
+        # dataops) → le portail (qui en dépend, pas de dataops) ne défait plus dataops. La
+        # clôture de `dataops` se limite donc à mlflow (ADR 0110/0111 : plus de code atlas).
         self.assertEqual(
             roundtrip.closure("dataops"),
-            ["dataops", "mlflow", "portal"],
+            ["dataops", "mlflow"],
         )
 
     def test_gitops_pulls_seed(self):
@@ -86,9 +83,11 @@ class Closure(unittest.TestCase):
                 "datalake",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
@@ -99,9 +98,11 @@ class Closure(unittest.TestCase):
                 "datalake",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
@@ -195,10 +196,7 @@ class RoundtripNominal(unittest.TestCase):
 
     def test_gitops_closure_rebuilds_gitops_first(self):
         fb = FakeBench(
-            present=(
-                roundtrip.phase_signal("gitops")
-                + roundtrip.phase_signal("gitops-seed")
-            )
+            present=(roundtrip.phase_signal("gitops") + roundtrip.phase_signal("gitops-seed"))
         )
         res = roundtrip.run_roundtrip(
             "gitops",
