@@ -550,7 +550,7 @@ juger en 5 min : [docs/preuves.md](docs/preuves.md).
 
 <!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
 
-- **111 ADR** (93 Accepted, 13 Proposed, 5 Superseded)
+- **112 ADR** (94 Accepted, 13 Proposed, 5 Superseded)
 - **18 plans** vivants (1 Abandonné, 7 Achevé, 9 Actif, 1 Brouillon)
 - **99 drifts** indexés (3 caduc, 93 corrige, 1 en-cours, 2 ouvert)
 - **33 scénarios** E2E reproductibles

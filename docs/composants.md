@@ -237,20 +237,22 @@ containerd côté nœuds pour le tirer en HTTP. On le référence en
 `registry:80/<repo>:<tag>` dans les manifestes. Manifestes :
 [`platform/container-registry/`](../platform/container-registry/).
 
-### Build de l'image de code (hors cluster)
+### buildkit (build de l'image de code, in-pod)
 
-L'**image de code** d'une code-location se construit **hors cluster** (sur le
-poste de contrôle), sur une **pré-image** de dépendances figée
-([ADR 0110](decisions/0110-preimage-de-build-et-build-in-pod.md), amendé). Les
+L'**image de code** d'une code-location se construit sur une **pré-image** de
+dépendances figée
+([ADR 0110](decisions/0110-preimage-de-build-et-build-in-pod.md)) : les
 dépendances lourdes (qui exigent Internet) sont figées une fois dans la
-pré-image, elle-même buildée hors cluster ; l'image de code (`FROM` pré-image)
-n'a plus aucun egress. Le build **in-pod** (buildkit rootless) a été
-**abandonné** : PodSecurity `baseline` (k8s ≥ 1.34) refuse le
-`seccompProfile: Unconfined` que tout moteur de build rootless exige, et le
-rafraîchissement du code est déjà manuel (automatisme Argo Events abrogé, ADR
-0105/0106). L'image de code se build donc sur le poste (`atlas`
-`deploy/build-code.sh`) puis se pousse au registre ; son digest est injecté dans
-l'overlay prod (flux GitOps inchangé).
+pré-image, buildée hors cluster ; l'image de code (`FROM` pré-image) n'a plus
+aucun egress. Ce build **in-pod** (buildkit rootless) — d'abord abandonné (0110
+amendé) sur un diagnostic erroné — a été **rétabli**
+([ADR 0112](decisions/0112-cicd-in-cluster-gitea-actions-buildkit.md)) : ce
+n'est pas k8s qui bloque le rootless, c'est le label `enforce: baseline` du
+namespace de build ; un ns non labellisé l'admet et le build FONCTIONNE (prouvé
+au banc). Le daemon `buildkitd` (privilège isolé à son ns) sert un client
+`buildctl` durci — lancé par un job Gitea Actions ou à la main — qui build et
+pousse au registre. Manifestes : [`platform/buildkit/`](../platform/buildkit/) ;
+déroulé opérationnel : [RUNBOOK](../platform/buildkit/RUNBOOK.md).
 
 ### La boucle GitOps de bout en bout
 

@@ -3,10 +3,17 @@
 ## Statut
 
 Accepted (2026-07-11), **amendé le 2026-07-11 — le volet BUILD IN-POD est
-ABANDONNÉ ; le split pré-image reste.** Le run banc a RÉFUTÉ l'hypothèse
-centrale « buildkit rootless in-pod tolérable sous PodSecurity » : sur k8s ≥
-1.34, PodSecurity `baseline` **interdit** `seccompProfile: Unconfined` ET
-`AppArmor: unconfined` (message d'admission
+ABANDONNÉ ; le split pré-image reste.** **RÉ-AMENDÉ le 2026-07-12
+([ADR 0112](0112-cicd-in-cluster-gitea-actions-buildkit.md)) — le build in-pod
+est RÉTABLI : la réfutation ci-dessous reposait sur un diagnostic erroné (le pod
+buildkitd n'échouait pas par une limite de k8s, mais parce que son namespace de
+build était labellisé `enforce: baseline` ; un ns non labellisé l'admet et le
+build in-pod FONCTIONNE, prouvé au banc).** Le volet « split pré-image »
+ci-dessous reste valide. Le récit d'abandon qui suit est conservé pour
+l'historique.** Le run banc a RÉFUTÉ l'hypothèse centrale « buildkit rootless
+in-pod tolérable sous PodSecurity » : sur k8s ≥ 1.34, PodSecurity `baseline`
+**interdit** `seccompProfile: Unconfined` ET `AppArmor: unconfined` (message
+d'admission
 `violates PodSecurity "baseline:latest": forbidden AppArmor profiles … seccompProfile … Unconfined`),
 et tout moteur de build rootless (buildkit, kaniko, buildah…) exige ces
 dérogations pour ses `unshare`/`mount`. Le pod buildkitd n'a jamais pu être créé
@@ -21,7 +28,7 @@ garde-fou de fraîcheur symétrique (`check_code_freshness.py` : « le code a
 changé → rebuild+push »). Le split pré-image (base lourde à egress figée / image
 de code sans egress `FROM` la base) est **CONSERVÉ** — c'est lui qui rend le
 build de code trivial et reproductible. Le flux GitOps (digest injecté dans
-l'overlay prod → Argo CD déploie par digest) est **INCHANGÉ**. Le chantier
+l'overlay prod → Argo CD déploie par digest) est **INCHANGÉ\*\*. Le chantier
 buildkit-in-pod (`platform/buildkit/`, rôle `platform-buildkit`, mirror
 `moby/buildkit`) est retiré.
 
