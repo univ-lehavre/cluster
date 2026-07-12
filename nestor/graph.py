@@ -414,21 +414,24 @@ _CATALOGUE: tuple[Component, ...] = (
     # Runner Gitea Actions (act_runner) — l'ORCHESTRATEUR de CI (ADR 0112), l'autre moitié de
     # la chaîne CI/CD in-cluster (buildkit = le moteur). Sur `git push` Gitea, il soumet le
     # build au daemon buildkitd DISTANT (Option B : le runner reste durci/baseline, le
-    # privilège rootless est confiné à buildkitd). Chaîne PROUVÉE air-gap sur Lima. Composant
-    # de la couche `gitops` (il dépend de la forge Gitea) : il n'est PAS une phase autonome —
-    # la phase `gitops` garde son signal `argocd` (dernier maillon), gitea-runner est une
-    # feuille supplémentaire (autorisé, cf. dagster+marquez feuilles de dataops). Deps : `gitea`
-    # (enregistrement + clone), `buildkit` (soumission du build), `build-images` (mirror de
-    # l'image act_runner au registre interne).
+    # privilège rootless est confiné à buildkitd). Chaîne PROUVÉE air-gap sur Lima.
+    #
+    # PHASE AUTONOME (comme buildkit/registry), montée en DERNIER — PAS un composant de la
+    # couche gitops. Raison (bug constaté au run réel 2026-07-12) : le runner dépend de
+    # `registry` (son image act_runner est mirrorée au registre interne — le nœud doit d'abord
+    # être configuré pour `registry:80` HTTP, volet node de platform-registry) ET de `buildkit`
+    # (son initContainer copie `buildctl` de l'image interne moby/buildkit). Ces deux phases
+    # viennent APRÈS gitops ; placer le runner DANS gitops faisait tourner le mirror act_runner
+    # avant la config registre node → `nerdctl push` échouait (DNS `registry` + tentative
+    # HTTPS). Ordre correct : gitops → registry → buildkit → gitea-runner. Signal propre : le
+    # Deployment `gitea-runner` Ready (le runner enregistré et prêt à recevoir des jobs).
     Component(
         name="gitea-runner",
         role="platform-gitea-runner",
-        deps=("gitea", "buildkit", "build-images"),
+        deps=("gitea", "registry", "buildkit", "build-images"),
         namespace="gitea-runner",
-        # weight=5 comme gitea/argocd : le composant appartient à la phase `gitops` et doit
-        # s'y projeter (component_alias_weight → alias gitops). Un poids différent le
-        # rangerait dans une autre phase (cf. test_projected_on_aliases_equals_coded_order).
-        weight=5,
+        signal=("deployment", "gitea-runner", "gitea-runner", True),
+        weight=9,  # après buildkit (8) : dernier maillon de la chaîne CI/CD
     ),
 )
 # NB (ADR 0105) : la couche `eventful` (build applicatif événementiel in-cluster, Argo Events +
@@ -518,6 +521,9 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     # explicitement, donc la CLÔTURE de dataops le tire quand même (aucune régression).
     "registry": ("registry",),
     "buildkit": ("buildkit",),
+    # `gitea-runner` : phase autonome montée en DERNIER (l'orchestrateur de CI, ADR 0112).
+    # Tire gitea + registry + buildkit + build-images par ses deps (clôture) → monte après eux.
+    "gitea-runner": ("gitea-runner",),
     "dataops": (
         "cnpg-operator",
         "barman-plugin",
@@ -529,7 +535,7 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     ),
     "mlflow": ("mlflow", "s3-backing-mlflow"),
     "portal": ("portal",),
-    "gitops": ("gitea", "argocd", "gitea-runner"),
+    "gitops": ("gitea", "argocd"),
     "gitops-seed": ("gitops-seed",),
     # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
     # seulement) ; l'ordre vient de topo_sort, pas de cette énumération.
@@ -554,7 +560,6 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
         "marquez",
         "gitea",
         "argocd",
-        "gitea-runner",
         "gitops-seed",
     ),
 }
@@ -656,6 +661,7 @@ ROUNDTRIP_PHASES: tuple[str, ...] = (
     # alias, donc `phase_of_component('registry')` doit résoudre `registry`, pas `dataops`.
     "registry",
     "buildkit",
+    "gitea-runner",
     "dataops",
     "mlflow",
     "gitops",
@@ -788,6 +794,7 @@ _PHASE_SIGNAL_COMPONENT: dict[str, str] = {
     "gitops": "argocd",  # DERNIER maillon ≠ nom de phase (argocd-server)
     "registry": "registry",  # phase autonome (ADR 0112) : Deployment registry Ready
     "buildkit": "buildkit",  # phase autonome (ADR 0112) : Deployment buildkitd Ready
+    "gitea-runner": "gitea-runner",  # phase autonome (ADR 0112) : Deployment gitea-runner Ready
     "dataops": "marquez",  # DERNIER maillon ≠ nom de phase
     "mlflow": "mlflow",
     "gitops-seed": "gitops-seed",
@@ -842,7 +849,8 @@ def rollback_phase_namespaces(phase: str) -> list[str]:
         "monitoring": ["monitoring"],
         "dataops": ["postgres", "dagster", "marquez"],
         "mlflow": ["mlflow"],
-        "gitops": ["argocd", "gitea", "gitea-runner"],
+        "gitops": ["argocd", "gitea"],
+        "gitea-runner": ["gitea-runner"],
     }.get(phase, [])
 
 

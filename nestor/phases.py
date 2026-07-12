@@ -398,6 +398,10 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     #    avec dataops.yaml. registry expose registry_storage_class (PVC du registre). ─
     "registry": _plan("registry", extravars_keys=("registry_storage_class",)),
     "buildkit": _plan("buildkit", extravars_keys=()),
+    # gitea-runner : l'orchestrateur de CI (ADR 0112), phase autonome montée en DERNIER
+    # (tire gitea + registry + buildkit). Playbook dédié bootstrap/gitea-runner.yaml (config
+    # registre node → mirror act_runner → rôle). Signal : Deployment gitea-runner Ready.
+    "gitea-runner": _plan("gitea-runner", extravars_keys=()),
     # ── dataops : chaîne registry → CNPG → Dagster → Marquez. NON TRIVIALE :
     #    après le playbook + gate Marquez, DEUX harnais e2e (OpenLineage→Marquez,
     #    egress 443) que _wait_layer_healthy NE couvre PAS → hooks explicites (CÂBLÉS façade). ─

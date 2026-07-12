@@ -136,10 +136,6 @@ class Invariant5OrdreCode(unittest.TestCase):
             5: "gitops",
             6: "dataops",
             7: "gitops-seed",
-            # buildkit (weight 8) est TIRÉ dans la chaîne atlas par la dépendance de
-            # `gitea-runner` (composant gitops, ADR 0112) → le moteur de build in-pod fait
-            # partie du socle atlas complet. Son poids élevé le projette en fin.
-            8: "buildkit",
         }
         proj: list[str] = []
         for c in graph.topo_sort(graph.component_expand_alias("atlas-ceph")):
@@ -148,17 +144,7 @@ class Invariant5OrdreCode(unittest.TestCase):
                 proj.append(a)
         self.assertEqual(
             proj,
-            [
-                "socle",
-                "ceph",
-                "sc",
-                "datalake",
-                "monitoring",
-                "gitops",
-                "dataops",
-                "gitops-seed",
-                "buildkit",
-            ],
+            ["socle", "ceph", "sc", "datalake", "monitoring", "gitops", "dataops", "gitops-seed"],
         )
 
 
@@ -213,6 +199,7 @@ class PhaseClosureCeph(unittest.TestCase):
                 "mlflow",
                 "buildkit",
                 "portal",
+                "gitea-runner",
             ],
         )
 
@@ -231,6 +218,7 @@ class PhaseClosureCeph(unittest.TestCase):
                 "mlflow",
                 "buildkit",
                 "portal",
+                "gitea-runner",
             ],
         )
         self.assertIn("gitops", cl)
@@ -243,10 +231,11 @@ class PhaseClosureCeph(unittest.TestCase):
 
     def test_gitops_pulls_seed(self):
         # ADR 0111 : gitops-seed-citation (instanciation Application, passée côté atlas) retiré
-        # → la clôture gitops n'a plus que le seed jouet.
+        # → la clôture gitops n'a plus que le seed jouet. ADR 0112 : gitea-runner (phase
+        # autonome) dépend de gitea → tiré dans la clôture DESCENDANTE de gitops.
         self.assertEqual(
             graph.phase_closure("gitops"),
-            ["gitops", "gitops-seed"],
+            ["gitops", "gitops-seed", "gitea-runner"],
         )
 
     def test_leaves_pull_only_themselves(self):
@@ -340,6 +329,7 @@ class SignalIsAGraphProperty(unittest.TestCase):
         "gitops": ("deployment", "argocd-server", "argocd", True),
         "registry": ("deployment", "registry", "registry", True),
         "buildkit": ("deployment", "buildkitd", "buildkit", True),
+        "gitea-runner": ("deployment", "gitea-runner", "gitea-runner", True),
         "dataops": ("deployment", "marquez", "marquez", True),
         "mlflow": ("deployment", "mlflow", "mlflow", True),
         "gitops-seed": ("application", "atlas-workflows", "argocd", False),

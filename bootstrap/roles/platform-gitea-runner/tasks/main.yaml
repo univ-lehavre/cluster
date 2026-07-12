@@ -42,7 +42,7 @@
         kind: Pod
         namespace: '{{ gitea_namespace }}'
         label_selectors:
-          - app.kubernetes.io/name = gitea
+          - app = gitea # label posé par platform/gitea/deployment.yaml (PAS app.kubernetes.io/name)
         field_selectors:
           - status.phase=Running
       register: _gitea_pod

@@ -444,3 +444,39 @@ runs:
       gitops: 72
       registry: 59
       buildkit: 412
+  - id: 2026-07-12T15-base-23083fea
+    date: '2026-07-12T15:34:28Z'
+    branche: feat/cicd-in-cluster-buildkit
+    commit: 23083fea
+    profil: base
+    topologie: cicd
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 64
+    phases:
+      up: 64
+  - id: 2026-07-12T16-base-6de1cb0e-dirty
+    date: '2026-07-12T16:00:16Z'
+    branche: feat/cicd-in-cluster-buildkit
+    commit: 6de1cb0e-dirty
+    profil: base
+    topologie: cicd
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 64
+    phases:
+      up: 64
+  - id: 2026-07-12T16-base-6de1cb0e-dirty
+    date: '2026-07-12T16:16:40Z'
+    branche: feat/cicd-in-cluster-buildkit
+    commit: 6de1cb0e-dirty
+    profil: base
+    topologie: cicd
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 62
+    phases:
+      gitea-runner: 62

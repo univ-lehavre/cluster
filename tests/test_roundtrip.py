@@ -38,10 +38,11 @@ class Closure(unittest.TestCase):
 
     def test_gitops_pulls_seed(self):
         # ADR 0111 : gitops-seed-citation (instanciation Application, passée côté atlas) retiré ;
-        # gitops ne tire plus que le seed jouet.
+        # gitops ne tire plus que le seed jouet. ADR 0112 : gitea-runner (phase autonome)
+        # dépend de gitea → tiré dans la clôture descendante de gitops.
         self.assertEqual(
             roundtrip.closure("gitops"),
-            ["gitops", "gitops-seed"],
+            ["gitops", "gitops-seed", "gitea-runner"],
         )
 
     def test_metrics_server_independent(self):
@@ -89,6 +90,7 @@ class Closure(unittest.TestCase):
                 "mlflow",
                 "buildkit",
                 "portal",
+                "gitea-runner",
             ],
         )
         self.assertEqual(
@@ -104,6 +106,7 @@ class Closure(unittest.TestCase):
                 "mlflow",
                 "buildkit",
                 "portal",
+                "gitea-runner",
             ],
         )
 
@@ -196,7 +199,11 @@ class RoundtripNominal(unittest.TestCase):
 
     def test_gitops_closure_rebuilds_gitops_first(self):
         fb = FakeBench(
-            present=(roundtrip.phase_signal("gitops") + roundtrip.phase_signal("gitops-seed"))
+            present=(
+                roundtrip.phase_signal("gitops")
+                + roundtrip.phase_signal("gitops-seed")
+                + roundtrip.phase_signal("gitea-runner")
+            )
         )
         res = roundtrip.run_roundtrip(
             "gitops",
@@ -208,10 +215,11 @@ class RoundtripNominal(unittest.TestCase):
         self.assertTrue(res.reversible)
         # La destruction est UN geste (découverte) ; les appels run_phase sont les RECONSTRUCTIONS,
         # dans l'ordre de montage (gitops → gitops-seed, ADR 0095). ADR 0111 : plus de
-        # gitops-seed-citation (instanciation passée côté atlas). Plus de `rollback` bash.
+        # gitops-seed-citation. ADR 0112 : gitea-runner (phase autonome) tiré par la clôture
+        # descendante de gitops (dépend de gitea) → reconstruit après le seed.
         self.assertEqual(
             fb.calls,
-            [("gitops",), ("gitops-seed",)],
+            [("gitops",), ("gitops-seed",), ("gitea-runner",)],
         )
 
     def test_destroy_layer_discovery_destroys_whole_closure_in_one_call(self):

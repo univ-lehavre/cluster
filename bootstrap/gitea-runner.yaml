@@ -1,0 +1,81 @@
+# code: language=ansible
+# Layer GITEA-RUNNER — l'orchestrateur de CI (act_runner), phase AUTONOME montée en DERNIER
+# (ADR 0112). Sur `git push` Gitea, le runner soumet le build au daemon buildkitd distant
+# (Option B). Extrait de gitops.yaml (le runner y était mal placé : il tourne AVANT que le
+# registre soit configuré node-side → le mirror act_runner échouait). Ordre correct :
+# gitops → registry → buildkit → gitea-runner.
+#
+# Prérequis (tirés par la clôture du graphe) : `gitea` (le runner s'y enregistre + clone),
+# `registry` (son image act_runner est mirrorée au registre interne — le nœud doit être
+# configuré pour `registry:80` HTTP), `buildkit` (son initContainer copie `buildctl` de
+# l'image interne moby/buildkit), `build-images` (le mirror lui-même).
+#
+# DEUX plays :
+#   1. étape NŒUDS (`cloud`) : config containerd registre (prérequis) puis mirror act_runner ;
+#   2. étape k8s (`localhost`) : le rôle platform-gitea-runner (ns baseline, Deployment host
+#      durci, NetworkPolicies, token d'enregistrement, gate Ready).
+
+- name: Layer Gitea-runner — étape nœuds (mirror de l'image act_runner)
+  hosts: cloud
+  force_handlers: true
+  pre_tasks:
+    - name: Audit-log — record playbook execution (+ garde d'identité stack_id)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: gitea-runner.yaml
+  tasks:
+    # PRÉREQUIS node-side du mirror : containerd doit résoudre `registry` (→ ClusterIP dans
+    # /etc/hosts) et le tirer/pousser en HTTP (certs.d + use_local_image_pull). Sinon
+    # `nerdctl push` échoue (`lookup registry: server misbehaving` + tentative HTTPS). Le
+    # composant `registry` a déjà posé cette config (il vient AVANT dans l'ordre) ; on la
+    # (re)pose ICI par sûreté — idempotent. Même séquence que dataops.yaml/buildkit.yaml.
+    - name: Configuration containerd pour le registre interne (prérequis mirror)
+      ansible.builtin.import_role:
+        name: platform-registry
+        tasks_from: node
+      tags: registry-node
+    - name: Flush handlers (restart containerd avant le mirror)
+      ansible.builtin.meta: flush_handlers
+    # Mirror `act_runner` (mirror_only) → registry:80/act_runner:<version>, consommé par
+    # platform/gitea-runner/deployment.yaml. OVERRIDE build_images → gitea_runner_build_images :
+    # on ne mirrore QUE act_runner, pas le catalogue dataops (parité mlflow/portal/buildkit).
+    - name: Mirror de l'image act_runner vers le registre interne
+      ansible.builtin.import_role:
+        name: platform-build-images
+      vars:
+        build_images: '{{ gitea_runner_build_images }}'
+      tags: build-images
+
+- name: Layer Gitea-runner — étape k8s (runner act_runner host durci)
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
+  gather_facts: false
+  environment:
+    SSL_CERT_FILE: '{{ dataops_ca_bundle | default(omit) }}'
+  pre_tasks:
+    - name: 'Garde : client Python kubernetes+certifi présent (sinon : uv sync)'
+      block:
+        - name: Probe import kubernetes + certifi
+          ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import kubernetes, certifi'"
+          changed_when: false
+          check_mode: false
+      rescue:
+        - name: Manque le client Python — guider vers uv sync
+          ansible.builtin.fail:
+            msg: >-
+              Le client Python `kubernetes` (ou `certifi`) est introuvable dans
+              l'interpréteur {{ ansible_python_interpreter | default('python3') }}.
+              Provisionner le .venv du poste de contrôle : `uv sync` à la racine
+              du dépôt (ADR 0006/0023, #277).
+    - name: Resolve the certifi CA bundle path
+      ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import certifi; print(certifi.where())'"
+      register: gitea_runner_certifi
+      changed_when: false
+    - name: Set the CA bundle for HTTPS requests
+      ansible.builtin.set_fact:
+        dataops_ca_bundle: '{{ gitea_runner_certifi.stdout | trim }}'
+  tasks:
+    - name: Orchestrateur de CI (Gitea Actions runner)
+      ansible.builtin.import_role:
+        name: platform-gitea-runner
+      tags: gitea-runner

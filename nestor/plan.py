@@ -88,6 +88,11 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
         "moteur de build in-pod (buildkit rootless)",
         "moteur de build in-pod (buildkit)",
     ),
+    "gitea-runner": PhaseSpec(
+        "bootstrap/gitea-runner.yaml",
+        "runner Gitea Actions (act_runner, mode host durci)",
+        "runner CI (Gitea Actions)",
+    ),
     "dataops": PhaseSpec(
         "bootstrap/dataops.yaml",
         "registry + CNPG + Dagster + Marquez",

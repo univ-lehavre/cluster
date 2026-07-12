@@ -20,27 +20,6 @@
 # Surcharges par topologie : group_vars d'inventaire non versionné
 # (cf. bootstrap/group_vars/dataops.example.yaml). Défauts de rôle = prod.
 
-# Étape NŒUDS : mirror de l'image act_runner (l'orchestrateur de CI) vers le registre
-# interne, AVANT de poser le runner côté k8s (air-gap ADR 0011). Même modèle que
-# buildkit.yaml. Override build_images → gitea_runner_build_images : on ne mirrore QUE
-# act_runner, pas le catalogue dataops (parité mlflow/portal/buildkit).
-- name: Socle GitOps — étape nœuds (mirror de l'image act_runner)
-  hosts: cloud
-  force_handlers: true
-  pre_tasks:
-    - name: Audit-log — record playbook execution (+ garde d'identité stack_id)
-      ansible.builtin.import_role:
-        name: audit-log
-      vars:
-        audit_log_playbook: gitops.yaml
-  tasks:
-    - name: Mirror de l'image act_runner vers le registre interne
-      ansible.builtin.import_role:
-        name: platform-build-images
-      vars:
-        build_images: '{{ gitea_runner_build_images }}'
-      tags: build-images
-
 - name: Socle GitOps — Gitea (forge) puis Argo CD (moteur)
   hosts: "{{ dataops_k8s_host | default('localhost') }}"
   gather_facts: false
@@ -92,11 +71,3 @@
       ansible.builtin.import_role:
         name: platform-argocd
       tags: argocd
-
-    # Orchestrateur de CI : le runner Gitea Actions (act_runner). Sur `git push`, il soumet
-    # le build au daemon buildkitd distant (Option B, ADR 0112). APRÈS Gitea (il s'y
-    # enregistre). L'image act_runner a été mirrorée par le play nœuds ci-dessus.
-    - name: Orchestrateur de CI (Gitea Actions runner)
-      ansible.builtin.import_role:
-        name: platform-gitea-runner
-      tags: gitea-runner

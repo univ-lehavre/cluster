@@ -265,10 +265,12 @@ ne **construit rien** lui-même — il **soumet** le contexte de build au daemon
 `buildkitd` distant (« Option B » : le runner reste durci/baseline, le privilège
 rootless est confiné à buildkitd). `buildctl` est **copié depuis l'image interne
 `moby/buildkit`** par un initContainer (air-gap : aucun téléchargement
-Internet). Composant de la couche **gitops** (il dépend de la forge Gitea) ;
-l'image `act_runner` est mirrorée au registre interne. Chaîne **prouvée
-air-gap** (le build `FROM` interne et le push de l'image de code au registre
-interne n'échappent jamais au cluster). Manifestes :
+Internet). C'est une **phase autonome montée en dernier**
+(`gitops → registry → buildkit → gitea-runner`) : le runner dépend de la forge
+Gitea, du registre interne (son image `act_runner` y est mirrorée — le nœud doit
+être configuré pour `registry:80`) et de buildkit (d'où il copie `buildctl`).
+Chaîne **prouvée air-gap** (le build `FROM` interne et le push de l'image de
+code au registre interne n'échappent jamais au cluster). Manifestes :
 [`platform/gitea-runner/`](../platform/gitea-runner/).
 
 ### La boucle GitOps de bout en bout

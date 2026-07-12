@@ -117,16 +117,24 @@ rootless, dépannage) est dans le
 - Gitea Actions activé + le modèle « runner host durci + client buildctl →
   daemon » (Option B).
 - Le **runner est un livrable nestor** (plus un scaffolding manuel) : composant
-  de graphe `gitea-runner` (couche **gitops** — il dépend de la forge), rôle
-  `platform-gitea-runner` importé par `bootstrap/gitops.yaml`, manifestes
-  `platform/gitea-runner/` (namespace **baseline ENFORCÉ**, Deployment host
-  durci, configmap, NetworkPolicies default-deny + allow-dns/gitea/buildkitd),
-  mirror `act_runner` au registre interne (`gitea_runner_build_images`),
-  exception `.trivyignore` KSV-0014 (le runner écrit l'état des jobs dans son
-  rootfs). `buildctl` est copié depuis l'image interne `moby/buildkit` par un
-  initContainer (air-gap). La chaîne complète (push → runner → buildctl →
-  buildkitd in-pod → `FROM` interne → push registre interne) est **prouvée
-  air-gap sur Lima**.
+  de graphe `gitea-runner`, **phase AUTONOME montée en DERNIER** (comme
+  buildkit/registry) — PAS un composant de la couche gitops. Il dépend de
+  `gitea` (enregistrement + clone), `registry` (son image `act_runner` est
+  mirrorée au registre interne, ce qui exige le nœud configuré pour
+  `registry:80` HTTP) et `buildkit` (son initContainer copie `buildctl` de
+  l'image interne moby/buildkit) → ordre
+  `gitops → registry → buildkit → gitea-runner`. **Le placer dans gitops faisait
+  tourner le mirror `act_runner` AVANT la config registre node → le push
+  échouait** (constaté au run réel : DNS `registry` + tentative HTTPS). Playbook
+  dédié `bootstrap/gitea-runner.yaml` (config node → mirror → rôle), rôle
+  `platform-gitea-runner`, manifestes `platform/gitea-runner/` (namespace
+  **baseline ENFORCÉ**, Deployment host durci, configmap, NetworkPolicies
+  default-deny + allow-dns/gitea/buildkitd), mirror `act_runner` au registre
+  interne (`gitea_runner_build_images`), exception `.trivyignore` KSV-0014 (le
+  runner écrit l'état des jobs dans son rootfs). `buildctl` est copié depuis
+  l'image interne `moby/buildkit` par un initContainer (air-gap). La chaîne
+  complète (push → runner → buildctl → buildkitd in-pod → `FROM` interne → push
+  registre interne) est **prouvée air-gap sur Lima**.
 - **Subtilité Cilium prouvée** : sous kube-proxy-replacement, l'enforcement
   egress d'une NetworkPolicy s'applique **après** le DNAT ClusterIP→pod, donc
   sur le **targetPort** du Service, pas sur son port. Les egress vers registry
