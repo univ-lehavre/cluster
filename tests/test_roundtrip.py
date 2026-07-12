@@ -31,18 +31,20 @@ class Closure(unittest.TestCase):
         # le portail (ADR 0091) dépend du registry/build-images de dataops (image maison)
         # → défaire dataops oblige à défaire mlflow ET portail d'abord (ordre inverse,
         # ADR 0054). portail en QUEUE (poids 9, après mlflow poids 8).
-        # ADR 0110 amendé : la phase `citation` (build) retirée → gitops-seed-citation ne
-        # dépend plus de dataops (via citation→registry) → sort de la clôture de `dataops`.
+        # ADR 0110 : phase `citation` (build) retirée ; ADR 0111 : gitops-seed-citation
+        # (instanciation Application) passée côté atlas → plus aucun consommateur de dataops
+        # côté code atlas → la clôture de `dataops` se limite à mlflow + portail.
         self.assertEqual(
             roundtrip.closure("dataops"),
             ["dataops", "mlflow", "portal"],
         )
 
     def test_gitops_pulls_seed(self):
-        # gitops-seed-citation dépend d'argocd/gitea (chaîne gitops) → tiré aussi (ADR 0095).
+        # ADR 0111 : gitops-seed-citation (instanciation Application, passée côté atlas) retiré ;
+        # gitops ne tire plus que le seed jouet.
         self.assertEqual(
             roundtrip.closure("gitops"),
-            ["gitops", "gitops-seed", "gitops-seed-citation"],
+            ["gitops", "gitops-seed"],
         )
 
     def test_metrics_server_independent(self):
@@ -86,7 +88,6 @@ class Closure(unittest.TestCase):
                 "gitops",
                 "dataops",
                 "gitops-seed",
-                "gitops-seed-citation",
                 "mlflow",
                 "portal",
             ],
@@ -100,7 +101,6 @@ class Closure(unittest.TestCase):
                 "gitops",
                 "dataops",
                 "gitops-seed",
-                "gitops-seed-citation",
                 "mlflow",
                 "portal",
             ],
@@ -198,7 +198,6 @@ class RoundtripNominal(unittest.TestCase):
             present=(
                 roundtrip.phase_signal("gitops")
                 + roundtrip.phase_signal("gitops-seed")
-                + roundtrip.phase_signal("gitops-seed-citation")
             )
         )
         res = roundtrip.run_roundtrip(
@@ -210,11 +209,11 @@ class RoundtripNominal(unittest.TestCase):
         )
         self.assertTrue(res.reversible)
         # La destruction est UN geste (découverte) ; les appels run_phase sont les RECONSTRUCTIONS,
-        # dans l'ordre de montage (gitops → gitops-seed → gitops-seed-citation, ADR 0095).
-        # Plus aucun `rollback` bash.
+        # dans l'ordre de montage (gitops → gitops-seed, ADR 0095). ADR 0111 : plus de
+        # gitops-seed-citation (instanciation passée côté atlas). Plus de `rollback` bash.
         self.assertEqual(
             fb.calls,
-            [("gitops",), ("gitops-seed",), ("gitops-seed-citation",)],
+            [("gitops",), ("gitops-seed",)],
         )
 
     def test_destroy_layer_discovery_destroys_whole_closure_in_one_call(self):

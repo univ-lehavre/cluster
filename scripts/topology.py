@@ -70,7 +70,6 @@ import difflib
 import glob
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -1973,54 +1972,9 @@ def _current_context_and_server() -> tuple[str | None, str | None]:
     return ctx_name, server
 
 
-def assert_prod_target(action: str, config) -> None:
-    """Garde d'isolation PROD (ADR 0053), INVERSE de `_assert_target_identity` : un seed PROD
-    mutant ne s'exécute QUE sur le cluster prod PROUVÉ — le NOM DE CLUSTER du contexte kubectl
-    courant == `config.expected_cluster` (défaut `cluster-prod`). Porte la garde bash
-    `assert_prod_target()` de seed-app-of-apps.sh : refus de muter une mauvaise cible (le banc,
-    un autre cluster).
-
-    Contrairement à la garde banc (qui accepte un `KUBECONFIG` exporté comme intention
-    explicite, ADR 0065), la garde prod EXIGE la preuve POSITIVE `cluster == expected_cluster` :
-    le seed prod (mute Gitea + Argo CD de dirqual) est le geste le plus dangereux du dépôt. Un
-    opérateur visant un autre cluster prod surcharge `atlas.expected_cluster` dans le YAML.
-
-    Lève `_path.IsolationRefused` (mappé code 2 par `run_seed`/`_launch_seed`) — AUCUNE mutation
-    n'a lieu avant que la garde ne passe. Le kubeconfig actif est celui posé par `_launch_seed`
-    (stack prod / KUBECONFIG) ; `_kubectl` en hérite via `_kubectl_env`."""
-    expected = config.expected_cluster
-    ctx = _kubectl("config", "current-context")
-    ctx_name = ctx.stdout.strip() if ctx and ctx.returncode == 0 else ""
-    if not ctx_name:
-        raise _path.IsolationRefused(
-            f"REFUS : `{action}` — aucun contexte kubectl courant. Le seed PROD exige une "
-            "cible prouvée (cluster-prod) : activer la stack prod (`nestor stack select "
-            "<stack-prod>`) ou exporter KUBECONFIG (ADR 0053)."
-        )
-    cluster = _kubectl(
-        "config", "view", "-o",
-        f"jsonpath={{.contexts[?(@.name=='{ctx_name}')].context.cluster}}",
-    )  # fmt: skip
-    cluster_name = cluster.stdout.strip() if cluster and cluster.returncode == 0 else ""
-    if cluster_name != expected:
-        raise _path.IsolationRefused(
-            f"REFUS : `{action}` — cible kube = cluster '{cluster_name or '?'}' "
-            f"(contexte '{ctx_name}'), attendu '{expected}'. Refus de muter une mauvaise "
-            "cible (le banc ou un autre cluster). Surcharger `atlas.expected_cluster` dans "
-            "la topologie si volontaire (ADR 0023/0053)."
-        )
-    ver = _kubectl("version", "-o", "json")
-    if not (ver and ver.returncode == 0):
-        raise _path.IsolationRefused(
-            f"REFUS : `{action}` — l'API Kubernetes du cluster '{expected}' ne répond pas. "
-            "Aucun geste mutant sur une cible muette (ADR 0046)."
-        )
-    _gitea_pod(config.ns)  # lève _path.PathError si Gitea absent (fail-fast honnête)
-    ns_ok = _kubectl("get", "ns", config.argocd_ns)
-    if not (ns_ok and ns_ok.returncode == 0):
-        raise _path.IsolationRefused(
-            f"REFUS : `{action}` — namespace `{config.argocd_ns}` absent (Argo CD posé ?)."
-        )
+# NB (ADR 0111) : la garde `assert_prod_target` (isolation du seed PROD d'une code-location
+# applicative, cluster == expected_cluster) a été RETIRÉE — ce seed est un geste côté dépôt
+# `atlas`. Seule subsiste la garde banc `_assert_target_identity` (jouet du socle).
 
 
 def _assert_inventory_safe(action: str, inventory_path: str, topo: Topology) -> None:
@@ -2743,11 +2697,10 @@ def cmd_preview(args: argparse.Namespace) -> int:
             )
 
         # Drift de DIGEST (ADR 0046/0095) : le digest DÉCLARÉ (topo `atlas.code_locations`)
-        # peut CONTREDIRE le digest RÉELLEMENT déployé — cas d'un build manuel node-side qui
-        # écrit le nouveau digest dans la topo sans re-seeder (le signal de couche
-        # `gitops-seed-citation` = présence d'Application, aveugle au digest, tient le
-        # déploiement « à-jour »). Le manifeste reste alors sur l'ancien digest en silence.
-        # On rend la divergence VISIBLE (le flux garanti reste git-push→eventful→write-back).
+        # peut CONTREDIRE le digest RÉELLEMENT déployé — l'Application Argo CD d'une code-location
+        # (instanciée côté atlas depuis ADR 0111) tient le déploiement « à-jour » sur présence,
+        # aveugle au digest. Le manifeste peut donc rester sur un ancien digest en silence. On
+        # rend la divergence VISIBLE (observabilité cluster-side, indépendante de l'instanciation).
         declared_digests = {
             (cl or {}).get("name", ""): (cl or {}).get("image_digest", "")
             for cl in topo.atlas.get("code_locations", []) or []
@@ -2757,8 +2710,10 @@ def cmd_preview(args: argparse.Namespace) -> int:
         ):
             _warn(
                 f"code-location `{name}` : digest DÉPLOYÉ `{deployed}` ≠ déclaré "
-                f"`{declared}` — build manuel non propagé au manifeste (re-seed requis : le "
-                "seed prod substitue le digest de la topo dans cluster/apps ; ADR 0046/0095)."
+                f"`{declared}` — build manuel non propagé au manifeste. Le déploiement par "
+                "digest (injection dans le manifeste Argo CD) est un geste côté dépôt atlas "
+                "depuis ADR 0111 : re-jouer le déploiement atlas de la code-location "
+                "(ADR 0046/0095)."
             )
 
     # ── PLAN : la séquence de couches à monter ───────────────────────────────────
@@ -3117,9 +3072,9 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
     la cible SÛRE (`_kubectl`/`_kubectl_env`) ; le pod est résolu une fois au 1er besoin."""
     ns, argocd_ns = config.ns, config.argocd_ns
     org, repo = config.org, config.repo
-    # Le repo de CODE atlas (`config.org_atlas/repo_atlas`) porte l'arbre atlas figé poussé par
-    # `push-atlas-tree` (source des Applications Argo CD), DISTINCT du repo déclaratif des
-    # workflows (org/repo) ciblé par le webhook #1 (déploiement → argocd-server).
+    # `org/repo` = le dépôt déclaratif des workflows JOUET (atlas-workflows) ciblé par le
+    # webhook Gitea (déploiement → argocd-server). ADR 0111 : plus de repo de CODE atlas ni
+    # d'arbre atlas figé côté cluster — l'instanciation applicative est un geste côté atlas.
     api_base = f"{config.api}/api/v1"
     state: dict[str, str] = {}
 
@@ -3393,452 +3348,12 @@ def _seed_do_banc(topo: Topology, config) -> Callable[[str], bool]:
     return do
 
 
-# ── Patrons *.example de l'App-of-Apps (ADR 0023 : valeurs d'exemple, injectées au seed).
-_AOA_DIR = os.path.join(_ROOT, "platform", "argocd", "app-of-apps")
-_CITATION_EXAMPLE = os.path.join(_AOA_DIR, "apps", "citation.example.yaml")
-_APPPROJECT_EXAMPLE = os.path.join(_AOA_DIR, "appproject-cluster-apps.example.yaml")
-_ROOT_APP_EXAMPLE = os.path.join(_AOA_DIR, "root-application.example.yaml")
-
-
-def _git_push_atlas_tree(config, ns: str, admin_pw: str) -> bool:
-    """Push GIT de l'arbre atlas figé (révision + digest injecté) vers Gitea intra-cluster.
-
-    Porte `push_atlas_tree` de seed-app-of-apps.sh (façade banc-citation, ADR 0095 §1.a) :
-      1. clone LOCAL figé du dépôt atlas (`config.atlas_repo_dir`) → branche `main` sur la
-         révision de la 1re code-location (le dépôt atlas est COMMUN ; on épingle son arbre à
-         une révision figée) ; on ne pousse JAMAIS le checkout de travail ;
-      2. substitution du DIGEST dans l'overlay prod du CLONE pour CHAQUE code-location
-         (`dataops/<name>-dagster/deploy/overlays/prod`, jamais le dépôt source — frontière
-         ADR 0094) via `_seed.substitute_image_placeholders` (logique pure) ; un code-location
-         sans digest est WARN + SKIP (best-effort, ne casse pas les autres) ;
-      3. `kubectl port-forward svc/gitea-http :3000` (tunnel k8s — CONTOURNE le piège DNS
-         FQDN côté hôte, cf. gitea-init) puis `git push --force main:main` avec un askpass
-         (creds jamais dans l'URL/les logs).
-    Idempotent (un rejeu re-pousse le même SHA). Renvoie False (fail-fast) sur tout échec."""
-    repo_dir = config.atlas_repo_dir
-    code_locations = config.code_locations
-    if not code_locations:
-        print("  ✗ aucune code-location déclarée (config atlas.code_locations / citation_*)")
-        return False
-    # Le dépôt atlas est COMMUN : on épingle son arbre à la révision de la 1re code-location.
-    revision = code_locations[0].revision
-    if not repo_dir or not os.path.isdir(os.path.join(repo_dir, ".git")):
-        print(f"  ✗ dépôt atlas introuvable : {repo_dir!r} (config atlas.repo_dir)")
-        return False
-    if not revision:
-        print("  ✗ revision non fournie (config atlas.code_locations[0].revision)")
-        return False
-
-    def _git(*argv: str, cwd: str | None = None, env: dict | None = None):
-        try:
-            return subprocess.run(  # noqa: S603 — argv git contrôlé
-                ["git", *argv], cwd=cwd, env=env, check=False, capture_output=True, text=True
-            )
-        except OSError:
-            return None
-
-    # La révision DOIT exister dans le checkout atlas (sinon rien à pousser).
-    chk = _git("-C", repo_dir, "cat-file", "-e", f"{revision}^{{commit}}")
-    if not (chk and chk.returncode == 0):
-        print(f"  ✗ révision {revision} absente du dépôt atlas ({repo_dir})")
-        return False
-
-    with tempfile.TemporaryDirectory(prefix="seed-citation-") as workdir:
-        clone = os.path.join(workdir, "atlas-clone")
-        # --no-local force un vrai clone (objets copiés) → la révision est présente même
-        # hors branche du checkout source.
-        cloned = _git("clone", "--quiet", "--no-local", repo_dir, clone)
-        if not (cloned and cloned.returncode == 0):
-            print("  ✗ clone du dépôt atlas échoué")
-            return False
-        # `checkout -B` (reset main SUR la révision + checkout) plutôt que `branch -f` :
-        # le clone a `main` checked-out, et git récent REFUSE `branch -f` sur la branche
-        # courante (« cannot force update the branch 'main' used by worktree »), MÊME si main
-        # est déjà à la révision. `checkout -B` déplace la branche courante sans refus.
-        branched = _git("-C", clone, "checkout", "--quiet", "-B", "main", revision)
-        if not (branched and branched.returncode == 0):
-            print(f"  ✗ impossible de placer main sur {revision}")
-            return False
-
-        # Substitution du digest dans l'overlay prod DU CLONE, POUR CHAQUE code-location
-        # (ADR 0095 §2 / frontière 0094). Best-effort par CL : un CL sans digest est WARN +
-        # SKIP (au banc l'overlay bench n'a pas de placeholder → normal), sans casser les autres.
-        for cl in code_locations:
-            overlay = os.path.join(
-                clone, "dataops", f"{cl.name}-dagster", "deploy", "overlays", "prod"
-            )
-            if not cl.image_digest:
-                print(
-                    f"  ! digest non fourni pour `{cl.name}` — overlay poussé avec le tag "
-                    "d'exemple (tag mutable, NON conforme ADR 0095 §2 — preuve seule)"
-                )
-                continue
-            if not os.path.isdir(overlay):
-                print(f"  ✗ overlay prod introuvable dans le clone : {overlay}")
-                return False
-            if not _substitute_digest_in_tree(overlay, cl.name, cl.image_name, cl.image_digest):
-                return False
-
-        # COMMIT de la substitution AVANT le push. Sans lui, `git push main:main` pousse l'arbre
-        # BRUT (placeholders __<NAME>_IMAGE(_DIGEST)__ NON substitués → image du Deployment ET
-        # DAGSTER_CURRENT_IMAGE des pods de RUN invalides → InvalidImageName). Conditionnel : au
-        # banc l'overlay `bench` n'a pas de placeholder → rien à committer → on pousse tel quel.
-        status = _git("-C", clone, "status", "--porcelain")
-        if status and status.stdout.strip():
-            _git("-C", clone, "add", "-A")
-            committed = _git(
-                "-C", clone, "-c", "user.email=nestor-seed@example-org.lan",
-                "-c", "user.name=nestor-seed", "commit", "--quiet", "-m",
-                "seed: injecte les digests d'image dans l'overlay prod",
-            )  # fmt: skip
-            if not (committed and committed.returncode == 0):
-                print("  ✗ commit de la substitution digest échoué")
-                return False
-
-        # Port-forward vers gitea-http (tunnel k8s, contourne le piège DNS FQDN). Le PORT du
-        # Service DIFFÈRE selon la topo (banc: 80 ; prod: 3000) → on le LIT (jamais codé) :
-        # `port-forward :<port-svc>` échoue si le Service n'expose pas ce port (vécu au banc).
-        svc_port = _kubectl(
-            "-n", ns, "get", "svc", "gitea-http", "-o", "jsonpath={.spec.ports[0].port}"
-        )
-        gitea_port = int(svc_port.stdout.strip()) if svc_port and svc_port.stdout.strip() else 80
-        lport, pf = _seed_port_forward(ns, "svc/gitea-http", gitea_port)
-        if not lport:
-            return False
-        try:
-            askpass = os.path.join(workdir, "askpass.sh")
-            with open(askpass, "w", encoding="utf-8") as fh:
-                fh.write(
-                    "#!/usr/bin/env bash\n"
-                    'case "$1" in\n'
-                    '  *[Uu]sername*) printf "%s" "${GIT_ASKPASS_USER}" ;;\n'
-                    '  *[Pp]assword*) printf "%s" "${GIT_ASKPASS_PASS}" ;;\n'
-                    "esac\n"
-                )
-            # 0o700 (owner-only rwx), PAS 0o755 : le helper est exécuté par git dans le
-            # MÊME process/user (via GIT_ASKPASS) — inutile de le rendre world-readable, et
-            # un askpass qui touche à l'auth ne doit pas être lisible par d'autres (CodeQL
-            # py/overly-permissive-file-permissions). Le workdir est déjà un mkdtemp privé.
-            os.chmod(askpass, 0o700)
-            push_url = f"http://127.0.0.1:{lport}/{config.org_atlas}/{config.repo_atlas}.git"
-            env = {
-                **os.environ,
-                "GIT_ASKPASS": askpass,
-                "GIT_ASKPASS_USER": config.admin_user,
-                "GIT_ASKPASS_PASS": admin_pw,
-                "GIT_TERMINAL_PROMPT": "0",
-            }
-            # --force : Gitea a auto_init le repo ; on impose l'arbre atlas figé comme main
-            # (le SHA épinglé dans targetRevision DOIT être la tête). Idempotent au rejeu.
-            pushed = _git("-C", clone, "push", "--force", push_url, "main:main", env=env)
-            if not (pushed and pushed.returncode == 0):
-                err = (pushed.stderr if pushed else "") or "git push injoignable"
-                print(f"  ✗ git push de l'arbre atlas échoué : {err.strip()[:200]}")
-                return False
-        finally:
-            if pf:
-                pf.terminate()
-    return True
-
-
-def _substitute_digest_in_tree(
-    overlay_dir: str, code_location_name: str, image_name: str, digest: str
-) -> bool:
-    """Applique `_seed.substitute_image_placeholders` à CHAQUE fichier de l'overlay clone.
-
-    Les placeholders sont PROPRES au code-location (`__<NAME>_IMAGE_DIGEST__` / `__<NAME>_IMAGE__`,
-    dérivés de `code_location_name`). Garde de frontière (ADR 0094) : au moins UN placeholder doit
-    être présent sur l'ensemble (sinon atlas n'a pas factorisé → on refuse de deviner la structure
-    interne, pas de déploiement par tag mutable en douce). Renvoie False (fail-fast) si aucun
-    placeholder, digest invalide, ou I/O échouée."""
-    total = 0
-    try:
-        for root, _dirs, files in os.walk(overlay_dir):
-            for name in files:
-                path = os.path.join(root, name)
-                with open(path, encoding="utf-8") as fh:
-                    text = fh.read()
-                new_text, n = _seed.substitute_image_placeholders(
-                    text, code_location_name, image_name, digest
-                )
-                if n:
-                    with open(path, "w", encoding="utf-8") as fh:
-                        fh.write(new_text)
-                    total += n
-    except _seed.SeedError as exc:
-        print(f"  ✗ substitution digest refusée : {exc}")
-        return False
-    except OSError as exc:
-        print(f"  ✗ substitution digest — I/O overlay : {exc}")
-        return False
-    if total == 0:
-        prefix = code_location_name.upper().replace("-", "_")
-        print(
-            f"  ✗ placeholders d'image absents de l'overlay `{code_location_name}` — atlas doit "
-            f"factoriser __{prefix}_IMAGE_DIGEST__/__{prefix}_IMAGE__ (frontière ADR 0094, #499)"
-        )
-        return False
-    return True
-
-
-def _seed_port_forward(ns: str, target: str, remote_port: int):
-    """Ouvre `kubectl port-forward <target> :<remote_port>` (port local éphémère) — tunnel k8s.
-
-    Contourne le piège DNS FQDN côté hôte (parité push_atlas_tree). Renvoie `(lport, proc)` ;
-    `(None, None)` si le port local n'est pas annoncé (kubectl mort/lent). L'appelant DOIT
-    `proc.terminate()` en `finally`."""
-    try:
-        proc = subprocess.Popen(  # noqa: S603 — argv contrôlé
-            ["kubectl", "-n", ns, "port-forward", target, f":{remote_port}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=_kubectl_env(),
-        )
-    except OSError:
-        print("  ✗ port-forward gitea-http : kubectl introuvable")
-        return None, None
-    # Attendre l'annonce « Forwarding from 127.0.0.1:PORT » (borné, ~10s).
-    for _ in range(50):
-        line = proc.stdout.readline() if proc.stdout else ""
-        m = re.search(r"127\.0\.0\.1:(\d+)", line or "")
-        if m:
-            return int(m.group(1)), proc
-        if proc.poll() is not None:
-            break
-    print("  ✗ port-forward gitea-http : port local non annoncé")
-    proc.terminate()
-    return None, None
-
-
-def _seed_do_app_of_apps(topo: Topology, config, *, overlay: str | None) -> Callable[[str], bool]:
-    """Construit le `do(step)` RÉEL du flux App-of-Apps — PARTAGÉ banc-citation ET prod (porte
-    seed-app-of-apps.sh). MULTI-code-location (boucle sur `config.code_locations`, ne pousse
-    JAMAIS la code-location jouet `toy`). Un seul cœur : org/repo cluster-apps + atlas, push de
-    l'arbre atlas figé, webhook #2, apps/<cl>.yaml par digest, AppProject + racine, + le token
-    write-back.
-
-    `overlay` = cible kustomize des déclarations poussées : "bench" (SeaweedFS, banc mono-nœud
-    local-path) OU None (garde le path `overlays/prod` du patron — OBC Ceph rook-ceph-datalake).
-    La GARDE (banc `_assert_target_identity` / prod `assert_prod_target`) et le KUBECONFIG sont
-    branchés par `_launch_seed` selon le terrain — jamais ici. C'est l'étape 1 « premier
-    pas » d'ADR 0095 §1.a (prouvée au banc AVANT la prod, ADR 0034/0085). État (token, admin_pw)
-    threadé par closure (le `do(step) -> bool` est sans état). Idempotent ; fail-fast."""
-    ns = config.ns
-    api_base = f"{config.api}/api/v1"
-    state: dict[str, str] = {}
-
-    def pod() -> str:
-        if "pod" not in state:
-            state["pod"] = _gitea_pod(ns)
-        return state["pod"]
-
-    def _api(method: str, path: str, body: str | None = None) -> str:
-        """Appel REST Gitea depuis le pod (curl localhost:3000) → code HTTP (dernière ligne)."""
-        argv = [
-            "curl", "-sS", "-w", "\n%{http_code}", "-X", method,
-            "-H", f"Authorization: token {state.get('token', '')}",
-            "-H", "Content-Type: application/json", f"{api_base}{path}",
-        ]  # fmt: skip
-        if body is not None:
-            argv += ["-d", body]
-        out = _gitea_exec(ns, pod(), argv)
-        if not (out and out.returncode == 0):
-            return ""
-        return (out.stdout or "").rpartition("\n")[2].strip()
-
-    def admin_token() -> bool:
-        # 1 — admin Gitea + token API (idempotent). Réutilise EXACTEMENT le patron banc :
-        # crée le Secret gitea-admin s'il manque, `gitea admin user create` (avale « already
-        # exists »), puis génère un token. On CONSERVE admin_pw (git push l'exige après).
-        chk = _kubectl("-n", ns, "get", "secret", "gitea-admin")
-        if not (chk and chk.returncode == 0):
-            _kubectl(
-                "-n", ns, "create", "secret", "generic", "gitea-admin",
-                "--from-literal=username=" + config.admin_user,
-                "--from-literal=password=" + _seed_gen_secret(),
-            )  # fmt: skip
-        pw = _kubectl("-n", ns, "get", "secret", "gitea-admin", "-o", "jsonpath={.data.password}")
-        admin_pw = _b64decode(pw.stdout.strip()) if pw and pw.returncode == 0 else ""
-        if not admin_pw:
-            return False
-        state["admin_pw"] = admin_pw
-        created = _gitea_exec(
-            ns, pod(),
-            ["gitea", "admin", "user", "create", "--username", config.admin_user,
-             "--password", admin_pw, "--email", config.admin_email, "--admin",
-             "--must-change-password=false"],
-        )  # fmt: skip
-        if not (created and created.returncode == 0):
-            blob = ((created.stdout or "") + (created.stderr or "")) if created else ""
-            if "already exists" not in blob:
-                return False
-        token_name = f"citation-seed-{os.getpid()}-{int(time.time())}"
-        out = _gitea_exec(
-            ns, pod(),
-            ["gitea", "admin", "user", "generate-access-token", "--username", config.admin_user,
-             "--token-name", token_name, "--scopes", "all", "--raw"],
-        )  # fmt: skip
-        tok = "".join((out.stdout or "").split()) if out and out.returncode == 0 else ""
-        if not tok:
-            return False
-        state["token"] = tok
-        return True
-
-    def _ensure_org_repo(org: str, repo: str) -> bool:
-        # POST org + repo (auto_init), idempotent (409/422 « existe déjà » = ok).
-        c_org = _api("POST", "/orgs", f'{{"username":"{org}"}}')
-        c_repo = _api(
-            "POST", f"/orgs/{org}/repos",
-            f'{{"name":"{repo}","auto_init":true,"default_branch":"main"}}',
-        )  # fmt: skip
-        return _seed_api_ok(c_org) and _seed_api_ok(c_repo)
-
-    def org_repo_apps() -> bool:
-        # 2 — org/repo déclaratif cluster/apps.
-        return _ensure_org_repo(config.org_cluster, config.repo_apps)
-
-    def org_repo_atlas() -> bool:
-        # 3 — org/repo de code atlas/atlas.
-        return _ensure_org_repo(config.org_atlas, config.repo_atlas)
-
-    def push_atlas_tree() -> bool:
-        # 4 — push GIT de l'arbre atlas figé (révision + digest injecté).
-        return _git_push_atlas_tree(config, ns, state.get("admin_pw", ""))
-
-    def push_citation() -> bool:
-        # 5 — rendu + push apps/<name>.yaml POUR CHAQUE code-location (repoURL/targetRevision
-        # injectés) via Contents API. Le patron GÉNÉRIQUE `citation.example.yaml` est réécrit
-        # `citation-dagster`→`<name>-dagster` par `render_code_location_declaration`. La boucle
-        # MULTI-code-location vit ICI (façade I/O), pas dans les steps (ordre stable). Fail-fast
-        # dès qu'un CL échoue (aucun faux-vert, ADR 0046).
-        if not config.code_locations:
-            print("  ✗ aucune code-location déclarée (config atlas.code_locations / citation_*)")
-            return False
-        try:
-            with open(_CITATION_EXAMPLE, encoding="utf-8") as fh:
-                example = fh.read()
-        except OSError:
-            print(f"  ✗ patron introuvable : {_CITATION_EXAMPLE}")
-            return False
-        for cl in config.code_locations:
-            try:
-                # overlay : "bench" (banc, SeaweedFS) ou None (prod → path `overlays/prod` du
-                # patron conservé, OBC Ceph rook-ceph-datalake). Le patron citation.example.yaml
-                # pointe overlays/prod ; None = no-op (path prod), "bench" réécrit vers bench.
-                rendered = _seed.render_code_location_declaration(
-                    # targetRevision = `main` (et NON `cl.revision`) : le seed force-push l'arbre
-                    # atlas SUBSTITUÉ+committé comme `main` ; épingler le SHA BRUT `cl.revision`
-                    # ferait suivre à Argo un ancêtre AVANT substitution (placeholders → images
-                    # invalides). Argo suit la tête `main` (l'état force-push, reproductible).
-                    example,
-                    cl.name,
-                    config.atlas_repo_url(),
-                    "main",
-                    overlay=overlay,
-                )
-            except _seed.SeedError as exc:
-                print(f"  ✗ {exc}")
-                return False
-            ok = _seed_put_contents_file(
-                config, state, ns, pod, config.org_cluster, config.repo_apps,
-                f"apps/{cl.name}.yaml", rendered, f"seed: apps/{cl.name}.yaml (ADR 0094)",
-            )  # fmt: skip
-            if not ok:
-                return False
-        return True
-
-    def appproject_root() -> bool:
-        # 6 — AppProject cluster-apps + Application racine (repoURL/sourceRepos injectés).
-        proj_src = f"{config.svc}/{config.org_cluster}/**"
-        apps_repo_url = config.apps_repo_url()
-        try:
-            with open(_APPPROJECT_EXAMPLE, encoding="utf-8") as fh:
-                proj = fh.read()
-            with open(_ROOT_APP_EXAMPLE, encoding="utf-8") as fh:
-                root = fh.read()
-        except OSError as exc:
-            print(f"  ✗ patron App-of-Apps introuvable : {exc}")
-            return False
-        proj = re.sub(
-            r"(?m)^(\s+- )http://gitea-http\.gitea\.svc\.cluster\.local/\*\*$",
-            rf"\g<1>{proj_src}", proj,
-        )  # fmt: skip
-        root = re.sub(r"(?m)^( {4})repoURL:.*$", rf"\g<1>repoURL: {apps_repo_url}", root)
-        if proj_src not in proj:
-            print("  ✗ injection sourceRepos ratée dans l'AppProject")
-            return False
-        if f"repoURL: {apps_repo_url}" not in root:
-            print("  ✗ injection repoURL ratée dans l'Application racine")
-            return False
-        a1 = _kubectl_apply_stdin(proj)
-        a2 = _kubectl_apply_stdin(root)
-        return bool(a1 and a1.returncode == 0 and a2 and a2.returncode == 0)
-
-    handlers = {
-        "admin-token": admin_token,
-        "org-repo-apps": org_repo_apps,
-        "org-repo-atlas": org_repo_atlas,
-        "push-atlas-tree": push_atlas_tree,
-        "push-citation": push_citation,
-        "appproject-root": appproject_root,
-    }
-
-    def do(step: str) -> bool:
-        handler = handlers.get(step)
-        if handler is None:
-            raise _path.PathError(f"seed App-of-Apps : étape inconnue `{step}` (façade)")
-        return handler()
-
-    return do
-
-
-def _seed_do_banc_citation(topo: Topology, config) -> Callable[[str], bool]:
-    """Seed banc-citation = flux App-of-Apps ciblant l'overlay `bench` (SeaweedFS, banc mono-nœud
-    local-path), sous garde `_assert_target_identity` (branchée par `_launch_seed`). Wrapper mince
-    sur `_seed_do_app_of_apps` — la logique est partagée avec le seed prod (DRY, jscpd)."""
-    return _seed_do_app_of_apps(topo, config, overlay="bench")
-
-
-def _seed_do_prod(topo: Topology, config) -> Callable[[str], bool]:
-    """Seed PROD = flux App-of-Apps ciblant l'overlay `prod` (OBC Ceph rook-ceph-datalake ;
-    overlay=None → path prod du patron conservé), sous garde `assert_prod_target` (branchée par
-    `_launch_seed`). MULTI-code-location (citation + mediawatch), ne pousse PAS `toy`. Wrapper
-    mince sur `_seed_do_app_of_apps` (DRY)."""
-    return _seed_do_app_of_apps(topo, config, overlay=None)
-
-
-def _seed_put_contents_file(config, state, ns, pod, org, repo, repo_path, content, message) -> bool:
-    """PUT/POST idempotent d'un fichier via la Contents API Gitea (create-or-update).
-
-    Encode le CONTENU (str) en base64, lit le SHA existant (GET → PUT-avec-sha si présent,
-    POST sinon), VÉRIFIE `"commit"` dans la réponse (un push raté laisse l'ancienne version →
-    Argo CD déploierait un manifeste périmé → fail-fast False). Parité push_contents_file
-    (seed-app-of-apps.sh). L'exec Gitea (`-w '\\n%{http_code}'`) sépare le CORPS (SHA/commit)
-    du code HTTP — comme `_api_full` du seed banc, autonome (Contents API a besoin du corps)."""
-    content_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    contents_path = f"/repos/{org}/{repo}/contents/{repo_path}"
-    api_base = f"{config.api}/api/v1"
-
-    def _exec(method: str, body: str | None = None):
-        argv = [
-            "curl", "-sS", "-w", "\n%{http_code}", "-X", method,
-            "-H", f"Authorization: token {state.get('token', '')}",
-            "-H", "Content-Type: application/json", f"{api_base}{contents_path}",
-        ]  # fmt: skip
-        if body is not None:
-            argv += ["-d", body]
-        out = _gitea_exec(ns, pod(), argv)
-        if not (out and out.returncode == 0):
-            return ""
-        return (out.stdout or "").rpartition("\n")[0]  # corps (avant la dernière ligne = code)
-
-    sha = _seed_contents_sha(_exec("GET"))
-    if sha:
-        resp = _exec("PUT", json.dumps({"content": content_b64, "sha": sha, "message": message}))
-    else:
-        resp = _exec("POST", json.dumps({"content": content_b64, "message": message}))
-    return _seed_resp_has_commit(resp)
+# ── NB (ADR 0111) : tout le câblage seed du flux App-of-Apps citation (patrons *.example de
+#    platform/argocd/app-of-apps/, `_git_push_atlas_tree`, `_substitute_digest_in_tree`,
+#    `_seed_port_forward`, `_seed_do_app_of_apps`, `_seed_do_banc_citation`, `_seed_do_prod`,
+#    `_seed_put_contents_file`) a été RETIRÉ : l'instanciation de l'Application Argo CD d'une
+#    code-location applicative est désormais un geste côté dépôt `atlas`. Seul subsiste le
+#    seed du JOUET `atlas-workflows` (`_seed_do_banc`, artefact du socle, ADR 0086).
 
 
 def _seed_gen_secret() -> str:
@@ -4134,133 +3649,74 @@ def _e2e_hook_impl(name: str) -> Callable[..., None] | None:
     return globals().get(attr) if attr else None
 
 
-# Phases DÉLÉGUÉES de seed → (kind run_seed, NOM du constructeur do, libellé). Deux flux, MÊME
-# garde banc (`_assert_target_identity`) : `gitops-seed` (jouet atlas-workflows) et
-# `gitops-seed-citation` (le VRAI flux App-of-Apps citation joué au banc, ADR 0095 §1.a). Le
-# seed PROD (`kind='prod'`) N'EST PAS monté au banc — il se prouve au rebuild dirqual
-# (garde `assert_prod_target`).
+# Phase DÉLÉGUÉE de seed → (kind run_seed, NOM du constructeur do, libellé, NOM de la garde).
+# Une SEULE phase depuis ADR 0111 : `gitops-seed` (jouet atlas-workflows, artefact du socle),
+# banc-only sous garde banc `_assert_target_identity`. Le flux App-of-Apps citation
+# (`gitops-seed-citation`, banc-citation + prod) a été RETIRÉ : l'instanciation d'une Application
+# de code-location applicative est un geste côté dépôt `atlas`.
 #
 # Le `do` est le NOM (résolu TARDIVEMENT via `globals()` à l'appel, comme `_E2E_HOOK_IMPL`) —
 # PAS la fonction capturée à l'import : sinon un patch de test sur l'attribut module (ex.
 # `_seed_do_banc`) ne prendrait pas effet (la référence figée du dict masquerait le stub).
-# phase → clé de cible seed → (seed kind, NOM du constructeur do, libellé, NOM de la garde).
-# La CLÉ dérive du terrain (ADR 0108) : `local` (banc Lima jetable) → garde banc
-# `_assert_target_identity` ; `prod` (terrain non local) → garde `assert_prod_target`. La garde
-# est le NOM d'une fonction module (résolue TARDIVEMENT via globals(), patchable en test) —
-# `_assert_target_identity` (kubectl) + `assert_prod_target` (seed prod, ADR 0053).
-# (jouet `toy`) reste banc-only : il n'a aucun sens en prod (la code-location jouet ne se déploie
-# jamais sur dirqual). `gitops-seed-citation` est le SEUL flux à DEUX cibles : banc-citation prouve
-# le chemin (ADR 0034), prod le joue réellement sur dirqual (multi-code-location, ADR 0095 §1.b).
-_SEED_PHASE_ROUTING: dict[str, dict[str, tuple[str, str, str, str]]] = {
-    "gitops-seed": {
-        "local": (
-            "banc",
-            "_seed_do_banc",
-            "gitea-init, jouet atlas-workflows",
-            "_assert_target_identity",
-        ),
-    },
-    "gitops-seed-citation": {
-        "local": (
-            "banc-citation",
-            "_seed_do_banc_citation",
-            "app-of-apps citation réel (banc)",
-            "_assert_target_identity",
-        ),
-        "prod": (
-            "prod",
-            "_seed_do_prod",
-            "app-of-apps multi-code-location (prod dirqual)",
-            "assert_prod_target",
-        ),
-    },
+# phase → (seed kind, NOM du constructeur do, libellé, NOM de la garde). La garde est le NOM
+# d'une fonction module (résolue TARDIVEMENT via globals(), patchable en test).
+# Le jouet reste banc-only : il n'a aucun sens en prod (la code-location jouet ne se déploie
+# jamais sur dirqual).
+_SEED_PHASE_ROUTING: dict[str, tuple[str, str, str, str]] = {
+    "gitops-seed": (
+        "banc",
+        "_seed_do_banc",
+        "gitea-init, jouet atlas-workflows",
+        "_assert_target_identity",
+    ),
 }
-
-
-def _seed_target_key(topo: Topology) -> str:
-    """Clé de routage seed dérivée du TERRAIN (ADR 0108) : `local` (banc Lima jetable, garde
-    banc) sinon `prod` (terrain non local, garde cluster-prod). Remplace l'ancien champ prod/bench
-    retiré du modèle — mapping unique `local → local`, `cloud`/`baremetal → prod`."""
-    return "local" if topo.terrain == "local" else "prod"
 
 
 def _launch_seed(phase: str, topo: Topology, derived: dict) -> _SeedLaunchResult:
     """Monte une phase DÉLÉGUÉE de seed : route vers `seed.run_seed(<kind>, …)` sous la garde
-    ADÉQUATE au terrain (`_seed_target_key` : `local` → garde banc, sinon `prod`).
+    banc `_assert_target_identity`.
 
-    Phases portées (`_SEED_PHASE_ROUTING`) : `gitops-seed` (banc, jouet) et `gitops-seed-citation`
-    à DEUX cibles — `banc-citation` (garde `_assert_target_identity`, prouve le chemin au banc, ADR
-    0095 §1.a) et `prod` (garde `assert_prod_target`, app-of-apps multi-code-location sur dirqual,
-    ADR 0095 §1.b). La garde est OPPOSÉE selon la cible (banc Lima vs cluster-prod). Mappe les
-    verdicts du seed (FAIL-FAST, AUCUN fallback, ADR 0046) :
+    Phase portée (`_SEED_PHASE_ROUTING`) : `gitops-seed` (banc, jouet atlas-workflows). Depuis
+    ADR 0111, le flux App-of-Apps citation (banc-citation + prod) a été retiré — c'est un geste
+    côté dépôt `atlas`. Mappe les verdicts du seed (FAIL-FAST, AUCUN fallback, ADR 0046) :
       - `SeedGuardRefused` (garde refuse une mauvaise cible) → `_path.IsolationRefused` (code 2) ;
       - `SeedError` (étape KO) → `_path.PathError` (fail-fast → code 1).
     Un succès → `_SeedLaunchResult(ok=True)`."""
     _ = derived  # le seed lit la config du YAML (SeedConfig.from_topology), pas le faisceau -e
-    by_kind = _SEED_PHASE_ROUTING.get(phase)
-    if by_kind is None:
+    routing = _SEED_PHASE_ROUTING.get(phase)
+    if routing is None:
         raise _path.PathError(
             f"phase déléguée `{phase}` : aucun câblage seed connu "
             f"(portées : {', '.join(sorted(_SEED_PHASE_ROUTING))})"
-        )
-    target_key = _seed_target_key(topo)
-    routing = by_kind.get(target_key)
-    if routing is None:
-        raise _path.PathError(
-            f"phase `{phase}` non montable sur terrain `{topo.terrain}` (cible `{target_key}`) "
-            f"(cibles portées : {', '.join(sorted(by_kind))})"
         )
     kind, do_builder_name, blurb, guard_name = routing
     do_builder = globals()[do_builder_name]  # résolution TARDIVE (patchable en test)
     guard_fn = globals()[guard_name]  # garde résolue TARDIVEMENT (patchable en test)
     config = _seed.SeedConfig.from_topology(topo)
-    # CIBLE PROD : `_kubectl` force KUBECONFIG=_bench_kubeconfig() SANS le `declared` de la topo en
-    # scope → pour viser dirqual on pose le KUBECONFIG DÉCLARÉ de la topo prod pour la DURÉE du seed
-    # (restauré en finally), sauf si l'opérateur en a déjà exporté un utilisable (intention
-    # prioritaire, ADR 0090). La garde `assert_prod_target` valide ensuite `cluster==cluster-prod`
-    # sur cette cible (DOUBLE FILET : un mauvais kubeconfig → refus, pas de mutation).
-    _kc_saved = os.environ.get("KUBECONFIG")
-    _declared_kc = getattr(topo, "kubeconfig", None)
-    _kc_posed = False
-    if target_key == "prod" and _operator_kubeconfig() is None and _declared_kc:
-        os.environ["KUBECONFIG"] = os.path.expanduser(_declared_kc)
-        _kc_posed = True
+    # GATE avant le seed : Gitea ET Argo CD Ready (parité run-phases.sh:1082-1085). Sans elle, le
+    # 1er geste (`gitea admin user create` via exec) tape un pod qui démarre encore → création
+    # silencieusement KO, `token` casse APRÈS (constaté au banc).
+    _gates = (("gitea", "gitea", "120s"), (config.argocd_ns, "argocd-server", "180s"))
+    for ns_dep, dep, to in _gates:
+        roll = _kubectl("-n", ns_dep, "rollout", "status", f"deploy/{dep}", f"--timeout={to}")
+        if not (roll and roll.returncode == 0):
+            raise _path.PathError(
+                f"seed {phase} : {ns_dep}/{dep} non Ready avant le seed "
+                f"(rollout status timeout {to}) — le socle GitOps doit être prêt (ADR 0046)"
+            )
+    do = do_builder(topo, config)
+    print(f"→ {phase} : seed des DONNÉES ({blurb}, garde banc)…")
+    # GARDE banc `_assert_target_identity` (kubectl ; relâche sur KUBECONFIG explicite, ADR 0065).
+    assert_target = lambda: guard_fn(f"nestor up ({phase})", topo)  # noqa: E731
     try:
-        # GATE avant le seed : Gitea ET Argo CD Ready (parité run-phases.sh:1082-1085, banc ET
-        # prod). Sans elle, le 1er geste (`gitea admin user create` via exec) tape un pod qui
-        # démarre encore → création silencieusement KO, `token` casse APRÈS (constaté au banc).
-        _gates = (("gitea", "gitea", "120s"), (config.argocd_ns, "argocd-server", "180s"))
-        for ns_dep, dep, to in _gates:
-            roll = _kubectl("-n", ns_dep, "rollout", "status", f"deploy/{dep}", f"--timeout={to}")
-            if not (roll and roll.returncode == 0):
-                raise _path.PathError(
-                    f"seed {phase} : {ns_dep}/{dep} non Ready avant le seed "
-                    f"(rollout status timeout {to}) — le socle GitOps doit être prêt (ADR 0046)"
-                )
-        do = do_builder(topo, config)
-        print(f"→ {phase} : seed des DONNÉES ({blurb}, garde {target_key})…")
-        # GARDE branchée selon la cible (terrain) : `assert_prod_target(action, config)` en prod
-        # (cible cluster-prod, NE relâche PAS sur KUBECONFIG) ; `_assert_target_identity` pour
-        # kubectl (relâche sur KUBECONFIG explicite, ADR 0065). Signatures distinctes → branche.
-        if target_key == "prod":
-            assert_target = lambda: guard_fn(f"nestor up ({phase})", config)  # noqa: E731
-        else:
-            assert_target = lambda: guard_fn(f"nestor up ({phase})", topo)  # noqa: E731
-        try:
-            _seed.run_seed(kind, config, assert_target=assert_target, do=do)
-        except _seed.SeedGuardRefused as exc:
-            # REFUS de garde (mauvaise cible) = sécurité, PAS un échec → IsolationRefused (code 2).
-            raise _path.IsolationRefused(str(exc)) from exc
-        except _seed.SeedError as exc:
-            # Étape KO → fail-fast (ADR 0046), AUCUN fallback : remonte en PathError (code 1).
-            raise _path.PathError(f"seed {phase} : {exc}") from exc
-    finally:
-        if _kc_posed:
-            if _kc_saved is None:
-                os.environ.pop("KUBECONFIG", None)
-            else:
-                os.environ["KUBECONFIG"] = _kc_saved
-    return _SeedLaunchResult(ok=True, message=f"seed appliqué ({phase}, {target_key})")
+        _seed.run_seed(kind, config, assert_target=assert_target, do=do)
+    except _seed.SeedGuardRefused as exc:
+        # REFUS de garde (mauvaise cible) = sécurité, PAS un échec → IsolationRefused (code 2).
+        raise _path.IsolationRefused(str(exc)) from exc
+    except _seed.SeedError as exc:
+        # Étape KO → fail-fast (ADR 0046), AUCUN fallback : remonte en PathError (code 1).
+        raise _path.PathError(f"seed {phase} : {exc}") from exc
+    return _SeedLaunchResult(ok=True, message=f"seed appliqué ({phase}, banc)")
 
 
 def _run_path_engine(
@@ -4309,17 +3765,11 @@ def _run_path_engine(
             # garde gère l'échappatoire KUBECONFIG (ADR 0065 — elle rend tôt si exporté). Pour
             # une phase à play unitaire (Ansible SSH/exec), on valide AUSSI l'inventaire.
             #
-            # EXCEPTION seed PROD DÉLÉGUÉ (playbook is None, terrain non local) : `_launch_seed`
-            # branche la garde PROD (`assert_prod_target`) — `_assert_target_identity` refuserait la
-            # prod À TORT. On la saute pour ces phases ; tout le reste (plays Ansible) la garde.
-            _is_prod_seed = (
-                topo.terrain != "local"
-                and phase in _SEED_PHASE_ROUTING
-                and _phases.has_phase_plan(phase)
-                and _phases.phase_plan(phase).playbook is None
-            )
-            if not _is_prod_seed:
-                _assert_target_identity(f"nestor up ({phase})", topo)
+            # NB (ADR 0111) : l'ancienne EXCEPTION « seed PROD délégué » (garde
+            # `assert_prod_target`) a disparu avec le flux App-of-Apps citation — l'unique seed
+            # délégué restant est le jouet `gitops-seed`, banc-only sous garde
+            # banc `_assert_target_identity`.
+            _assert_target_identity(f"nestor up ({phase})", topo)
             if _phases.has_phase_plan(phase) and _phases.phase_plan(phase).playbook is not None:
                 _assert_inventory_safe(f"nestor up ({phase})", ctx.inventory, topo)
 
@@ -4766,12 +4216,11 @@ def _monter_phase(topo: Topology, phase: str, run_params: dict, stack_name: str)
     # couche que `next` refuse ensuite de monter — incohérent.
     if playbook_rel is None:
         if phase in _SEED_PHASE_ROUTING:
-            # Phase DÉLÉGUÉE seed (gitops-seed / gitops-seed-citation) : route vers le câblage
-            # Python (parité _run_path_engine), pas un arm bash (retiré). Mappe les verdicts du
-            # moteur (PathError/IsolationRefused → fail-fast / usage) comme `_run_path_engine`.
-            # La GARDE (`_assert_target_identity` / seed `assert_prod_target`) est branchée DANS
-            # `_launch_seed` selon le terrain — on ne la double PAS ici (elle refuserait la
-            # prod à tort pour un gitops-seed-citation prod).
+            # Phase DÉLÉGUÉE seed (`gitops-seed`, jouet) : route vers le câblage Python
+            # (parité _run_path_engine), pas un arm bash (retiré). Mappe les verdicts du moteur
+            # (PathError/IsolationRefused → fail-fast / usage) comme `_run_path_engine`. La GARDE
+            # banc (`_assert_target_identity`) est branchée DANS `_launch_seed` — on ne la double
+            # PAS ici.
             print(f"→ {phase} : {_quoi_couche(phase)} via nestor/seed.py…")
             try:
                 _launch_seed(phase, topo, run_params)

@@ -91,14 +91,10 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
     "gitops-seed": PhaseSpec(
         None, "init Gitea (données, ADR 0044 — script)", "init GitOps (seed Gitea)"
     ),
-    # gitops-seed-citation (ADR 0095 §1.a) : le vrai flux App-of-Apps citation joué au banc
-    # (git push arbre atlas + apps/citation.yaml par digest + Applications). DONNÉES, pas un
-    # play — portée par nestor/seed.py (kind banc-citation) + façade _seed_do_banc_citation.
-    "gitops-seed-citation": PhaseSpec(
-        None,
-        "app-of-apps citation réel (données, ADR 0095 §1.a — seed)",
-        "déploiement citation (App-of-Apps)",
-    ),
+    # NB (ADR 0111) : la phase `gitops-seed-citation` (instanciation de l'Application Argo CD
+    # citation) a été RETIRÉE — l'instanciation d'une code-location APPLICATIVE passe côté
+    # atlas (le geste de déploiement atlas crée+pousse son Application). `gitops-seed` (jouet
+    # atlas-workflows, artefact du socle) reste.
     # Portail (ADR 0091/0092) : layer AUTONOME monté via le chemin générique `layers`.
     # Le portail observe les Services NodePort des autres couches (lecture seule) — il
     # n'a pas de dépendance dure (marche dès le socle, SKIP par endpoint absent), juste
@@ -109,8 +105,9 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
         "portail d'accès aux UI",
     ),
     # NB (ADR 0110 amendé) : la phase `citation` (build node-side de l'image de code) a été
-    # RETIRÉE — l'image de code se build hors cluster (poste, atlas build-code.sh). Le
-    # DÉPLOIEMENT reste GitOps par digest (gitops-seed-citation).
+    # RETIRÉE — l'image de code se build hors cluster (poste, atlas build-code.sh). ADR 0111 :
+    # l'INSTANCIATION de l'Application Argo CD (déploiement GitOps) passe aussi côté atlas —
+    # cluster ne porte plus de phase de déploiement d'une code-location applicative.
     # NB (ADR 0105) : la phase `eventful` (chaîne événementielle Argo Workflows/Events,
     # ADR 0095 §1.b) est RETIRÉE — le build node-side (platform-build-images) est le
     # mécanisme terminal. Plus aucune PhaseSpec associée.

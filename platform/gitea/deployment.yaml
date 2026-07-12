@@ -97,9 +97,9 @@ spec:
             periodSeconds: 30
             # Idem : sans marge, un push lent (pre-receive hook mesuré à 36 s)
             # faisait échouer la liveness (timeout défaut 1 s) → K8s tuait Gitea
-            # EN PLEIN PUSH → le seed `push-citation` échouait (crash-loop 12
-            # redémarrages observés). failureThreshold×periodSeconds ≈ 3 min de
-            # grâce avant redémarrage.
+            # EN PLEIN PUSH → un push de seed échouait (crash-loop 12 redémarrages
+            # observés). failureThreshold×periodSeconds ≈ 3 min de grâce avant
+            # redémarrage.
             timeoutSeconds: 15
             failureThreshold: 6
           resources:

@@ -170,6 +170,14 @@ La frontière 0094 devient :
 - **mediawatch / pageviews** : leurs `application.example.yaml` existent mais
   elles n'ont ni `install.sh` ni nœud de déploiement — le geste atlas doit être
   **générique** (les trois code-locations suivent le même moule).
+- **Observabilité de drift digest dormante** : le comparateur côté cluster
+  (`nestor/discover.py:stale_deployments`, façade `preview`) lit
+  `topo.atlas.code_locations[].image_digest`. Ce champ n'est plus renseigné par
+  un geste cluster (l'injection du digest passe côté atlas) : l'observabilité
+  est **conservée mais inerte** tant qu'un contrat atlas → cluster ne repeuple
+  pas le digest déclaré. À trancher : recâbler ce contrat ou migrer
+  l'observabilité côté atlas. Suivi en
+  [issue #648](https://github.com/univ-lehavre/cluster/issues/648).
 
 ## Alternatives écartées
 

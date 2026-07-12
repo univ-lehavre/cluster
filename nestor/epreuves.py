@@ -435,16 +435,10 @@ EPREUVES: list[Epreuve] = [
         "dataops",
         None,
     ),
-    Epreuve(
-        "34",
-        "Build → digest → GitOps : déploiement par @sha256 immuable",
-        "intég",
-        "gitops",
-        TOPO_AGNOSTIQUE,
-        TERRAIN_API,
-        "dataops",
-        None,
-    ),
+    # NB (ADR 0111) : l'épreuve « 34 — Build → digest → GitOps par @sha256 » a été RETIRÉE
+    # avec le scénario `34-build-gitops-digest.sh` : elle exerçait la chaîne App-of-Apps
+    # `cluster/apps` (racine `cluster-apps`), machinerie passée côté dépôt atlas. Sa réécriture
+    # côté atlas est suivie en issue dédiée.
 ]
 
 

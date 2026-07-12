@@ -353,9 +353,8 @@ _CATALOGUE: tuple[Component, ...] = (
     ),
     # NB (ADR 0110 amendé) : le composant/phase `citation` (BUILD node-side de l'image de
     # code) a été RETIRÉ — l'image de code se build hors cluster (poste, atlas build-code.sh).
-    # Le DÉPLOIEMENT survit via `gitops-seed-citation` (Argo CD tire par digest) : ce dernier
-    # ne dépend PLUS de `citation` (le digest vient désormais du build hors cluster, injecté
-    # dans la topo/seed), seulement d'argocd/gitea.
+    # NB (ADR 0111) : le DÉPLOIEMENT de citation (instanciation de l'Application Argo CD) est
+    # désormais porté par ATLAS, pas par cluster (voir la note après le composant `argocd`).
     Component(
         name="gitea",
         role="platform-gitea",
@@ -384,20 +383,12 @@ _CATALOGUE: tuple[Component, ...] = (
         signal=("application", "atlas-workflows", "argocd", False),
         weight=7,
     ),
-    Component(
-        name="gitops-seed-citation",
-        role=None,  # données : le VRAI flux App-of-Apps citation (git push arbre atlas +
-        # apps/citation.yaml par digest + Applications) — pas de rôle Ansible dédié (comme
-        # gitops-seed). Dépend d'argocd/gitea (org/repo poussé). Le digest de l'image publié
-        # dans apps/citation.yaml vient désormais du build HORS cluster (ADR 0110 amendé),
-        # injecté dans la topo/seed — plus de dépendance à une phase `citation` de build.
-        deps=("argocd", "gitea"),
-        # Application `citation-dagster` (déployée dans dagster, projet argocd `atlas`).
-        targeted=("-n argocd applications.argoproj.io citation-dagster",),
-        # Application Argo CD `citation-dagster` (CRD sans replicas) → présence seule.
-        signal=("application", "citation-dagster", "argocd", False),
-        weight=7,
-    ),
+    # NB (ADR 0111) : le composant `gitops-seed-citation` (instanciation de l'Application Argo
+    # CD `citation-dagster` : git push arbre atlas + apps/citation.yaml + Application) a été
+    # RETIRÉ. L'instanciation de l'Application d'une code-location APPLICATIVE passe désormais
+    # côté ATLAS (le geste de déploiement atlas crée+pousse son Application) — cluster ne
+    # l'instancie plus (nestor ne touche pas au code atlas, ADR 0108). Le composant `gitops-seed`
+    # (code-location JOUET `atlas-workflows`, un artefact du socle) RESTE ci-dessus.
     # NB (ADR 0110 amendé) : le composant `buildkit` (moteur de build IN-POD) a été RETIRÉ —
     # PodSecurity baseline (k8s ≥ 1.34) refuse le seccomp Unconfined du rootless, et le build
     # de code est déplacé HORS cluster (poste, atlas build-code.sh). Plus de rôle platform-buildkit.
@@ -496,7 +487,6 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     "portal": ("portal",),
     "gitops": ("gitea", "argocd"),
     "gitops-seed": ("gitops-seed",),
-    "gitops-seed-citation": ("gitops-seed-citation",),
     # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
     # seulement) ; l'ordre vient de topo_sort, pas de cette énumération.
     "atlas-ceph": (
@@ -620,7 +610,6 @@ ROUNDTRIP_PHASES: tuple[str, ...] = (
     "mlflow",
     "gitops",
     "gitops-seed",
-    "gitops-seed-citation",
     "portal",
 )
 
@@ -750,7 +739,6 @@ _PHASE_SIGNAL_COMPONENT: dict[str, str] = {
     "dataops": "marquez",  # DERNIER maillon ≠ nom de phase
     "mlflow": "mlflow",
     "gitops-seed": "gitops-seed",
-    "gitops-seed-citation": "gitops-seed-citation",
     "portal": "portal",
 }
 
@@ -837,8 +825,6 @@ def rollback_phase_targeted_resources(phase: str, backend: str = CEPH) -> list[s
         )
     if phase == "gitops-seed":
         return ["-n argocd applications.argoproj.io atlas-workflows"]
-    if phase == "gitops-seed-citation":
-        return ["-n argocd applications.argoproj.io citation-dagster"]
     return []
 
 

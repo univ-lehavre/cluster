@@ -60,8 +60,9 @@ hardening:
 #   nvme_block_device: /dev/nvme1n1   # NVMe block.db réel du parc.
 #   data_device_glob: /dev/sd[b-e]    # glob des devices data réels.
 
-# ─── gitea : bootstrap GitOps/seed. Défauts génériques (nestor/seed.py), LUS par SeedConfig ;
-# en prod, l'org/repo déclaratifs (cluster/apps) et code (atlas/atlas) sont réels.
+# ─── gitea : seed du JOUET du socle. Défauts génériques (nestor/seed.py), LUS par SeedConfig.
+# ADR 0111 : les clés du seed prod App-of-Apps (org_cluster/repo_apps/org_atlas/repo_atlas)
+# ne sont PLUS lues — l'instanciation applicative est un geste côté dépôt atlas.
 gitea:
   ns: gitea
   admin_user: atlas-admin
@@ -71,16 +72,12 @@ gitea:
   argocd_ns: argocd
   org: atlas
   repo: workflows
-  org_cluster: cluster
-  repo_apps: apps
-  org_atlas: atlas
-  repo_atlas: atlas
 
-# ─── atlas : dépôt de code externe + code-locations (build citation, ADR 0110).
+# ─── atlas : code-locations pour l'OBSERVABILITÉ de drift digest côté cluster
+# (discover.stale_deployments). ADR 0111 : l'instanciation/déploiement de la code-location
+# (build, push de l'Application) est un geste côté dépôt atlas — ces champs ne sont PLUS lus
+# par un seed cluster ; seul `image_digest` (si déclaré) sert à comparer déclaré vs déployé.
 atlas:
-  repo_dir: ~/Hub/atlas # chemin du dépôt atlas EXTERNE (build des images de code-location).
-  # expected_cluster : non déclaré → DÉRIVÉ du stack_id (`dirqual`) par le seed (ADR 0108) ;
-  # aligné sur le clusterName kubeadm. Ne le déclarer que pour viser un cluster au nom différent.
   code_locations:
     - name: citation # nom court (dérive image/overlay). REQUIS.
 

@@ -70,8 +70,10 @@ resources:
   memory: 16GiB
   disk: 128GiB
 
-# ─── gitea : bootstrap GitOps/seed. Tous les champs ont un défaut générique (nestor/seed.py) ;
+# ─── gitea : seed du JOUET du socle. Tous les champs ont un défaut générique (nestor/seed.py) ;
 # montrés avec leur valeur par défaut pour la lisibilité (ils SONT lus par SeedConfig).
+# ADR 0111 : les clés du seed prod App-of-Apps (org_cluster/repo_apps/org_atlas/repo_atlas)
+# ne sont PLUS lues — l'instanciation applicative est un geste côté dépôt atlas.
 gitea:
   ns: gitea
   admin_user: atlas-admin
@@ -81,15 +83,12 @@ gitea:
   argocd_ns: argocd
   org: atlas
   repo: workflows
-  org_cluster: cluster
-  repo_apps: apps
-  org_atlas: atlas
-  repo_atlas: atlas
 
-# ─── atlas : dépôt de code externe + code-locations (build citation, ADR 0110).
+# ─── atlas : code-locations pour l'OBSERVABILITÉ de drift digest côté cluster
+# (discover.stale_deployments). ADR 0111 : l'instanciation/déploiement de la code-location
+# (build, push de l'Application) est un geste côté dépôt atlas — ces champs ne sont PLUS lus
+# par un seed cluster ; seul `image_digest` (si déclaré) sert à comparer déclaré vs déployé.
 atlas:
-  repo_dir: ~/Hub/atlas # chemin du dépôt atlas EXTERNE (build des images de code-location).
-  # expected_cluster : non déclaré → DÉRIVÉ du stack_id (`local`) par le seed (ADR 0108).
   code_locations:
     - name: citation # nom court (dérive image/overlay). REQUIS.
 
