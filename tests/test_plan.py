@@ -211,7 +211,15 @@ class TargetValidation(unittest.TestCase):
         seq = expected_phase_sequence(self._topo_layers(["gitops", "metrics"]), None)
         self.assertEqual(
             seq,
-            ["up", "bootstrap", "storage-simple", "metrics-server", "gitops", "registry", "buildkit"],
+            [
+                "up",
+                "bootstrap",
+                "storage-simple",
+                "metrics-server",
+                "gitops",
+                "registry",
+                "buildkit",
+            ],
         )
 
     def test_store_ceph_layers_sequence_includes_datalake(self):
