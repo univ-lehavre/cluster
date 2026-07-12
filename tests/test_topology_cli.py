@@ -1605,6 +1605,8 @@ runs:
             "metrics-server",
             "monitoring",
             "gitops",
+            "registry",
+            "buildkit",
             "dataops",
             "mlflow",
             "gitops-seed",

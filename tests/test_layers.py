@@ -42,8 +42,9 @@ class ResolveLayersLocalPath(unittest.TestCase):
 
     def test_dataops_pulls_storage_and_monitoring(self):
         # dataops → monitoring (SeaweedFS) + stockage ; PAS de datalake en local-path.
+        # ADR 0112 : `registry` (phase autonome) est tiré par la clôture de dataops.
         seq = resolve_layers(["dataops"], "local-path")
-        self.assertEqual(seq, ["storage-simple", "monitoring", "dataops"])
+        self.assertEqual(seq, ["storage-simple", "monitoring", "registry", "dataops"])
         self.assertNotIn("datalake", seq)
 
     def test_atlas_equivalent_order_matches_arm(self):
@@ -51,7 +52,7 @@ class ResolveLayersLocalPath(unittest.TestCase):
         # posé par l'arm en queue) : storage → metrics → monitoring → gitops → dataops.
         self.assertEqual(
             resolve_layers(["dataops", "gitops", "metrics"], "local-path"),
-            ["storage-simple", "metrics-server", "monitoring", "gitops", "dataops"],
+            ["storage-simple", "metrics-server", "monitoring", "gitops", "registry", "dataops"],
         )
 
     def test_non_prefix_palier(self):
@@ -77,6 +78,7 @@ class ResolveLayersLocalPath(unittest.TestCase):
                 "metrics-server",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
@@ -95,7 +97,8 @@ class ResolveLayersLocalPath(unittest.TestCase):
 class ResolveLayersCeph(unittest.TestCase):
     def test_dataops_ceph_includes_datalake(self):
         seq = resolve_layers(["dataops"], "ceph")
-        self.assertEqual(seq, ["ceph", "sc", "datalake", "dataops"])
+        # ADR 0112 : `registry` (phase autonome) est tiré par la clôture de dataops.
+        self.assertEqual(seq, ["ceph", "sc", "datalake", "registry", "dataops"])
 
     def test_store_ceph_is_ceph_sc_datalake(self):
         # `store` en ceph = pile stockage COMPLÈTE : bloc (ceph+sc) ET objet RGW (datalake).
@@ -119,6 +122,7 @@ class ResolveLayersCeph(unittest.TestCase):
                 "metrics-server",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",

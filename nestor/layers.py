@@ -39,6 +39,11 @@ LAYER_PHASES: dict[str, list[str]] = {
     "store": ["storage"],
     "obs": ["monitoring"],
     "dataops": ["dataops"],
+    # `build` : socle CI/CD léger (le moteur de build in-pod SANS la chaîne dataops,
+    # ADR 0112). `buildkit` tire `registry` + `build-images` par ses deps → un socle
+    # buildkit complet, sans CNPG/Dagster/Marquez. `layers: [build]` (ou `[gitops, build]`
+    # pour la chaîne CI/CD complète : forge + build + réconciliation).
+    "build": ["buildkit"],
     # `atlas` (ADR 0083) : alias de la CHAÎNE MLOps complète — ancien preset atlas
     # (metrics-server + monitoring + gitops + gitops-seed + dataops) PLUS mlflow
     # (ADR 0082). Alias COMPOSITE : il référence d'autres alias (metrics/obs/store)
@@ -61,6 +66,8 @@ _QUEUE_PHASES = frozenset(
         "datalake",
         "monitoring",
         "gitops",
+        "registry",
+        "buildkit",
         "dataops",
         "mlflow",
         "gitops-seed",

@@ -251,8 +251,10 @@ class CheckPhaseSignal(unittest.TestCase):
         self.assertEqual(check_phase_signal("dataops", "dagster", "dagster"), [])
 
     def test_signal_pointing_non_leaf_is_error(self):
-        # registry est dans dataops mais N'EST PAS une feuille (dagster en dépend).
-        out = check_phase_signal("dataops", "registry", "registry")
+        # cnpg-cluster-pg est dans dataops mais N'EST PAS une feuille (dagster/marquez en
+        # dépendent). (registry n'est plus un bon exemple : depuis ADR 0112 c'est une phase
+        # autonome, donc sa propre feuille.)
+        out = check_phase_signal("dataops", "cnpg-cluster-pg", "postgres")
         self.assertTrue(has_error(out))
         self.assertIn("feuille", out[0].message)
 

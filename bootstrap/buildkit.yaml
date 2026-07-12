@@ -1,0 +1,63 @@
+# code: language=ansible
+# Layer BUILDKIT — le moteur de build in-pod (buildkit rootless) SEUL, phase AUTONOME
+# (ADR 0112). Extrait du play dataops (mêmes imports, idempotents) pour un socle CI/CD
+# léger : `layers: [build]` monte registry + buildkit SANS CNPG/Dagster/Marquez.
+#
+# Prérequis (tirés par la clôture du graphe) : `registry` (le build pull la pré-image et
+# push le résultat) et `build-images` (mirror de l'image `moby/buildkit` vers le registre
+# interne). Ce playbook (re)joue le mirror puis pose le socle buildkitd.
+#
+# DEUX plays :
+#   1. étape NŒUDS (`cloud`) : mirror de l'image buildkit publique → registry interne ;
+#   2. étape k8s (`localhost`) : le rôle platform-buildkit (namespace SANS enforce=baseline,
+#      buildkitd rootless, NetworkPolicies, service, config insecure registry:80).
+
+- name: Layer Buildkit — étape nœuds (mirror de l'image buildkit)
+  hosts: cloud
+  force_handlers: true
+  pre_tasks:
+    - name: Audit-log — record playbook execution (+ garde d'identité stack_id)
+      ansible.builtin.import_role:
+        name: audit-log
+      vars:
+        audit_log_playbook: buildkit.yaml
+  tasks:
+    # Mirror `moby/buildkit` (mirror_only) → registry:80/moby/buildkit:v0.19.0-rootless,
+    # consommé par platform/buildkit/deployment.yaml. Idempotent (rejouable).
+    - name: Mirror de l'image buildkit vers le registre interne
+      ansible.builtin.import_role:
+        name: platform-build-images
+      tags: build-images
+
+- name: Layer Buildkit — étape k8s (socle buildkitd rootless)
+  hosts: "{{ dataops_k8s_host | default('localhost') }}"
+  gather_facts: false
+  environment:
+    SSL_CERT_FILE: '{{ dataops_ca_bundle | default(omit) }}'
+  pre_tasks:
+    - name: 'Garde : client Python kubernetes+certifi présent (sinon : uv sync)'
+      block:
+        - name: Probe import kubernetes + certifi
+          ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import kubernetes, certifi'"
+          changed_when: false
+          check_mode: false
+      rescue:
+        - name: Manque le client Python — guider vers uv sync
+          ansible.builtin.fail:
+            msg: >-
+              Le client Python `kubernetes` (ou `certifi`) est introuvable dans
+              l'interpréteur {{ ansible_python_interpreter | default('python3') }}.
+              Provisionner le .venv du poste de contrôle : `uv sync` à la racine
+              du dépôt (ADR 0006/0023, #277).
+    - name: Resolve the certifi CA bundle path
+      ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} -c 'import certifi; print(certifi.where())'"
+      register: buildkit_certifi
+      changed_when: false
+    - name: Set the CA bundle for HTTPS requests
+      ansible.builtin.set_fact:
+        dataops_ca_bundle: '{{ buildkit_certifi.stdout | trim }}'
+  tasks:
+    - name: Moteur de build in-pod (buildkit rootless)
+      ansible.builtin.import_role:
+        name: platform-buildkit
+      tags: buildkit

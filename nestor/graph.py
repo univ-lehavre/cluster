@@ -231,6 +231,11 @@ _CATALOGUE: tuple[Component, ...] = (
         role="platform-registry",
         deps=("gateway-api", _SC),
         namespace="registry",
+        # `registry` est une PHASE autonome (socle CI/CD, ADR 0112) → elle porte son signal :
+        # le Deployment `registry` Ready (le registre servant). Avant 0112 registry était un
+        # composant interne de dataops (signal porté par le dernier maillon marquez) ; devenu
+        # phase, il atteste sa propre santé.
+        signal=("deployment", "registry", "registry", True),
         weight=6,
     ),
     Component(
@@ -396,13 +401,14 @@ _CATALOGUE: tuple[Component, ...] = (
     # FONCTIONNE (prouvé au banc Lima : build cible code FROM pré-image + push). buildkitd builde
     # l'image de CODE des code-locations (`FROM deps-base`, zéro egress). Dépend de `registry`
     # (pull la pré-image + push le résultat) et de `build-images` (mirror node-side de l'image
-    # buildkit). PAS de `signal` : outillage de build, il n'atteste aucune couche applicative
-    # (un signal serait orphelin, test only_signal_components_carry_a_signal).
+    # buildkit). `buildkit` étant une PHASE autonome (socle CI/CD, ADR 0112), elle porte son
+    # signal : le Deployment `buildkitd` Ready (le daemon de build servant).
     Component(
         name="buildkit",
         role="platform-buildkit",
         deps=("registry", "build-images"),
         namespace="buildkit",
+        signal=("deployment", "buildkitd", "buildkit", True),
         weight=8,
     ),
 )
@@ -486,8 +492,14 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     "storage-simple": ("storage-simple",),
     "metrics-server": ("metrics-server",),
     "monitoring": ("prometheus-stack", "loki", "s3-backing-loki"),
+    # `registry` et `buildkit` sont des PHASES autonomes (socle CI/CD montable SANS
+    # dataops). registry = le registre d'images seul (deps gateway-api + storage) ;
+    # buildkit = le moteur de build in-pod (tire registry + build-images par ses deps).
+    # `dataops` ne liste PLUS registry dans son alias : dagster/marquez en dépendent
+    # explicitement, donc la CLÔTURE de dataops le tire quand même (aucune régression).
+    "registry": ("registry",),
+    "buildkit": ("buildkit",),
     "dataops": (
-        "registry",
         "cnpg-operator",
         "barman-plugin",
         "cnpg-secrets",
@@ -619,6 +631,11 @@ ROUNDTRIP_PHASES: tuple[str, ...] = (
     "datalake",
     "metrics-server",
     "monitoring",
+    # registry AVANT dataops : registry est une phase autonome (socle CI/CD) ; dataops
+    # le tire par dépendance (dagster/marquez → registry) mais ne le PORTE plus dans son
+    # alias, donc `phase_of_component('registry')` doit résoudre `registry`, pas `dataops`.
+    "registry",
+    "buildkit",
     "dataops",
     "mlflow",
     "gitops",
@@ -749,6 +766,8 @@ _PHASE_SIGNAL_COMPONENT: dict[str, str] = {
     "datalake": "datalake",
     "monitoring": "loki",  # DERNIER maillon ≠ nom de phase
     "gitops": "argocd",  # DERNIER maillon ≠ nom de phase (argocd-server)
+    "registry": "registry",  # phase autonome (ADR 0112) : Deployment registry Ready
+    "buildkit": "buildkit",  # phase autonome (ADR 0112) : Deployment buildkitd Ready
     "dataops": "marquez",  # DERNIER maillon ≠ nom de phase
     "mlflow": "mlflow",
     "gitops-seed": "gitops-seed",

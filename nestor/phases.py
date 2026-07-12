@@ -392,6 +392,12 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     ),
     # ── gitops : Gitea (forge) + Argo CD (moteur). Consomme gitea_storage_class. ─
     "gitops": _plan("gitops", extravars_keys=("gitea_storage_class",)),
+    # ── registry / buildkit : phases AUTONOMES du socle CI/CD (ADR 0112). Outillage de
+    #    build (pas de signal → gate none) : registry sert les images, buildkit builde.
+    #    Playbooks dédiés (bootstrap/{registry,buildkit}.yaml), rôles idempotents partagés
+    #    avec dataops.yaml. registry expose registry_storage_class (PVC du registre). ─
+    "registry": _plan("registry", extravars_keys=("registry_storage_class",)),
+    "buildkit": _plan("buildkit", extravars_keys=()),
     # ── dataops : chaîne registry → CNPG → Dagster → Marquez. NON TRIVIALE :
     #    après le playbook + gate Marquez, DEUX harnais e2e (OpenLineage→Marquez,
     #    egress 443) que _wait_layer_healthy NE couvre PAS → hooks explicites (CÂBLÉS façade). ─

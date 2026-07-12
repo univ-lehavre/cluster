@@ -74,6 +74,20 @@ PHASE_PLAYBOOK: dict[str, PhaseSpec] = {
         "observabilité (Prometheus + Grafana + Loki)",
     ),
     "gitops": PhaseSpec("bootstrap/gitops.yaml", "Gitea + Argo CD", "GitOps (Gitea + Argo CD)"),
+    # Registry + Buildkit : phases AUTONOMES (socle CI/CD léger, ADR 0112) montables SANS
+    # la chaîne dataops. Leurs playbooks dédiés importent les mêmes rôles que dataops.yaml
+    # (idempotents → double appel inoffensif). `registry` reste tiré par la clôture de
+    # dataops (dagster/marquez → registry).
+    "registry": PhaseSpec(
+        "bootstrap/registry.yaml",
+        "registre d'images interne (registry:80, HTTP)",
+        "registre d'images interne",
+    ),
+    "buildkit": PhaseSpec(
+        "bootstrap/buildkit.yaml",
+        "moteur de build in-pod (buildkit rootless)",
+        "moteur de build in-pod (buildkit)",
+    ),
     "dataops": PhaseSpec(
         "bootstrap/dataops.yaml",
         "registry + CNPG + Dagster + Marquez",

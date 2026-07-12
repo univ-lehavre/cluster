@@ -18,9 +18,13 @@
 catalog:
   terrain: local
 
-# ─── layers : le socle CI/CD strict. `gitops` = Gitea + Argo CD (clôture minimale).
+# ─── layers : le socle CI/CD (ADR 0112). `gitops` = Gitea + Argo CD (forge + réconciliation) ;
+# `build` = registry + buildkit (moteur de build in-pod), SANS la chaîne dataops (CNPG/Dagster/
+# Marquez). Résultat : storage-simple → gitops → registry → buildkit. Le runner Gitea Actions
+# (act_runner) se déploie par-dessus (hors socle nestor, cf. ADR 0112 / RUNBOOK buildkit).
 layers:
   - gitops
+  - build
 
 # ─── nodes : mono-nœud control+worker (hyperconvergence, pas de HA).
 nodes:

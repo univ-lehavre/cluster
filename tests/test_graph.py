@@ -192,9 +192,11 @@ class PhaseClosureCeph(unittest.TestCase):
                 "datalake",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
@@ -208,9 +210,11 @@ class PhaseClosureCeph(unittest.TestCase):
                 "datalake",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
@@ -236,13 +240,13 @@ class PhaseClosureCeph(unittest.TestCase):
         self.assertEqual(graph.phase_closure("portal"), ["portal"])
         self.assertEqual(graph.phase_closure("metrics-server"), ["metrics-server"])
 
-    def test_dataops_pulls_mlflow_portal(self):
-        # ADR 0110 : la phase `citation` (build) retirée ; ADR 0111 : gitops-seed-citation
-        # (instanciation Application) passée côté atlas → plus aucun consommateur de dataops
-        # côté code atlas. La clôture de `dataops` se limite à mlflow + portail.
+    def test_dataops_pulls_mlflow(self):
+        # ADR 0110/0111 : plus de consommateur de dataops côté code atlas. ADR 0112 : `portal`
+        # ne dépend PLUS de `dataops` (il dépend de registry + build-images, désormais phases
+        # autonomes hors dataops) → il sort de la clôture. Reste `mlflow` (base CNPG).
         self.assertEqual(
             graph.phase_closure("dataops"),
-            ["dataops", "mlflow", "portal"],
+            ["dataops", "mlflow"],
         )
 
     def test_mount_order_ceph_first(self):
@@ -319,6 +323,8 @@ class SignalIsAGraphProperty(unittest.TestCase):
         "datalake": ("cephobjectstore.ceph.rook.io", "datalake", "rook-ceph", "phase"),
         "monitoring": ("statefulset", "loki", "monitoring", True),
         "gitops": ("deployment", "argocd-server", "argocd", True),
+        "registry": ("deployment", "registry", "registry", True),
+        "buildkit": ("deployment", "buildkitd", "buildkit", True),
         "dataops": ("deployment", "marquez", "marquez", True),
         "mlflow": ("deployment", "mlflow", "mlflow", True),
         "gitops-seed": ("application", "atlas-workflows", "argocd", False),
