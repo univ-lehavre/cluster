@@ -136,6 +136,31 @@ bordure est traité dans la vue
 - **Argo CD gérant l'infra et/ou lui-même** : écarté pour cause de bootstrap
   circulaire.
 
+## CI/CD in-cluster : le build in-pod rétabli
+
+Le GitOps ci-dessus déploie ce qui est **déjà construit**. Reste la question du
+**build** de l'image de code d'une code-location : un `git push` doit
+déclencher, **dans** le cluster isolé, la construction de l'image puis son
+déploiement — sans egress, sans réintroduire l'instabilité de l'événementiel
+(Argo Events/NATS, écarté
+[ADR 0105](../decisions/0105-retrait-build-evenementiel.md)) ni relâcher la
+sécurité. C'est l'objet de
+[ADR 0112](../decisions/0112-cicd-in-cluster-gitea-actions-buildkit.md).
+
+La chaîne retenue : **push → Gitea Actions** (runner `act_runner` en **mode host
+durci**, enregistré par token, zéro Docker-in-Docker) **→ client `buildctl`
+durci → daemon `buildkitd` rootless in-pod** (snapshotter `auto`/overlayfs, sans
+`/dev/fuse`) **→ push de l'image au registre interne → Argo CD** réconcilie le
+déploiement. Le build in-pod, un temps réputé abandonné
+([ADR 0110](../decisions/0110-preimage-de-build-et-build-in-pod.md)), est ainsi
+**rétabli** — prouvé au banc (scénario 35, PR #650). Le déclenchement par
+**Sentinelle/Job** initialement planché (plan build-in-pod) est **abandonné** au
+profit de Gitea Actions. atlas **instancie** lui-même son `Application` Argo CD
+([ADR 0111](../decisions/0111-atlas-instancie-application-argocd.md)), fermant
+la boucle côté applicatif. Exploitation :
+[`platform/buildkit/RUNBOOK.md`](../../platform/buildkit/RUNBOOK.md) et
+[`platform/gitea-runner/RUNBOOK.md`](../../platform/gitea-runner/RUNBOOK.md).
+
 ## Validation sur banc
 
 La mise en service d'Argo CD est conditionnée à une **validation banc**
@@ -166,4 +191,7 @@ l'**applicatif** → GitOps, pas Ansible) ; elle remplace l'ancien Job CLI jetab
 - [Validation banc](../architecture/validation-banc.md) — protocole de tests sur
   le banc Lima ([`bench/lima/`](../../bench/lima/)).
 - ADR de cette vue : [ADR 0016](../decisions/0016-observabilite.md),
-  [ADR 0022](../decisions/0022-argocd-gitops-applicatif.md).
+  [ADR 0022](../decisions/0022-argocd-gitops-applicatif.md),
+  [ADR 0110](../decisions/0110-preimage-de-build-et-build-in-pod.md),
+  [ADR 0111](../decisions/0111-atlas-instancie-application-argocd.md),
+  [ADR 0112](../decisions/0112-cicd-in-cluster-gitea-actions-buildkit.md).

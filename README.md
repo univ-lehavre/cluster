@@ -549,12 +549,16 @@ comparés en CI ; tout écart fait rougir le build. La vitrine consolidée, pour
 juger en 5 min : [docs/preuves.md](docs/preuves.md).
 
 <!-- STATS:DEBUT — bloc régénéré par `pnpm check:gouvernance --stats` (ADR 0060) -->
+<!-- prettier-ignore-start -->
+<!-- Puces d'un seul tenant : le garde-fou `lint:stats` compare puce par puce ;
+     un wrap prettier (proseWrap 80) casserait la comparaison. Exclu de prettier. -->
 
 - **112 ADR** (95 Accepted, 12 Proposed, 5 Superseded)
-- **18 plans** vivants (1 Abandonné, 7 Achevé, 9 Actif, 1 Brouillon)
+- **18 plans** vivants (1 Abandonné, 7 Achevé, 8 Actif, 1 Brouillon, 1 Superseded)
 - **99 drifts** indexés (3 caduc, 93 corrige, 1 en-cours, 2 ouvert)
 - **34 scénarios** E2E reproductibles
 
+<!-- prettier-ignore-end -->
 <!-- STATS:FIN -->
 
 _Bloc régénéré par `pnpm check:gouvernance --stats`. L'avancement détaillé est

@@ -361,6 +361,42 @@ L'agent qui **collecte les logs** sur chaque nœud (un DaemonSet) et les pousse
 vers **Loki** (l'agrégateur de logs). Côté application, il n'y a rien à faire :
 écrire sur la sortie standard suffit, Promtail s'occupe du reste.
 
+## CI/CD in-cluster
+
+La chaîne de build/déploiement qui tourne **dans** le cluster isolé, sans egress
+(ADR 0112). Un `git push` déclenche le build de l'image de code puis son
+déploiement, sans réintroduire l'événementiel (ADR 0105) ni relâcher la
+sécurité.
+
+### Gitea
+
+Une **forge git légère** hébergée dans le cluster. Argo CD y **pull** les
+manifestes (le cluster est isolé, pas d'egress vers une forge externe). Voir
+[composants](composants.md#gitea-forge-git-intra-cluster).
+
+### Gitea Actions / act_runner
+
+Le **moteur de CI** de Gitea : un runner (`act_runner`) enregistré par
+**token**, en **mode host durci** (zéro Docker-in-Docker, zéro privilège),
+déclenché sur `git push`. C'est le **déclencheur** retenu par l'ADR 0112 (à la
+place de la Sentinelle initialement planifiée). Exploitation :
+[`platform/gitea-runner/RUNBOOK.md`](../platform/gitea-runner/RUNBOOK.md).
+
+### buildkit / buildkitd
+
+Le **moteur de build d'images** d'OCI, ici en **rootless in-pod** (un daemon
+`buildkitd` dans le cluster, piloté par le client `buildctl`). Construit l'image
+de code sans Docker ni privilège élevé. Voir
+[composants](composants.md#buildkit-build-de-limage-de-code-in-pod) et
+[`platform/buildkit/RUNBOOK.md`](../platform/buildkit/RUNBOOK.md).
+
+### Registre d'images interne
+
+Le **registre d'images** hébergé dans le cluster : buildkit y pousse l'image de
+code construite, et les pods l'y tirent (via le DNS cluster, en HTTP), faute
+d'egress vers un registre externe. Voir
+[composants](composants.md#registry-dimages-interne).
+
 ## Opérations & qualité
 
 ### ConfigMap
