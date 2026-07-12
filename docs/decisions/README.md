@@ -128,7 +128,7 @@ Format léger inspiré de Michael Nygard :
 | 0106 | [GitOps zéro-geste : la Sentinelle (détection API + build node-side inchangé)](0106-gitops-zero-geste-sentinelle.md)                               | Superseded by 0110 |
 | 0107 | [Adaptativité matérielle (prémisse des cultures d'ingénierie)](0107-adaptativite-materielle-premisse-cultures.md)                                  | Proposed           |
 | 0108 | [Isolation par identité d'instance et séparation des verbes provisionner / installer](0108-isolation-par-identite-et-verbes-provision-install.md)  | Proposed           |
-| 0109 | [Persistance déclarative de l'instance (curseur de rétention des données)](0109-persistance-declarative-topologie.md)                              | Proposed           |
+| 0109 | [Persistance déclarative de l'instance (curseur de rétention des données)](0109-persistance-declarative-topologie.md)                              | Accepted           |
 | 0110 | [Pré-image de build : l'image de code se construit sans réseau (in-pod), la base lourde hors cluster](0110-preimage-de-build-et-build-in-pod.md)   | Accepted           |
 | 0111 | [Déplacement de frontière : atlas instancie l'Application Argo CD de ses code-locations](0111-atlas-instancie-application-argocd.md)               | Accepted           |
 | 0112 | [CI/CD in-cluster : Gitea Actions + BuildKit rootless (le build in-pod, rétabli)](0112-cicd-in-cluster-gitea-actions-buildkit.md)                  | Accepted           |

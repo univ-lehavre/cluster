@@ -103,3 +103,15 @@ Accepted.
   (convention de bucket `pageviews`, mécanisme OBC, namespaces `pageviews`) —
   les deux faces du même contrat nomment le même bucket et les mêmes namespaces
   (c'est la divergence que le contrat bilatéral existe pour prévenir).
+- **2026-07-12 — Curseur `persistence.mode` (ADR 0109).** Le canal
+  `derive_run_params` (`profile.py`, transporté par les `-e` Ansible des phases)
+  a gagné le champ `persistence_mode`. Son transport côté cluster est **câblé
+  (#631)** mais **mord uniquement sur les briques d'infrastructure**
+  (StorageClass, CNPG, Loki, Prometheus, datalake, volume-snapshots) : le
+  curseur **s'arrête à CNPG** et **n'atteint pas** l'env du pod code-location
+  `atlas` aujourd'hui. Le **versant applicatif** — le pipeline atlas réagissant
+  au mode (bornes d'ingestion, cache) — est traité côté atlas
+  ([ADR atlas 0102](https://github.com/univ-lehavre/atlas/blob/main/docs/src/content/docs/decisions/0102-cache-adaptatif-reaction-persistence-mode.md),
+  volet différé cluster#630). Câbler la variable jusqu'au pod atlas est un
+  **second geste** non encore fait (le défaut `full` garantit l'absence de
+  régression tant qu'il ne l'est pas).
