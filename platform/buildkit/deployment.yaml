@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buildkitd
+  namespace: buildkit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: buildkitd
+  template:
+    metadata:
+      labels:
+        app: buildkitd
+      annotations:
+        # DÉROGATION rootless (ADR 0110) : buildkit rootless a besoin d'un profil
+        # seccomp permissif (syscalls `clone`/`unshare`/`mount` du build sans
+        # privilège) et d'AppArmor unconfined. `RuntimeDefault` (le durcissement
+        # maison) bloquerait le build. Tolérée par PodSecurity `baseline` du ns.
+        container.apparmor.security.beta.kubernetes.io/buildkitd: unconfined
+    spec:
+      # Durcissement maison CONSERVÉ au maximum (cf. platform/container-registry),
+      # SAUF les deux dérogations minimales du rootless (seccomp + /dev/fuse).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        # DÉROGATION : Unconfined (et non RuntimeDefault) — requis par le rootless.
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: buildkitd
+          # buildkit rootless, tiré du REGISTRE INTERNE (banc air-gappé : un pod ne
+          # tire pas d'Internet). L'image publique `moby/buildkit:v0.19.0-rootless`
+          # est mirrorée par `platform-build-images` (mirror_only, épinglée par
+          # DIGEST d'index upstream — ADR 0006/0011) puis servie ici PAR TAG interne :
+          # le mirror node-side produit une image mono-arch dont le digest interne
+          # diffère de l'index upstream, exactement comme le reconciler helm-kubectl
+          # (registry:80/dtzar/helm-kubectl:4.2.2, ADR 0103). L'immuabilité upstream
+          # est tracée côté mirror (le `public: …@sha256:…`), pas ici.
+          image: registry:80/moby/buildkit:v0.19.0-rootless
+          imagePullPolicy: IfNotPresent
+          args:
+            - --addr
+            - tcp://0.0.0.0:1234
+            - --config
+            - /home/user/.config/buildkit/buildkitd.toml
+            # CONSTAT EMPIRIQUE (2026-07-12) : sans ce flag, le worker OCI exécute chaque
+            # `RUN` dans un process-sandbox qui monte `/proc` — refusé en rootless
+            # (`mounting "proc" … operation not permitted`), tout `RUN` échoue. Le désactiver
+            # exécute les `RUN` sans ce sous-namespace (le pod lui-même isole déjà le build).
+            - --oci-worker-no-process-sandbox
+          ports:
+            - containerPort: 1234
+              name: buildkit
+          # CONSTAT EMPIRIQUE (2026-07-12) : le daemon écoute en TCP (`--addr
+          # tcp://0.0.0.0:1234`) ; sans `--addr`, `buildctl debug workers` tape le socket
+          # unix par défaut (`/run/user/1000/buildkit/buildkitd.sock`, absent en mode TCP)
+          # → probes en échec permanent alors que le daemon tourne. On cible donc le TCP.
+          readinessProbe:
+            exec:
+              command: ['buildctl', '--addr', 'tcp://127.0.0.1:1234', 'debug', 'workers']
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          livenessProbe:
+            exec:
+              command: ['buildctl', '--addr', 'tcp://127.0.0.1:1234', 'debug', 'workers']
+            initialDelaySeconds: 15
+            periodSeconds: 60
+          resources:
+            requests:
+              memory: '1Gi'
+              cpu: '500m'
+            limits:
+              # Build de l'image de CODE seule (pas la deps-base) : léger (COPY src
+              # + install --no-deps + dbt parse). Marge confortable, à affiner au
+              # lot 2 selon la mesure réelle.
+              memory: '2Gi'
+              cpu: '2'
+          securityContext:
+            # allowPrivilegeEscalation TRUE : le rootless en a besoin (newuidmap).
+            # C'est la seule concession au-delà de seccomp/fuse ; jamais `privileged`.
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: false
+            capabilities:
+              # CONSTAT EMPIRIQUE (Lima k8s 1.34, 2026-07-12) : `drop:[ALL]` SEUL fait
+              # échouer buildkit rootless à `newuidmap … operation not permitted` (setup
+              # des UID/GID maps du user-namespace). CAP_SETUID + CAP_SETGID sont REQUIS.
+              # Prouvé : avec ces deux capabilities (+ Unconfined), le build produit bien
+              # une image OCI ; sans elles, le daemon ne démarre pas son worker rootless.
+              drop: [ALL]
+              add: [SETUID, SETGID]
+          # NB (lot 2) : le snapshotter fuse-overlayfs exigerait un mount /dev/fuse
+          # (device plugin ou hostPath selon ce que le banc permet) — non ajouté ici
+          # tant que le choix fuse-vs-native n'est pas prouvé au banc (ADR 0110).
+          volumeMounts:
+            - name: config
+              mountPath: /home/user/.config/buildkit
+              readOnly: true
+            - name: buildkitd
+              mountPath: /home/user/.local/share/buildkit
+      volumes:
+        - name: config
+          configMap:
+            name: buildkitd-config
+        - name: buildkitd
+          emptyDir: {}

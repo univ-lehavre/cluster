@@ -67,6 +67,12 @@ spec:
             # ADR 0105 ; son hôte a donc disparu de l'allowlist.)
             - name: GITEA__webhook__ALLOWED_HOST_LIST
               value: argocd-server.argocd.svc.cluster.local
+            # Gitea Actions (CI native, moteur act_runner enregistré par TOKEN — pas
+            # d'OAuth). Le déclenchement au push est interne au cluster ; les runners
+            # sont des pods act_runner. Le build délègue à buildkitd (Option B) → aucun
+            # privilège dans le runner. Activé ici de façon déclarative.
+            - name: GITEA__actions__ENABLED
+              value: 'true'
           volumeMounts:
             # Données persistantes (dépôts git + base SQLite) — PVC.
             - name: gitea-data

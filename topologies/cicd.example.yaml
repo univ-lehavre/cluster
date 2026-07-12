@@ -1,0 +1,67 @@
+# code: language=yaml
+#
+# ─── Topologie DÉDIÉE « cicd » : socle MINIMAL pour prototyper une plateforme CI/CD
+# in-cluster (build d'image + déclenchement au push Gitea + déploiement Argo CD).
+#
+# DOCTRINE : n'y figurent QUE les couches nécessaires au CI/CD — Gitea (forge +
+# webhooks) et Argo CD (CD/GitOps), via `layers: [gitops]`. On EXCLUT volontairement
+# metrics/monitoring/dataops/mlflow/portal (chaîne MLOps applicative) : elles n'ont
+# aucun rôle dans un banc d'essai CI/CD et alourdissent le montage.
+#
+# Le REGISTRY (registry:80) N'EST PAS tiré par cette topo (il vit dans la phase
+# `dataops` du graphe, indissociable de CNPG/Dagster/Marquez). Pour un prototype qui a
+# besoin d'un registre, le poser À LA CARTE :
+#   kubectl apply -k platform/container-registry/   (namespace + deployment + service + PVC)
+# — ou builder en sortie OCI tar (aucun registre requis pour PROUVER qu'un builder builde).
+
+# ─── catalog : terrain local = VM Lima jetable.
+catalog:
+  terrain: local
+
+# ─── layers : le socle CI/CD strict. `gitops` = Gitea + Argo CD (clôture minimale).
+layers:
+  - gitops
+
+# ─── nodes : mono-nœud control+worker (hyperconvergence, pas de HA).
+nodes:
+  - name: node1
+    roles: [control, worker]
+
+# ─── exposition : NodePort L4 (accès UI Gitea/Argo CD via portForward Lima, sans DNS).
+exposition:
+  mode: nodeport
+
+# ─── access : DÉCLARATIF — le poste macOS joint les UI en http://127.0.0.1:<port> (NAT Lima).
+access:
+  via: portForward
+  host: 127.0.0.1
+  nodeport_range: '30000-32767'
+
+# ─── storage : local-path (pas de disques bruts).
+storage:
+  backend: local-path
+
+# ─── hardening : non durci (banc).
+hardening:
+  enabled: false
+
+# ─── resources : dimensionnement VM Lima. Socle CI/CD minimal → plus léger que la chaîne
+# MLOps complète (mais on garde de la marge pour les runners CI et un builder in-pod).
+resources:
+  cpus: 6
+  memory: 12GiB
+  disk: 64GiB
+
+# ─── gitea : seed du JOUET du socle (valide la couche gitops). Défauts génériques (nestor/seed.py).
+gitea:
+  ns: gitea
+  admin_user: atlas-admin
+  admin_email: atlas-admin@example-org.lan
+  svc: http://gitea-http.gitea.svc.cluster.local
+  api: http://localhost:3000
+  argocd_ns: argocd
+  org: atlas
+  repo: workflows
+
+# ─── kubeconfig : PAS posé en banc (ADR 0102 volet B) — nestor le DÉRIVE à
+# `.kubeconfigs/cicd.config`. `export KUBECONFIG=…` surcharge toujours.
