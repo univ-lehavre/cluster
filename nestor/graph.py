@@ -231,6 +231,11 @@ _CATALOGUE: tuple[Component, ...] = (
         role="platform-registry",
         deps=("gateway-api", _SC),
         namespace="registry",
+        # `registry` est une PHASE autonome (socle CI/CD, ADR 0112) → elle porte son signal :
+        # le Deployment `registry` Ready (le registre servant). Avant 0112 registry était un
+        # composant interne de dataops (signal porté par le dernier maillon marquez) ; devenu
+        # phase, il atteste sa propre santé.
+        signal=("deployment", "registry", "registry", True),
         weight=6,
     ),
     Component(
@@ -353,9 +358,8 @@ _CATALOGUE: tuple[Component, ...] = (
     ),
     # NB (ADR 0110 amendé) : le composant/phase `citation` (BUILD node-side de l'image de
     # code) a été RETIRÉ — l'image de code se build hors cluster (poste, atlas build-code.sh).
-    # Le DÉPLOIEMENT survit via `gitops-seed-citation` (Argo CD tire par digest) : ce dernier
-    # ne dépend PLUS de `citation` (le digest vient désormais du build hors cluster, injecté
-    # dans la topo/seed), seulement d'argocd/gitea.
+    # NB (ADR 0111) : le DÉPLOIEMENT de citation (instanciation de l'Application Argo CD) est
+    # désormais porté par ATLAS, pas par cluster (voir la note après le composant `argocd`).
     Component(
         name="gitea",
         role="platform-gitea",
@@ -384,23 +388,51 @@ _CATALOGUE: tuple[Component, ...] = (
         signal=("application", "atlas-workflows", "argocd", False),
         weight=7,
     ),
+    # NB (ADR 0111) : le composant `gitops-seed-citation` (instanciation de l'Application Argo
+    # CD `citation-dagster` : git push arbre atlas + apps/citation.yaml + Application) a été
+    # RETIRÉ. L'instanciation de l'Application d'une code-location APPLICATIVE passe désormais
+    # côté ATLAS (le geste de déploiement atlas crée+pousse son Application) — cluster ne
+    # l'instancie plus (nestor ne touche pas au code atlas, ADR 0108). Le composant `gitops-seed`
+    # (code-location JOUET `atlas-workflows`, un artefact du socle) RESTE ci-dessus.
+    # Moteur de build IN-POD (buildkit rootless) — RÉTABLI (2026-07-12). L'abandon ADR 0110
+    # (#644) reposait sur un mauvais diagnostic : PodSecurity baseline ne bloque pas le rootless
+    # « par nature » — c'est le namespace de build labellisé `enforce: baseline` qui refusait le
+    # seccomp Unconfined. Le socle (platform/buildkit/) ne labellise PLUS ce ns → le build in-pod
+    # FONCTIONNE (prouvé au banc Lima : build cible code FROM pré-image + push). buildkitd builde
+    # l'image de CODE des code-locations (`FROM deps-base`, zéro egress). Dépend de `registry`
+    # (pull la pré-image + push le résultat) et de `build-images` (mirror node-side de l'image
+    # buildkit). `buildkit` étant une PHASE autonome (socle CI/CD, ADR 0112), elle porte son
+    # signal : le Deployment `buildkitd` Ready (le daemon de build servant).
     Component(
-        name="gitops-seed-citation",
-        role=None,  # données : le VRAI flux App-of-Apps citation (git push arbre atlas +
-        # apps/citation.yaml par digest + Applications) — pas de rôle Ansible dédié (comme
-        # gitops-seed). Dépend d'argocd/gitea (org/repo poussé). Le digest de l'image publié
-        # dans apps/citation.yaml vient désormais du build HORS cluster (ADR 0110 amendé),
-        # injecté dans la topo/seed — plus de dépendance à une phase `citation` de build.
-        deps=("argocd", "gitea"),
-        # Application `citation-dagster` (déployée dans dagster, projet argocd `atlas`).
-        targeted=("-n argocd applications.argoproj.io citation-dagster",),
-        # Application Argo CD `citation-dagster` (CRD sans replicas) → présence seule.
-        signal=("application", "citation-dagster", "argocd", False),
-        weight=7,
+        name="buildkit",
+        role="platform-buildkit",
+        deps=("registry", "build-images"),
+        namespace="buildkit",
+        signal=("deployment", "buildkitd", "buildkit", True),
+        weight=8,
     ),
-    # NB (ADR 0110 amendé) : le composant `buildkit` (moteur de build IN-POD) a été RETIRÉ —
-    # PodSecurity baseline (k8s ≥ 1.34) refuse le seccomp Unconfined du rootless, et le build
-    # de code est déplacé HORS cluster (poste, atlas build-code.sh). Plus de rôle platform-buildkit.
+    # Runner Gitea Actions (act_runner) — l'ORCHESTRATEUR de CI (ADR 0112), l'autre moitié de
+    # la chaîne CI/CD in-cluster (buildkit = le moteur). Sur `git push` Gitea, il soumet le
+    # build au daemon buildkitd DISTANT (Option B : le runner reste durci/baseline, le
+    # privilège rootless est confiné à buildkitd). Chaîne PROUVÉE air-gap sur Lima.
+    #
+    # PHASE AUTONOME (comme buildkit/registry), montée en DERNIER — PAS un composant de la
+    # couche gitops. Raison (bug constaté au run réel 2026-07-12) : le runner dépend de
+    # `registry` (son image act_runner est mirrorée au registre interne — le nœud doit d'abord
+    # être configuré pour `registry:80` HTTP, volet node de platform-registry) ET de `buildkit`
+    # (son initContainer copie `buildctl` de l'image interne moby/buildkit). Ces deux phases
+    # viennent APRÈS gitops ; placer le runner DANS gitops faisait tourner le mirror act_runner
+    # avant la config registre node → `nerdctl push` échouait (DNS `registry` + tentative
+    # HTTPS). Ordre correct : gitops → registry → buildkit → gitea-runner. Signal propre : le
+    # Deployment `gitea-runner` Ready (le runner enregistré et prêt à recevoir des jobs).
+    Component(
+        name="gitea-runner",
+        role="platform-gitea-runner",
+        deps=("gitea", "registry", "buildkit", "build-images"),
+        namespace="gitea-runner",
+        signal=("deployment", "gitea-runner", "gitea-runner", True),
+        weight=9,  # après buildkit (8) : dernier maillon de la chaîne CI/CD
+    ),
 )
 # NB (ADR 0105) : la couche `eventful` (build applicatif événementiel in-cluster, Argo Events +
 # Argo Workflows + NATS, ADR 0095 §1.b) a été RETIRÉE — le build node-side (platform-build-images,
@@ -482,8 +514,17 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     "storage-simple": ("storage-simple",),
     "metrics-server": ("metrics-server",),
     "monitoring": ("prometheus-stack", "loki", "s3-backing-loki"),
+    # `registry` et `buildkit` sont des PHASES autonomes (socle CI/CD montable SANS
+    # dataops). registry = le registre d'images seul (deps gateway-api + storage) ;
+    # buildkit = le moteur de build in-pod (tire registry + build-images par ses deps).
+    # `dataops` ne liste PLUS registry dans son alias : dagster/marquez en dépendent
+    # explicitement, donc la CLÔTURE de dataops le tire quand même (aucune régression).
+    "registry": ("registry",),
+    "buildkit": ("buildkit",),
+    # `gitea-runner` : phase autonome montée en DERNIER (l'orchestrateur de CI, ADR 0112).
+    # Tire gitea + registry + buildkit + build-images par ses deps (clôture) → monte après eux.
+    "gitea-runner": ("gitea-runner",),
     "dataops": (
-        "registry",
         "cnpg-operator",
         "barman-plugin",
         "cnpg-secrets",
@@ -496,7 +537,6 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     "portal": ("portal",),
     "gitops": ("gitea", "argocd"),
     "gitops-seed": ("gitops-seed",),
-    "gitops-seed-citation": ("gitops-seed-citation",),
     # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
     # seulement) ; l'ordre vient de topo_sort, pas de cette énumération.
     "atlas-ceph": (
@@ -616,11 +656,16 @@ ROUNDTRIP_PHASES: tuple[str, ...] = (
     "datalake",
     "metrics-server",
     "monitoring",
+    # registry AVANT dataops : registry est une phase autonome (socle CI/CD) ; dataops
+    # le tire par dépendance (dagster/marquez → registry) mais ne le PORTE plus dans son
+    # alias, donc `phase_of_component('registry')` doit résoudre `registry`, pas `dataops`.
+    "registry",
+    "buildkit",
+    "gitea-runner",
     "dataops",
     "mlflow",
     "gitops",
     "gitops-seed",
-    "gitops-seed-citation",
     "portal",
 )
 
@@ -747,10 +792,12 @@ _PHASE_SIGNAL_COMPONENT: dict[str, str] = {
     "datalake": "datalake",
     "monitoring": "loki",  # DERNIER maillon ≠ nom de phase
     "gitops": "argocd",  # DERNIER maillon ≠ nom de phase (argocd-server)
+    "registry": "registry",  # phase autonome (ADR 0112) : Deployment registry Ready
+    "buildkit": "buildkit",  # phase autonome (ADR 0112) : Deployment buildkitd Ready
+    "gitea-runner": "gitea-runner",  # phase autonome (ADR 0112) : Deployment gitea-runner Ready
     "dataops": "marquez",  # DERNIER maillon ≠ nom de phase
     "mlflow": "mlflow",
     "gitops-seed": "gitops-seed",
-    "gitops-seed-citation": "gitops-seed-citation",
     "portal": "portal",
 }
 
@@ -803,6 +850,7 @@ def rollback_phase_namespaces(phase: str) -> list[str]:
         "dataops": ["postgres", "dagster", "marquez"],
         "mlflow": ["mlflow"],
         "gitops": ["argocd", "gitea"],
+        "gitea-runner": ["gitea-runner"],
     }.get(phase, [])
 
 
@@ -837,8 +885,6 @@ def rollback_phase_targeted_resources(phase: str, backend: str = CEPH) -> list[s
         )
     if phase == "gitops-seed":
         return ["-n argocd applications.argoproj.io atlas-workflows"]
-    if phase == "gitops-seed-citation":
-        return ["-n argocd applications.argoproj.io citation-dagster"]
     return []
 
 

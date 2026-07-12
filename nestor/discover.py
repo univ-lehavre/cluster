@@ -194,12 +194,12 @@ def classify_digest_drift(
 ) -> list[tuple[str, str, str]]:
     """Code-locations dont le digest DÉPLOYÉ contredit le digest DÉCLARÉ (PUR, ADR 0046/0095).
 
-    Le seed (`_seed_do_prod`) substitue le digest de la topo dans l'overlay poussé vers
-    Gitea `cluster/apps` → Argo déploie. Mais un BUILD MANUEL node-side (`nestor next` sur
-    la couche image) écrit le nouveau digest dans la TOPO sans re-seeder — et le signal de
-    couche `gitops-seed-citation` (présence de l'Application, pas le digest) tient le
-    déploiement « à-jour ». Le manifeste garde alors l'ANCIEN digest silencieusement.
-    Ce comparateur rend la divergence VISIBLE (la façade `preview` AVERTIT).
+    Le geste de déploiement (côté dépôt `atlas` depuis ADR 0111) fige le digest de l'image de
+    code dans le manifeste que suit l'Application Argo CD → Argo déploie. Mais un BUILD MANUEL
+    node-side (`nestor next` sur la couche image) écrit le nouveau digest dans la TOPO sans
+    re-déployer — et l'Application Argo CD (présence, pas le digest) tient le déploiement
+    « à-jour ». Le manifeste garde alors l'ANCIEN digest silencieusement. Ce comparateur rend la
+    divergence VISIBLE côté cluster (la façade `preview` AVERTIT).
 
     `declared_digests` : {code-location: digest} de la topo (`atlas.code_locations[].image_digest`),
     filtré aux entrées qui EN portent un (None/absent = rien à comparer, ex. mediawatch overlay).

@@ -1,0 +1,61 @@
+# code: language=ansible
+# Rôle platform-buildkit (ADR 0110) — moteur de build d'images IN-POD (buildkit
+# rootless). Build l'image de CODE des code-locations (`FROM deps-base`, zéro
+# egress), là où le build node-side (`platform-build-images`) exigeait root +
+# containerd du nœud. Appliqué depuis le control-plane.
+# Prérequis : registry (le build pull la pré-image + push le résultat) ; la
+# pré-image `<cl>-deps-base:<SHA_DEPS>` doit être présente au registre (buildée
+# hors cluster, atlas `deploy/build-deps-base.sh`).
+
+- name: Deploy buildkitd (in-pod rootless build engine)
+  run_once: true
+  block:
+    - name: Apply buildkit namespace
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/buildkit/namespace.yaml'
+
+    # NetworkPolicies : default-deny AVANT les allow (sinon fenêtre de deny ou
+    # allow ignoré). allow-dns = résolution `registry.registry.svc` (le pod
+    # n'hérite pas du /etc/hosts du nœud) ; allow-registry-egress = pull de la
+    # pré-image + push du résultat (registry:80 HTTP, ADR 0011) ; allow-buildctl-ingress
+    # = un client `buildctl` DISTANT (Option B, ADR 0112 — job Gitea Actions durci) joint
+    # le daemon sur 1234. AUCUN egress Internet (l'image de code ne télécharge rien — c'est
+    # l'intérêt de la pré-image, ADR 0110).
+    - name: Apply buildkit network policies (default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        namespace: buildkit
+        src: '{{ platform_repo_dir }}/platform/network-policies/buildkit/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-registry-egress.yaml
+        - allow-buildctl-ingress.yaml
+
+    - name: Apply buildkitd config (registry:80 http/insecure)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/buildkit/buildkitd-config.yaml'
+
+    - name: Apply buildkitd Deployment
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/buildkit/deployment.yaml'
+
+    - name: Apply buildkitd Service
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/buildkit/service.yaml'
+
+    - name: Wait for buildkitd to be Available
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: buildkitd
+        namespace: buildkit
+      register: _buildkitd
+      until: >-
+        _buildkitd.resources | length > 0
+        and (_buildkitd.resources[0].status.availableReplicas | default(0)) >= 1
+      retries: 30
+      delay: 10

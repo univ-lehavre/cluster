@@ -333,18 +333,27 @@ fetch_kubeconfig_node() {
 
     if [ -n "${ctx}" ]; then
         # Renomme cluster + user + contexte sur des noms UNIQUES dérivés de $ctx.
-        # kubeadm pose toujours les noms par défaut `kubernetes` (cluster),
-        # `kubernetes-admin` (user) et `kubernetes-admin@kubernetes` (contexte) :
-        # on les remplace par des chaînes exactes (du plus long au plus court pour
-        # éviter les remplacements partiels). Édition directe : un seul
-        # cluster/user/contexte par kubeconfig de nœud.
+        # kubeadm pose par défaut `kubernetes` (cluster), `kubernetes-admin` (user) et
+        # `kubernetes-admin@kubernetes` (contexte) — MAIS `clusterName` peut valoir le
+        # stack_id (kubeadm-config.j2), auquel cas le cluster est déjà `${ctx}` et le
+        # contexte `kubernetes-admin@${ctx}` : les motifs par défaut ne matchent alors PAS.
+        # On renomme donc cluster + user par sed (motifs par défaut, best-effort) PUIS on
+        # force le CONTEXTE COURANT à exactement `${ctx}` via `rename-context` — INCONDITIONNEL
+        # (la garde d'identité exige `current-context == stack_id`, ADR 0108). C'est robuste
+        # quel que soit le nom initial du contexte (kubernetes-admin@kubernetes OU
+        # kubernetes-admin@${ctx}). Un `rename-context` déjà nommé `${ctx}` est un no-op.
         sed -i.bak \
-            -e "s#kubernetes-admin@kubernetes#${ctx}#g" \
             -e "s#kubernetes-admin#${ctx}-admin#g" \
             -e "s#name: kubernetes\$#name: ${ctx}#g" \
             -e "s#cluster: kubernetes\$#cluster: ${ctx}#g" \
             "${out}"
         rm -f "${out}.bak"
+        # Contexte courant → `${ctx}` exactement (source unique de vérité de la garde).
+        local cur
+        cur=$(KUBECONFIG="${out}" kubectl config current-context 2>/dev/null || true)
+        if [ -n "${cur}" ] && [ "${cur}" != "${ctx}" ]; then
+            KUBECONFIG="${out}" kubectl config rename-context "${cur}" "${ctx}" > /dev/null
+        fi
     fi
 
     # tls-server-name : la validation TLS se fait contre le SAN cluster-api.

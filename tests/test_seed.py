@@ -1,13 +1,16 @@
-"""Tests du seed des données post-bootstrap (nestor/seed.py) — LOT 8 refonte nestor.
+"""Tests du seed des données post-bootstrap du JOUET (nestor/seed.py) — LOT 8 refonte nestor.
 
-unittest stdlib, I/O TOTALEMENT INJECTÉE (gardes `assert_target` + actions `do` stubées) —
+unittest stdlib, I/O TOTALEMENT INJECTÉE (garde `assert_target` + actions `do` stubées) —
 AUCUN appel Gitea réel, AUCUN cluster, AUCUN kubectl/git. Ces tests prouvent la LOGIQUE :
-les DEUX GARDES OPPOSÉES (banc vs prod), l'ordre des étapes, le fail-fast sur étape KO, le
-paramétrage 100 % YAML (SeedConfig.from_topology lit gitea/atlas, plus l'env), et la ref
-digest immuable.
+la GARDE banc, l'ordre des étapes, le fail-fast sur étape KO, le paramétrage 100 % YAML
+(SeedConfig.from_topology lit le bloc gitea, plus l'env).
 
-⚠️  HONNÊTETÉ (ADR 0034) : la PREUVE réelle (gitea-init sur le banc, app-of-apps sur dirqual)
-reste un RUN consigné — PAS couvert ici. Voir `nestor/seed.py:_BANC_TODO`.
+NB (ADR 0111) : le seed ne porte PLUS le flux App-of-Apps citation (kinds `prod`/`banc-citation`,
+substitution de digest, rendu de déclaration de code-location) — c'est un geste côté dépôt atlas.
+Seul demeure le seed du jouet `atlas-workflows` (artefact du socle, ADR 0086).
+
+⚠️  HONNÊTETÉ (ADR 0034) : la PREUVE réelle (gitea-init sur le banc) reste un RUN consigné —
+PAS couvert ici. Voir `nestor/seed.py:_BANC_TODO`.
 """
 
 import os
@@ -21,7 +24,7 @@ from nestor.model import topology_from_dict  # noqa: E402
 
 
 def _topo(**over):
-    """Topology minimale valide, surchargeable (blocs gitea/atlas)."""
+    """Topology minimale valide, surchargeable (bloc gitea)."""
     d = {
         # ADR 0108 : la classe matérielle vit dans `catalog.terrain` (`local` = ex-banc) ;
         # l'ancien champ prod/bench de criticité est retiré du modèle.
@@ -42,18 +45,6 @@ class Config(unittest.TestCase):
         self.assertEqual(cfg.admin_user, "atlas-admin")
         self.assertEqual(cfg.org, "atlas")
         self.assertEqual(cfg.repo, "workflows")
-        # stack_id ABSENT (topology_from_dict sans chemin) → fail-safe legacy `cluster-prod`.
-        self.assertEqual(cfg.expected_cluster, "cluster-prod")
-
-    def test_expected_cluster_derives_from_stack_id(self):
-        # Sans `atlas.expected_cluster` déclaré, la cible prouvée de la garde prod DÉRIVE du
-        # `stack_id` (ADR 0108) : garde prod (cluster == expected_cluster) et garde d'identité
-        # (contexte == stack_id) partagent alors une seule source de vérité — le clusterName
-        # kubeadm vaut aussi le stack_id (kubeadm-config.j2). On stubbe stack_id (non posé par
-        # topology_from_dict, seulement par load_topology depuis un chemin).
-        topo = _topo()
-        object.__setattr__(topo, "stack_id", "dirqual")
-        self.assertEqual(seed.SeedConfig.from_topology(topo).expected_cluster, "dirqual")
 
     def test_gitea_block_overrides(self):
         cfg = seed.SeedConfig.from_topology(
@@ -65,83 +56,14 @@ class Config(unittest.TestCase):
         # Champs non surchargés gardent le défaut.
         self.assertEqual(cfg.repo, "workflows")
 
-    def test_atlas_block_overrides_retrocompat_mono_citation(self):
-        # RÉTROCOMPAT : le bloc mono `citation_*` (banc.yaml existant, SANS code_locations)
-        # → UNE code-location name='citation' portant révision + digest. Ne casse pas le banc.
-        cfg = seed.SeedConfig.from_topology(
-            _topo(
-                atlas={
-                    "expected_cluster": "prod-x",
-                    "repo_dir": "/tmp/atlas",
-                    "citation_revision": "abc1234",
-                    "citation_image_digest": "sha256:dead",
-                }
-            )
-        )
-        self.assertEqual(cfg.expected_cluster, "prod-x")
-        self.assertEqual(cfg.atlas_repo_dir, "/tmp/atlas")
-        # 1 seule code-location, name='citation', dérivée du bloc mono hérité.
-        self.assertEqual(len(cfg.code_locations), 1)
-        (cl,) = cfg.code_locations
-        self.assertEqual(cl.name, "citation")
-        self.assertEqual(cl.revision, "abc1234")
-        self.assertEqual(cl.image_digest, "sha256:dead")
-        # image_name DÉRIVÉ du name (jamais codé en dur).
-        self.assertEqual(cl.image_name, "registry:80/citation-dagster")
-
-    def test_atlas_code_locations_list_multi(self):
-        # FORME MULTI (préférée) : citation ET mediawatch dans atlas.code_locations.
-        cfg = seed.SeedConfig.from_topology(
-            _topo(
-                atlas={
-                    "repo_dir": "/tmp/atlas",
-                    "code_locations": [
-                        {"name": "citation", "revision": "abc1234", "image_digest": "sha256:c0"},
-                        {"name": "mediawatch", "revision": "fe6b0793", "image_digest": "sha256:m0"},
-                    ],
-                }
-            )
-        )
-        self.assertEqual([cl.name for cl in cfg.code_locations], ["citation", "mediawatch"])
-        cit, med = cfg.code_locations
-        self.assertEqual(cit.revision, "abc1234")
-        self.assertEqual(med.revision, "fe6b0793")
-        self.assertEqual(med.image_digest, "sha256:m0")
-        # image_name dérivé du name pour chaque CL.
-        self.assertEqual(med.image_name, "registry:80/mediawatch-dagster")
-
-    def test_atlas_code_locations_prime_over_mono(self):
-        # Si `code_locations` est présent, il PRIME (la forme mono héritée est ignorée).
-        cfg = seed.SeedConfig.from_topology(
-            _topo(
-                atlas={
-                    "citation_revision": "IGNORED",
-                    "code_locations": [{"name": "mediawatch", "revision": "fe6b0793"}],
-                }
-            )
-        )
-        self.assertEqual([cl.name for cl in cfg.code_locations], ["mediawatch"])
-
-    def test_atlas_code_location_without_name_raises(self):
-        # Un code-location sans `name` (signal canonique) → SeedError (pas de devinette).
-        with self.assertRaises(seed.SeedError):
-            seed.SeedConfig.from_topology(_topo(atlas={"code_locations": [{"revision": "abc"}]}))
-
-    def test_atlas_absent_yields_no_code_locations(self):
-        # Bloc atlas vide → aucune code-location (tuple vide, pas de crash).
-        self.assertEqual(seed.SeedConfig.from_topology(_topo()).code_locations, ())
-
-    def test_derived_urls(self):
+    def test_derived_url(self):
         cfg = seed.SeedConfig.from_topology(
             _topo(gitea={"svc": "http://gitea.lan", "org": "a", "repo": "w"})
         )
         self.assertEqual(cfg.workflows_repo_url(), "http://gitea.lan/a/w.git")
-        # Prod : org_cluster/repo_apps et org_atlas/repo_atlas (défauts).
-        self.assertEqual(cfg.apps_repo_url(), "http://gitea.lan/cluster/apps.git")
-        self.assertEqual(cfg.atlas_repo_url(), "http://gitea.lan/atlas/atlas.git")
 
     def test_no_env_read(self):
-        # Aucune variable GITEA_*/CITATION_* dans l'env ne doit influencer la config.
+        # Aucune variable GITEA_* dans l'env ne doit influencer la config.
         os.environ["GITEA_ORG"] = "leaked-from-env"
         self.addCleanup(os.environ.pop, "GITEA_ORG", None)
         cfg = seed.SeedConfig.from_topology(_topo())
@@ -149,7 +71,7 @@ class Config(unittest.TestCase):
 
 
 class Steps(unittest.TestCase):
-    """Séquence ORDONNÉE des étapes (PUR) — parité des `echo N/7` du bash."""
+    """Séquence ORDONNÉE des étapes du jouet (PUR) — parité des `echo N/7` du bash."""
 
     def test_banc_steps(self):
         steps = seed.seed_steps("banc")
@@ -157,55 +79,18 @@ class Steps(unittest.TestCase):
         self.assertIn("application", steps)
         self.assertEqual(len(steps), 7)
 
-    def test_prod_steps(self):
-        # Le seed PROD app-of-apps multi-code-location (dirqual) : 6 étapes ordonnées.
-        # ADR 0105 : `writeback-token` et `webhook-build` (chaîne événementielle §1.b) RETIRÉS
-        # — le build node-side lit lui-même le digest, plus d'EventSource à câbler.
-        steps = seed.seed_steps("prod")
-        self.assertEqual(
-            steps,
-            (
-                "admin-token",
-                "org-repo-apps",
-                "org-repo-atlas",
-                "push-atlas-tree",
-                "push-citation",
-                "appproject-root",
-            ),
-        )
-        # push-citation APRÈS push-atlas-tree (le repo de code atlas doit exister d'abord).
-        self.assertGreater(steps.index("push-citation"), steps.index("push-atlas-tree"))
-        # Plus aucun vestige de la chaîne événementielle dans la séquence (ADR 0105).
-        self.assertNotIn("webhook-build", steps)
-        self.assertNotIn("writeback-token", steps)
-
-    def test_banc_citation_and_prod_share_the_app_of_apps_core(self):
-        # banc-citation et prod PARTAGENT INTÉGRALEMENT le flux App-of-Apps : ADR 0105 a retiré
-        # `writeback-token` (l'unique divergence historique). L'overlay (bench/prod) et la garde
-        # sont injectés par la façade, pas dans les steps → séquences identiques.
-        bc = seed.seed_steps("banc-citation")
-        prod = seed.seed_steps("prod")
-        self.assertIn("push-citation", bc)
-        self.assertNotIn("webhook-build", bc)  # chaîne événementielle retirée (ADR 0105)
-        self.assertNotIn("webhook-build", prod)
-        self.assertNotIn("writeback-token", prod)
-        # push-citation vient APRÈS push-atlas-tree dans les deux séquences.
-        self.assertGreater(bc.index("push-citation"), bc.index("push-atlas-tree"))
-        # Aucune divergence de STEPS entre prod et banc-citation (ADR 0105).
-        self.assertEqual(set(prod) - set(bc), set())
-        self.assertEqual(set(bc) - set(prod), set())
-
-    def test_unknown_kind_rejected(self):
-        with self.assertRaises(seed.SeedError):
-            seed.seed_steps("staging")
+    def test_prod_and_banc_citation_kinds_rejected(self):
+        # ADR 0111 : les kinds du flux App-of-Apps citation ont disparu — seul `banc` demeure.
+        for kind in ("prod", "banc-citation", "staging"):
+            with self.assertRaises(seed.SeedError):
+                seed.seed_steps(kind)
 
 
-class GuardsOpposed(unittest.TestCase):
-    """LE point du LOT 8 : DEUX gardes OPPOSÉES — banc REFUSE la prod, prod REFUSE le banc.
+class GuardBanc(unittest.TestCase):
+    """La garde banc : `run_seed` la joue EN TÊTE, un refus stoppe AVANT tout geste.
 
-    On STUBE chaque garde : la façade y branche `_assert_target_identity` (banc) /
-    `assert_prod_target` (prod) ; ici on prouve que `run_seed` joue la garde EN TÊTE et
-    qu'un refus stoppe AVANT tout geste (aucune étape exécutée)."""
+    On STUBE la garde : la façade y branche `_assert_target_identity` (banc) ; ici on prouve
+    que `run_seed` joue la garde en tête et qu'un refus n'exécute aucune étape."""
 
     def test_banc_guard_passes_then_runs_all_steps(self):
         order = []
@@ -219,8 +104,8 @@ class GuardsOpposed(unittest.TestCase):
         self.assertEqual(order[0], "guard")  # garde AVANT toute étape
         self.assertEqual(order[1:], list(seed.seed_steps("banc")))
 
-    def test_banc_guard_refusing_prod_target_stops_before_steps(self):
-        # Garde banc qui DÉTECTE une cible prod → lève ; aucune étape ne s'exécute.
+    def test_banc_guard_refusing_wrong_target_stops_before_steps(self):
+        # Garde banc qui DÉTECTE une mauvaise cible (prod) → lève ; aucune étape ne s'exécute.
         executed = []
 
         def guard_refuses():
@@ -234,56 +119,6 @@ class GuardsOpposed(unittest.TestCase):
                 do=lambda step: executed.append(step) or True,
             )
         self.assertEqual(executed, [])  # rien muté : la garde protège en amont
-
-    def test_prod_guard_refusing_bench_target_stops_before_steps(self):
-        # Garde prod qui DÉTECTE le banc → lève ; aucune étape ne s'exécute.
-        executed = []
-
-        def guard_refuses():
-            raise seed.SeedGuardRefused("cible = banc, pas la prod attendue")
-
-        with self.assertRaises(seed.SeedGuardRefused):
-            seed.run_seed(
-                "prod",
-                seed.SeedConfig(),
-                assert_target=guard_refuses,
-                do=lambda step: executed.append(step) or True,
-            )
-        self.assertEqual(executed, [])
-
-    def test_banc_citation_runs_its_sequence_under_banc_guard(self):
-        # Le POINT de la décision A (ADR 0095 §1.a) : banc-citation joue le flux App-of-Apps
-        # SOUS garde banc. La garde passe (cible = banc) → les étapes de banc-citation, dans
-        # l'ordre (chaîne événementielle retirée, ADR 0105).
-        order = []
-        result = seed.run_seed(
-            "banc-citation",
-            seed.SeedConfig(),
-            assert_target=lambda: order.append("guard"),
-            do=lambda step: order.append(step) or True,
-        )
-        self.assertTrue(result.done)
-        self.assertEqual(order[0], "guard")
-        self.assertEqual(order[1:], list(seed.seed_steps("banc-citation")))
-        self.assertIn("push-citation", order)
-
-    def test_banc_citation_guard_refusing_prod_target_stops_before_steps(self):
-        # SÉCURITÉ (ADR 0053/0084) : la garde banc de banc-citation DÉTECTE une cible prod
-        # → lève AVANT toute étape. On ne déploie jamais citation « réel » sur la prod par
-        # cette voie banc (la voie prod garde `assert_prod_target`, séparée).
-        executed = []
-
-        def guard_refuses():
-            raise seed.SeedGuardRefused("cible = prod, pas le banc (ADR 0053)")
-
-        with self.assertRaises(seed.SeedGuardRefused):
-            seed.run_seed(
-                "banc-citation",
-                seed.SeedConfig(),
-                assert_target=guard_refuses,
-                do=lambda step: executed.append(step) or True,
-            )
-        self.assertEqual(executed, [])
 
     def test_non_guard_exception_wrapped_as_refused(self):
         # Une garde façade qui lève hors hiérarchie (_UsageError…) → SeedGuardRefused.
@@ -310,165 +145,6 @@ class FailFast(unittest.TestCase):
             seed.run_seed("banc", seed.SeedConfig(), assert_target=lambda: None, do=do)
         # On s'est arrêté SUR org-repo (pas d'étape au-delà).
         self.assertEqual(seen, ["admin", "token", "org-repo"])
-
-
-class DigestRef(unittest.TestCase):
-    """Référence d'image par DIGEST immuable (ADR 0095 §2) — frontière contrat atlas."""
-
-    def test_valid_digest_builds_ref(self):
-        ref = seed.citation_image_ref("registry:80/citation-dagster", "sha256:abcd")
-        self.assertEqual(ref, "registry:80/citation-dagster@sha256:abcd")
-
-    def test_non_digest_rejected(self):
-        # Un tag mutable (`0.0.0`) n'est PAS un digest → refus (pas de déploiement mutable).
-        with self.assertRaises(seed.SeedError):
-            seed.citation_image_ref("registry:80/citation-dagster", "0.0.0")
-
-
-class SubstitutePlaceholders(unittest.TestCase):
-    """Substitution GÉNÉRIQUE des 2 jetons d'injection atlas par code-location (frontière 0094).
-
-    Les jetons sont DÉRIVÉS du nom de code-location (`__<NAME>_IMAGE_DIGEST__` / `__<NAME>_IMAGE__`)
-    — parité citation ET mediawatch (multi-code-location)."""
-
-    def test_both_placeholders_substituted(self):
-        text = "digest: __CITATION_IMAGE_DIGEST__\nenv: __CITATION_IMAGE__\n"
-        out, n = seed.substitute_image_placeholders(
-            text, "citation", "registry:80/citation-dagster", "sha256:abcd"
-        )
-        self.assertEqual(n, 2)
-        self.assertIn("digest: sha256:abcd", out)
-        self.assertIn("env: registry:80/citation-dagster@sha256:abcd", out)
-        # Aucun placeholder résiduel.
-        self.assertNotIn("__CITATION_IMAGE", out)
-
-    def test_mediawatch_placeholders_derived_from_name(self):
-        # Les jetons mediawatch sont __MEDIAWATCH_IMAGE__ (préfixe = nom en MAJUSCULES) — parité
-        # des overlays atlas (dataops/mediawatch-dagster/deploy/overlays/prod).
-        text = "digest: __MEDIAWATCH_IMAGE_DIGEST__\nenv: __MEDIAWATCH_IMAGE__\n"
-        out, n = seed.substitute_image_placeholders(
-            text, "mediawatch", "registry:80/mediawatch-dagster", "sha256:beef"
-        )
-        self.assertEqual(n, 2)
-        self.assertIn("digest: sha256:beef", out)
-        self.assertIn("env: registry:80/mediawatch-dagster@sha256:beef", out)
-        # Le jeton mediawatch NE touche PAS un placeholder citation (isolation par code-location).
-        cit = "__CITATION_IMAGE__"
-        out2, n2 = seed.substitute_image_placeholders(
-            cit, "mediawatch", "registry:80/mediawatch-dagster", "sha256:beef"
-        )
-        self.assertEqual(n2, 0)
-        self.assertEqual(out2, cit)
-
-    def test_order_digest_before_image_no_amputation(self):
-        # __CITATION_IMAGE_DIGEST__ traité AVANT __CITATION_IMAGE__ : le sha256 seul ne doit
-        # PAS être amputé par la substitution du préfixe __CITATION_IMAGE__.
-        text = "__CITATION_IMAGE_DIGEST__"
-        out, n = seed.substitute_image_placeholders(
-            text, "citation", "registry:80/citation-dagster", "sha256:dead"
-        )
-        self.assertEqual(out, "sha256:dead")
-        self.assertEqual(n, 1)
-
-    def test_no_placeholder_returns_zero(self):
-        out, n = seed.substitute_image_placeholders(
-            "rien à injecter", "citation", "registry:80/citation-dagster", "sha256:abcd"
-        )
-        self.assertEqual(n, 0)
-        self.assertEqual(out, "rien à injecter")
-
-    def test_bad_digest_rejected_before_substitution(self):
-        with self.assertRaises(seed.SeedError):
-            seed.substitute_image_placeholders(
-                "__CITATION_IMAGE__", "citation", "registry:80/citation-dagster", "0.0.0"
-            )
-
-    def test_retrocompat_alias_defaults_to_citation(self):
-        # L'alias mono `substitute_citation_placeholders` fige le nom à 'citation'.
-        out, n = seed.substitute_citation_placeholders(
-            "env: __CITATION_IMAGE__\n", "registry:80/citation-dagster", "sha256:abcd"
-        )
-        self.assertEqual(n, 1)
-        self.assertIn("registry:80/citation-dagster@sha256:abcd", out)
-
-
-class RenderCodeLocationDeclaration(unittest.TestCase):
-    """Rendu GÉNÉRIQUE de apps/<name>.yaml depuis le patron *.example (PUR, ADR 0023).
-
-    Le patron `citation.example.yaml` sert de PATRON GÉNÉRIQUE : réécrit `citation-dagster`
-    → `<name>-dagster` (metadata.name ET path) pour instancier n'importe quel code-location."""
-
-    _EXAMPLE = (
-        "metadata:\n"
-        "  name: citation-dagster\n"
-        "spec:\n"
-        "  source:\n"
-        "    repoURL: http://example/atlas.git\n"
-        "    targetRevision: 0000000\n"
-        "    path: dataops/citation-dagster/deploy/overlays/prod\n"
-    )
-
-    def test_injects_repourl_and_revision(self):
-        out = seed.render_code_location_declaration(
-            self._EXAMPLE, "citation", "http://gitea/atlas/atlas.git", "c98feea9"
-        )
-        self.assertIn("repoURL: http://gitea/atlas/atlas.git", out)
-        self.assertIn("targetRevision: c98feea9", out)
-        # Sans overlay explicite, le path du patron (prod) n'est PAS touché.
-        self.assertIn("path: dataops/citation-dagster/deploy/overlays/prod", out)
-
-    def test_citation_name_is_noop_rewrite(self):
-        # `citation` : la réécriture citation-dagster→citation-dagster est un no-op.
-        out = seed.render_code_location_declaration(
-            self._EXAMPLE, "citation", "http://gitea/atlas/atlas.git", "c98feea9"
-        )
-        self.assertIn("name: citation-dagster", out)
-        self.assertIn("path: dataops/citation-dagster/deploy/overlays/prod", out)
-
-    def test_mediawatch_rewrites_name_and_path(self):
-        # `mediawatch` : le patron générique est réécrit citation-dagster→mediawatch-dagster
-        # PARTOUT (metadata.name ET path dataops/mediawatch-dagster/…).
-        out = seed.render_code_location_declaration(
-            self._EXAMPLE, "mediawatch", "http://gitea/atlas/atlas.git", "fe6b0793"
-        )
-        self.assertIn("name: mediawatch-dagster", out)
-        self.assertIn("path: dataops/mediawatch-dagster/deploy/overlays/prod", out)
-        self.assertIn("targetRevision: fe6b0793", out)
-        # Plus AUCUNE trace de citation dans le rendu mediawatch.
-        self.assertNotIn("citation-dagster", out)
-
-    def test_mediawatch_with_bench_overlay(self):
-        # mediawatch + overlay bench : name ET path réécrits, overlay bench.
-        out = seed.render_code_location_declaration(
-            self._EXAMPLE, "mediawatch", "http://gitea/atlas/atlas.git", "fe6b0793", overlay="bench"
-        )
-        self.assertIn("name: mediawatch-dagster", out)
-        self.assertIn("path: dataops/mediawatch-dagster/deploy/overlays/bench", out)
-        self.assertNotIn("overlays/prod", out)
-
-    def test_overlay_rewrites_path_to_bench(self):
-        # banc-citation : le path prod du patron est réécrit vers bench (décision D2).
-        out = seed.render_code_location_declaration(
-            self._EXAMPLE, "citation", "http://gitea/atlas/atlas.git", "c98feea9", overlay="bench"
-        )
-        self.assertIn("path: dataops/citation-dagster/deploy/overlays/bench", out)
-        self.assertNotIn("overlays/prod", out)
-
-    def test_overlay_not_matched_raises(self):
-        # Un patron sans ligne path overlays/ + overlay demandé → garde (motif non matché).
-        with self.assertRaises(seed.SeedError):
-            seed.render_code_location_declaration(
-                "spec:\n  source:\n    repoURL: http://x/a.git\n    targetRevision: abc1234\n",
-                "citation",
-                "http://x/a.git",
-                "abc1234",
-                overlay="bench",
-            )
-
-    def test_failed_injection_raises(self):
-        # Patron sans les lignes ciblées (indentation absente) → garde anti-injection ratée.
-        with self.assertRaises(seed.SeedError):
-            seed.render_code_location_declaration("spec: {}\n", "citation", "http://x/a.git", "abc")
 
 
 class Honesty(unittest.TestCase):

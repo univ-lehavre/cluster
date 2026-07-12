@@ -4,6 +4,17 @@
 
 Accepted (2026-06-25 ; proposé le 2026-06-24).
 
+> **Amendé par [ADR 0111](0111-atlas-instancie-application-argocd.md)
+> (2026-07-12) sur le canal de déploiement.** Cet ADR décrit le write-back du
+> digest dans un repo Gitea `cluster/apps` (App-of-Apps **côté cluster**) et
+> l'instanciation de l'`Application` par le seed cluster. 0111 déplace cette
+> responsabilité vers atlas : l'`Application` (et l'injection
+> `repoURL`/`targetRevision`) est portée par atlas, pas par `cluster/apps`. Le
+> §1.b (build événementiel) était déjà abrogé par
+> [0105](0105-retrait-build-evenementiel-node-side-terminal.md) ; le build de
+> code lui-même est sorti du cluster
+> ([0110](0110-preimage-de-build-et-build-in-pod.md)).
+
 **Partiellement superseded par
 [0105](0105-retrait-build-evenementiel-node-side-terminal.md) (2026-07-08)** :
 le §1.b (build ÉVÉNEMENTIEL in-cluster) est ABROGÉ — instable en prod

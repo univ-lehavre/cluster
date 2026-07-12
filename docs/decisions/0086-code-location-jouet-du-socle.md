@@ -6,6 +6,15 @@ Accepted (2026-06-19) — livraison INCRÉMENTALE. Le code est livré
 (`platform/dagster/image-openlineage/toy_assets.py`, code-location jouet) ;
 promu depuis `Proposed (2026-06-18)`.
 
+> **Précisé par [ADR 0111](0111-atlas-instancie-application-argocd.md)
+> (2026-07-12).** « Le socle héberge et instancie via GitOps » reste vrai pour
+> la **code-location JOUET** (`atlas-workflows`, un artefact du socle) ; il ne
+> l'est **plus** pour les code-locations **applicatives** atlas (citation,
+> mediawatch, pageviews) dont l'`Application` Argo CD est désormais instanciée
+> par atlas (0111 amende 0094).
+
+<!-- deux notes d'amendement distinctes (MD028) -->
+
 > **Partiellement superseded par
 > [0103](0103-workspace-dagster-multi-code-location-reconciler.md)**
 > (2026-07-03) : le mécanisme de **workspace** décrit ici (patch du ConfigMap

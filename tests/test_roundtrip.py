@@ -26,23 +26,23 @@ class Closure(unittest.TestCase):
         # OBSERVE les UI des autres couches sans arête de données) → clôture = lui-même.
         self.assertEqual(roundtrip.closure("portal"), ["portal"])
 
-    def test_dataops_pulls_mlflow_and_portal(self):
-        # mlflow (layer autonome ADR 0082) dépend de la base CNPG posée par dataops ;
-        # le portail (ADR 0091) dépend du registry/build-images de dataops (image maison)
-        # → défaire dataops oblige à défaire mlflow ET portail d'abord (ordre inverse,
-        # ADR 0054). portail en QUEUE (poids 9, après mlflow poids 8).
-        # ADR 0110 amendé : la phase `citation` (build) retirée → gitops-seed-citation ne
-        # dépend plus de dataops (via citation→registry) → sort de la clôture de `dataops`.
+    def test_dataops_pulls_mlflow(self):
+        # mlflow (layer autonome ADR 0082) dépend de la base CNPG posée par dataops.
+        # ADR 0112 : `registry`/`build-images` sont désormais des phases AUTONOMES (hors
+        # dataops) → le portail (qui en dépend, pas de dataops) ne défait plus dataops. La
+        # clôture de `dataops` se limite donc à mlflow (ADR 0110/0111 : plus de code atlas).
         self.assertEqual(
             roundtrip.closure("dataops"),
-            ["dataops", "mlflow", "portal"],
+            ["dataops", "mlflow"],
         )
 
     def test_gitops_pulls_seed(self):
-        # gitops-seed-citation dépend d'argocd/gitea (chaîne gitops) → tiré aussi (ADR 0095).
+        # ADR 0111 : gitops-seed-citation (instanciation Application, passée côté atlas) retiré ;
+        # gitops ne tire plus que le seed jouet. ADR 0112 : gitea-runner (phase autonome)
+        # dépend de gitea → tiré dans la clôture descendante de gitops.
         self.assertEqual(
             roundtrip.closure("gitops"),
-            ["gitops", "gitops-seed", "gitops-seed-citation"],
+            ["gitops", "gitops-seed", "gitea-runner"],
         )
 
     def test_metrics_server_independent(self):
@@ -84,11 +84,13 @@ class Closure(unittest.TestCase):
                 "datalake",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
-                "gitops-seed-citation",
                 "mlflow",
+                "buildkit",
                 "portal",
+                "gitea-runner",
             ],
         )
         self.assertEqual(
@@ -98,11 +100,13 @@ class Closure(unittest.TestCase):
                 "datalake",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
-                "gitops-seed-citation",
                 "mlflow",
+                "buildkit",
                 "portal",
+                "gitea-runner",
             ],
         )
 
@@ -198,7 +202,7 @@ class RoundtripNominal(unittest.TestCase):
             present=(
                 roundtrip.phase_signal("gitops")
                 + roundtrip.phase_signal("gitops-seed")
-                + roundtrip.phase_signal("gitops-seed-citation")
+                + roundtrip.phase_signal("gitea-runner")
             )
         )
         res = roundtrip.run_roundtrip(
@@ -210,11 +214,12 @@ class RoundtripNominal(unittest.TestCase):
         )
         self.assertTrue(res.reversible)
         # La destruction est UN geste (découverte) ; les appels run_phase sont les RECONSTRUCTIONS,
-        # dans l'ordre de montage (gitops → gitops-seed → gitops-seed-citation, ADR 0095).
-        # Plus aucun `rollback` bash.
+        # dans l'ordre de montage (gitops → gitops-seed, ADR 0095). ADR 0111 : plus de
+        # gitops-seed-citation. ADR 0112 : gitea-runner (phase autonome) tiré par la clôture
+        # descendante de gitops (dépend de gitea) → reconstruit après le seed.
         self.assertEqual(
             fb.calls,
-            [("gitops",), ("gitops-seed",), ("gitops-seed-citation",)],
+            [("gitops",), ("gitops-seed",), ("gitea-runner",)],
         )
 
     def test_destroy_layer_discovery_destroys_whole_closure_in_one_call(self):

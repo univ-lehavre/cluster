@@ -76,8 +76,7 @@ bench/scenarios/
 ├── 30-ha-3cp-cp-survival.sh           ← HA : survie à 1 panne CP (VIP bascule + quorum etcd, ADR 0047/0055, #250)
 ├── 31-contract-endpoints.sh          ← CONTRAT : endpoints du contrat réellement servis (ADR 0043)
 ├── 32-portal.sh                      ← PORTAIL : répond, liste les UI, NE PEUT PAS lire un Secret (ADR 0091)
-├── 33-cache-cnpg.sh                  ← CACHE : primitives CNPG du cache partagé (connexion + UPSERT + advisory lock) (ADR 0093)
-└── 34-build-gitops-digest.sh         ← BUILD→GITOPS : build → digest → write-back cluster/apps → Argo CD → pod PAR DIGEST (ADR 0095, #34)
+└── 33-cache-cnpg.sh                  ← CACHE : primitives CNPG du cache partagé (connexion + UPSERT + advisory lock) (ADR 0093)
 ```
 
 Chaque script :
@@ -125,7 +124,6 @@ Chaque script :
 | 31  | Contrat cluster→atlas (endpoints)   | Pour chaque endpoint du contrat (`contract/endpoints.example.yaml`) : Service présent au bon port + répond (TCP/HTTP) ; skip/strict par endpoint (STRICT_CONTRACT)                | ~2 min        | **Contrat** d'interface tenu (ADR 0043) — transversal (postgres…mlflow)   |
 | 30  | ha-3cp — survie d'1 panne _(caduc)_ | Arrêt du CP **porteur de la VIP** → kube-vip **bascule** (VIP répond toujours) + **quorum etcd 2/3** + API joignable ; restore → 3/3 (topologie `ha-3cp` requise)                 | ~3 min        | **HA control-plane** — **caduc** : `ha-3cp` abandonné (ADR 0097)          |
 | 33  | Cache CNPG (primitives)             | Rôle `cache` → base `cache` (connexion) + UPSERT `ON CONFLICT` atomique (1 ligne / N upserts) + `pg_advisory_lock` exclusif inter-sessions ; skip/strict (STRICT_CACHE)           | ~2 min        | **Cache partagé** par réutilisation CNPG (ADR 0093) — primitives Postgres |
-| 34  | Build → GitOps par digest           | Build jouet node-side → **digest** lu → write-back Gitea `cluster/apps` (par `@sha256`) → Argo CD **Synced/Healthy** → pod **tiré PAR DIGEST** ; skip/strict (STRICT_DIGEST)      | ~4 min        | **Fabrique→déploiement immuable** : premier pas ADR 0095 §1.a (banc)      |
 
 > 🔑 **09 — restauration etcd validée (2026-06-01).** Contrairement à 03/04, le
 > 09 **ne reboote aucune VM** : il exerce la procédure du RUNBOOK _sur_ le
@@ -377,45 +375,15 @@ cf.
 
 ### Le build d'image se déploie-t-il par digest immuable (zéro tag mutable) ?
 
-C'est l'objet du scénario **34** — le **premier pas** de
-[ADR 0095](/cluster/docs/decisions/0095-build-applicatif-evenementiel-in-cluster/)
-(§1.a) et du
-[plan build événementiel](/cluster/docs/plans/plan-build-evenementiel-gitops/)
-(étape 4). Il prouve **au banc** Lima mono-nœud local-path
-([ADR 0085](/cluster/docs/decisions/0085-preuves-applicatives-local-path/)) la
-chaîne **fabrique → déploiement par digest** : une image **jouet contrôlée par
-cluster** est buildée node-side (`nerdctl`/`buildkit` via `limactl shell`,
-[ADR 0033](/cluster/docs/decisions/0033-orchestration-ansible-platform-dataops/)),
-son **digest** réel est lu (`RepoDigests`) puis **écrit dans Gitea
-`cluster/apps`** (patron Contents API, create-or-update idempotent) avec une
-référence `registry:80/<app>@sha256:…` — **jamais** un tag mutable
-([ADR 0095](/cluster/docs/decisions/0095-build-applicatif-evenementiel-in-cluster/)
-§2). Argo CD réconcilie (la racine app-of-apps voit le fichier → crée
-l'Application fille), elle devient **Synced/Healthy**, et le **pod tourne tiré
-PAR DIGEST** (`.spec.containers[].image` se termine par `@sha256:…`). Gates :
-(1) digest non vide ; (2) le manifeste poussé référence `@sha256` (pas un tag) ;
-(3) Application Synced/Healthy ; (4) pod Running ET image par digest.
-
-- **Garde banc absolue** : le scénario MUTE Gitea + Argo CD → il EXIGE que le
-  cluster du contexte courant soit le banc (`EXPECTED_CLUSTER`, défaut
-  `cluster-banc`) et **refuse** `cluster-prod` (`die`), symétrique inverse de la
-  garde `assert_prod_target` du seed. Lancer avec
-  `KUBECONFIG=bench/lima/.work/kubeconfig`.
-- **Image de test = jouet, pas `citation`** : on isole la preuve de la chaîne
-  (que cluster maîtrise de bout en bout) de la **tension citation** — le seed
-  n'injecte le digest citation que via le placeholder `__CITATION_IMAGE__`
-  qu'atlas expose (frontière
-  [ADR 0094](/cluster/docs/decisions/0094-frontiere-deploiement-applicatif/)).
-  `MODE=citation` **détecte** l'absence du placeholder et **skippe** avec un
-  message clair (atlas doit factoriser ce point d'injection).
-- `STRICT_DIGEST=1` fait **échouer** au lieu de skip si un prérequis manque (CI
-  banc), calque `STRICT_CACHE` du 33 ; `KEEP=1` conserve les ressources de test
-  (sinon `trap EXIT` les nettoie : Application, Deployment, fichiers Gitea,
-  image jouet). Le **run applicatif observable** reste hors périmètre (scénario
-  29).
-
-Lancer (banc) :
-`STRICT_DIGEST=1 KUBECONFIG=bench/lima/.work/kubeconfig bash bench/scenarios/34-build-gitops-digest.sh`.
+> **Déplacé côté atlas (ADR 0111).** La preuve **fabrique → déploiement par
+> digest** exerçait la chaîne App-of-Apps `cluster/apps` (racine `cluster-apps`,
+> `seed-app-of-apps.sh`) — machinerie retirée du cluster : l'instanciation de
+> l'Application d'une code-location applicative est désormais un geste côté
+> dépôt `atlas`. Le scénario `34-build-gitops-digest.sh` a donc été **retiré** ;
+> sa réécriture côté atlas est suivie en
+> [issue #648](https://github.com/univ-lehavre/cluster/issues/648). Le cluster
+> conserve la preuve **plateforme** via le jouet `gitops-seed` (Application
+> `atlas-workflows` posée directement, sans racine App-of-Apps).
 
 ## Exécution
 

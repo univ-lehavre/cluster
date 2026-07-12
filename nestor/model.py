@@ -137,14 +137,14 @@ class Topology:
     #   ceph    : {block_device, hdd_glob, data_device_glob, nvme_block_device, min_hdd}
     #             (ex-CEPH_BLOCK_DEVICE/CEPH_HDD_GLOB/… de run-phases.sh:139-143).
     #   ha      : {vip, iface} (ex-HA_VIP/HA_VIP_IFACE de run-phases.sh:1632-1642).
-    #   gitea   : {org, repo, ns, admin_user, admin_email, svc, api,
-    #             org_cluster, repo_apps, org_atlas, repo_atlas} (ex-GITEA_*).
+    #   gitea   : {org, repo, ns, admin_user, admin_email, svc, api} — paramètres du seed
+    #             du JOUET (SeedConfig.from_topology). ADR 0111 : les clés du seed prod
+    #             App-of-Apps (org_cluster/repo_apps/org_atlas/repo_atlas) ne sont PLUS lues.
     #   cilium  : {cluster_name, cluster_id} (ex-CILIUM_CLUSTER_*).
-    #   atlas   : {repo_dir, expected_cluster, code_locations} où code_locations est une
-    #             LISTE de {name, revision, image_digest} (multi-code-location : citation,
-    #             mediawatch…). RÉTROCOMPAT : {citation_revision, citation_image_digest}
-    #             (sans code_locations) → 1 code-location name='citation' (SeedConfig.
-    #             from_topology). Ex-ATLAS_REPO_DIR/CITATION_*/EXPECTED_CLUSTER du seed prod.
+    #   atlas   : {code_locations} — LISTE de {name, revision, image_digest} servant à
+    #             l'OBSERVABILITÉ de drift digest côté cluster (discover.stale_deployments).
+    #             ADR 0111 : l'INSTANCIATION de l'Application (repo_dir, expected_cluster,
+    #             citation_*) est un geste côté dépôt atlas — ces clés ne sont PLUS lues ici.
     #   portal  : {contract, listen_port, seuil_jours} (ex-PORTAL_*/SEUIL_JOURS Python).
     ceph: dict[str, Any] = field(default_factory=dict)
     ha: dict[str, Any] = field(default_factory=dict)

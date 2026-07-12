@@ -102,6 +102,19 @@
         - _needs_local_build | bool
         - ansible_facts.architecture == 'aarch64' or (item.build_all_arch | default(false) | bool)
 
+    # Marquez est-il RÉELLEMENT demandé ? La prépa Marquez (clone du source upstream +
+    # dossiers + Dockerfiles) est LOURDE (gradle/web) et n'a de sens QUE si `marquez`
+    # figure dans la liste `build_images` à provisionner. Sans ce garde-fou, une couche
+    # qui override build_images pour une AUTRE image (buildkit → moby/buildkit,
+    # gitea-runner → act_runner) clonait Marquez inutilement (constaté 2026-07-12 sur la
+    # topologie cicd). On garde donc les tâches Marquez par la présence effective dans la
+    # liste, EN PLUS de l'arch (le build Marquez lui-même reste arm64-only).
+    - name: Determine whether Marquez is in the images to provision
+      ansible.builtin.set_fact:
+        _marquez_wanted: >-
+          {{ (build_images | map(attribute='name') | list)
+             | intersect(['marquez', 'marquez-web']) | length > 0 }}
+
     # Répertoires des images Marquez (Dockerfile versionné copié à côté du clone source).
     - name: Ensure Marquez build directories exist
       ansible.builtin.file:
@@ -111,7 +124,9 @@
       loop:
         - marquez
         - marquez-web
-      when: ansible_facts.architecture == 'aarch64'
+      when:
+        - ansible_facts.architecture == 'aarch64'
+        - _marquez_wanted | bool
 
     # Marquez : clone du source upstream SUR le nœud (contexte gradle/web).
     - name: Clone Marquez source at the pinned tag
@@ -121,7 +136,9 @@
         version: '{{ marquez_version }}'
         depth: 1
         single_branch: true
-      when: ansible_facts.architecture == 'aarch64'
+      when:
+        - ansible_facts.architecture == 'aarch64'
+        - _marquez_wanted | bool
 
     # Les Dockerfiles Marquez sont VERSIONNÉS dans le dépôt (copies fidèles
     # upstream, ADR 0028) → copiés sur le nœud à côté des contextes de build.
@@ -137,7 +154,9 @@
           dest: '{{ build_workdir }}/marquez-web/Dockerfile'
       loop_control:
         label: '{{ item.dest }}'
-      when: ansible_facts.architecture == 'aarch64'
+      when:
+        - ansible_facts.architecture == 'aarch64'
+        - _marquez_wanted | bool
 
     # Émetteur OpenLineage jetable (harnais e2e, ADR 0022) — contexte copié sur le nœud
     # si la preuve lineage est demandée. L'émetteur est `build_all_arch` (image maison

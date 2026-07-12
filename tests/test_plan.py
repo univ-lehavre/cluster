@@ -59,6 +59,7 @@ class ExpectedSequence(unittest.TestCase):
                 "metrics-server",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
@@ -81,6 +82,7 @@ class ExpectedSequence(unittest.TestCase):
                 "metrics-server",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
@@ -97,7 +99,8 @@ class ExpectedSequence(unittest.TestCase):
     def test_cluster_dataops_order(self):
         seq = expected_phase_sequence(_topo(backend="ceph"), "cluster-dataops")
         self.assertEqual(
-            seq, ["up", "bootstrap", "ceph", "sc", "datalake", "monitoring", "dataops"]
+            seq,
+            ["up", "bootstrap", "ceph", "sc", "datalake", "monitoring", "registry", "dataops"],
         )
 
     def test_socle_light(self):
@@ -188,6 +191,7 @@ class TargetValidation(unittest.TestCase):
                 "metrics-server",
                 "monitoring",
                 "gitops",
+                "registry",
                 "dataops",
                 "gitops-seed",
                 "mlflow",
@@ -198,7 +202,10 @@ class TargetValidation(unittest.TestCase):
     def test_layers_non_prefix_palier(self):
         # [gitops, metrics] : palier non-préfixe, séquence dérivée de resolve_layers.
         seq = expected_phase_sequence(self._topo_layers(["gitops", "metrics"]), None)
-        self.assertEqual(seq, ["up", "bootstrap", "storage-simple", "metrics-server", "gitops"])
+        self.assertEqual(
+            seq,
+            ["up", "bootstrap", "storage-simple", "metrics-server", "gitops"],
+        )
 
     def test_store_ceph_layers_sequence_includes_datalake(self):
         # Régression du « plan faux » : profil store + ceph → chemin layers, séquence

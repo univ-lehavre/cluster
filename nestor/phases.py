@@ -392,6 +392,16 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     ),
     # ── gitops : Gitea (forge) + Argo CD (moteur). Consomme gitea_storage_class. ─
     "gitops": _plan("gitops", extravars_keys=("gitea_storage_class",)),
+    # ── registry / buildkit : phases AUTONOMES du socle CI/CD (ADR 0112). Outillage de
+    #    build (pas de signal → gate none) : registry sert les images, buildkit builde.
+    #    Playbooks dédiés (bootstrap/{registry,buildkit}.yaml), rôles idempotents partagés
+    #    avec dataops.yaml. registry expose registry_storage_class (PVC du registre). ─
+    "registry": _plan("registry", extravars_keys=("registry_storage_class",)),
+    "buildkit": _plan("buildkit", extravars_keys=()),
+    # gitea-runner : l'orchestrateur de CI (ADR 0112), phase autonome montée en DERNIER
+    # (tire gitea + registry + buildkit). Playbook dédié bootstrap/gitea-runner.yaml (config
+    # registre node → mirror act_runner → rôle). Signal : Deployment gitea-runner Ready.
+    "gitea-runner": _plan("gitea-runner", extravars_keys=()),
     # ── dataops : chaîne registry → CNPG → Dagster → Marquez. NON TRIVIALE :
     #    après le playbook + gate Marquez, DEUX harnais e2e (OpenLineage→Marquez,
     #    egress 443) que _wait_layer_healthy NE couvre PAS → hooks explicites (CÂBLÉS façade). ─
@@ -417,8 +427,9 @@ _PHASE_PLANS: dict[str, PhasePlan] = {
     #    est injoignable de l'extérieur — accès Tailscale) → repro `nestor up` sans env manuel. ─
     "portal": _plan("portal", extravars_keys=("portal_access_host",)),
     # NB (ADR 0110 amendé) : la phase `citation` (BUILD node-side de l'image de code) a été
-    # RETIRÉE — l'image de code se build hors cluster (poste, atlas build-code.sh). Le
-    # DÉPLOIEMENT reste GitOps par digest figé (gitops-seed-citation). La phase `eventful`
+    # RETIRÉE — l'image de code se build hors cluster (poste, atlas build-code.sh). ADR 0111 :
+    # l'INSTANCIATION de l'Application Argo CD (déploiement GitOps) passe aussi côté atlas —
+    # plus de phase de déploiement d'une code-location applicative ici. La phase `eventful`
     # (chaîne événementielle Argo Workflows/Events, ADR 0095 §1.b) avait déjà été retirée
     # (ADR 0105).
 }
@@ -438,16 +449,9 @@ _DELEGATED_PHASES: dict[str, PhasePlan] = {
         gate_kind=gate_kind_for("gitops-seed"),  # "presence" (Application atlas-workflows)
         note="init Gitea (DONNÉES, gitea-init.sh) — porté par nestor/seed.py au lot 8, pas ici",
     ),
-    # gitops-seed-citation (ADR 0095 §1.a) : le VRAI flux App-of-Apps citation joué AU BANC
-    # (seed.run_seed('banc-citation'), garde banc). DONNÉES (git push arbre atlas + apply
-    # Applications) portées par nestor/seed.py + façade _seed_do_banc_citation, pas un play.
-    "gitops-seed-citation": PhasePlan(
-        phase="gitops-seed-citation",
-        playbook=None,
-        extravars_keys=(),
-        gate_kind=gate_kind_for("gitops-seed-citation"),  # "none" (GitOps, pas un signal de couche)
-        note="app-of-apps citation réel (git push atlas + Applications) — nestor/seed.py, pas ici",
-    ),
+    # NB (ADR 0111) : la phase `gitops-seed-citation` a été RETIRÉE — l'instanciation de
+    # l'Application Argo CD d'une code-location applicative passe côté atlas (le geste de
+    # déploiement atlas crée+pousse son Application). `gitops-seed` (jouet) reste.
 }
 
 # Phases AMONT à orchestration non-Ansible (provisioning VM / socle k8s+CNI) : portées

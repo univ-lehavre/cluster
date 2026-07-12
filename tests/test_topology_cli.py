@@ -916,9 +916,10 @@ runs:
         self.assertIn("VOULU", out)
         self.assertIn("RÉEL", out)
         self.assertIn("PLAN", out)
-        # VOULU (ex-status) : nœuds/profil/backend déclarés.
+        # VOULU (ex-status) : nœuds/couches/backend déclarés. La topo dirqual pose `layers`
+        # (profil dataops explicite + build, ADR 0112) → la section affiche « couches ».
         self.assertIn("control-planes", out)
-        self.assertIn("profil", out)
+        self.assertIn("couches", out)
         # RÉEL (ex-refresh) : les VMs à créer (terrain vierge, stub vms=[]).
         self.assertIn("VMs à créer", out)
 
@@ -1605,6 +1606,8 @@ runs:
             "metrics-server",
             "monitoring",
             "gitops",
+            "registry",
+            "buildkit",
             "dataops",
             "mlflow",
             "gitops-seed",

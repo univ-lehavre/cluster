@@ -39,6 +39,13 @@ LAYER_PHASES: dict[str, list[str]] = {
     "store": ["storage"],
     "obs": ["monitoring"],
     "dataops": ["dataops"],
+    # `build` : socle CI/CD (ADR 0112). `buildkit` = le moteur de build in-pod (tire
+    # `registry` + `build-images` par ses deps) ; `gitea-runner` = l'orchestrateur de CI
+    # (tire gitea + registry + buildkit par ses deps → monté en DERNIER). SANS la chaîne
+    # dataops (CNPG/Dagster/Marquez). `layers: [gitops, build]` = la chaîne CI/CD complète
+    # (forge + build + runner). Le runner APRÈS registry+buildkit : son mirror act_runner
+    # exige le registre configuré node-side, son initContainer copie buildctl de buildkit.
+    "build": ["buildkit", "gitea-runner"],
     # `atlas` (ADR 0083) : alias de la CHAÎNE MLOps complète — ancien preset atlas
     # (metrics-server + monitoring + gitops + gitops-seed + dataops) PLUS mlflow
     # (ADR 0082). Alias COMPOSITE : il référence d'autres alias (metrics/obs/store)
@@ -61,10 +68,12 @@ _QUEUE_PHASES = frozenset(
         "datalake",
         "monitoring",
         "gitops",
+        "registry",
+        "buildkit",
+        "gitea-runner",
         "dataops",
         "mlflow",
         "gitops-seed",
-        "gitops-seed-citation",
         "portal",
     }
 )

@@ -17,11 +17,22 @@
 # La cible HA (3 CP) est un chantier séparé (plan-ha-3cp) — cette topo décrit le RÉEL, pas la cible.
 
 # ─── catalog : seuls les champs LUS. `terrain: baremetal` → pas de provisioning VM
-# (resources ignoré), pas de phase `up`. `profile: dataops` = préfixe cumulatif
-# base⊂metrics⊂store⊂obs⊂dataops (lu car aucun `layers` top-level n'est posé).
+# (resources ignoré), pas de phase `up`. `profile` documentaire ici : `layers` (ci-dessous)
+# est posé, donc il PRIME (ADR 0069) — on rend explicite le préfixe dataops PLUS `build`.
 catalog:
   terrain: baremetal # local | cloud | baremetal (défaut fail-safe : baremetal).
-  profile: dataops # base ⊂ metrics ⊂ store ⊂ obs ⊂ dataops (inclusion cumulative, ADR 0039).
+  profile: dataops # documentaire (base ⊂ metrics ⊂ store ⊂ obs ⊂ dataops) — `layers` prime.
+
+# ─── layers : le profil `dataops` rendu explicite (metrics ⊂ store ⊂ obs ⊂ dataops) PLUS
+# `build` (ADR 0112) = registry + buildkit. dirqual builde ses images de code IN-POD (buildctl
+# → daemon buildkitd). RELÂCHEMENT PodSecurity ASSUMÉ : le ns de build (`buildkit`) n'est pas
+# labellisé `enforce: baseline` (privilège du builder isolé à ce ns ; reste du cluster durci).
+layers:
+  - metrics
+  - store
+  - obs
+  - dataops
+  - build
 
 # ─── nodes : les 4 nœuds RÉELS. `dirqual1` = control + worker + storage (hyperconvergé : il
 # porte l'API, CoreDNS ET des OSD Ceph, audit 2026-06-24) ; `dirqual2-4` = worker + storage.
@@ -60,8 +71,9 @@ hardening:
 #   nvme_block_device: /dev/nvme1n1   # NVMe block.db réel du parc.
 #   data_device_glob: /dev/sd[b-e]    # glob des devices data réels.
 
-# ─── gitea : bootstrap GitOps/seed. Défauts génériques (nestor/seed.py), LUS par SeedConfig ;
-# en prod, l'org/repo déclaratifs (cluster/apps) et code (atlas/atlas) sont réels.
+# ─── gitea : seed du JOUET du socle. Défauts génériques (nestor/seed.py), LUS par SeedConfig.
+# ADR 0111 : les clés du seed prod App-of-Apps (org_cluster/repo_apps/org_atlas/repo_atlas)
+# ne sont PLUS lues — l'instanciation applicative est un geste côté dépôt atlas.
 gitea:
   ns: gitea
   admin_user: atlas-admin
@@ -71,16 +83,12 @@ gitea:
   argocd_ns: argocd
   org: atlas
   repo: workflows
-  org_cluster: cluster
-  repo_apps: apps
-  org_atlas: atlas
-  repo_atlas: atlas
 
-# ─── atlas : dépôt de code externe + code-locations (build citation, ADR 0110).
+# ─── atlas : code-locations pour l'OBSERVABILITÉ de drift digest côté cluster
+# (discover.stale_deployments). ADR 0111 : l'instanciation/déploiement de la code-location
+# (build, push de l'Application) est un geste côté dépôt atlas — ces champs ne sont PLUS lus
+# par un seed cluster ; seul `image_digest` (si déclaré) sert à comparer déclaré vs déployé.
 atlas:
-  repo_dir: ~/Hub/atlas # chemin du dépôt atlas EXTERNE (build des images de code-location).
-  # expected_cluster : non déclaré → DÉRIVÉ du stack_id (`dirqual`) par le seed (ADR 0108) ;
-  # aligné sur le clusterName kubeadm. Ne le déclarer que pour viser un cluster au nom différent.
   code_locations:
     - name: citation # nom court (dérive image/overlay). REQUIS.
 

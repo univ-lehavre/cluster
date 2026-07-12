@@ -435,14 +435,23 @@ EPREUVES: list[Epreuve] = [
         "dataops",
         None,
     ),
+    # NB (ADR 0111) : l'épreuve « 34 — Build → digest → GitOps par @sha256 » a été RETIRÉE
+    # avec le scénario `34-build-gitops-digest.sh` : elle exerçait la chaîne App-of-Apps
+    # `cluster/apps` (racine `cluster-apps`), machinerie passée côté dépôt atlas. Sa réécriture
+    # côté atlas est suivie en issue dédiée.
     Epreuve(
-        "34",
-        "Build → digest → GitOps : déploiement par @sha256 immuable",
+        "35",
+        "CI/CD in-cluster : push Gitea → build image → Argo CD déploie",
         "intég",
         "gitops",
         TOPO_AGNOSTIQUE,
         TERRAIN_API,
-        "dataops",
+        # profil_min='base' : le socle CI/CD vit dans les COUCHES `gitops`+`build` (topo cicd),
+        # hors de la chaîne de profils cumulatifs (ADR 0039) que connaît `epreuve_jouable`. On
+        # met donc le minorant 'base' (toujours « couvert ») ; le scénario 35 SKIP proprement
+        # (exit 0, calque du 27) si un maillon du socle CI/CD manque — le filtrage réel se fait
+        # à l'exécution, pas par le profil. STRICT_CICD=1 fait échouer au lieu de skip.
+        "base",
         None,
     ),
 ]
