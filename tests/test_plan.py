@@ -50,6 +50,7 @@ class ExpectedSequence(unittest.TestCase):
         # ADR 0083 : `atlas` = alias de la chaîne MLOps complète (ancien atlas + mlflow).
         # Ordre dérivé du graphe atomique (resolve_layers), plus de table figée.
         seq = expected_phase_sequence(_topo(backend="local-path"), "atlas")
+        # ADR 0112 : `buildkit` tiré par `gitea-runner` (composant gitops) → dans la chaîne atlas.
         self.assertEqual(
             seq,
             [
@@ -63,6 +64,7 @@ class ExpectedSequence(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
@@ -71,6 +73,7 @@ class ExpectedSequence(unittest.TestCase):
         # ADR 0083 : `atlas` en ceph = ancien atlas-ceph + metrics-server (sur-ensemble
         # assumé) + mlflow. Dérivé via resolve_layers.
         seq = expected_phase_sequence(_topo(backend="ceph"), "atlas-ceph")
+        # ADR 0112 : `buildkit` tiré par `gitea-runner` (composant gitops) → dans la chaîne atlas.
         self.assertEqual(
             seq,
             [
@@ -86,6 +89,7 @@ class ExpectedSequence(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
@@ -182,6 +186,7 @@ class TargetValidation(unittest.TestCase):
     def test_layers_atlas_alias_full_chain(self):
         # `layers: [atlas]` dérive la chaîne MLOps complète via le graphe (ADR 0083).
         seq = expected_phase_sequence(self._topo_layers(["atlas"]), None)
+        # ADR 0112 : `buildkit` tiré par `gitea-runner` (composant gitops) → dans la chaîne atlas.
         self.assertEqual(
             seq,
             [
@@ -195,14 +200,19 @@ class TargetValidation(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
 
     def test_layers_non_prefix_palier(self):
         # [gitops, metrics] : palier non-préfixe, séquence dérivée de resolve_layers.
+        # ADR 0112 : `gitops` tire `registry` + `buildkit` (via gitea-runner, composant gitops).
         seq = expected_phase_sequence(self._topo_layers(["gitops", "metrics"]), None)
-        self.assertEqual(seq, ["up", "bootstrap", "storage-simple", "metrics-server", "gitops"])
+        self.assertEqual(
+            seq,
+            ["up", "bootstrap", "storage-simple", "metrics-server", "gitops", "registry", "buildkit"],
+        )
 
     def test_store_ceph_layers_sequence_includes_datalake(self):
         # Régression du « plan faux » : profil store + ceph → chemin layers, séquence

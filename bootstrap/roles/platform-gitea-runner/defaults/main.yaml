@@ -1,0 +1,14 @@
+---
+# Valeurs par défaut du rôle platform-gitea-runner (ADR 0112) — l'orchestrateur de CI
+# (act_runner) qui, sur `git push` Gitea, soumet le build au daemon buildkitd distant.
+#
+# NB : les manifestes platform/gitea-runner/ sont STATIQUES (refs d'image `registry:80/…`
+# en dur, comme platform/buildkit/) — pas de variable d'image ici. Le rôle ne paramètre
+# que le namespace Gitea (source du token d'enregistrement).
+
+# Racine du dépôt (source des manifestes platform/gitea-runner/). Défini ICI pour que le
+# rôle soit AUTONOME (parité platform-buildkit/platform-registry).
+platform_repo_dir: '{{ playbook_dir }}/..'
+
+# Namespace du Deployment Gitea (pour générer le token d'enregistrement via `gitea` CLI).
+gitea_namespace: gitea

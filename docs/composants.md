@@ -254,6 +254,23 @@ au banc). Le daemon `buildkitd` (privilège isolé à son ns) sert un client
 pousse au registre. Manifestes : [`platform/buildkit/`](../platform/buildkit/) ;
 déroulé opérationnel : [RUNBOOK](../platform/buildkit/RUNBOOK.md).
 
+### gitea-runner (orchestrateur de CI, Gitea Actions)
+
+Le **runner Gitea Actions** (`act_runner`) est l'autre moitié de la chaîne CI/CD
+in-cluster
+([ADR 0112](decisions/0112-cicd-in-cluster-gitea-actions-buildkit.md)) : sur un
+`git push` dans Gitea, il déclenche le job de CI. En mode **host**, les étapes
+du job tournent dans le conteneur runner (zéro DinD, zéro privilège) ; le runner
+ne **construit rien** lui-même — il **soumet** le contexte de build au daemon
+`buildkitd` distant (« Option B » : le runner reste durci/baseline, le privilège
+rootless est confiné à buildkitd). `buildctl` est **copié depuis l'image interne
+`moby/buildkit`** par un initContainer (air-gap : aucun téléchargement
+Internet). Composant de la couche **gitops** (il dépend de la forge Gitea) ;
+l'image `act_runner` est mirrorée au registre interne. Chaîne **prouvée
+air-gap** (le build `FROM` interne et le push de l'image de code au registre
+interne n'échappent jamais au cluster). Manifestes :
+[`platform/gitea-runner/`](../platform/gitea-runner/).
+
 ### La boucle GitOps de bout en bout
 
 Les briques ci-dessus (Argo CD, Gitea, registry) s'articulent en une **boucle**

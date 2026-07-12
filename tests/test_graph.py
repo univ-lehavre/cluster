@@ -91,13 +91,14 @@ class Invariant3Determinism(unittest.TestCase):
 class Acyclicite(unittest.TestCase):
     """topo_sort sur tout le catalogue réussit ; un cycle est détecté."""
 
-    def test_all_components_sortable_28(self):
+    def test_all_components_sortable_29(self):
         order = graph.topo_sort(list(graph.COMPONENT_ALL))
-        # 28 composants : citation (build node-side) RETIRÉ (ADR 0110) ; eventful RETIRÉ
+        # 29 composants : citation (build node-side) RETIRÉ (ADR 0110) ; eventful RETIRÉ
         # (ADR 0105) ; gitops-seed-citation (instanciation Application, passée côté atlas)
         # RETIRÉ (ADR 0111). `gitops-seed` (jouet atlas-workflows) reste. `buildkit` (moteur
         # de build in-pod rootless) RÉTABLI (2026-07-12, le diagnostic d'abandon 0110 était faux).
-        self.assertEqual(len(order), 28)
+        # `gitea-runner` (orchestrateur CI Gitea Actions, couche gitops) AJOUTÉ (ADR 0112).
+        self.assertEqual(len(order), 29)
         self.assertEqual(set(order), set(graph.COMPONENT_ALL))
 
     def test_injected_cycle_detected(self):
@@ -135,6 +136,10 @@ class Invariant5OrdreCode(unittest.TestCase):
             5: "gitops",
             6: "dataops",
             7: "gitops-seed",
+            # buildkit (weight 8) est TIRÉ dans la chaîne atlas par la dépendance de
+            # `gitea-runner` (composant gitops, ADR 0112) → le moteur de build in-pod fait
+            # partie du socle atlas complet. Son poids élevé le projette en fin.
+            8: "buildkit",
         }
         proj: list[str] = []
         for c in graph.topo_sort(graph.component_expand_alias("atlas-ceph")):
@@ -143,7 +148,17 @@ class Invariant5OrdreCode(unittest.TestCase):
                 proj.append(a)
         self.assertEqual(
             proj,
-            ["socle", "ceph", "sc", "datalake", "monitoring", "gitops", "dataops", "gitops-seed"],
+            [
+                "socle",
+                "ceph",
+                "sc",
+                "datalake",
+                "monitoring",
+                "gitops",
+                "dataops",
+                "gitops-seed",
+                "buildkit",
+            ],
         )
 
 

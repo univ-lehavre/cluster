@@ -125,6 +125,18 @@ buildkit_build_images:
     mirror_only: true # passthrough (pull digest d'index → retag → push), pas de build
     public: docker.io/moby/buildkit@sha256:e901cffdad753892a7c3afb8b9972549fca02c73888cf340c91ed801fdd96d71
 
+# Image act_runner (ADR 0112) — l'ORCHESTRATEUR de CI (Gitea Actions runner). Liste SÉPARÉE
+# de build_images : consommée UNIQUEMENT par le play bootstrap/gitops.yaml (override
+# `build_images` au niveau import_role), JAMAIS par dataops. PASSTHROUGH (mirror_only) : le
+# Deployment gitea-runner (platform/gitea-runner/deployment.yaml) consomme la ref interne
+# `registry:80/act_runner:0.6.1` (air-gap ADR 0011 — sans quoi ImagePullBackOff). Épinglée
+# par digest d'INDEX upstream (multi-arch, vérifié Docker Hub). Ni build ni retag.
+gitea_runner_build_images:
+  - name: act_runner
+    tag: 0.6.1 # tag interne consommé par platform/gitea-runner/deployment.yaml
+    mirror_only: true # passthrough (pull digest d'index → retag → push), pas de build
+    public: docker.io/gitea/act_runner@sha256:b5c35d6bdbb9bb25e531230bfc7cc663cb751406cbec90a2a891b85fea54de86
+
 # Image maison MLflow (ADR 0082 amendé) : officielle + psycopg2. Liste SÉPARÉE de
 # build_images — consommée UNIQUEMENT par la layer autonome bootstrap/mlflow.yaml
 # (override `build_images` au niveau import_role), JAMAIS par dataops (mlflow ≠ dataops,

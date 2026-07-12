@@ -1,0 +1,26 @@
+# Configuration act_runner (ADR 0112) — mode `host` : les steps du job s'exécutent DANS le
+# conteneur runner (pas de conteneur par step → zéro DinD, zéro privilège). Le label `host`
+# est celui que les workflows ciblent (`runs-on: host`). `docker_host: "-"` DÉSACTIVE tout
+# accès à un daemon Docker (le runner ne construit pas d'image lui-même : il soumet à
+# buildkitd distant). Cache désactivé (socle jetable, pas de serveur de cache).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-runner-config
+  namespace: gitea-runner
+data:
+  config.yaml: |
+    log:
+      level: info
+    runner:
+      file: /data/.runner
+      capacity: 1
+      labels:
+        - "host:host"
+    cache:
+      enabled: false
+    container:
+      privileged: false
+      docker_host: "-"
+    host:
+      workdir_parent: /workspace

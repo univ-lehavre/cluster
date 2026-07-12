@@ -50,15 +50,27 @@ class ResolveLayersLocalPath(unittest.TestCase):
     def test_atlas_equivalent_order_matches_arm(self):
         # [dataops, gitops, metrics] reproduit l'ordre de l'arm atlas (hors gitops-seed,
         # posé par l'arm en queue) : storage → metrics → monitoring → gitops → dataops.
+        # ADR 0112 : `buildkit` (phase autonome) tiré par `gitea-runner` (composant gitops).
         self.assertEqual(
             resolve_layers(["dataops", "gitops", "metrics"], "local-path"),
-            ["storage-simple", "metrics-server", "monitoring", "gitops", "registry", "dataops"],
+            [
+                "storage-simple",
+                "metrics-server",
+                "monitoring",
+                "gitops",
+                "registry",
+                "dataops",
+                "buildkit",
+            ],
         )
 
     def test_non_prefix_palier(self):
         # gitops + metrics SANS monitoring — IMPOSSIBLE via le profil scalaire.
+        # ADR 0112 : `gitops` tire `registry` + `buildkit` (via gitea-runner, composant gitops).
         seq = resolve_layers(["gitops", "metrics"], "local-path")
-        self.assertEqual(seq, ["storage-simple", "metrics-server", "gitops"])
+        self.assertEqual(
+            seq, ["storage-simple", "metrics-server", "gitops", "registry", "buildkit"]
+        )
         self.assertNotIn("monitoring", seq)
 
     def test_phase_name_accepted_directly(self):
@@ -71,6 +83,8 @@ class ResolveLayersLocalPath(unittest.TestCase):
         # → dataops → gitops-seed) PLUS mlflow (ADR 0082) et portail (ADR 0091) en queue.
         # L'ordre vient du graphe atomique (resolve_layers), pas d'une table figée.
         # FILET anti-drift.
+        # ADR 0112 : `gitea-runner` (composant gitops) tire `buildkit` (phase autonome) par
+        # sa dépendance → le moteur de build in-pod fait partie de la chaîne atlas complète.
         self.assertEqual(
             resolve_layers(["atlas"], "local-path"),
             [
@@ -82,6 +96,7 @@ class ResolveLayersLocalPath(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )
@@ -113,6 +128,7 @@ class ResolveLayersCeph(unittest.TestCase):
         # ADR 0083 : `atlas` en ceph = ancien atlas-ceph (ceph+sc+datalake → monitoring
         # → gitops → dataops → gitops-seed) PLUS metrics-server (sur-ensemble assumé,
         # inoffensif), mlflow (ADR 0082) et portail (ADR 0091). Ordre du graphe atomique.
+        # ADR 0112 : `buildkit` (phase autonome) tiré par `gitea-runner` (composant gitops).
         self.assertEqual(
             resolve_layers(["atlas"], "ceph"),
             [
@@ -126,6 +142,7 @@ class ResolveLayersCeph(unittest.TestCase):
                 "dataops",
                 "gitops-seed",
                 "mlflow",
+                "buildkit",
                 "portal",
             ],
         )

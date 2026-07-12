@@ -1,0 +1,98 @@
+# code: language=ansible
+# Rôle platform-gitea-runner (ADR 0112) — l'ORCHESTRATEUR de CI (act_runner). Sur `git push`
+# Gitea, il soumet le contexte de build au daemon buildkitd DISTANT (Option B : le runner
+# reste durci/baseline, le privilège rootless est confiné à buildkitd). Le build est in-pod
+# (FROM interne, zéro egress Internet) ; l'image de code produite est poussée au registre
+# interne. Chaîne PROUVÉE air-gap sur Lima (2026-07-12).
+#
+# Prérequis (tirés par la clôture du graphe) : `gitea` (le runner s'y enregistre + clone),
+# `buildkit` (il y soumet le build), `build-images` (mirror des images act_runner + buildkit
+# au registre interne). Appliqué depuis le control-plane.
+
+- name: Deploy Gitea Actions runner (host mode, hardened)
+  run_once: true
+  block:
+    - name: Apply gitea-runner namespace
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/gitea-runner/namespace.yaml'
+
+    # NetworkPolicies : default-deny AVANT les allow. allow-dns = résout gitea/buildkitd ;
+    # allow-gitea-egress = enregistrement + poll + clone (80 ET 3000, DNAT Cilium) ;
+    # allow-buildkitd-egress = soumission du build (1234). AUCUN egress Internet.
+    - name: Apply gitea-runner network policies (default-deny first)
+      kubernetes.core.k8s:
+        state: present
+        namespace: gitea-runner
+        src: '{{ platform_repo_dir }}/platform/network-policies/gitea-runner/{{ item }}'
+      loop:
+        - 00-default-deny.yaml
+        - allow-dns.yaml
+        - allow-gitea-egress.yaml
+        - allow-buildkitd-egress.yaml
+
+    - name: Apply gitea-runner config (host mode)
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/gitea-runner/configmap.yaml'
+
+    # Résout le pod Gitea (pour y exécuter la CLI `gitea` qui génère le token).
+    - name: Find the Gitea pod
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: '{{ gitea_namespace }}'
+        label_selectors:
+          - app.kubernetes.io/name = gitea
+        field_selectors:
+          - status.phase=Running
+      register: _gitea_pod
+
+    - name: Assert a running Gitea pod exists
+      ansible.builtin.assert:
+        that: _gitea_pod.resources | default([]) | length > 0
+        fail_msg: >-
+          Aucun pod Gitea Running dans le namespace {{ gitea_namespace }} — déployer
+          la couche gitops (platform-gitea) avant le runner.
+
+    # Le runner a besoin d'un TOKEN d'enregistrement, généré par l'instance Gitea. Il n'est
+    # PAS idempotent au sens strict (chaque appel produit un token valide neuf) mais Gitea
+    # accepte le ré-enregistrement ; on (re)pose le Secret à chaque run. no_log : secret.
+    - name: Generate a Gitea Actions runner registration token
+      kubernetes.core.k8s_exec:
+        namespace: '{{ gitea_namespace }}'
+        pod: '{{ (_gitea_pod.resources | first).metadata.name }}'
+        command: gitea actions generate-runner-token
+      register: _runner_token
+      changed_when: true
+      no_log: true
+
+    - name: Create the runner registration Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: gitea-runner-registration
+            namespace: gitea-runner
+          type: Opaque
+          stringData:
+            token: '{{ _runner_token.stdout | trim }}'
+      no_log: true
+
+    - name: Apply gitea-runner Deployment
+      kubernetes.core.k8s:
+        state: present
+        src: '{{ platform_repo_dir }}/platform/gitea-runner/deployment.yaml'
+
+    - name: Wait for the runner Deployment to be Available
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: gitea-runner
+        namespace: gitea-runner
+      register: _runner_deploy
+      until: >-
+        _runner_deploy.resources | length > 0
+        and (_runner_deploy.resources[0].status.availableReplicas | default(0)) >= 1
+      retries: 30
+      delay: 10

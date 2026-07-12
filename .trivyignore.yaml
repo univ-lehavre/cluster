@@ -68,6 +68,15 @@ misconfigurations:
     paths:
       - 'platform/buildkit/deployment.yaml'
 
+  # gitea-runner (act_runner, ADR 0112) : le runner en mode host écrit son état d'exécution
+  # (workspace des jobs, checkout git, artefacts de step) dans le rootfs → rootfs read-only le
+  # casse. Le reste est durci (non-root uid 1000, drop ALL, seccomp RuntimeDefault, baseline
+  # ENFORCÉ — le runner ne fait que SOUMETTRE au daemon buildkitd, aucun privilège rootless
+  # requis, contrairement à buildkitd). Cf. platform/gitea-runner/.
+  - id: KSV-0014 # rootfs read-only impossible (act_runner écrit l'état des jobs)
+    paths:
+      - 'platform/gitea-runner/deployment.yaml'
+
   # ── mailpit SMTP : hostPort 1025 assumé (banc-only, ADR 0071) ─────────────
   # Le relais postfix HÔTE (#131) tourne SUR le nœud, hors réseau pods — il joint
   # le SMTP sur NodeIP:1025 via un hostPort routé en eBPF (Cilium), au lieu d'un

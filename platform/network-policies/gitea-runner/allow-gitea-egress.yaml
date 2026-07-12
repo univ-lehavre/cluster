@@ -1,0 +1,27 @@
+# Egress vers Gitea (ns `gitea`) : le runner s'ENREGISTRE auprès de Gitea, POLLE les jobs,
+# et CLONE le dépôt (git over HTTP). Sans ce flux, `act_runner` ne peut ni s'enregistrer ni
+# récupérer de job.
+#
+# DEUX ports (80 ET 3000) — même SUBTILITÉ CILIUM que allow-registry-egress (prouvée sur
+# Lima) : le runner cible la ClusterIP du Service `gitea-http:80` ; Cilium DNAT 80 -> 3000
+# (targetPort) AVANT l'enforcement egress, donc la policy voit le port 3000. Autoriser 80
+# seul laisserait tomber le trafic. On autorise les DEUX.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gitea-egress
+  namespace: gitea-runner
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gitea
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 3000

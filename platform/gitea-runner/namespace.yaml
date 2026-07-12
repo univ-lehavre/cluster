@@ -1,0 +1,14 @@
+# Namespace du runner Gitea Actions (ADR 0112) — l'ORCHESTRATEUR de CI (act_runner),
+# distinct du moteur de build (ns `buildkit`, buildkitd rootless). PodSecurity `baseline`
+# ENFORCÉ : contrairement au ns `buildkit` (qui doit relâcher le seccomp pour le rootless),
+# le runner n'a besoin d'AUCUN privilège — il ne fait que soumettre le contexte de build au
+# daemon buildkitd distant (Option B, ADR 0112). Il tient donc le durcissement standard.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitea-runner
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

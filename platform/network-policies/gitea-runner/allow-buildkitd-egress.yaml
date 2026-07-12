@@ -1,0 +1,21 @@
+# Egress vers buildkitd (ns `buildkit`, port 1234 gRPC) : le runner SOUMET le contexte de
+# build au daemon distant (Option B, ADR 0112 — le runner reste durci, le privilège rootless
+# est confiné à buildkitd). C'est le pendant de `allow-buildctl-ingress` côté ns buildkit.
+# Port 1234 sans DNAT (Service et targetPort identiques), un seul port suffit.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-buildkitd-egress
+  namespace: gitea-runner
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: buildkit
+      ports:
+        - protocol: TCP
+          port: 1234

@@ -411,6 +411,25 @@ _CATALOGUE: tuple[Component, ...] = (
         signal=("deployment", "buildkitd", "buildkit", True),
         weight=8,
     ),
+    # Runner Gitea Actions (act_runner) — l'ORCHESTRATEUR de CI (ADR 0112), l'autre moitié de
+    # la chaîne CI/CD in-cluster (buildkit = le moteur). Sur `git push` Gitea, il soumet le
+    # build au daemon buildkitd DISTANT (Option B : le runner reste durci/baseline, le
+    # privilège rootless est confiné à buildkitd). Chaîne PROUVÉE air-gap sur Lima. Composant
+    # de la couche `gitops` (il dépend de la forge Gitea) : il n'est PAS une phase autonome —
+    # la phase `gitops` garde son signal `argocd` (dernier maillon), gitea-runner est une
+    # feuille supplémentaire (autorisé, cf. dagster+marquez feuilles de dataops). Deps : `gitea`
+    # (enregistrement + clone), `buildkit` (soumission du build), `build-images` (mirror de
+    # l'image act_runner au registre interne).
+    Component(
+        name="gitea-runner",
+        role="platform-gitea-runner",
+        deps=("gitea", "buildkit", "build-images"),
+        namespace="gitea-runner",
+        # weight=5 comme gitea/argocd : le composant appartient à la phase `gitops` et doit
+        # s'y projeter (component_alias_weight → alias gitops). Un poids différent le
+        # rangerait dans une autre phase (cf. test_projected_on_aliases_equals_coded_order).
+        weight=5,
+    ),
 )
 # NB (ADR 0105) : la couche `eventful` (build applicatif événementiel in-cluster, Argo Events +
 # Argo Workflows + NATS, ADR 0095 §1.b) a été RETIRÉE — le build node-side (platform-build-images,
@@ -510,7 +529,7 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
     ),
     "mlflow": ("mlflow", "s3-backing-mlflow"),
     "portal": ("portal",),
-    "gitops": ("gitea", "argocd"),
+    "gitops": ("gitea", "argocd", "gitea-runner"),
     "gitops-seed": ("gitops-seed",),
     # atlas-ceph = clôture Ceph SANS metrics-server (monté par l'alias léger
     # seulement) ; l'ordre vient de topo_sort, pas de cette énumération.
@@ -535,6 +554,7 @@ _ALIASES_BASE: dict[str, tuple[str, ...]] = {
         "marquez",
         "gitea",
         "argocd",
+        "gitea-runner",
         "gitops-seed",
     ),
 }
@@ -822,7 +842,7 @@ def rollback_phase_namespaces(phase: str) -> list[str]:
         "monitoring": ["monitoring"],
         "dataops": ["postgres", "dagster", "marquez"],
         "mlflow": ["mlflow"],
-        "gitops": ["argocd", "gitea"],
+        "gitops": ["argocd", "gitea", "gitea-runner"],
     }.get(phase, [])
 
 

@@ -116,6 +116,22 @@ rootless, dépannage) est dans le
 
 - Gitea Actions activé + le modèle « runner host durci + client buildctl →
   daemon » (Option B).
+- Le **runner est un livrable nestor** (plus un scaffolding manuel) : composant
+  de graphe `gitea-runner` (couche **gitops** — il dépend de la forge), rôle
+  `platform-gitea-runner` importé par `bootstrap/gitops.yaml`, manifestes
+  `platform/gitea-runner/` (namespace **baseline ENFORCÉ**, Deployment host
+  durci, configmap, NetworkPolicies default-deny + allow-dns/gitea/buildkitd),
+  mirror `act_runner` au registre interne (`gitea_runner_build_images`),
+  exception `.trivyignore` KSV-0014 (le runner écrit l'état des jobs dans son
+  rootfs). `buildctl` est copié depuis l'image interne `moby/buildkit` par un
+  initContainer (air-gap). La chaîne complète (push → runner → buildctl →
+  buildkitd in-pod → `FROM` interne → push registre interne) est **prouvée
+  air-gap sur Lima**.
+- **Subtilité Cilium prouvée** : sous kube-proxy-replacement, l'enforcement
+  egress d'une NetworkPolicy s'applique **après** le DNAT ClusterIP→pod, donc
+  sur le **targetPort** du Service, pas sur son port. Les egress vers registry
+  (80→5000) et Gitea (80→3000) autorisent **les deux ports** ; autoriser le seul
+  port de Service fait échouer le flux par timeout silencieux.
 
 ### Ce qui n'est PAS réintroduit
 

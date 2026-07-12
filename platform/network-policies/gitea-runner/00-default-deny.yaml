@@ -1,0 +1,15 @@
+# Nie tout le trafic (ingress + egress) pour tous les pods du ns `gitea-runner`.
+# Ré-ouvert par les `allow-*` de ce dossier. Appliqué EN PREMIER (préfixe `00-`).
+# Air-gap du CI (ADR 0112) : le runner ne doit joindre QUE Gitea (déclencheur + clone) et
+# buildkitd (soumission du build) — JAMAIS Internet. Le build lui-même est air-gap côté
+# buildkitd (ns `buildkit`, egress limité au registre interne).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: gitea-runner
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

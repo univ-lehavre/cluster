@@ -1,0 +1,112 @@
+# Runner Gitea Actions (act_runner) — ORCHESTRATEUR de CI (ADR 0112). PROUVÉ air-gap sur
+# Lima (2026-07-12) : un `git push` sur Gitea déclenche ce runner, qui soumet le contexte
+# de build au daemon buildkitd distant (Option B) ; l'image de code est buildée in-pod
+# (FROM interne) et poussée au registre interne, SANS aucun egress Internet.
+#
+# MODE `host` (config.yaml) : les steps du job tournent DANS ce conteneur runner (zéro DinD,
+# zéro privilège conteneur). Le runner n'embarque PAS `buildctl` → un initContainer le COPIE
+# depuis l'image INTERNE moby/buildkit (air-gap : PAS de téléchargement GitHub). Le runner
+# ne fait que SOUMETTRE au daemon : il reste durci (baseline, non-root, caps drop ALL).
+#
+# Images INTERNES (air-gap, ADR 0011) : `registry:80/act_runner` et `registry:80/moby/buildkit`
+# sont mirrorées au registre interne (rôle platform-build-images). Refs en DUR `registry:80`
+# comme platform/buildkit/deployment.yaml (le registre interne est invariant, ADR 0011).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea-runner
+  namespace: gitea-runner
+  labels:
+    app: gitea-runner
+spec:
+  replicas: 1
+  # Recreate : le fichier d'enregistrement (.runner) vit dans un emptyDir ; un rolling
+  # update ferait cohabiter deux runners sur le même enregistrement. Un seul à la fois.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gitea-runner
+  template:
+    metadata:
+      labels:
+        app: gitea-runner
+    spec:
+      # Le runner n'appelle JAMAIS l'API Kubernetes (il parle à Gitea + buildkitd en TCP).
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # buildctl vient de l'image INTERNE moby/buildkit (air-gap), copié dans un volume
+        # partagé placé en tête de PATH du runner. Le build lui-même reste in-pod (buildkitd).
+        - name: copy-buildctl
+          image: registry:80/moby/buildkit:v0.19.0-rootless
+          command: ['/bin/sh', '-ec']
+          args:
+            - |
+              cp /usr/bin/buildctl /opt/bin/buildctl
+              chmod 0755 /opt/bin/buildctl
+              /opt/bin/buildctl --version
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tools
+              mountPath: /opt/bin
+      containers:
+        - name: runner
+          image: registry:80/act_runner:0.6.1
+          env:
+            - name: GITEA_INSTANCE_URL
+              value: http://gitea-http.gitea.svc.cluster.local:80
+            - name: GITEA_RUNNER_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-runner-registration
+                  key: token
+            - name: GITEA_RUNNER_NAME
+              value: runner-host
+            - name: CONFIG_FILE
+              value: /config/config.yaml
+            # buildctl (copié par l'initContainer) en tête de PATH.
+            - name: PATH
+              value: /opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            - name: HOME
+              value: /workspace
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: workspace
+              mountPath: /workspace
+            - name: tools
+              mountPath: /opt/bin
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: workspace
+          emptyDir: {}
+        - name: tools
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: gitea-runner-config
