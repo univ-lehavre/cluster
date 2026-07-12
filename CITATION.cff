@@ -31,6 +31,6 @@ license: MIT
 version: 2.54.0 # x-release-please-version
 # `date-released` estampillée automatiquement à la date de release par le workflow
 # release.yml (release-please ne synchronise que `version:`) — ne pas éditer à la main.
-date-released: '2026-07-11'
+date-released: '2026-07-12'
 # DOI Zenodo pour une citation pérenne (concept DOI, toutes versions) :
 doi: '10.5281/zenodo.20287209'
