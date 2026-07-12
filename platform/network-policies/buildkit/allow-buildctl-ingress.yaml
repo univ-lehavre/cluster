@@ -1,0 +1,29 @@
+# Autorise l'INGRESS vers buildkitd sur le port 1234 (gRPC buildctl) depuis les pods du
+# cluster. NÉCESSAIRE pour l'« Option B » (ADR 0112) : un client `buildctl` DISTANT (ex. un
+# job Gitea Actions dans le ns `gitea-runner`, durci et en baseline) soumet au daemon plutôt
+# que d'embarquer le privilège rootless. Sans cette règle, le `default-deny-all` bloque la
+# connexion (`dial tcp …:1234: i/o timeout`).
+#
+# Pourquoi ouvrir à tout namespace : buildkitd est un SERVICE DE BUILD partagé, sollicité par
+# des jobs CI qui peuvent naître dans divers namespaces. L'air-gap du build tient à l'EGRESS
+# du daemon (bloqué sauf DNS + registry), PAS à restreindre qui le SOLLICITE — le client ne
+# fait que soumettre un contexte, il n'ouvre aucune porte sortante. Restreindre par label de
+# namespace serait possible (matchLabels `buildkit-client: "true"`) si un cloisonnement plus
+# fin devenait nécessaire.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-buildctl-ingress
+  namespace: buildkit
+spec:
+  podSelector:
+    matchLabels:
+      app: buildkitd
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {} # tout namespace du cluster (clients buildctl)
+      ports:
+        - protocol: TCP
+          port: 1234
