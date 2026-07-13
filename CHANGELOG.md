@@ -11,6 +11,48 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.55.0](https://github.com/univ-lehavre/cluster/compare/v2.54.0...v2.55.0) (2026-07-13)
+
+
+### Features
+
+* **buildkit:** recâble le composant buildkit dans le graphe nestor + Ansible ([ea4c791](https://github.com/univ-lehavre/cluster/commit/ea4c79115c61290be49ea08c0cc5f1f11de6bd9a))
+* **buildkit:** rétablit le build in-pod (buildkit rootless) + gitea actions ([da144b2](https://github.com/univ-lehavre/cluster/commit/da144b2a65b9e7356472386a5a7c206d76f3e612))
+* **citation:** câble le rôle buildkit autonome et découple le mirror dataops ([94d4b08](https://github.com/univ-lehavre/cluster/commit/94d4b08dc1a1352ab0bcf56cbae174138d097880))
+* **citation:** CI/CD in-cluster air-gap (ADR 0112) + frontière atlas instancie l'Application (ADR 0111) ([29d0bf3](https://github.com/univ-lehavre/cluster/commit/29d0bf3b66ecb0f94b43f88f54b7ab03ffc80e77))
+* **citation:** promeut le runner gitea actions en composant nestor (adr 0112) ([fb484fe](https://github.com/univ-lehavre/cluster/commit/fb484feffe56962ae753ab5552a5cd6053ad764d))
+* **config:** axe persistence.mode dans le modèle de topologie (adr 0109, préalable) ([92487da](https://github.com/univ-lehavre/cluster/commit/92487da2ba2d7fe9fa8079ea54debd566020473c))
+* **config:** câble persistence.mode côté cluster — curseur de rétention adaptatif (ADR 0109, [#631](https://github.com/univ-lehavre/cluster/issues/631)) ([9b0b2e1](https://github.com/univ-lehavre/cluster/commit/9b0b2e15951b28054a0dfb26b0384afd167a02b2))
+* **config:** câble persistence.mode sur les 6 briques cluster (adr 0109, [#631](https://github.com/univ-lehavre/cluster/issues/631)) ([2993534](https://github.com/univ-lehavre/cluster/commit/299353416563390093d320bd636932b238a855cc))
+* **config:** local et dirqual montent buildkit (build in-pod, adr 0112) ([4869678](https://github.com/univ-lehavre/cluster/commit/48696781ec990e366380e40aee721b11ab1cb6a7))
+* **nestor:** registry et buildkit deviennent des phases/couches autonomes (adr 0112) ([9683063](https://github.com/univ-lehavre/cluster/commit/9683063a184cf529d2ba46be8687babb87d18782))
+
+
+### Bug Fixes
+
+* **citation:** buildkit egress registre sur 80 ET 5000 (dnat cilium) + ingress buildctl ([5b142f3](https://github.com/univ-lehavre/cluster/commit/5b142f3610f4235db902a16f483f3a918ff0fcf5))
+* **citation:** gitea-runner en phase autonome après buildkit + garde le clone marquez ([34b1d7e](https://github.com/univ-lehavre/cluster/commit/34b1d7e764389616381b116dd0e2567903ed3e07))
+* **docs:** corrige markdownlint md028 (adr 0086) et le format ruff (test_roundtrip) ([dac924d](https://github.com/univ-lehavre/cluster/commit/dac924db1f6a1ce0b5bc85230db8bacc3ec8054a))
+* **docs:** corrige md037 (marqueurs d'emphase) dans l'adr 0110 ré-amendé ([6de1cb0](https://github.com/univ-lehavre/cluster/commit/6de1cb0ee861b4d42871c4f7501c9c585b59c4da))
+* **lima:** renomme le contexte kubeconfig au stack_id de façon inconditionnelle ([4cba830](https://github.com/univ-lehavre/cluster/commit/4cba83040556561e6579ca427fa48070c9115479))
+* **nestor:** format ruff sur test_plan (oracles de chaîne atlas avec buildkit) ([23083fe](https://github.com/univ-lehavre/cluster/commit/23083feaea0c916abb0f33d7f70866c2cc65b10f))
+
+
+### Refactor
+
+* **nestor:** retire le câblage seed du flux app-of-apps citation (adr 0111) ([f5d0ea0](https://github.com/univ-lehavre/cluster/commit/f5d0ea064b1db1a67bb934ebc5fe3cff723f4f8a))
+
+
+### Documentation
+
+* **docs:** adr 0111 — atlas instancie l'application argocd (amende 0094) ([1d415a1](https://github.com/univ-lehavre/cluster/commit/1d415a18eba524642bee00721479307d4e6666f3))
+* **docs:** adr 0112 — ci/cd in-cluster (gitea actions + buildkit) ; amende 0110 ([db03888](https://github.com/univ-lehavre/cluster/commit/db03888f6257af2ea32d0b9713701eda4d323b12))
+* **docs:** aligne la doc sur le câblage persistence.mode (adr 0109) ([9d14405](https://github.com/univ-lehavre/cluster/commit/9d14405dbce6e5f18c274dab7bd84ce28d48902b))
+* **docs:** aligne la doc sur le câblage persistence.mode (adr 0109) ([afe0d3c](https://github.com/univ-lehavre/cluster/commit/afe0d3c5beac15fbc93c77f7d2695f66cc44063c))
+* **docs:** aligne la doc sur le ci/cd in-cluster livré (adr 0112) ([b4916dc](https://github.com/univ-lehavre/cluster/commit/b4916dc183ec5ed8bcfdbdd9ede999cbfe891306))
+* **docs:** aligne la doc sur le ci/cd in-cluster livré (adr 0112) ([4e7ff9b](https://github.com/univ-lehavre/cluster/commit/4e7ff9ba6a7e6e98f9f8afa05fee1439a7d503da))
+* **docs:** amende les ADR liés et le contrat pour l'instanciation atlas (adr 0111) ([d38e307](https://github.com/univ-lehavre/cluster/commit/d38e30795017ef359252690e8bbc8ce60f83320b))
+
 ## [2.54.0](https://github.com/univ-lehavre/cluster/compare/v2.53.2...v2.54.0) (2026-07-12)
 
 
