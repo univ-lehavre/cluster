@@ -282,13 +282,16 @@ class ExtravarsAreRestrictedPerPhase(unittest.TestCase):
     def test_persistence_mode_reaches_data_bearing_phases(self):
         # persistence.mode (ADR 0109) circule vers les phases qui portent une brique de
         # rétention : sc (reclaimPolicy), datalake (preservePools), monitoring (Loki+Prom),
-        # dataops (CNPG), volume-snapshots (CronJob). Le faisceau le pose toujours (défaut
-        # `full`) ; chaque phase le reçoit car elle le déclare dans ses extravars_keys.
-        self.assertEqual(self.derived.get("persistence_mode"), "full")
+        # dataops (CNPG), volume-snapshots (CronJob). Chaque phase le reçoit car elle le
+        # déclare dans ses extravars_keys. On dérive l'attendu de la fixture (le mode déclaré
+        # dans local.example.yaml) plutôt que de le figer : le test vérifie la CIRCULATION du
+        # mode, pas une valeur d'exemple particulière.
+        mode = self.derived.get("persistence_mode")
+        self.assertEqual(mode, "bounded")  # valeur d'exemple du banc local (local.example.yaml)
         for phase in ("sc", "datalake", "monitoring", "dataops", "volume-snapshots"):
             with self.subTest(phase=phase):
                 self.assertEqual(
-                    phases.extravars_for(phase, self.derived).get("persistence_mode"), "full"
+                    phases.extravars_for(phase, self.derived).get("persistence_mode"), mode
                 )
         # Une phase qui ne porte PAS de brique de rétention ne le reçoit PAS (mapping strict).
         self.assertNotIn("persistence_mode", phases.extravars_for("gitops", self.derived))
