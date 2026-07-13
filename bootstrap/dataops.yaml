@@ -129,17 +129,15 @@
         name: platform-build-images
       tags: build-images
 
-    # Moteur de build IN-POD (buildkit rootless) — RÉTABLI (2026-07-12). L'abandon ADR 0110
-    # (#644) reposait sur un mauvais diagnostic : PodSecurity `baseline` ne bloque pas le
-    # rootless « par nature » — c'est le namespace de build labellisé `enforce: baseline` qui
-    # refusait le `seccompProfile: Unconfined`. Le socle (platform/buildkit/) ne labellise plus
-    # ce ns (privilège isolé, reste du cluster en baseline) → le build in-pod FONCTIONNE (prouvé
-    # au banc Lima : build cible code FROM pré-image + push). buildkitd sert un `buildctl` client
-    # (Gitea Actions ou manuel) qui build l'image de CODE des code-locations sans egress.
-    - name: Moteur de build in-pod (buildkit rootless)
-      ansible.builtin.import_role:
-        name: platform-buildkit
-      tags: buildkit
+# buildkit N'EST PAS ici — c'est une PHASE AUTONOME (socle CI/CD, ADR 0112), montée par son
+# playbook dédié bootstrap/buildkit.yaml (layer `build`, cf. nestor LAYER_PHASES). Elle relève
+# du groupe k8s (`hosts: {{ dataops_k8s_host }}`), PAS de ce play nœuds : le rôle applique des
+# manifestes via kubernetes.core (lib Python `kubernetes` sur le poste de contrôle), et son
+# image `registry:80/moby/buildkit:…` n'est mirrorée QUE par buildkit.yaml (liste
+# `buildkit_build_images`, JAMAIS par le `build_images` de dataops). L'import de ce rôle dans
+# ce play `hosts: cloud` (résidu du recâblage #644→2026-07-12, que « découple le mirror
+# dataops » aurait dû retirer) le faisait tourner sur un NŒUD (node1, python3.13 système sans
+# lib `kubernetes`) → import KO. Retiré : parité graphe nestor (buildkit ≠ dataops), drift play corrigé.
 
 - name: Plateforme DataOps — étape applicative (Dagster + Marquez)
   hosts: "{{ dataops_k8s_host | default('localhost') }}"
