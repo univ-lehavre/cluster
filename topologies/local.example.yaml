@@ -55,7 +55,7 @@ exposition:
 # (rétention minimale, sauvegardes/snapshots désarmés). Ne régit JAMAIS etcd/le plan de contrôle.
 # Dérivé par nestor sur six briques (sc, cnpg, loki, prometheus, datalake, volume-snapshots).
 persistence:
-  mode: full # full | bounded | ephemeral.
+  mode: bounded # full | bounded | ephemeral.
 
 # ─── access : DÉCLARATIF (non lu par nestor, mais PORTÉ ici car spécifique au terrain local) —
 # documente COMMENT le poste macOS joint les UI. Réseau Lima = NAT (user-v2) : l'IP de la VM
@@ -80,8 +80,8 @@ hardening:
 # 128 GiB : la chaîne MLOps complète (layers ci-dessus) y vit.
 resources:
   cpus: 6
-  memory: 16GiB
-  disk: 128GiB
+  memory: 24GiB
+  disk: 256GiB
 
 # ─── gitea : seed du JOUET du socle. Tous les champs ont un défaut générique (nestor/seed.py) ;
 # montrés avec leur valeur par défaut pour la lisibilité (ils SONT lus par SeedConfig).
