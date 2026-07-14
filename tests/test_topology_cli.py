@@ -1094,19 +1094,50 @@ runs:
 
     def test_prod_probes_return_empty_without_explicit_kubeconfig(self):
         # ADR 0084/0108 (issue #405) : sur terrain NON local (baremetal) sans KUBECONFIG
-        # explicite, les sondes du RÉEL rendent [] — elles ne sondent PAS le banc Lima
-        # (limactl/kubectl banc). `_real_vms("baremetal")` court-circuite avant `limactl` ;
-        # `_ready_nodes("baremetal")` avant `kubectl` (KUBECONFIG absent / auto-banc). Test PUR :
+        # explicite NI kubeconfig rapatrié nommé par la stack, les sondes du RÉEL rendent [] —
+        # elles ne sondent PAS le banc Lima (limactl/kubectl banc). `_real_vms("baremetal")`
+        # court-circuite avant `limactl` ; `_ready_nodes("baremetal")` avant `kubectl`. Test PUR :
         # pas de subprocess à simuler (le gating retourne [] AVANT tout appel système).
         os.environ.pop("KUBECONFIG", None)
         orig_auto = cli._KUBECONFIG_AUTO_BENCH
         cli._KUBECONFIG_AUTO_BENCH = True  # auto-export banc de main() ≠ intention prod
         self.addCleanup(setattr, cli, "_KUBECONFIG_AUTO_BENCH", orig_auto)
+        # PUR + déterministe : on force l'ABSENCE du kubeconfig nommé par la stack (sinon la
+        # sonde partirait le lire — cf. le test complémentaire ci-dessous). `_bench_kubeconfig_path`
+        # rend un chemin ; on stube `os.path.exists` pour ce chemin uniquement.
+        orig_exists = cli.os.path.exists
+        cli.os.path.exists = lambda p: False if str(p).endswith(".config") else orig_exists(p)
+        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
         # `_PRISTINE_*` : les vraies sondes captées au chargement du module (avant tout
-        # stub) → indépendant de l'ordre des tests. En prod sans KUBECONFIG explicite,
+        # stub) → indépendant de l'ordre des tests. En prod sans cible connue,
         # le gating (ADR 0084) court-circuite AVANT limactl/kubectl → [].
         self.assertEqual(_PRISTINE_REAL_VMS("baremetal"), [])
         self.assertEqual(_PRISTINE_READY_NODES("baremetal"), [])
+
+    def test_prod_probe_reads_stack_named_kubeconfig(self):
+        # ADR 0102 volet B : sur terrain prod, si le kubeconfig RAPATRIÉ nommé par la stack
+        # active (`.kubeconfigs/<stack>.config`) existe, `_ready_nodes` le SONDE (même cible que
+        # `nestor kubectl`) — sans exiger un KUBECONFIG exporté ni un champ `kubeconfig:` déclaré.
+        # Régression : sans ça, `nestor kubectl get nodes` voyait la prod mais `preview` la
+        # croyait vide (« nœuds Ready : — » → propose de tout réinstaller sur une prod saine).
+        os.environ.pop("KUBECONFIG", None)
+        orig_auto = cli._KUBECONFIG_AUTO_BENCH
+        cli._KUBECONFIG_AUTO_BENCH = True
+        self.addCleanup(setattr, cli, "_KUBECONFIG_AUTO_BENCH", orig_auto)
+        # Le kubeconfig nommé par la stack EXISTE (on force exists=True pour un *.config) ...
+        orig_exists = cli.os.path.exists
+        cli.os.path.exists = lambda p: True if str(p).endswith(".config") else orig_exists(p)
+        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
+        # ... et kubectl répond avec un nœud Ready (on stube le subprocess, la sonde doit
+        # l'ATTEINDRE au lieu de court-circuiter à []).
+        orig_run = cli.subprocess.run
+
+        class _R:
+            stdout = "dirqual1   Ready   control-plane   32d   v1.34.8\n"
+
+        cli.subprocess.run = lambda *a, **k: _R()
+        self.addCleanup(setattr, cli.subprocess, "run", orig_run)
+        self.assertEqual(_PRISTINE_READY_NODES("baremetal"), ["dirqual1"])
 
     def test_never_launches(self):
         # preview est READ-ONLY : le runner ansible n'est JAMAIS appelé.
@@ -2438,12 +2469,14 @@ class Stack(unittest.TestCase):
         self.assertIn("export KUBECONFIG=", out)
         self.assertNotIn(os.devnull, out)  # le banc, pas /dev/null
 
-    def test_select_bare_name_falls_back_to_example(self):
-        # `stack select <nom>` (nom NU) active `topologies/<nom>.example.yaml` quand aucune
-        # surcharge locale `<nom>.yaml` n'existe — cas nominal du banc générique versionné.
-        name = "zz-test-fallback"
+    def test_select_bare_name_without_real_topo_fails(self):
+        # PAS de fallback `.example` : `stack select <nom>` (nom NU) ÉCHOUE si `<nom>.yaml`
+        # n'existe pas — même si `<nom>.example.yaml` existe. Le fallback activait le modèle
+        # versionné et, pour une prod, y écrivait le kubeconfig local (fuite git, ADR 0023).
+        # Pour activer un modèle, le nommer explicitement (`<nom>.example`).
+        name = "zz-test-nofallback"
         example = os.path.join(_ROOT, "topologies", f"{name}.example.yaml")
-        bare = self._catalog(name)  # <nom>.yaml — ne doit PAS exister
+        bare = self._catalog(name)  # <nom>.yaml — n'existe pas
         with open(example, "w", encoding="utf-8") as f:
             f.write(
                 "catalog: {terrain: local, profile: base}\n"
@@ -2452,8 +2485,30 @@ class Stack(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(example) and os.unlink(example))
         self.assertFalse(os.path.exists(bare))
         code, _, err = _capture(["stack", "select", name])
-        self.assertEqual(code, 0)  # trouvé via le fallback, plus « introuvable »
-        self.assertIn(f"topologies/{name}.example.yaml", err)  # a bien activé le .example
+        self.assertEqual(code, 1)  # échec propre, pas d'activation du .example
+        self.assertIn("introuvable", err)
+
+    def test_select_prod_example_never_writes_versioned_file(self):
+        # RÉGRESSION : `stack select <prod>.example` (modèle versionné, terrain non-local sans
+        # `kubeconfig:`) ne doit JAMAIS écrire le champ kubeconfig DANS le .example (fichier
+        # suivi par git) — c'était la fuite du fallback (chemin local dans un versionné, ADR 0023).
+        name = "zz-test-prodexample"
+        example = os.path.join(_ROOT, "topologies", f"{name}.example.yaml")
+        content = (
+            "catalog: {terrain: baremetal, profile: dataops}\n"
+            "nodes:\n  - {name: n1, roles: [control, worker]}\n"
+            "storage: {backend: ceph}\n"
+        )
+        with open(example, "w", encoding="utf-8") as f:
+            f.write(content)
+        self.addCleanup(lambda: os.path.exists(example) and os.unlink(example))
+        # activer par le nom EXPLICITE `.example` (plus de fallback nu), en INTERACTIF
+        # (sans --no-input) — c'est le mode qui écrivait avant le garde-fou `is_example`.
+        _capture(["stack", "select", f"{name}.example"])
+        with open(example, encoding="utf-8") as f:
+            after = f.read()
+        self.assertNotIn("kubeconfig:", after)  # le .example versionné reste INTACT
+        self.assertEqual(after, content)
 
     def test_select_example_name_uses_normalized_stack_id(self):
         # `stack select <nom>.example` doit poser le contexte kubectl + viser le kubeconfig au
