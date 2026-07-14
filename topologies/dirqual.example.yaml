@@ -29,12 +29,17 @@ catalog:
 # `build` (ADR 0112) = registry + buildkit. dirqual builde ses images de code IN-POD (buildctl
 # → daemon buildkitd). RELÂCHEMENT PodSecurity ASSUMÉ : le ns de build (`buildkit`) n'est pas
 # labellisé `enforce: baseline` (privilège du builder isolé à ce ns ; reste du cluster durci).
+# `volume-snapshots` (ADR 0013) : CronJob quotidien de snapshots des PVC applicatifs (RPO 24h).
+# Phase autonome (dépend de `sc`, non tirée par clôture) → à lister EXPLICITEMENT ici. Sur ce
+# parc Ceph la réplication ne couvre PAS la suppression/corruption logique : sans cette couche
+# l'angle mort ADR 0013 reste ouvert. `resolve_layers` l'ordonne après `sc`.
 layers:
   - metrics
   - store
   - obs
   - dataops
   - build
+  - volume-snapshots
 
 # ─── nodes : les 4 nœuds RÉELS. `dirqual1` = control + worker + storage (hyperconvergé : il
 # porte l'API, CoreDNS ET des OSD Ceph, audit 2026-06-24) ; `dirqual2-4` = worker + storage.
