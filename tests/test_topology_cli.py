@@ -2438,6 +2438,44 @@ class Stack(unittest.TestCase):
         self.assertIn("export KUBECONFIG=", out)
         self.assertNotIn(os.devnull, out)  # le banc, pas /dev/null
 
+    def test_select_bare_name_falls_back_to_example(self):
+        # `stack select <nom>` (nom NU) active `topologies/<nom>.example.yaml` quand aucune
+        # surcharge locale `<nom>.yaml` n'existe — cas nominal du banc générique versionné.
+        name = "zz-test-fallback"
+        example = os.path.join(_ROOT, "topologies", f"{name}.example.yaml")
+        bare = self._catalog(name)  # <nom>.yaml — ne doit PAS exister
+        with open(example, "w", encoding="utf-8") as f:
+            f.write(
+                "catalog: {terrain: local, profile: base}\n"
+                "nodes:\n  - {name: node1, roles: [control]}\n"
+            )
+        self.addCleanup(lambda: os.path.exists(example) and os.unlink(example))
+        self.assertFalse(os.path.exists(bare))
+        code, _, err = _capture(["stack", "select", name])
+        self.assertEqual(code, 0)  # trouvé via le fallback, plus « introuvable »
+        self.assertIn(f"topologies/{name}.example.yaml", err)  # a bien activé le .example
+
+    def test_select_example_name_uses_normalized_stack_id(self):
+        # `stack select <nom>.example` doit poser le contexte kubectl + viser le kubeconfig au
+        # stack_id NORMALISÉ (`<nom>`), pas au nom tapé (`<nom>.example`) — sinon la garde
+        # d'identité (current-context == stack_id) refuse, et le kubeconfig `.example.config`
+        # visé n'existe pas (ADR 0102/0108).
+        name = "zz-test-normalize"
+        example = os.path.join(_ROOT, "topologies", f"{name}.example.yaml")
+        with open(example, "w", encoding="utf-8") as f:
+            f.write(
+                "catalog: {terrain: local, profile: base}\n"
+                "nodes:\n  - {name: node1, roles: [control]}\n"
+            )
+        self.addCleanup(lambda: os.path.exists(example) and os.unlink(example))
+        posed = {}
+        orig = cli._pose_named_context
+        cli._pose_named_context = lambda topo, stack: posed.update(stack=stack)
+        self.addCleanup(setattr, cli, "_pose_named_context", orig)
+        code, _, _ = _capture(["stack", "select", f"{name}.example"])
+        self.assertEqual(code, 0)
+        self.assertEqual(posed.get("stack"), name)  # stack_id normalisé, pas "<nom>.example"
+
     def test_prod_select_no_input_warns_but_does_not_write_kubeconfig(self):
         # ADR 0090 : `stack select` sur une stack PROD sans `kubeconfig:` SIGNALE de le
         # déclarer mais N'ÉCRIT PAS le fichier sous --no-input (action opérateur, CI sûre).
