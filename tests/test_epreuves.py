@@ -53,8 +53,8 @@ class Catalogue(unittest.TestCase):
         self.assertEqual(in_catalog, on_disk)
 
     def test_entrees_uniques(self):
-        self.assertEqual(len(EPREUVES), 34)
-        self.assertEqual(len({e.num for e in EPREUVES}), 34)
+        self.assertEqual(len(EPREUVES), 35)
+        self.assertEqual(len({e.num for e in EPREUVES}), 35)
 
     def test_champs_dans_le_vocabulaire(self):
         for e in EPREUVES:
@@ -90,11 +90,12 @@ class Filtrage(unittest.TestCase):
         # ET les 4 caducs (03/04/19/30 — terrain Vagrant multi-node / ha-3cp abandonné,
         # ADR 0097 ; 19 est à la fois offensif ET caduc). Soit {03,04,17,18,19,20,21,30}.
         self.assertEqual(nums_ex, {"03", "04", "17", "18", "19", "20", "21", "30"})
-        # 26 jouables : 34 − 8 exclus. Les caducs (03/04/19/30) sortent d'office
-        # (epreuve_jouable les rejette AVANT tout autre filtre) ; restent les 26
-        # épreuves actives non offensives jouables en prod dataops/ceph/multi (dont la 35,
-        # profil_min=base, listée partout — elle SKIP à l'exécution si le socle CI/CD manque).
-        self.assertEqual(len(jouables), 26)
+        # 27 jouables : 35 − 8 exclus. Les caducs (03/04/19/30) sortent d'office
+        # (epreuve_jouable les rejette AVANT tout autre filtre) ; restent les 27
+        # épreuves actives non offensives jouables en prod dataops/ceph/multi (dont les
+        # 35 et 36, profil_min=base, listées partout — elles SKIP à l'exécution si le
+        # socle CI/CD ou un prérequis de livraison manque).
+        self.assertEqual(len(jouables), 27)
 
     def test_backend_local_path_exclut_les_ceph(self):
         _, exclues = filter_epreuves(_topo(backend="local-path"))
