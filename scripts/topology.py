@@ -790,20 +790,43 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
 
     target_abs = os.path.join(_ROOT, target_rel)
     if not os.path.exists(target_abs):
-        # Aide : lister ce que le catalogue propose réellement.
-        catalog = sorted(
-            os.path.basename(p) for p in glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml"))
-        )
-        dispo = ", ".join(catalog) or "(catalogue vide)"
-        print(
-            f"erreur : {target_rel} introuvable dans le catalogue.\n  disponibles : {dispo}",
-            file=sys.stderr,
-        )
-        return 1
+        # FALLBACK `.example` : `stack select local` (nom nu) doit trouver le modèle
+        # versionné `local.example.yaml` quand aucune surcharge locale `local.yaml` n'existe
+        # — c'est le cas nominal du banc générique (l'opérateur pense « local », le stack_id
+        # normalisé est `local`, cf. catalog_entry « activer un .example est légitime »). On
+        # ne l'applique QUE pour un nom NU (pas déjà `.example`/suffixé) pour ne pas masquer
+        # une vraie faute de frappe. Une surcharge `local.yaml` PRIME si elle existe (testée
+        # en premier ci-dessus) : le fallback ne s'active que si elle est absente.
+        stem = args.name.strip()
+        example_rel = f"topologies/{stem}.example.yaml"
+        if not stem.endswith((".yaml", ".yml", ".example")) and os.path.exists(
+            os.path.join(_ROOT, example_rel)
+        ):
+            target_rel = example_rel
+            target_abs = os.path.join(_ROOT, example_rel)
+        else:
+            # Aide : lister ce que le catalogue propose réellement.
+            catalog = sorted(
+                os.path.basename(p) for p in glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml"))
+            )
+            dispo = ", ".join(catalog) or "(catalogue vide)"
+            print(
+                f"erreur : {target_rel} introuvable dans le catalogue.\n  disponibles : {dispo}",
+                file=sys.stderr,
+            )
+            return 1
 
     # Garde-fou : valider AVANT d'activer (ne pas pointer le symlink sur un fichier cassé).
     topo = load_topology(target_abs)
     _activate_symlink(target_rel)
+    # IDENTITÉ DE STACK = `topo.stack_id` (NORMALISÉ par stack_id_from_path : `.example.yaml`
+    # retiré → `local.example.yaml` et `local.yaml` = stack `local`). On l'utilise pour le
+    # contexte kubectl + le kubeconfig, PAS `args.name` (le nom TAPÉ) : `stack select
+    # local.example` doit poser le contexte `local` et viser `.kubeconfigs/local.config`,
+    # jamais `.kubeconfigs/local.example.config` (inexistant → faux-refus de la garde
+    # d'identité qui exige `current-context == stack_id`, ADR 0108). La branche banc plus bas
+    # utilisait déjà `_stack_id(target_abs)` ; on aligne le contexte et la prod dessus.
+    stack = topo.stack_id
     print(
         f"✓ activée : topology.yaml → {target_rel} (chemin dérivé : {default_target(topo)})",
         file=sys.stderr,
@@ -812,7 +835,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     # CONTEXTE kubectl nommé (LOT 8, ADR 0097 §3) : remplace `nestor env`. On pose un
     # contexte `<stack>` dans le kubeconfig de la cible (best-effort, non bloquant) — le
     # mécanisme STANDARD k8s (`kubectl --context <stack>`) supplante l'export de KUBECONFIG.
-    _pose_named_context(topo, args.name)
+    _pose_named_context(topo, stack)
 
     # PROD (ADR 0090) : la cible n'est pas le banc Lima mais le cluster déclaré. Si la
     # topo ne déclare pas encore son `kubeconfig:`, c'est ICI (à l'activation — déjà une
@@ -821,7 +844,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     # `--no-input` : on n'écrit rien (action opérateur), on signale.
     if topo.terrain != "local":
         cible = _select_prod_kubeconfig(
-            topo, target_abs, args.name, no_input=getattr(args, "no_input", False)
+            topo, target_abs, stack, no_input=getattr(args, "no_input", False)
         )
     # BANC : le kubeconfig du banc DE CETTE STACK s'il est monté ET JOIGNABLE, sinon
     # /dev/null (jamais la prod, ADR 0053). Chemin nommé par la stack SÉLECTIONNÉE (ADR 0102
@@ -845,7 +868,7 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
     # est capturé (`eval "$(…)"`/pipe), on l'imprime pour que le shell la pose.
     if sys.stdout.isatty():
         print(
-            f'  pointer le shell : `eval "$(nestor stack select {args.name})"`',
+            f'  pointer le shell : `eval "$(nestor stack select {stack})"`',
             file=sys.stderr,
         )
     else:
