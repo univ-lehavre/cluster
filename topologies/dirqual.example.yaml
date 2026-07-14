@@ -1,7 +1,9 @@
 # code: language=yaml
 #
 # topologies/dirqual.example.yaml — image VERSIONNÉE de l'instance PROD `dirqual`
-# (4 nœuds baremetal `dirqual1-4`, `10.67.2.11-14`, ADR 0056/0090). SOURCE DE VÉRITÉ
+# (4 nœuds baremetal `dirqual1-4`, `10.0.0.11-14` — plage d'EXEMPLE dans le `/22` mandaté
+# ADR 0023 ; l'adressage réel du parc vit dans le `dirqual.yaml` gitignoré). ADR 0056/0090.
+# SOURCE DE VÉRITÉ
 # déclarative : `nestor` en DÉRIVE l'inventaire Ansible, les group_vars de profil, la
 # table de nœuds. Générateur SANS ÉTAT ; Ansible reste le moteur de convergence (ADR 0056 §7).
 # Le `topology.yaml` réel (symlink d'activation) et le `dirqual.yaml` de surcharge locale
@@ -101,7 +103,7 @@ atlas:
     - name: citation # nom court (dérive image/overlay). REQUIS.
 
 # ─── portal : seul `access_host` est lu (host des NodePort côté navigateur). En prod, l'hôte
-# Tailscale du control-plane : `dirqual1` (l'InternalIP 10.67.2.11 est injoignable de l'extérieur).
+# Tailscale du control-plane : `dirqual1` (l'InternalIP, ex. `10.0.0.11`, est injoignable de l'extérieur).
 portal:
   access_host: dirqual1
 
