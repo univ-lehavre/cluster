@@ -96,3 +96,27 @@
         and (loki_sts.resources[0].status.readyReplicas | default(0)) >= 1
       retries: '{{ loki_ready_retries }}'
       delay: '{{ loki_ready_delay }}'
+
+    # ── NetworkPolicies du namespace monitoring (default-deny + micro-segmentation) ─
+    # platform-loki est le DERNIER maillon posant un workload dans le ns `monitoring`
+    # (après platform-monitoring : Prometheus/Grafana/Alertmanager, et Loki+Promtail
+    # ci-dessus). On arme donc ici le default-deny, quand TOUS les pods du ns existent
+    # et que les allow-* sont posées → pas de fenêtre où le deny casse un démarrage.
+    # ORDRE STRICT : les allow-* AVANT 00-default-deny (NetworkPolicy est additif ;
+    # armer le deny sans les allow couperait Prometheus/Loki/Promtail). Les egress
+    # allow-loki-egress (S3 + API) et allow-promtail-egress (API sd) sont INDISPENSABLES :
+    # Loki/Promtail ont été ajoutés au ns après le jeu d'origine (Prometheus-centré) et
+    # sans eux le deny DROP les chunks S3 de Loki et le service-discovery de Promtail.
+    - name: Apply monitoring network policies (allow-* first, default-deny last)
+      kubernetes.core.k8s:
+        state: present
+        namespace: '{{ loki_namespace }}'
+        src: '{{ platform_repo_dir }}/platform/network-policies/monitoring/{{ item }}'
+      loop:
+        - allow-dns.yaml
+        - allow-intra-namespace.yaml
+        - allow-grafana-ingress.yaml
+        - allow-scrape-egress.yaml
+        - allow-loki-egress.yaml
+        - allow-promtail-egress.yaml
+        - 00-default-deny.yaml

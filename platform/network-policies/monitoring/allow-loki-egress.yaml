@@ -1,0 +1,48 @@
+# Egress du pod Loki (single-binary + sidecar k8s-sidecar des règles). Le jeu de
+# policies monitoring d'origine visait Prometheus/Grafana/Alertmanager ; Loki a
+# été ajouté au ns `monitoring` ensuite et n'était couvert par AUCUN allow-* pour
+# ses deux flux SORTANTS hors du ns — sans cette policy, le default-deny les DROP :
+#
+#   1. Backing S3 (chunks + ruler) : Loki ÉCRIT ses objets dans le datalake.
+#      - Banc léger : SeaweedFS (ns `s3`, port 8333).
+#      - Topologie Ceph : RGW (ns `rook-ceph`, Service :80, pod :8080 après DNAT).
+#      Le rôle platform-loki template l'endpoint (défaut rgw → rook-ceph:80) ; la
+#      policy couvre les DEUX backings, robuste quel que soit le mode (parité
+#      dagster/allow-s3-egress).
+#   2. API server (:6443) : le sidecar k8s-sidecar (METHOD=WATCH, loki.yaml) watch
+#      les ConfigMaps/Secrets de règles d'alerte. Egress hors-cluster sans `to:`
+#      (même idiome que allow-scrape-egress pour Prometheus).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-loki-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+  policyTypes:
+    - Egress
+  egress:
+    # Banc léger : SeaweedFS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: s3
+      ports:
+        - protocol: TCP
+          port: 8333
+    # Topologie Ceph : RGW (Service rook-ceph-rgw-datalake:80, pod 8080).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rook-ceph
+      ports:
+        - protocol: TCP
+          port: 80 # Service RGW
+        - protocol: TCP
+          port: 8080 # port du POD rgw (cible réelle après DNAT)
+    # API server : sidecar de règles (WATCH ConfigMaps/Secrets).
+    - ports:
+        - protocol: TCP
+          port: 6443
