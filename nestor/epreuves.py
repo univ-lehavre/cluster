@@ -454,6 +454,26 @@ EPREUVES: list[Epreuve] = [
         "base",
         None,
     ),
+    # Livraison RÉELLE (ADR 0113, atlas 0104) : le 35 prouve l'usine sur un JOUET ; le 36
+    # pousse le VRAI dépôt atlas (main revu, checkout requis via ATLAS_DIR) et vérifie la
+    # sortie doctrinale de la chaîne — la branche `deploy` (= main ⊕ digests) matérialisée
+    # par le workflow d'atlas, les images `<cl>-dagster:<sha12>` au registre interne, les
+    # placeholders d'overlay substitués. Prouve AU PASSAGE le droit de push du token
+    # Actions sur `deploy` (dernier prérequis d'usine du plan atlas, lot 2). Périmètre :
+    # livraison seule — la réconciliation Argo CD des overlays prod (OBC/RGW) attend un
+    # terrain Ceph. Même logique de profil que le 35 (socle cicd hors chaîne ADR 0039) :
+    # minorant 'base', SKIP à l'exécution si un prérequis manque (maillon du socle,
+    # checkout atlas, pré-images au registre) ; STRICT_LIVRAISON=1 fait échouer.
+    Epreuve(
+        "36",
+        "Livraison atlas : push main → usine → branche deploy",
+        "intég",
+        "gitops",
+        TOPO_AGNOSTIQUE,
+        TERRAIN_API,
+        "base",
+        None,
+    ),
 ]
 
 
