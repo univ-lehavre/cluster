@@ -132,3 +132,4 @@ Format léger inspiré de Michael Nygard :
 | 0110 | [Pré-image de build : l'image de code se construit sans réseau (in-pod), la base lourde hors cluster](0110-preimage-de-build-et-build-in-pod.md)   | Accepted           |
 | 0111 | [Déplacement de frontière : atlas instancie l'Application Argo CD de ses code-locations](0111-atlas-instancie-application-argocd.md)               | Accepted           |
 | 0112 | [CI/CD in-cluster : Gitea Actions + BuildKit rootless (le build in-pod, rétabli)](0112-cicd-in-cluster-gitea-actions-buildkit.md)                  | Accepted           |
+| 0113 | [Chaîne de livraison autonome : la branche deploy matérialisée par la CI](0113-chaine-livraison-branche-deploy.md)                                 | Proposed           |
