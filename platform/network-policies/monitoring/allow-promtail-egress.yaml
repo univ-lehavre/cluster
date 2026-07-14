@@ -1,0 +1,22 @@
+# Egress du DaemonSet Promtail vers l'API server (:6443). Promtail fait un
+# service-discovery Kubernetes (kubernetes_sd_configs role: pod, promtail.yaml)
+# pour savoir quels logs de pods collecter — sans cet egress, sous default-deny,
+# la découverte est DROPPÉE → collecte VIDE (aucune cible), l'observabilité des
+# logs tombe silencieusement. Le push des logs vers Loki (:3100) est intra-ns
+# (couvert par allow-intra-namespace) ; la résolution DNS par allow-dns-egress.
+# Egress hors-cluster sans `to:` (même idiome que allow-scrape-egress).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-promtail-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: promtail
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 6443
