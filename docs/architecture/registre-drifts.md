@@ -7,8 +7,8 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 
 ## En chiffres
 
-- **99 drifts** indexés — statut : 3 caduc, 93 corrige, 1 en-cours, 2 ouvert.
-- Par portée : 39 code, 10 env, 22 harnais, 4 infra, 24 livrable.
+- **100 drifts** indexés — statut : 3 caduc, 94 corrige, 1 en-cours, 2 ouvert.
+- Par portée : 40 code, 10 env, 22 harnais, 4 infra, 24 livrable.
 
 ## Livrable (bug — vaut pour tous les bancs ET la prod) (24)
 
@@ -39,7 +39,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L93` | ✅ corrige | preuve prod citation Parquet — run transform aval (2026-07-08) | pair_uplift_model OOMKill pour la 5ᵉ fois, MÊME après le streaming (L92). L'aval (uplift + index pgvector) reste bloqué. → Échantillon DÉTERMINISTE des labels d'entraînement au-delà de _MAX_TRAIN_LABELS (défaut 800k, dérivable via CITATION_UPLIFT_MAX_TRAIN_LABELS) AVANT la densification de X → X : 48 Go → ~8 Go. Un GradientBoosting n'a pas besoin de 4,7M lignes ; la validation groupée-par-auteur reste honnête sur l'échantillon (graine figée, ADR 0057). atlas fix/citation-uplift-train-sample. 45 tests verts. LEÇON : MESURER (count des inputs) dès le 1er OOM plutôt qu'estimer — 5 cycles perdus à colmater le scoring alors que le volume était côté labels d'entraînement. |
 | `L96` | ✅ corrige | preuve prod citation+pageviews — observabilité et débit des runs longs (2026-07-08) | Deux assets à boucle longue tournaient DES HEURES sans le moindre log de progression après STEP_START — indiscernables d'un run bloqué (il fallait lire /proc/<pid>/stat dans le pod pour savoir s'ils avançaient). citation `pair_uplift_model` : 3h+ (scoring ~12M paires). pageviews `ref_universities` : 61 min (résolution des redirections). Mauvaise pratique signalée par l'utilisateur ; les deux runs arrêtés proprement (terminateRun) pour reprendre. → DÉBIT sans multiprocessing (rouvrirait l'OOM L90/L92 ou casse le déterminisme) : citation VECTORISE la construction des features (pair_features_block ; mêmes résultats — vectoriel bit-à-bit, cos/dist ≤1 ULP ; BLAS/sklearn parallélisent alors en interne) ; pageviews PARALLÉLISE la résolution en ThreadPool 16 (I/O-bound, dict ordre-indépendant → référentiel inchangé). OBSERVABILITÉ (décision : logs + métadonnées Dagster/MLflow, PAS Prometheus — pod éphémère, Pushgateway absent, Loki/MLflow déjà là) : log de progression ≥1×/min via context.log (bloc/total ou titres/total, débit, ETA) + métadonnées MaterializeResult historisées (scoring_duration_s/pairs_per_s ; n_titres_resolus/resolution_duration_s). atlas PR #585 (citation, 25 tests) + #586 (pageviews, 61 tests), mergées. Rebuild + re-seed + relance des 2 runs. LEÇON : un run long DOIT logger périodiquement dès la conception. |
 
-## Code (défaut du livrable révélé au run) (39)
+## Code (défaut du livrable révélé au run) (40)
 
 | Id | Statut | Campagne | Symptôme → correctif |
 | --- | --- | --- | --- |
@@ -82,6 +82,7 @@ Un **drift** = un écart révélé par un run e2e que le lint ne voyait pas (hon
 | `L69` | ✅ corrige | portail — banc Lima (2026-06-23) | Le portail rendait DRIFT pour les UI vendored et n'affichait aucun lien vers elles. → Observer aussi `<svc>-nodeport` (le Service d'exposition séparé) ; `login_for()` affiche l'IDENTIFIANT à côté de la commande mot de passe ; scheme `https` pour les UI qui terminent le TLS (dashboard Ceph). Commit ab7f47f. |
 | `L70` | ✅ corrige | audit prod dirqual — etcd backup (2026-06-24) | Le rendu du template etcd-snapshot échouait : « Syntax error in template: unexpected char » — révélant que l'etcd backup n'avait JAMAIS été actif sur dirqual (rôle etcd-backup encore jamais joué, cf. bench/RESULTS.md:54). → Reformuler le commentaire sans accolades Jinja. Le rendu réussit (snapshot etcd 63 Mo produit sur control-plane). Commit 23f6aed. |
 | `L71` | ✅ corrige | audit prod dirqual — CoreDNS SPOF (#487, 2026-06-25) | Le durcissement de l'anti-affinité CoreDNS échouait : le module `kubernetes.core.k8s` ne s'exécutait pas sur le control-plane (le rôle `k8s-initialization` y tourne en become/sudo car kubeadm init l'exige). → S'aligner sur les autres opérations k8s du rôle (taint, label) : `kubectl patch --type=strategic` avec le kubeconfig local du nœud, idempotent (no-op « no change » si déjà en place). Commit fa17a5c. |
+| `L99` | ✅ corrige | validation netpol monitoring — banc Lima (2026-07-14) | Montage de la phase `monitoring` en échec sur `platform-cert-manager` : « Apply internal CA issuers » → « failed calling webhook webhook.cert-manager.io : Post `https://cert-manager-webhook.cert-manager.svc:443/validate` : connect: connection refused ». Le pod webhook existe mais son port 443 ne répond pas encore. → Gate renforcée en équivalent `kubectl rollout status` (observedGeneration ≥ generation, updatedReplicas/availableReplicas/readyReplicas ≥ replicas, unavailableReplicas == 0) → elle n'est plus satisfaite par l'ancien pod. PLUS un retry-filet sur « Apply internal CA issuers » (until non-failed) fermant la fenêtre Endpoints (Service:443 route avec un court délai après le rollout). Logique de gate prouvée sur 4 scénarios (rollout en cours/terminé/ juste-patché/status-vide). Sans lien avec la PR netpol dirqual qui a révélé le drift (le rôle cert-manager s'exécute avant, ns cert-manager ≠ monitoring). |
 
 ## Environnement (artefact d'un banc précis) (10)
 

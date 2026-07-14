@@ -99,21 +99,44 @@
         label: '{{ item.deploy }}'
 
     # Le webhook d'admission doit être Ready avant d'appliquer des ressources
-    # cert-manager (Issuers) — sinon « failed calling webhook ».
-    - name: Wait for cert-manager webhook to be Ready
+    # cert-manager (Issuers) — sinon « failed calling webhook ... connection refused ».
+    # ATTENDRE LA FIN DU ROLLOUT, pas juste `readyReplicas >= 1` : la tâche « Set
+    # cert-manager resources » ci-dessus PATCHE le Deployment webhook → rollout. Pendant
+    # celui-ci, l'ANCIEN pod reste Ready (readyReplicas=1) alors que le nouveau n'écoute
+    # pas encore → `Apply internal CA issuers` appelle un webhook mort (drift, famille L36 :
+    # ressource appliquée avant que le porteur du webhook réponde). On exige donc l'équivalent
+    # `kubectl rollout status` : génération observée, tous les replicas à jour/dispo/prêts,
+    # aucun indisponible.
+    - name: Wait for cert-manager webhook rollout to complete
       kubernetes.core.k8s_info:
         kind: Deployment
         name: cert-manager-webhook
         namespace: '{{ cert_manager_namespace }}'
       register: cm_webhook
+      vars:
+        _cm_dep: '{{ cm_webhook.resources[0] | default({}) }}'
+        _cm_status: '{{ _cm_dep.status | default({}) }}'
+        _cm_desired: '{{ _cm_dep.spec.replicas | default(1) }}'
       until: >-
         cm_webhook.resources | default([]) | length > 0
-        and (cm_webhook.resources[0].status.readyReplicas | default(0)) >= 1
+        and (_cm_status.observedGeneration | default(0)) >= (_cm_dep.metadata.generation | default(1))
+        and (_cm_status.updatedReplicas | default(0)) | int >= (_cm_desired | int)
+        and (_cm_status.availableReplicas | default(0)) | int >= (_cm_desired | int)
+        and (_cm_status.readyReplicas | default(0)) | int >= (_cm_desired | int)
+        and (_cm_status.unavailableReplicas | default(0)) | int == 0
       retries: '{{ cert_manager_ready_retries }}'
       delay: '{{ cert_manager_ready_delay }}'
 
     # Chaîne de CA interne (selfsigned-bootstrap → root-ca → internal-ca).
+    # RETRY filet : même rollout terminé, les Endpoints du Service webhook:443 peuvent
+    # router avec un court délai vers le nouveau pod → un premier appel peut encore voir
+    # « connection refused ». On réessaie l'apply jusqu'à ce que le webhook réponde (la
+    # gate ci-dessus rend ce cas rare ; ce retry ferme la fenêtre Endpoints résiduelle).
     - name: Apply internal CA issuers
       kubernetes.core.k8s:
         state: present
         src: '{{ platform_repo_dir }}/platform/cert-manager/issuers.yaml'
+      register: cm_issuers
+      until: cm_issuers is not failed
+      retries: '{{ cert_manager_ready_retries }}'
+      delay: '{{ cert_manager_ready_delay }}'
