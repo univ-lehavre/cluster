@@ -737,13 +737,24 @@ def _select_prod_kubeconfig(topo: Topology, topo_path: str, stack: str, *, no_in
                 env_kubeconfig=env_kc, declared=topo.kubeconfig, stack=stack, repo_root=_ROOT
             )
         )
-    # Topo sans cible : compléter (déterministe). En --no-input on signale seulement
-    # (rester strict en CI : ne pas modifier de fichier versionné/local sans intention).
+    # Topo sans cible : compléter (déterministe). On N'ÉCRIT PAS quand :
+    #  - `--no-input` (rester strict en CI : ne pas modifier de fichier sans intention) ;
+    #  - le fichier est un `.example` VERSIONNÉ — y écrire le chemin local du kubeconfig
+    #    fuiterait un credential dans un fichier suivi par git (ADR 0023). Une topo prod se
+    #    matérialise par `stack new <nom>` (topologies/<nom>.yaml gitignoré), pas en polluant
+    #    le modèle. Dans ces deux cas on SIGNALE seulement et on rend le chemin conventionnel.
     default = _prod_target.default_kubeconfig_path(stack, repo_root=_ROOT)
-    if no_input:
+    is_example = os.path.basename(topo_path).endswith(".example.yaml")
+    if no_input or is_example:
+        raison = (
+            "modèle `.example` versionné (ne pas y écrire de credential, ADR 0023) — "
+            f"créer la topo réelle `stack new {stack}`"
+            if is_example
+            else f"la déclarer (ex. `{default}`)"
+        )
         _warn(
-            f"topologie sans `kubeconfig:` — la déclarer (ex. `{default}`) pour que "
-            "`nestor preview` lise l'état réel du cluster prod (ADR 0090)."
+            f"topologie sans `kubeconfig:` — {raison} pour que `nestor preview` lise "
+            "l'état réel du cluster prod (ADR 0090)."
         )
         return os.path.expanduser(default)
     with open(topo_path, encoding="utf-8") as f:
@@ -790,31 +801,22 @@ def cmd_stack_select(args: argparse.Namespace) -> int:
 
     target_abs = os.path.join(_ROOT, target_rel)
     if not os.path.exists(target_abs):
-        # FALLBACK `.example` : `stack select local` (nom nu) doit trouver le modèle
-        # versionné `local.example.yaml` quand aucune surcharge locale `local.yaml` n'existe
-        # — c'est le cas nominal du banc générique (l'opérateur pense « local », le stack_id
-        # normalisé est `local`, cf. catalog_entry « activer un .example est légitime »). On
-        # ne l'applique QUE pour un nom NU (pas déjà `.example`/suffixé) pour ne pas masquer
-        # une vraie faute de frappe. Une surcharge `local.yaml` PRIME si elle existe (testée
-        # en premier ci-dessus) : le fallback ne s'active que si elle est absente.
-        stem = args.name.strip()
-        example_rel = f"topologies/{stem}.example.yaml"
-        if not stem.endswith((".yaml", ".yml", ".example")) and os.path.exists(
-            os.path.join(_ROOT, example_rel)
-        ):
-            target_rel = example_rel
-            target_abs = os.path.join(_ROOT, example_rel)
-        else:
-            # Aide : lister ce que le catalogue propose réellement.
-            catalog = sorted(
-                os.path.basename(p) for p in glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml"))
-            )
-            dispo = ", ".join(catalog) or "(catalogue vide)"
-            print(
-                f"erreur : {target_rel} introuvable dans le catalogue.\n  disponibles : {dispo}",
-                file=sys.stderr,
-            )
-            return 1
+        # PAS de fallback `.example` (retiré) : `stack select <nom>` exige que la cible EXISTE
+        # exactement (`<nom>.yaml`, `<nom>.example.yaml`, `<nom>.example`). Un fallback nu →
+        # `.example` activait le MODÈLE VERSIONNÉ et, pour une prod sans `kubeconfig:`,
+        # `_select_prod_kubeconfig` y ÉCRIVAIT le chemin local du kubeconfig → fuite dans un
+        # fichier suivi par git (violation ADR 0023). Pour activer un modèle, le nommer
+        # explicitement (`stack select local.example`) ; une topo réelle se crée par
+        # `stack new <nom>` (topologies/<nom>.yaml, gitignoré).
+        catalog = sorted(
+            os.path.basename(p) for p in glob.glob(os.path.join(_CATALOG_DIR, "*.y*ml"))
+        )
+        dispo = ", ".join(catalog) or "(catalogue vide)"
+        print(
+            f"erreur : {target_rel} introuvable dans le catalogue.\n  disponibles : {dispo}",
+            file=sys.stderr,
+        )
+        return 1
 
     # Garde-fou : valider AVANT d'activer (ne pas pointer le symlink sur un fichier cassé).
     topo = load_topology(target_abs)

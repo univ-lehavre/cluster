@@ -2469,12 +2469,14 @@ class Stack(unittest.TestCase):
         self.assertIn("export KUBECONFIG=", out)
         self.assertNotIn(os.devnull, out)  # le banc, pas /dev/null
 
-    def test_select_bare_name_falls_back_to_example(self):
-        # `stack select <nom>` (nom NU) active `topologies/<nom>.example.yaml` quand aucune
-        # surcharge locale `<nom>.yaml` n'existe — cas nominal du banc générique versionné.
-        name = "zz-test-fallback"
+    def test_select_bare_name_without_real_topo_fails(self):
+        # PAS de fallback `.example` : `stack select <nom>` (nom NU) ÉCHOUE si `<nom>.yaml`
+        # n'existe pas — même si `<nom>.example.yaml` existe. Le fallback activait le modèle
+        # versionné et, pour une prod, y écrivait le kubeconfig local (fuite git, ADR 0023).
+        # Pour activer un modèle, le nommer explicitement (`<nom>.example`).
+        name = "zz-test-nofallback"
         example = os.path.join(_ROOT, "topologies", f"{name}.example.yaml")
-        bare = self._catalog(name)  # <nom>.yaml — ne doit PAS exister
+        bare = self._catalog(name)  # <nom>.yaml — n'existe pas
         with open(example, "w", encoding="utf-8") as f:
             f.write(
                 "catalog: {terrain: local, profile: base}\n"
@@ -2483,8 +2485,30 @@ class Stack(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(example) and os.unlink(example))
         self.assertFalse(os.path.exists(bare))
         code, _, err = _capture(["stack", "select", name])
-        self.assertEqual(code, 0)  # trouvé via le fallback, plus « introuvable »
-        self.assertIn(f"topologies/{name}.example.yaml", err)  # a bien activé le .example
+        self.assertEqual(code, 1)  # échec propre, pas d'activation du .example
+        self.assertIn("introuvable", err)
+
+    def test_select_prod_example_never_writes_versioned_file(self):
+        # RÉGRESSION : `stack select <prod>.example` (modèle versionné, terrain non-local sans
+        # `kubeconfig:`) ne doit JAMAIS écrire le champ kubeconfig DANS le .example (fichier
+        # suivi par git) — c'était la fuite du fallback (chemin local dans un versionné, ADR 0023).
+        name = "zz-test-prodexample"
+        example = os.path.join(_ROOT, "topologies", f"{name}.example.yaml")
+        content = (
+            "catalog: {terrain: baremetal, profile: dataops}\n"
+            "nodes:\n  - {name: n1, roles: [control, worker]}\n"
+            "storage: {backend: ceph}\n"
+        )
+        with open(example, "w", encoding="utf-8") as f:
+            f.write(content)
+        self.addCleanup(lambda: os.path.exists(example) and os.unlink(example))
+        # activer par le nom EXPLICITE `.example` (plus de fallback nu), en INTERACTIF
+        # (sans --no-input) — c'est le mode qui écrivait avant le garde-fou `is_example`.
+        _capture(["stack", "select", f"{name}.example"])
+        with open(example, encoding="utf-8") as f:
+            after = f.read()
+        self.assertNotIn("kubeconfig:", after)  # le .example versionné reste INTACT
+        self.assertEqual(after, content)
 
     def test_select_example_name_uses_normalized_stack_id(self):
         # `stack select <nom>.example` doit poser le contexte kubectl + viser le kubeconfig au
