@@ -1753,3 +1753,28 @@ drifts:
       du CODE doit s'accompagner d'un teardown de l'ÉTAT vivant (ADR 0046 : le code est la vérité,
       mais l'état déjà divergent se corrige explicitement).
     statut: corrige
+
+  - id: L99
+    campagne: 'validation netpol monitoring — banc Lima (2026-07-14)'
+    portee: code
+    symptome: >-
+      Montage de la phase `monitoring` en échec sur `platform-cert-manager` :
+      « Apply internal CA issuers » → « failed calling webhook webhook.cert-manager.io :
+      Post https://cert-manager-webhook.cert-manager.svc:443/validate : connect: connection
+      refused ». Le pod webhook existe mais son port 443 ne répond pas encore.
+    cause: >-
+      Famille L36 (ressource appliquée avant que le porteur du webhook réponde), fenêtre
+      résiduelle laissée ouverte par la gate. La tâche « Set cert-manager resources »
+      PATCHE le Deployment webhook (requests/limits hors-bundle) → rollout. La gate qui
+      suivait ne testait que `readyReplicas >= 1`, satisfaite par l'ANCIEN pod pendant le
+      rollout, alors que le NOUVEAU n'écoutait pas encore → l'apply des Issuers appelait un
+      webhook mort. Flake intermittent (masqué quand le nouveau pod démarrait vite).
+    correctif: >-
+      Gate renforcée en équivalent `kubectl rollout status` (observedGeneration ≥ generation,
+      updatedReplicas/availableReplicas/readyReplicas ≥ replicas, unavailableReplicas == 0) →
+      elle n'est plus satisfaite par l'ancien pod. PLUS un retry-filet sur « Apply internal CA
+      issuers » (until non-failed) fermant la fenêtre Endpoints (Service:443 route avec un court
+      délai après le rollout). Logique de gate prouvée sur 4 scénarios (rollout en cours/terminé/
+      juste-patché/status-vide). Sans lien avec la PR netpol dirqual qui a révélé le drift (le
+      rôle cert-manager s'exécute avant, ns cert-manager ≠ monitoring).
+    statut: corrige
