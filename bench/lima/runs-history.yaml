@@ -568,3 +568,15 @@ runs:
       buildkit: 89
       portal: 127
       gitea-runner: 77
+  - id: 2026-07-14T11-base-894c2054
+    date: '2026-07-14T11:23:36Z'
+    branche: fix/dirqual-briques-majeures
+    commit: 894c2054
+    profil: base
+    topologie: local
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 41
+    phases:
+      up: 41
