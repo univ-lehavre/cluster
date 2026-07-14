@@ -923,15 +923,23 @@ def _ready_nodes(terrain: str = "local", declared: str | None = None) -> list[st
       sinon VIDE — jamais `~/.kube/config`, ADR 0053). Un banc absent rend une liste vide.
     - terrain non local (`cloud`/`baremetal`) : on sonde si une cible PROD est connue — soit
       `KUBECONFIG` EXPORTÉ explicitement (intention, ADR 0053 (a)), soit `declared` =
-      `kubeconfig:` de la topologie (ADR 0090). Sinon `[]` — un `preview` prod sans cible
-      déclarée ne lit JAMAIS le kubeconfig banc (qui afficherait `lima-*` Ready à tort) ni
-      `~/.kube/config`."""
-    # En prod : sonder UNIQUEMENT si une cible prod est connue (KUBECONFIG exporté OU
-    # kubeconfig déclaré dans la topo, ADR 0090). `_KUBECONFIG_AUTO_BENCH` distingue le
-    # défaut auto-posé vers le BANC par `main()` (≠ intention prod) : un KUBECONFIG
-    # auto-banc ne doit PAS faire sonder le banc pour une stack prod (bug #405, ADR 0084).
+      `kubeconfig:` de la topologie (ADR 0090), soit le kubeconfig RAPATRIÉ nommé par la
+      stack active (`.kubeconfigs/<stack>.config`, ADR 0102 volet B) — la même cible que
+      `nestor kubectl` vise déjà. Sinon `[]` — un `preview` prod sans cible connue ne lit
+      JAMAIS `~/.kube/config`."""
+    # En prod : sonder UNIQUEMENT si une cible prod est CONNUE. Trois façons (ADR 0090/0102) :
+    # (a) `KUBECONFIG` exporté (intention opérateur — `_KUBECONFIG_AUTO_BENCH` exclut le défaut
+    #     auto-banc de main(), qui ne doit PAS faire sonder le banc pour une prod, bug #405) ;
+    # (b) champ `kubeconfig:` déclaré dans la topo ; (c) le kubeconfig RAPATRIÉ nommé par la
+    # stack active `.kubeconfigs/<stack>.config` — c'est la cible que `_bench_kubeconfig`
+    # (donc `_kubectl_env` ci-dessous) résout DÉJÀ, nommée par LA stack, jamais le banc d'une
+    # autre. Sans (c), `nestor kubectl get nodes` voyait la prod mais `preview` la croyait vide
+    # (« nœuds Ready : — » → propose de tout réinstaller) dès que la topo n'a pas de `kubeconfig:`.
     explicit_kubeconfig = bool(os.environ.get("KUBECONFIG")) and not _KUBECONFIG_AUTO_BENCH
-    if terrain != "local" and not explicit_kubeconfig and not declared:
+    stack_kubeconfig = terrain != "local" and os.path.exists(
+        _bench_kubeconfig_path(_active_stack_name(None))
+    )
+    if terrain != "local" and not explicit_kubeconfig and not declared and not stack_kubeconfig:
         return []
     try:
         out = subprocess.run(  # noqa: S603 — argv fixe, pas d'entrée shell

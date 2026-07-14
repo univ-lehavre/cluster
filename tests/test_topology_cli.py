@@ -1094,19 +1094,50 @@ runs:
 
     def test_prod_probes_return_empty_without_explicit_kubeconfig(self):
         # ADR 0084/0108 (issue #405) : sur terrain NON local (baremetal) sans KUBECONFIG
-        # explicite, les sondes du RÉEL rendent [] — elles ne sondent PAS le banc Lima
-        # (limactl/kubectl banc). `_real_vms("baremetal")` court-circuite avant `limactl` ;
-        # `_ready_nodes("baremetal")` avant `kubectl` (KUBECONFIG absent / auto-banc). Test PUR :
+        # explicite NI kubeconfig rapatrié nommé par la stack, les sondes du RÉEL rendent [] —
+        # elles ne sondent PAS le banc Lima (limactl/kubectl banc). `_real_vms("baremetal")`
+        # court-circuite avant `limactl` ; `_ready_nodes("baremetal")` avant `kubectl`. Test PUR :
         # pas de subprocess à simuler (le gating retourne [] AVANT tout appel système).
         os.environ.pop("KUBECONFIG", None)
         orig_auto = cli._KUBECONFIG_AUTO_BENCH
         cli._KUBECONFIG_AUTO_BENCH = True  # auto-export banc de main() ≠ intention prod
         self.addCleanup(setattr, cli, "_KUBECONFIG_AUTO_BENCH", orig_auto)
+        # PUR + déterministe : on force l'ABSENCE du kubeconfig nommé par la stack (sinon la
+        # sonde partirait le lire — cf. le test complémentaire ci-dessous). `_bench_kubeconfig_path`
+        # rend un chemin ; on stube `os.path.exists` pour ce chemin uniquement.
+        orig_exists = cli.os.path.exists
+        cli.os.path.exists = lambda p: False if str(p).endswith(".config") else orig_exists(p)
+        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
         # `_PRISTINE_*` : les vraies sondes captées au chargement du module (avant tout
-        # stub) → indépendant de l'ordre des tests. En prod sans KUBECONFIG explicite,
+        # stub) → indépendant de l'ordre des tests. En prod sans cible connue,
         # le gating (ADR 0084) court-circuite AVANT limactl/kubectl → [].
         self.assertEqual(_PRISTINE_REAL_VMS("baremetal"), [])
         self.assertEqual(_PRISTINE_READY_NODES("baremetal"), [])
+
+    def test_prod_probe_reads_stack_named_kubeconfig(self):
+        # ADR 0102 volet B : sur terrain prod, si le kubeconfig RAPATRIÉ nommé par la stack
+        # active (`.kubeconfigs/<stack>.config`) existe, `_ready_nodes` le SONDE (même cible que
+        # `nestor kubectl`) — sans exiger un KUBECONFIG exporté ni un champ `kubeconfig:` déclaré.
+        # Régression : sans ça, `nestor kubectl get nodes` voyait la prod mais `preview` la
+        # croyait vide (« nœuds Ready : — » → propose de tout réinstaller sur une prod saine).
+        os.environ.pop("KUBECONFIG", None)
+        orig_auto = cli._KUBECONFIG_AUTO_BENCH
+        cli._KUBECONFIG_AUTO_BENCH = True
+        self.addCleanup(setattr, cli, "_KUBECONFIG_AUTO_BENCH", orig_auto)
+        # Le kubeconfig nommé par la stack EXISTE (on force exists=True pour un *.config) ...
+        orig_exists = cli.os.path.exists
+        cli.os.path.exists = lambda p: True if str(p).endswith(".config") else orig_exists(p)
+        self.addCleanup(setattr, cli.os.path, "exists", orig_exists)
+        # ... et kubectl répond avec un nœud Ready (on stube le subprocess, la sonde doit
+        # l'ATTEINDRE au lieu de court-circuiter à []).
+        orig_run = cli.subprocess.run
+
+        class _R:
+            stdout = "dirqual1   Ready   control-plane   32d   v1.34.8\n"
+
+        cli.subprocess.run = lambda *a, **k: _R()
+        self.addCleanup(setattr, cli.subprocess, "run", orig_run)
+        self.assertEqual(_PRISTINE_READY_NODES("baremetal"), ["dirqual1"])
 
     def test_never_launches(self):
         # preview est READ-ONLY : le runner ansible n'est JAMAIS appelé.
