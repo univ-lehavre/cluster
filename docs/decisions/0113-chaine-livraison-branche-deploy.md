@@ -2,7 +2,7 @@
 
 ## Statut
 
-Proposed (2026-07-14). Prolonge
+Accepted (2026-07-14). Prolonge
 [0111](0111-atlas-instancie-application-argocd.md) (atlas instancie
 l'`Application`) et [0112](0112-cicd-in-cluster-gitea-actions-buildkit.md)
 (l'usine CI/CD in-cluster, prouvée sur un jouet) ; précise
