@@ -324,8 +324,18 @@ fetch_kubeconfig_node() {
     local vm=$1 out=$2 api_port=$3 ctx="${4:-}"
     [ -n "${api_port}" ] || die "fetch_kubeconfig_node : api_port manquant"
     mkdir -p "$(dirname "${out}")"
-    vm_sh "${vm}" sudo cat /etc/kubernetes/admin.conf > "${out}" \
-        || die "kubeconfig introuvable sur ${vm} (bootstrap fait ?)"
+    # ATOMICITÉ : écrire d'abord dans un fichier TEMP, ne remplacer `${out}` QUE si le
+    # fetch réussit ET rend un kubeconfig non vide. Le patron naïf `cat … > "${out}"`
+    # TRONQUE `${out}` à 0 octet AVANT d'exécuter la commande (la redirection ouvre le
+    # fichier en premier) ; si le `cat` échoue (mauvais CP, VM absente), le `|| die`
+    # arrive trop tard et laisse un kubeconfig VIDE — perte d'accès silencieuse au banc.
+    local tmp="${out}.tmp.$$"
+    if ! vm_sh "${vm}" sudo cat /etc/kubernetes/admin.conf > "${tmp}" 2>/dev/null \
+        || [ ! -s "${tmp}" ]; then
+        rm -f "${tmp}"
+        die "kubeconfig introuvable sur ${vm} (bootstrap fait ? bon control-plane ?)"
+    fi
+    mv -f "${tmp}" "${out}"
     # admin.conf pointe sur cluster-api:6443 (résolu DANS la VM) → réécrit sur le
     # forward hôte.
     sed -i.bak -E "s#server: https://[^[:space:]]+#server: https://127.0.0.1:${api_port}#" "${out}"
