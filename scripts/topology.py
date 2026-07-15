@@ -1961,13 +1961,13 @@ def _access_generate_env(topo: Topology | None = None, local_port: int = _access
     pg_user = _access_secret("postgres", "pg-role-pgvector", "username")
     pg_pwd = _access_secret("postgres", "pg-role-pgvector", "password")
     push_url = _access_gitea_push_url(topo, local_port) if topo is not None else ""
+    # INTENTIONNEL : produire ce fichier de credentials EST la fonction de `access`
+    # (ADR 0048). Le `.env` est gitignoré côté atlas et porte DÉJÀ le mot de passe
+    # Postgres en clair ; le token de `GITEA_PUSH_URL` suit le même régime (secret
+    # d'instance jetable, régénéré à chaque `access`, jamais versionné — ADR 0113 §5 /
+    # 0114). Sans ce fichier, le geste `deploy.sh` d'atlas n'a pas de cible et refuse.
     with open(out_path, "w", encoding="utf-8") as f:
-        # codeql[py/clear-text-storage-sensitive-data] — INTENTIONNEL : produire ce
-        # fichier de credentials EST la fonction de `access` (ADR 0048). Le `.env` est
-        # gitignoré côté atlas et porte DÉJÀ le mot de passe Postgres en clair ; le token
-        # de `GITEA_PUSH_URL` suit le même régime (secret d'instance jetable, régénéré à
-        # chaque `access`, jamais versionné — ADR 0113 §5 / 0114). Sans ce fichier, le
-        # geste `deploy.sh` d'atlas n'a pas de cible et refuse.
+        # codeql[py/clear-text-storage-sensitive-data]
         f.write(_access.env_content(pg_user, pg_pwd, gitea_push_url=push_url))
     extra = ", GITEA_PUSH_URL" if push_url else ""
     print(f"\n✓ {os.path.basename(out_path)} généré (PG, OpenLineage, registry{extra})")
