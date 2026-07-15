@@ -14,6 +14,7 @@ directement `http://<IP-nœud>:<nodePort>` (aucun forward). Valeurs génériques
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 import yaml
 
@@ -36,6 +37,62 @@ def url_line(layer: str, url: str, auth: str) -> str:
 def env_line(key: str, value: str | None) -> str:
     """Ligne `KEY=VALUE` du `.env` (valeur vide tolérée)."""
     return f"{key}={value or ''}\n"
+
+
+# ── Cible de LIVRAISON atlas (GITEA_PUSH_URL) ────────────────────────────────
+# Le geste de mise en production atlas (`dataops/deploy.sh`, ADR atlas 0104) pousse le
+# `main` revu vers la forge de l'instance : `git push $GITEA_PUSH_URL main`. Le dépôt
+# cible est le dépôt atlas COMPLET — celui que suit l'`Application` Argo CD
+# (`repoURL …/<org>/<repo_livraison>.git`, `targetRevision: deploy`). À NE PAS confondre
+# avec le dépôt JOUET du socle (`gitea.repo`, défaut `workflows` — ADR 0111/0086) : le
+# jouet sert à prouver l'usine (scénario 35), il n'est jamais la cible de livraison.
+# Défauts génériques (ADR 0023/0035, pas de marque) : org=`atlas`, repo de livraison=`atlas`.
+LIVRAISON_ORG = "atlas"
+LIVRAISON_REPO = "atlas"
+
+
+def push_endpoint_for(
+    *,
+    declared: str | None,
+    exposition_mode: str,
+    access_host: str,
+    node_port: str,
+    local_port: int,
+) -> str:
+    """`host:port` par lequel le POSTE joint la forge git, dérivé de la TOPOLOGIE (PUR).
+
+    Un seul chemin, paramétré par la topo (plus de dualité banc/prod — que des topologies,
+    ADR 0108) :
+    - `declared` (champ topo `gitea.push_endpoint`) l'emporte TOUJOURS s'il est renseigné :
+      l'instance a déclaré explicitement son endpoint de forge externe (le contrat prime la
+      déduction — robustesse, ADR 0090/0102) ;
+    - sinon on DÉDUIT de `exposition.mode` (ADR 0092) : `nodeport`/`gateway` → la forge est
+      jointe DIRECTEMENT en `<access_host>:<node_port>` (host côté navigateur = `portal.
+      access_host`, port = nodePort réel du Service) ; tout autre mode (réseau isolé, ex.
+      Lima) → un port-forward local `127.0.0.1:<local_port>` que la façade maintient.
+    Rend `""` si l'endpoint déductible manque (nodePort absent) — l'appelant décide."""
+    if declared:
+        return declared.strip()
+    if exposition_mode in ("nodeport", "gateway"):
+        if access_host and node_port:
+            return f"{access_host}:{node_port}"
+        return ""
+    # Réseau non joignable directement (Lima isolé, ADR 0092) : port-forward local.
+    return f"127.0.0.1:{local_port}"
+
+
+def gitea_push_url(endpoint: str, user: str, token: str, *, org: str, repo: str) -> str:
+    """Assemble `GITEA_PUSH_URL = http://<user>:<token>@<endpoint>/<org>/<repo>.git` (PUR).
+
+    `user`/`token` sont URL-encodés (un token peut porter des caractères réservés). HTTP
+    clair : la forge est en réseau privé (ADR 0011) et le `.env` est gitignoré ; embarquer
+    `user:token@` suit la pratique existante (le `.env` porte déjà des mots de passe en
+    clair, faux positif CodeQL assumé). Rend `""` si un morceau requis manque (endpoint ou
+    token) — l'appelant n'écrit alors pas la variable plutôt que d'émettre une URL cassée."""
+    if not endpoint or not token:
+        return ""
+    cred = f"{quote(user, safe='')}:{quote(token, safe='')}"
+    return f"http://{cred}@{endpoint}/{org}/{repo}.git"
 
 
 @dataclass(frozen=True)
@@ -78,15 +135,18 @@ SECRET_ROWS = (
 )
 
 
-def env_content(pg_user: str, pg_pwd: str) -> str:
+def env_content(pg_user: str, pg_pwd: str, *, gitea_push_url: str = "") -> str:
     """Contenu de `atlas/.env.cluster.local` (consommé par atlas). Pur : ne lit pas les
     Secrets (l'appelant les fournit déjà décodés) ; rend le texte exact à écrire.
 
     Postgres : FQDN intra-pod (le code atlas tourne DANS le cluster) ; OpenLineage et
-    registry pointent les services internes. Valeurs de déploiement génériques (ADR 0023)."""
+    registry pointent les services internes. Valeurs de déploiement génériques (ADR 0023).
+    `gitea_push_url` (optionnel) : la cible de LIVRAISON atlas (ADR atlas 0104) — émise
+    seulement si l'appelant a pu la dériver (endpoint joignable + token) ; vide → ligne
+    non écrite (le geste `deploy.sh` refuse alors bruyamment, plutôt qu'une URL cassée)."""
     header = (
         "# Généré par nestor (ex-access.sh) — NE PAS COMMITER (gitignoré).\n"
-        "# Banc Lima local ; valeurs de déploiement (ADR 0023). Régénérer après un run.\n"
+        "# Valeurs de déploiement de l'instance (ADR 0023). Régénérer après un run.\n"
         "# Postgres : FQDN intra-pod (le code atlas tourne dans le cluster) ou via un\n"
         "# kubectl port-forward dédié si exécuté depuis l'hôte.\n"
     )
@@ -101,4 +161,7 @@ def env_content(pg_user: str, pg_pwd: str) -> str:
         env_line("OPENLINEAGE_NAMESPACE", "dagster"),
         env_line("REGISTRY", "registry:80"),
     ]
+    if gitea_push_url:
+        lines.append("# Cible de mise en production atlas (ADR atlas 0104 ; deploy.sh).\n")
+        lines.append(env_line("GITEA_PUSH_URL", gitea_push_url))
     return header + "".join(lines)

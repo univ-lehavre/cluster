@@ -553,7 +553,7 @@ juger en 5 min : [docs/preuves.md](docs/preuves.md).
 <!-- Puces d'un seul tenant : le garde-fou `lint:stats` compare puce par puce ;
      un wrap prettier (proseWrap 80) casserait la comparaison. Exclu de prettier. -->
 
-- **113 ADR** (96 Accepted, 12 Proposed, 5 Superseded)
+- **114 ADR** (97 Accepted, 12 Proposed, 5 Superseded)
 - **18 plans** vivants (1 Abandonné, 7 Achevé, 8 Actif, 1 Brouillon, 1 Superseded)
 - **100 drifts** indexés (3 caduc, 94 corrige, 1 en-cours, 2 ouvert)
 - **35 scénarios** E2E reproductibles

@@ -1732,8 +1732,14 @@ def cmd_access(args: argparse.Namespace) -> int:
         return 1
     _access_open_forwards_and_print(uis, node_ip)
     _access_print_secrets()
-    _access_generate_env()
-    print("\nPrêt. Travaillez dans atlas/ ; `git push` (Gitea → Argo CD réconcilie).")
+    # Cible de LIVRAISON (GITEA_PUSH_URL) dérivée de la topo ACTIVE. Le port-forward gitea
+    # éventuel prend un port hôte APRÈS ceux des UI (indices 0..len-1) pour ne pas entrer en
+    # collision (host_port_for = BASE_PORT + index).
+    topo = load_topology(_resolve(getattr(args, "file", None)))
+    gitea_lport = _access.host_port_for(len(uis))
+    _access_generate_env(topo, gitea_lport)
+    print("\nPrêt. Travaillez dans atlas/ ; `dataops/deploy.sh` met en production")
+    print("(push main → usine → branche deploy, ADR atlas 0104).")
     print("Pour tout arrêter : `nestor access --stop`")
     return 0
 
@@ -1845,14 +1851,108 @@ def _access_print_secrets() -> None:
         print(f"    {label:<11} {user} / {pwd}")  # affichage des credentials VOULU (cf. docstring)
 
 
-def _access_generate_env() -> None:
+def _access_open_gitea_forward(namespace: str, lport: int) -> None:
+    """Ouvre `kubectl port-forward 127.0.0.1:<lport> → svc/gitea-http:80` en arrière-plan
+    (détaché) pour que le `git push` d'atlas (`deploy.sh`) joigne la forge quand le réseau
+    est isolé (Lima, ADR 0092). Contrairement aux forwards d'UI (Service `<svc>-nodeport`,
+    consommés dans la foulée), CELUI-CI vise `gitea-http` (port 80) et DOIT survivre à
+    `nestor access` — il est fermé par `--stop` (même `pkill kubectl.*port-forward`)."""
+    subprocess.run(  # noqa: S603 — nettoyage d'un forward résiduel sur ce port
+        ["pkill", "-f", f"kubectl.*port-forward.*127.0.0.1:{lport}:"], check=False
+    )
+    with open(os.devnull, "wb") as devnull:
+        subprocess.Popen(  # noqa: S603 — argv contrôlé ; détaché volontairement
+            [
+                "kubectl",
+                "--kubeconfig",
+                _bench_kubeconfig(),
+                "-n",
+                namespace,
+                "port-forward",
+                "svc/gitea-http",
+                f"127.0.0.1:{lport}:80",
+            ],
+            stdin=devnull,
+            stdout=devnull,
+            stderr=devnull,
+            start_new_session=True,
+        )
+
+
+def _access_gitea_push_url(topo: Topology, local_port: int) -> str:
+    """Dérive `GITEA_PUSH_URL` — la cible de LIVRAISON atlas (ADR atlas 0104) — de la topo
+    ACTIVE. I/O : lit le Secret gitea-admin (user), GÉNÈRE un token API dans le pod gitea
+    (jetable, régénéré à chaque `access` — jamais versionné, doctrine du token de livraison
+    ADR 0113 §5), résout l'endpoint. La DÉCISION (endpoint selon l'exposition, assemblage de
+    l'URL) est pure (`nestor/access.py`). Rend `""` (sans écrire la variable) si un maillon
+    manque — le geste `deploy.sh` refuse alors bruyamment, mieux qu'une URL cassée.
+
+    Endpoint : `gitea.push_endpoint` déclaré prime ; sinon déduit de `exposition` — un
+    `nodeport`/`gateway` est joint DIRECTEMENT en `<portal.access_host>:<nodePort réel>`,
+    tout autre mode (réseau isolé, Lima) via le port-forward local maintenu par la façade."""
+    cfg = _seed.SeedConfig.from_topology(topo)
+    user = _access_secret(cfg.ns, "gitea-admin", "username") or cfg.admin_user
+    # Endpoint : champ déclaré, sinon déduction (nodePort réel du Service gitea exposé).
+    declared = (topo.gitea or {}).get("push_endpoint")
+    endpoint = _access.push_endpoint_for(
+        declared=declared,
+        exposition_mode=topo.exposition_mode,
+        access_host=(topo.portal or {}).get("access_host", ""),
+        node_port=_access_node_port_of(cfg.ns, "gitea"),
+        local_port=local_port,
+    )
+    if not endpoint:
+        _warn(
+            "endpoint de forge indéterminé (ni `gitea.push_endpoint` déclaré, ni Service "
+            "gitea-nodeport lisible) — GITEA_PUSH_URL non émise. Déclarer "
+            "`gitea.push_endpoint: <host>:<port>` dans la topologie."
+        )
+        return ""
+    # Endpoint LOCAL (127.0.0.1:… — réseau isolé, Lima) : le `git push` d'atlas passera par
+    # un port-forward que l'on OUVRE et laisse vivre (fermé par `nestor access --stop`), vers
+    # le Service gitea-http (port 80, pas le -nodeport des UI). Endpoint direct → rien à ouvrir.
+    if endpoint.startswith("127.0.0.1:"):
+        _access_open_gitea_forward(cfg.ns, int(endpoint.rsplit(":", 1)[1]))
+    # Token API jetable généré DANS le pod (localhost:3000, jamais de FQDN hôte).
+    pod = _gitea_pod(cfg.ns)
+    token_name = f"nestor-access-{os.getpid()}"
+    out = _gitea_exec(
+        cfg.ns,
+        pod,
+        [
+            "gitea",
+            "admin",
+            "user",
+            "generate-access-token",
+            "--username",
+            cfg.admin_user,
+            "--token-name",
+            token_name,
+            "--scopes",
+            "all",
+            "--raw",
+        ],
+    )
+    token = "".join((out.stdout or "").split()) if out and out.returncode == 0 else ""
+    if not token:
+        _warn(
+            "token Gitea non généré (pod gitea prêt ? admin présent ?) — GITEA_PUSH_URL non émise."
+        )
+        return ""
+    # org = celui du bloc gitea (défaut `atlas`, DOIT égaler l'org du repoURL des Application) ;
+    # repo = le dépôt de LIVRAISON (`atlas`), PAS `cfg.repo` (jouet `workflows`, ADR 0111).
+    return _access.gitea_push_url(endpoint, user, token, org=cfg.org, repo=_access.LIVRAISON_REPO)
+
+
+def _access_generate_env(topo: Topology | None = None, local_port: int = _access.BASE_PORT) -> None:
     """Génère `atlas/.env.cluster.local` (gitignoré) consommable par atlas, si le dépôt
     voisin existe. Réutilise `access.env_content` (pur) pour le rendu exact.
 
     ÉCRIRE les credentials dans le `.env` EST la fonction de `access` (« git push et ça
     marche », ADR 0048) — comme l'ex-`access.sh` (`generate_env`). Le fichier est
     gitignoré côté atlas (jamais commité). Le clear-text storage est VOULU — CodeQL
-    `py/clear-text-storage` est ici un faux positif fonctionnel (alerte dismissée)."""
+    `py/clear-text-storage` est ici un faux positif fonctionnel (alerte dismissée).
+    `topo` fourni → on ajoute la cible de LIVRAISON `GITEA_PUSH_URL` (ADR atlas 0104)."""
     atlas_dir = os.path.abspath(os.path.join(_ROOT, "..", "atlas"))
     if not os.path.isdir(atlas_dir):
         _warn(f"dépôt atlas absent ({atlas_dir}) — .env non généré")
@@ -1860,9 +1960,21 @@ def _access_generate_env() -> None:
     out_path = os.path.join(atlas_dir, ".env.cluster.local")
     pg_user = _access_secret("postgres", "pg-role-pgvector", "username")
     pg_pwd = _access_secret("postgres", "pg-role-pgvector", "password")
+    push_url = _access_gitea_push_url(topo, local_port) if topo is not None else ""
+    # CodeQL `py/clear-text-storage-sensitive-data` (high) signale l'écriture ci-dessous :
+    # INTENTIONNEL, produire ce fichier de credentials EST la fonction de `access` (ADR
+    # 0048). Le `.env` est gitignoré côté atlas et porte DÉJÀ le mot de passe Postgres en
+    # clair ; le token de `GITEA_PUSH_URL` suit le même régime (secret d'instance jetable,
+    # régénéré à chaque `access`, jamais versionné — ADR 0113 §5 / 0114). Sans ce fichier,
+    # le geste `deploy.sh` d'atlas n'a pas de cible et refuse.
+    # L'alerte se lève à la MAIN dans l'onglet Security (« won't fix — by design »), comme
+    # sa sœur sur `_access_print_secrets` : code scanning n'honore PAS les suppressions en
+    # ligne (github/codeql#11427 ouverte, #9298 « not planned ») — un marqueur `codeql[…]`
+    # ici serait inopérant et trompeur.
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write(_access.env_content(pg_user, pg_pwd))
-    print(f"\n✓ {os.path.basename(out_path)} généré (PG, OpenLineage, registry)")
+        f.write(_access.env_content(pg_user, pg_pwd, gitea_push_url=push_url))
+    extra = ", GITEA_PUSH_URL" if push_url else ""
+    print(f"\n✓ {os.path.basename(out_path)} généré (PG, OpenLineage, registry{extra})")
     _warn("Vérifier qu'il est bien ignoré par git côté atlas (/.env.cluster.local).")
 
 

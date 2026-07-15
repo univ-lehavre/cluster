@@ -95,7 +95,14 @@ gitea:
   api: http://localhost:3000
   argocd_ns: argocd
   org: atlas
-  repo: workflows
+  repo: workflows # JOUET du socle (seed) — PAS la cible de livraison (voir push_endpoint).
+  # push_endpoint : host:port par lequel le POSTE joint la forge pour la MISE EN PRODUCTION
+  # atlas (`nestor access` en dérive GITEA_PUSH_URL → `dataops/deploy.sh`, ADR atlas 0104).
+  # La cible du push est le dépôt atlas COMPLET `<org>/atlas` (que suit l'Application Argo CD),
+  # distinct du JOUET `<org>/workflows` ci-dessus. Ici (terrain local, réseau Lima isolé) on
+  # LAISSE nestor déduire l'endpoint (port-forward `127.0.0.1:<port>`) — champ inutile. Le
+  # renseigner seulement si l'on veut forcer un endpoint (ex. ingress dédié).
+  # push_endpoint: 127.0.0.1:3000
 
 # ─── atlas : code-locations pour l'OBSERVABILITÉ de drift digest côté cluster
 # (discover.stale_deployments). ADR 0111 : l'instanciation/déploiement de la code-location

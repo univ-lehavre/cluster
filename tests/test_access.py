@@ -13,10 +13,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from nestor.access import (  # noqa: E402
     BASE_PORT,
+    LIVRAISON_ORG,
+    LIVRAISON_REPO,
     env_content,
     env_line,
     exposed_uis,
+    gitea_push_url,
     host_port_for,
+    push_endpoint_for,
     url_line,
 )
 
@@ -106,6 +110,102 @@ class EnvContent(unittest.TestCase):
         out = env_content("", "")
         self.assertIn("POSTGRES_USER=\n", out)
         self.assertIn("POSTGRES_PASSWORD=\n", out)
+
+    def test_gitea_push_url_emitted_when_given(self):
+        out = env_content("u", "p", gitea_push_url="http://a:b@127.0.0.1:8447/atlas/atlas.git")
+        self.assertIn("GITEA_PUSH_URL=http://a:b@127.0.0.1:8447/atlas/atlas.git\n", out)
+
+    def test_gitea_push_url_absent_when_empty(self):
+        # Vide → ligne NON écrite (deploy.sh refuse bruyamment, mieux qu'une URL cassée).
+        self.assertNotIn("GITEA_PUSH_URL", env_content("u", "p"))
+
+
+class PushEndpointFor(unittest.TestCase):
+    def test_declared_wins_over_deduction(self):
+        # Le champ topo déclaré prime TOUJOURS (contrat > déduction, ADR 0090/0102).
+        ep = push_endpoint_for(
+            declared="forge.example.org:443",
+            exposition_mode="nodeport",
+            access_host="ignored",
+            node_port="30001",
+            local_port=8447,
+        )
+        self.assertEqual(ep, "forge.example.org:443")
+
+    def test_declared_stripped(self):
+        ep = push_endpoint_for(
+            declared="  host:80  ",
+            exposition_mode="gateway",
+            access_host="",
+            node_port="",
+            local_port=8447,
+        )
+        self.assertEqual(ep, "host:80")
+
+    def test_nodeport_uses_access_host_and_node_port(self):
+        # Réseau joignable directement : <access_host>:<nodePort réel>.
+        ep = push_endpoint_for(
+            declared=None,
+            exposition_mode="nodeport",
+            access_host="node1",
+            node_port="31234",
+            local_port=8447,
+        )
+        self.assertEqual(ep, "node1:31234")
+
+    def test_gateway_uses_access_host_and_node_port(self):
+        ep = push_endpoint_for(
+            declared=None,
+            exposition_mode="gateway",
+            access_host="lb.example",
+            node_port="30080",
+            local_port=8447,
+        )
+        self.assertEqual(ep, "lb.example:30080")
+
+    def test_isolated_network_falls_back_to_local_forward(self):
+        # Mode isolé (Lima) : port-forward local 127.0.0.1:<local_port>.
+        ep = push_endpoint_for(
+            declared=None,
+            exposition_mode="portforward",
+            access_host="",
+            node_port="",
+            local_port=8447,
+        )
+        self.assertEqual(ep, "127.0.0.1:8447")
+
+    def test_nodeport_missing_port_is_empty(self):
+        # nodePort illisible ET pas de champ déclaré → "" (l'appelant n'émet rien).
+        ep = push_endpoint_for(
+            declared=None,
+            exposition_mode="nodeport",
+            access_host="node1",
+            node_port="",
+            local_port=8447,
+        )
+        self.assertEqual(ep, "")
+
+
+class GiteaPushUrl(unittest.TestCase):
+    def test_assembles_full_url(self):
+        url = gitea_push_url("127.0.0.1:8447", "atlas-admin", "tok", org="atlas", repo="atlas")
+        self.assertEqual(url, "http://atlas-admin:tok@127.0.0.1:8447/atlas/atlas.git")
+
+    def test_credentials_url_encoded(self):
+        # Un token à caractères réservés ne doit pas casser l'URL.
+        url = gitea_push_url("h:80", "user name", "a/b@c", org="atlas", repo="atlas")
+        self.assertIn("user%20name:a%2Fb%40c@h:80", url)
+
+    def test_empty_endpoint_yields_empty(self):
+        self.assertEqual(gitea_push_url("", "u", "t", org="atlas", repo="atlas"), "")
+
+    def test_empty_token_yields_empty(self):
+        self.assertEqual(gitea_push_url("h:80", "u", "", org="atlas", repo="atlas"), "")
+
+    def test_livraison_defaults_are_atlas(self):
+        # Défauts génériques (ADR 0023/0035) : la cible de livraison est atlas/atlas.
+        self.assertEqual(LIVRAISON_ORG, "atlas")
+        self.assertEqual(LIVRAISON_REPO, "atlas")
 
 
 if __name__ == "__main__":
