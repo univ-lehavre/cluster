@@ -580,3 +580,38 @@ runs:
     total_s: 41
     phases:
       up: 41
+  - id: 2026-07-14T18-base-59322003
+    date: '2026-07-14T18:36:43Z'
+    branche: main
+    commit: '59322003'
+    profil: base
+    topologie: local
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 64
+    phases:
+      up: 64
+  - id: 2026-07-14T19-base-59322003-dirty
+    date: '2026-07-14T19:06:33Z'
+    branche: main
+    commit: 59322003-dirty
+    profil: base
+    topologie: local
+    target: layers
+    arch: arm64
+    hote: Mac15,9
+    total_s: 1775
+    phases:
+      bootstrap: 380
+      storage-simple: 9
+      metrics-server: 29
+      monitoring: 156
+      gitops: 61
+      registry: 64
+      dataops: 655
+      gitops-seed: 2
+      mlflow: 126
+      buildkit: 88
+      portal: 128
+      gitea-runner: 77
