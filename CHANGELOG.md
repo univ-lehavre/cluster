@@ -11,6 +11,40 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.56.0](https://github.com/univ-lehavre/cluster/compare/v2.55.0...v2.56.0) (2026-07-15)
+
+
+### Features
+
+* **dirqual:** monte volume-snapshots (backup PVC, ADR 0013) ([8f51bb8](https://github.com/univ-lehavre/cluster/commit/8f51bb84e1b599ecda5eeb179a834018799168b7))
+
+
+### Bug Fixes
+
+* **bench:** fetch kubeconfig atomique (ne vide plus le fichier en cas d'échec) ([2e2b8de](https://github.com/univ-lehavre/cluster/commit/2e2b8de163c4f2ee3fcd22a92a75a4c86bb8eb5f))
+* **bench:** fetch kubeconfig atomique (ne vide plus le fichier en cas d'échec) ([937cdd9](https://github.com/univ-lehavre/cluster/commit/937cdd9f6b5c37a82d94ec15d8c4fdef33f1c53c))
+* **cert-manager:** attend la fin du rollout du webhook avant les Issuers (L99) ([bd08ede](https://github.com/univ-lehavre/cluster/commit/bd08ede660844f23f39fd04eac91438fbc4b5ab3))
+* **cert-manager:** attend la fin du rollout du webhook avant les Issuers (L99) ([7281e4e](https://github.com/univ-lehavre/cluster/commit/7281e4ebc30461e26674eec2d1c887e81f20957e))
+* **dataops:** retire buildkit du play nœuds (drift → tourne sur node1) ([ef64273](https://github.com/univ-lehavre/cluster/commit/ef64273476f0285ea38a416c358bb7672eb05bcb))
+* **dataops:** retire buildkit du play nœuds (drift → tourne sur node1) ([35d0aac](https://github.com/univ-lehavre/cluster/commit/35d0aac07566b287086ffd7921a90048da140684))
+* **dirqual:** briques majeures — IP générique, volume-snapshots, netpol monitoring ([1861fc6](https://github.com/univ-lehavre/cluster/commit/1861fc6bd8cbf7b818978f71f30d1c7b879bd68c))
+* **dirqual:** génériser l'IP prod versionnée (ADR 0023) ([1912682](https://github.com/univ-lehavre/cluster/commit/191268231b0b21813a403b49d16f095c4a04bd3f))
+* **monitoring:** applique les NetworkPolicies du ns (default-deny + Loki/Promtail) ([7a241a8](https://github.com/univ-lehavre/cluster/commit/7a241a817b3a7f5decd205249a117005a51797cb))
+* **nestor:** fiabilise stack select / preview sur une prod (kubeconfig nommé par la stack) ([3d5bb58](https://github.com/univ-lehavre/cluster/commit/3d5bb586da911c15967094f0f3e677a7e7fd700e))
+* **nestor:** preview prod sonde le kubeconfig rapatrié nommé par la stack ([b217cd6](https://github.com/univ-lehavre/cluster/commit/b217cd61339ac13eefc48e6c54b7cb91c46b003d))
+* **nestor:** stack select n'écrit plus de kubeconfig dans un .example versionné ([db59877](https://github.com/univ-lehavre/cluster/commit/db59877899dcadeec7aff8d691848e8df88ca869))
+* **nestor:** stack select vise le stack_id normalisé, pas le nom tapé ([e62a0a7](https://github.com/univ-lehavre/cluster/commit/e62a0a79049b217fe4d7a093d013afb19d76c6e1))
+* **nestor:** stack select vise le stack_id normalisé, pas le nom tapé ([6755cf0](https://github.com/univ-lehavre/cluster/commit/6755cf075ae2d3c6c7dd15e9fb2023c0aff1ec62))
+
+
+### Documentation
+
+* **docs:** acte l'adr 0113 — chaîne de livraison autonome (accepted) ([c27e9b9](https://github.com/univ-lehavre/cluster/commit/c27e9b9d983a4bdd59ad6bec0b2043c76cc907f6))
+* **docs:** acte l'adr 0113 — chaîne de livraison autonome (accepted) ([256ab5d](https://github.com/univ-lehavre/cluster/commit/256ab5da63c6bba0caaa8e05dc11d435d6e84db9))
+* **docs:** acte la chaîne de livraison autonome — branche deploy (adr 0113) ([3770697](https://github.com/univ-lehavre/cluster/commit/37706979745b8748b2865802b924039a95f4fdf5))
+* **docs:** acte la chaîne de livraison autonome — branche deploy matérialisée par la ci (adr 0113) ([02a1669](https://github.com/univ-lehavre/cluster/commit/02a1669d2602bac9477b48726fb5aa45294d361f))
+* **readme:** régénère le bloc « dépôt en chiffres » (100 drifts, L99) ([44bcb64](https://github.com/univ-lehavre/cluster/commit/44bcb647ddfa32d927982cad36b8327e6e14b22b))
+
 ## [2.55.0](https://github.com/univ-lehavre/cluster/compare/v2.54.0...v2.55.0) (2026-07-13)
 
 
