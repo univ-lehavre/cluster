@@ -11,6 +11,25 @@ quotidien dépose (ou met à jour) une PR `chore(main): release vX.Y.Z` qui agr�
 les commits depuis la dernière release. Merger cette PR publie la version (bump +
 tag + entrée de changelog). Rien à lancer en local.
 
+## [2.57.0](https://github.com/univ-lehavre/cluster/compare/v2.56.0...v2.57.0) (2026-07-16)
+
+
+### Features
+
+* **nestor:** access dérive GITEA_PUSH_URL de la topologie active (adr 0114) ([09c4290](https://github.com/univ-lehavre/cluster/commit/09c42902080f1f49f2a2b54091878a6c4fde3d54))
+* **nestor:** access dérive GITEA_PUSH_URL de la topologie active (ADR 0114) ([fefa68f](https://github.com/univ-lehavre/cluster/commit/fefa68feb20c2501b872d63de5e2b5ee83f61d87))
+
+
+### Bug Fixes
+
+* **nestor:** marque le stockage du token dans le .env comme intentionnel (codeql) ([ad9f631](https://github.com/univ-lehavre/cluster/commit/ad9f6314e89cb0daa856bf079fba951319980a37))
+* **nestor:** place le marqueur codeql sur la ligne de l'alerte ([4c948f8](https://github.com/univ-lehavre/cluster/commit/4c948f8de5e5fb7b0e6636548cfc71eb9b40d89e))
+
+
+### Documentation
+
+* **nestor:** explicite pourquoi l'alerte codeql du .env se lève à la main ([5302d3a](https://github.com/univ-lehavre/cluster/commit/5302d3a2ffcf683f3d8872f5d79bc7a68e1db9b7))
+
 ## [2.56.0](https://github.com/univ-lehavre/cluster/compare/v2.55.0...v2.56.0) (2026-07-15)
 
 
